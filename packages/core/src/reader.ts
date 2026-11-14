@@ -11,7 +11,9 @@ import {
 import { migrate } from "./db/schema";
 import { getSetting, setSetting } from "./db/settings";
 import type { Article, Feed, Folder, Table, UnreadCounts } from "./models";
-import { type PullResult, pull } from "./sync/pull";
+import { LOCAL_ID_PREFIX, type MarkReadScope, type Operation } from "./sync/ops";
+import { getArticleSeq, getCursor, type PullResult, pull } from "./sync/pull";
+import { countPending, enqueue, type PushResult, push } from "./sync/queue";
 
 const TOKEN_KEY = "auth.token";
 
@@ -26,6 +28,15 @@ export interface ReaderCoreOptions {
 }
 
 export type ChangeListener = (tables: ReadonlySet<Table>) => void;
+
+/** 1 回の同期の結果 */
+export interface SyncResult {
+  push: PushResult;
+  pull: PullResult;
+}
+
+/** フォルダ名の長さの上限（sendo と同じ） */
+export const MAX_FOLDER_NAME_LENGTH = 200;
 
 /**
  * sendo-reader の中核。手元の DB の読み書きと、sendo との同期をまとめる。
@@ -46,7 +57,7 @@ export class ReaderCore {
    * リクエストを止め、その同期が手元の DB に書き戻さないようにする
    */
   #session = new AbortController();
-  #syncing: Promise<PullResult> | null = null;
+  #syncing: Promise<SyncResult> | null = null;
 
   private constructor(options: ReaderCoreOptions) {
     this.#db = options.db;
@@ -127,25 +138,108 @@ export class ReaderCore {
   // --- 同期 ---
 
   /**
-   * sendo から差分を取り込む。すでに同期中なら、その結果を待つ（同時に 2 つは走らせない）。
-   * ログインしていなければ ApiError（unauthorized）を投げる。
+   * 手元の操作を sendo に送り（操作キュー）、そのあと差分を取り込む。すでに同期中なら、
+   * その結果を待つ（同時に 2 つは走らせない）。ログインしていなければ ApiError（unauthorized）。
+   * 操作を送れなかったら（届かない、など）、取り込まずに ApiError を投げる。操作は残る。
    */
-  sync(): Promise<PullResult> {
+  sync(): Promise<SyncResult> {
     if (this.#syncing !== null) return this.#syncing;
-    const running: Promise<PullResult> = this.#runSync(this.#session.signal).finally(() => {
+    const running: Promise<SyncResult> = this.#runSync(this.#session.signal).finally(() => {
       if (this.#syncing === running) this.#syncing = null;
     });
     this.#syncing = running;
     return running;
   }
 
-  async #runSync(signal: AbortSignal): Promise<PullResult> {
+  async #runSync(signal: AbortSignal): Promise<SyncResult> {
     if (this.#token === null) throw new ApiError("unauthorized", "ログインしていない");
-    return pull(this.#db, this.#api, {
+    const pushed = await push(this.#db, this.#api, signal);
+    if (pushed.rejected.length > 0) {
+      this.#emit(new Set<Table>(["folders", "feeds", "articles"]));
+    }
+    const pulled = await pull(this.#db, this.#api, {
       now: this.#now,
       signal,
       onPage: (changed) => this.#emit(changed),
     });
+    return { push: pushed, pull: pulled };
+  }
+
+  /** まだ sendo に送り終えていない操作の数 */
+  countPending(): Promise<number> {
+    return countPending(this.#db);
+  }
+
+  // --- 書き込み（手元にすぐ反映し、操作キューに積む。送るのは sync()） ---
+
+  /** 記事を既読（true）／未読（false）にする */
+  setRead(articleId: string, read: boolean): Promise<void> {
+    return this.#write({ kind: "setArticleState", articleId, read, at: this.#now() }, ["articles"]);
+  }
+
+  /** 記事にスターを付ける（true）／外す（false） */
+  setStarred(articleId: string, starred: boolean): Promise<void> {
+    return this.#write({ kind: "setArticleState", articleId, starred, at: this.#now() }, [
+      "articles",
+    ]);
+  }
+
+  /**
+   * まとめて既読にする。押した時点で手元にあった記事だけを既読にし、sendo にも同期済みの範囲
+   * （カーソル）までだけを頼む（sync.md の 6）。まだ一度も同期していなければ何もしない。
+   */
+  async markAllRead(scope: MarkReadScope): Promise<void> {
+    const op = await this.#db.transaction(async (tx) => {
+      const cursor = await getCursor(tx);
+      if (cursor === null) return null;
+      const op: Operation = {
+        kind: "markRead",
+        scope,
+        upTo: await getArticleSeq(tx),
+        cursor,
+        at: this.#now(),
+      };
+      await enqueue(tx, op, this.#now());
+      return op;
+    });
+    if (op !== null) this.#emit(new Set<Table>(["articles"]));
+  }
+
+  /** フォルダを作る。sendo が ID を付けるまでは仮の ID で、作ったフォルダの ID を返す */
+  async createFolder(name: string): Promise<string> {
+    const folderId = `${LOCAL_ID_PREFIX}${crypto.randomUUID()}`;
+    await this.#write(
+      { kind: "createFolder", folderId, name: normalizeFolderName(name), at: this.#now() },
+      ["folders"],
+    );
+    return folderId;
+  }
+
+  renameFolder(folderId: string, name: string): Promise<void> {
+    return this.#write({ kind: "renameFolder", folderId, name: normalizeFolderName(name) }, [
+      "folders",
+    ]);
+  }
+
+  /** フォルダを消す。入っていたフィードはフォルダなしに戻す（フィードは消さない） */
+  deleteFolder(folderId: string): Promise<void> {
+    return this.#write({ kind: "deleteFolder", folderId }, ["folders", "feeds"]);
+  }
+
+  /** フィードを別のフォルダに移す。null ならフォルダなし */
+  moveFeed(feedId: string, folderId: string | null): Promise<void> {
+    return this.#write({ kind: "moveFeed", feedId, folderId }, ["feeds"]);
+  }
+
+  /** 購読をやめる。記事はスターを付けたものだけが残る */
+  unsubscribe(feedId: string): Promise<void> {
+    return this.#write({ kind: "unsubscribe", feedId }, ["feeds", "articles"]);
+  }
+
+  async #write(op: Operation, tables: Table[]): Promise<void> {
+    if (this.#token === null) throw new ApiError("unauthorized", "ログインしていない");
+    await this.#db.transaction((tx) => enqueue(tx, op, this.#now()));
+    this.#emit(new Set(tables));
   }
 
   // --- 読み出し（手元の DB だけ） ---
@@ -189,10 +283,29 @@ export class ReaderCore {
   }
 }
 
-/** 手元のデータ（同期で届いた行、カーソル、トークンなどの設定）をすべて消す */
+/**
+ * 手元のデータ（同期で届いた行、まだ送っていない操作、カーソル、トークンなどの設定）を
+ * すべて消す
+ */
 async function clearAll(tx: Executor): Promise<void> {
+  await tx.run("delete from pending_ops");
   await tx.run("delete from articles");
   await tx.run("delete from feeds");
   await tx.run("delete from folders");
   await tx.run("delete from settings");
+}
+
+/**
+ * フォルダ名の空白をまとめ、長すぎれば切り詰める。sendo と同じく、UTF-16 の長さで数え、
+ * サロゲートペアの途中では切らない（手元と sendo で名前がずれないように）。空なら投げる。
+ */
+export function normalizeFolderName(value: string): string {
+  const name = value.replace(/\s+/g, " ").trim();
+  if (name === "") throw new RangeError("フォルダ名が空");
+  let out = "";
+  for (const char of name) {
+    if (out.length + char.length > MAX_FOLDER_NAME_LENGTH) break;
+    out += char;
+  }
+  return out;
 }

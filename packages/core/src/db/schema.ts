@@ -53,6 +53,22 @@ const migrations: readonly (readonly string[])[] = [
     // 手元から古い既読の記事を消すとき（sync/pull.ts）
     "create index articles_received_idx on articles (received_at)",
   ],
+  [
+    // 操作キュー（sync/queue.ts）。手元にすぐ反映した操作を、ここに積んで順に sendo へ送る
+    `create table pending_ops (
+      id integer primary key autoincrement,
+      kind text not null,
+      key text not null,
+      payload text not null,
+      rev integer not null default 0,
+      created_at integer not null,
+      attempts integer not null default 0,
+      last_error text
+    ) strict`,
+    // 記事が手元に初めて入った順の番号。「すべて既読」で、押したときに手元にあった記事だけを
+    // 既読にするのに使う（あとから届いた記事を巻き込まない）
+    "alter table articles add column local_seq integer not null default 0",
+  ],
 ];
 
 export const SCHEMA_VERSION = migrations.length;

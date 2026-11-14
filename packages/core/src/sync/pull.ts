@@ -3,6 +3,7 @@ import type { Database, Executor } from "../db/database";
 import { deleteSetting, getSetting, setSetting } from "../db/settings";
 import type { Article, Table } from "../models";
 import type { SyncPage } from "./page";
+import { reapplyPending } from "./queue";
 
 /** 手元に置く既読の記事の期間。受信箱に入ってからこれより古い既読の記事は、手元から消す */
 export const LOCAL_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
@@ -11,6 +12,8 @@ export const LOCAL_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 const MAX_PAGES = 1000;
 
 const CURSOR_KEY = "sync.cursor";
+/** 記事が手元に初めて入った順の番号（articles.local_seq）の、最後に振った値 */
+const ARTICLE_SEQ_KEY = "local.articleSeq";
 
 export interface PullResult {
   /** 取ったページの数 */
@@ -34,6 +37,9 @@ export interface PullOptions {
  *
  * ページごとに、行の書き込みと新しいカーソルの保存を 1 つのトランザクションで行う。途中で
  * 失敗しても、書き込んだページまでのカーソルが残るので、次はその続きから取れる。
+ *
+ * 届いた行は sendo の状態なので、手元でまだ送り終えていない操作は、同じトランザクションの中で
+ * その上に重ね直す（楽観的な更新を保つ）。
  */
 export async function pull(db: Database, api: SendoApi, options: PullOptions): Promise<PullResult> {
   const result: PullResult = { pages: 0, reset: false, changed: new Set() };
@@ -64,6 +70,7 @@ export async function pull(db: Database, api: SendoApi, options: PullOptions): P
       // ので、ここで確かめれば、ログアウトの消去のあとに書き戻すことはない）
       options.signal?.throwIfAborted();
       const changed = await applyPage(tx, page);
+      await reapplyPending(tx);
       await setSetting(tx, CURSOR_KEY, page.cursor);
       return changed;
     });
@@ -95,8 +102,12 @@ async function applyPage(tx: Executor, page: SyncPage): Promise<Set<Table>> {
     if (await applyFeed(tx, feed)) changed.add("articles");
   }
   if (page.feeds.length > 0) changed.add("feeds");
-  for (const article of page.articles) await applyArticle(tx, article);
-  if (page.articles.length > 0) changed.add("articles");
+  if (page.articles.length > 0) {
+    const localSeq = (await getArticleSeq(tx)) + 1;
+    await setSetting(tx, ARTICLE_SEQ_KEY, String(localSeq));
+    for (const article of page.articles) await applyArticle(tx, article, localSeq);
+    changed.add("articles");
+  }
   return changed;
 }
 
@@ -140,11 +151,13 @@ async function applyFeed(tx: Executor, feed: SyncPage["feeds"][number]): Promise
   return false;
 }
 
-async function applyArticle(tx: Executor, article: Article): Promise<void> {
+/** 記事を書き込む。初めて手元に入る記事には localSeq を振る（すでにあれば変えない） */
+async function applyArticle(tx: Executor, article: Article, localSeq: number): Promise<void> {
   await tx.run(
     `insert into articles (
-       id, feed_id, url, title, summary, author, published_at, received_at, read_at, starred_at
-     ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       id, feed_id, url, title, summary, author, published_at, received_at, read_at, starred_at,
+       local_seq
+     ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      on conflict (id) do update set
        feed_id = excluded.feed_id, url = excluded.url, title = excluded.title,
        summary = excluded.summary, author = excluded.author,
@@ -161,8 +174,14 @@ async function applyArticle(tx: Executor, article: Article): Promise<void> {
       article.receivedAt,
       article.readAt,
       article.starredAt,
+      localSeq,
     ],
   );
+}
+
+/** 今までに手元に入った記事の範囲（「すべて既読」の境界に使う） */
+export async function getArticleSeq(db: Executor): Promise<number> {
+  return Number((await getSetting(db, ARTICLE_SEQ_KEY)) ?? "0");
 }
 
 /**
@@ -186,7 +205,10 @@ async function pruneOldArticles(
   return removed.length > 0;
 }
 
-/** 同期で届いたデータとカーソルを消す（トークンなどの設定は残す） */
+/**
+ * 同期で届いたデータとカーソルを消す。トークンと、まだ送り終えていない操作は残す
+ * （作り直したあと、届いた行の上に重ね直す）。手元に入った順の番号は戻さない。
+ */
 export async function clearSyncedData(db: Database, signal?: AbortSignal): Promise<void> {
   await db.transaction(async (tx) => {
     signal?.throwIfAborted();

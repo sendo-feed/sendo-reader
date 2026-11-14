@@ -41,6 +41,8 @@ interface InboxRow {
   readAt: number | null;
   starredAt: number | null;
   seq: number;
+  /** 受信箱に入ったときの番号（カーソルを境界にした「まとめて既読」に使う） */
+  firstSeq: number;
 }
 
 interface Cursor {
@@ -69,6 +71,8 @@ export class FakeSendo {
   readonly inbox = new Map<string, InboxRow>();
   /** 受けたリクエスト（"GET /sync?cursor=…" の形） */
   readonly requests: string[] = [];
+  /** 受けた「まとめて既読」の本文 */
+  readonly markReadRequests: Record<string, unknown>[] = [];
   /** リクエストを受けて、答える前に呼ぶ（送っている途中に画面で操作したことにする、など） */
   onRequest: ((path: string) => Promise<void>) | null = null;
 
@@ -140,6 +144,7 @@ export class FakeSendo {
     feedId: string,
     input: { title?: string; publishedAt?: number; url?: string | null; id?: string } = {},
   ): InboxRow {
+    const seq = this.#bump("articles");
     const row: InboxRow = {
       id: input.id ?? this.#id("article"),
       feedId,
@@ -151,7 +156,8 @@ export class FakeSendo {
       receivedAt: this.now,
       readAt: null,
       starredAt: null,
-      seq: this.#bump("articles"),
+      seq,
+      firstSeq: seq,
     };
     this.inbox.set(row.id, row);
     return row;
@@ -223,10 +229,101 @@ export class FakeSendo {
     }
     if (request.method === "GET" && path === "/folders") {
       const items = [...this.folders.values()].filter((row) => row.deletedAt === null);
-      return json(200, { items: items.map((row) => ({ id: row.id, name: row.name })) });
+      return json(200, { items: items.map(folderJson) });
+    }
+    if (request.method === "GET" && path === "/feeds") {
+      const items = [...this.feeds.values()].filter((row) => row.deletedAt === null);
+      return json(200, { items: items.map(feedJson) });
+    }
+    const body = request.body === null ? {} : ((await request.json()) as Record<string, unknown>);
+
+    let match = /^\/articles\/([^/]+)$/.exec(path);
+    if (request.method === "PATCH" && match !== null && match[1] !== "mark-read") {
+      const row = this.inbox.get(decodeURIComponent(match[1] ?? ""));
+      if (row === undefined) return error(404, "not_found", "article does not exist");
+      this.setArticleState(row.id, body as { read?: boolean; starred?: boolean });
+      return json(200, { article: { id: row.id } });
+    }
+    if (request.method === "POST" && path === "/articles/mark-read") {
+      return this.#markRead(body);
+    }
+    if (request.method === "POST" && path === "/folders") {
+      const name = String(body.name ?? "").trim();
+      if (name === "") return error(400, "invalid_request", "name: empty");
+      if (this.#folderByName(name) !== undefined) {
+        return error(409, "folder_exists", "a folder with this name exists");
+      }
+      return json(201, { folder: folderJson(this.createFolder(name)) });
+    }
+    match = /^\/folders\/([^/]+)$/.exec(path);
+    if (match !== null) {
+      const folder = this.folders.get(decodeURIComponent(match[1] ?? ""));
+      if (folder === undefined || folder.deletedAt !== null) {
+        return error(404, "not_found", "folder does not exist");
+      }
+      if (request.method === "PATCH") {
+        const name = String(body.name ?? "").trim();
+        const other = this.#folderByName(name);
+        if (other !== undefined && other.id !== folder.id) {
+          return error(409, "folder_exists", "a folder with this name exists");
+        }
+        folder.name = name;
+        folder.seq = this.#bump("folders");
+        return json(200, { folder: folderJson(folder) });
+      }
+      if (request.method === "DELETE") {
+        this.deleteFolder(folder.id);
+        return new Response(null, { status: 204 });
+      }
+    }
+    match = /^\/feeds\/([^/]+)$/.exec(path);
+    if (match !== null) {
+      const feed = this.feeds.get(decodeURIComponent(match[1] ?? ""));
+      if (feed === undefined || feed.deletedAt !== null) {
+        return error(404, "not_found", "feed does not exist");
+      }
+      if (request.method === "PATCH") {
+        const folderId = body.folderId as string | null;
+        if (folderId !== null && this.folders.get(folderId)?.deletedAt !== null) {
+          return error(400, "folder_not_found", "folder does not exist");
+        }
+        this.moveFeed(feed.id, folderId);
+        return json(200, { feed: feedJson(feed) });
+      }
+      if (request.method === "DELETE") {
+        this.unsubscribe(feed.id);
+        return new Response(null, { status: 204 });
+      }
     }
     return error(404, "not_found", "Not Found");
   };
+
+  /** カーソルを境界にした「まとめて既読」（仮の形。src/api/sync-contract.ts） */
+  #markRead(body: Record<string, unknown>): Response {
+    const cursor = typeof body.cursor === "string" ? decodeCursor(body.cursor) : null;
+    if (cursor === null) return error(400, "invalid_request", "cursor: required");
+    const inScope = (row: InboxRow): boolean => {
+      if (body.all === true) return true;
+      if (typeof body.feedId === "string") return row.feedId === body.feedId;
+      if (typeof body.folderId === "string") {
+        return this.feeds.get(row.feedId)?.folderId === body.folderId;
+      }
+      return false;
+    };
+    let updated = 0;
+    for (const row of this.inbox.values()) {
+      if (row.readAt !== null || row.firstSeq > cursor.articles || !inScope(row)) continue;
+      row.readAt = this.now;
+      row.seq = this.#bump("articles");
+      updated += 1;
+    }
+    this.markReadRequests.push(body);
+    return json(200, { updated });
+  }
+
+  #folderByName(name: string): FolderRow | undefined {
+    return [...this.folders.values()].find((row) => row.deletedAt === null && row.name === name);
+  }
 
   #sync(rawCursor: string | null): Response {
     const cursor = rawCursor === null ? null : decodeCursor(rawCursor);
@@ -288,18 +385,11 @@ export class FakeSendo {
       cursor: encodeCursor(next),
       hasMore,
       folders: page.folders.map((row) => ({
-        id: row.id,
-        name: row.name,
-        createdAt: iso(row.createdAt),
+        ...folderJson(row),
         deletedAt: row.deletedAt === null ? null : iso(row.deletedAt),
       })),
       feeds: page.feeds.map((row) => ({
-        id: row.id,
-        url: row.url,
-        title: row.title,
-        siteUrl: row.siteUrl,
-        folderId: row.folderId,
-        createdAt: iso(row.createdAt),
+        ...feedJson(row),
         deletedAt: row.deletedAt === null ? null : iso(row.deletedAt),
       })),
       articles: page.articles.map((row) => ({
@@ -331,6 +421,21 @@ export class FakeSendo {
     if (row === undefined) throw new Error(`${id} がない`);
     return row;
   }
+}
+
+function folderJson(row: FolderRow) {
+  return { id: row.id, name: row.name, createdAt: iso(row.createdAt) };
+}
+
+function feedJson(row: FeedRow) {
+  return {
+    id: row.id,
+    url: row.url,
+    title: row.title,
+    siteUrl: row.siteUrl,
+    folderId: row.folderId,
+    createdAt: iso(row.createdAt),
+  };
 }
 
 function bySeq(a: { seq: number }, b: { seq: number }): number {

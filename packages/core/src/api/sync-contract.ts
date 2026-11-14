@@ -3,13 +3,15 @@
  *
  * sendo の差分同期の決定（docs/decisions/sync.md）に沿った「仮の形」。sendo の OpenAPI に
  * /sync が入ったら、ここは生成した型（schema.gen.ts）に置き換え、この形との違いを直す。
- * 仮の形を使うのはこのファイルと api/client.ts の sync() だけにして、置き換えを小さくする。
+ * 仮の形を使うのはこのファイルだけにし、core の中では SyncPage（sync/page.ts）を使う。
  *
  * - カーソルの中身は解釈しない。受け取ったものをそのまま次に送る
  * - カーソルなしで呼ぶと、最初の同期（未読、スター、直近 30 日に受信箱に入った記事）
  * - hasMore が true なら、返ってきたカーソルですぐ続きを取る
  * - 消したフォルダと購読は deletedAt の付いた行で届く
  * - カーソルが古すぎて差分を出せないときは 410 と error.code = "cursor_expired"。最初から同期し直す
+ * - まとめて既読（POST /api/v1/articles/mark-read）は、until（時刻）の代わりにカーソルを境界に
+ *   できる（sync.md の 6）。カーソルの時点で受信箱に入っていた記事だけを既読にする
  */
 
 import type { SyncPage } from "../sync/page";
@@ -59,6 +61,13 @@ export interface SyncArticle {
   receivedAt: string;
   readAt: string | null;
   starredAt: string | null;
+}
+
+/** POST /api/v1/articles/mark-read の、カーソルを境界にする形（本文は scope を展開して cursor を足す） */
+export interface MarkReadUpToCursorRequest {
+  scope: { all: true } | { feedId: string } | { folderId: string };
+  /** 同期で受け取ったカーソル。中身は解釈しない */
+  cursor: string;
 }
 
 /**

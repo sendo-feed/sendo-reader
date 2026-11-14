@@ -2,7 +2,7 @@ import createClient from "openapi-fetch";
 import type { SyncPage } from "../sync/page";
 import { ApiError, errorFromBody, toApiError } from "./errors";
 import type { paths } from "./schema.gen";
-import { toSyncPage } from "./sync-contract";
+import { type MarkReadUpToCursorRequest, toSyncPage } from "./sync-contract";
 
 export { ApiError, type ApiErrorKind, errorFromBody, toApiError } from "./errors";
 
@@ -71,6 +71,23 @@ export function createSendoApi(options: SendoApiOptions) {
         throw new ApiError("server", "sendo の同期の応答が JSON でない", response.status);
       }
       return toSyncPage(body);
+    },
+
+    /**
+     * まとめて既読にする。cursor（同期済みの範囲）までに受信箱に入っていた記事だけを既読にする
+     * （sync.md の 6）。sendo の OpenAPI に入るまでの仮の形（sync-contract.ts）。
+     */
+    async markReadUpToCursor(request: MarkReadUpToCursorRequest, signal?: AbortSignal) {
+      const response = await send(
+        new Request(`${baseUrl}/articles/mark-read`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ ...request.scope, cursor: request.cursor }),
+          ...(signal === undefined ? {} : { signal }),
+        }),
+      );
+      if (!response.ok) throw await toApiError(response);
+      await response.body?.cancel();
     },
 
     /** トークンが使えるかを確かめる。使えなければ ApiError("unauthorized") */
