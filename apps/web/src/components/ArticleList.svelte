@@ -73,15 +73,13 @@
     const requested = articles.map((article) => article.id);
     const shown = new Set(requested);
     const [latest, top] = await Promise.all([
-      Promise.all(requested.map((id) => reader.client.getArticle(id))),
+      reader.client.getArticles(requested),
       reader.client.listArticles({ ...query, limit: PAGE }),
     ]);
     if (current !== generation) return;
     // 読み直した記事だけを差し替える（読み直している間に「もっと読む」で足した記事は残す。
     // 読み直して見つからなかった記事は、手元から消えたので外す）
-    const byId = new Map(
-      latest.filter((article): article is Article => article !== null).map((a) => [a.id, a]),
-    );
+    const byId = new Map(latest.map((article) => [article.id, article]));
     articles = articles.flatMap((article) =>
       shown.has(article.id) ? (byId.get(article.id) ?? []) : [article],
     );

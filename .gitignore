@@ -42,3 +42,11 @@ work/
 
 # Claude Code が作る作業用の worktree
 .claude/worktrees/
+
+# 画面を通したテスト（Playwright）と Lighthouse CI の出力
+test-results/
+playwright-report/
+.lighthouseci/
+# WSL で Lighthouse を動かすと、chrome-launcher が Windows の一時フォルダの名前
+# （C:\Users\…）でディレクトリを作る
+C:*

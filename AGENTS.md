@@ -21,6 +21,8 @@ Sendo の公式リーダー。`packages/core`（同期エンジン）と `apps/w
 - `pnpm dev`：画面の dev サーバー（http://localhost:5173）。`/api` は手元の sendo（http://localhost:8787）に中継する。sendo は sendo の README のとおりに別に動かす
 - `pnpm build`：画面をビルドし、reader Worker をデプロイせずにバンドルして確かめる
 - `pnpm size`：ビルドのあとに、画面のスレッドの JS（gzip 後 100KB）と、DB のワーカーの JS と wasm（550KB）が予算に収まるか確かめる
+- `pnpm e2e`：画面を通したテスト（Playwright）。`pnpm build` のあとに動かす。本番のビルドを `vite preview` で開き、`/api` には `packages/core/test/fake-sendo.ts` の偽の sendo が答える。速さの予算（キャッシュ済みの起動から記事まで 1 秒、操作の反応 100ms）も、CPU を 4 倍遅くして確かめる
+- `pnpm --filter @sendo-reader/web lighthouse`：初回の読み込みを Lighthouse で測り、`apps/web/.lighthouseci/` に残す（上限はまだ決めていない）。手元では `CHROME_PATH` に Chromium の場所を渡す
 - `apps/web/wrangler.jsonc` を変えたら `pnpm --filter @sendo-reader/web cf-typegen` で型を作り直す
 - sendo の API が変わったら、`pnpm --filter @sendo-reader/core api:fetch`（手元の sendo の `/api/v1/openapi.json` を `packages/core/src/api/openapi.json` に写す。`SENDO_OPENAPI` で別の URL かファイルを指せる）と `pnpm --filter @sendo-reader/core api:generate`（`schema.gen.ts` を作る）を実行し、両方をコミットする。生成したファイルは手で直さない（CI で食い違いを検査している）
 
@@ -40,7 +42,9 @@ Sendo の公式リーダー。`packages/core`（同期エンジン）と `apps/w
 - `apps/web/`：PWA（Svelte 5 ＋ Vite の SPA）
   - `src/`：画面。`main.ts` が入口、`App.svelte` が一番外の部品
     - `db.worker.ts`：DB と同期を持つワーカーの入口（`@sendo-reader/core/web/worker` を動かすだけ）
-    - `lib/reader.ts`：ワーカーを起こす（Trusted Types の `sendo-worker` のポリシーで、自分のオリジンの URL だけを許す）
+    - `lib/reader.ts`：ワーカーを起こす。`lib/trusted.ts` の Trusted Types の `sendo-worker` のポリシーで、自分のオリジンの URL だけを許す（Service Worker の登録も同じ）
+    - Service Worker（vite-plugin-pwa、`vite.config.ts`）：アプリの外枠と SQLite の wasm をキャッシュし、ネットワークがなくても起動する。Trusted Types の都合で、Workbox の実行部分は `sw.js` に入れている（`importScripts` を使わない）
+    - `e2e/`：画面を通したテスト（Playwright）
     - `lib/state.svelte.ts`：画面の状態（フォルダ、フィード、未読の数、同期の様子）。手元の表が変わったら読み直す
     - `lib/router.svelte.ts`：小さな自前のルーター（History API）
     - `routes/`：画面（ログイン、読む画面、購読の管理）、`components/`：部品（`components/manage/` は購読の管理の部品）

@@ -66,6 +66,16 @@ export async function listArticles(db: Executor, query: ArticleQuery = {}): Prom
   return rows.map(toArticle);
 }
 
+/** 記事をまとめて読む（見つからない ID は飛ばす）。画面が出している記事の状態を読み直すのに使う */
+export async function getArticles(db: Executor, ids: readonly string[]): Promise<Article[]> {
+  if (ids.length === 0) return [];
+  const rows = await db.all<ArticleRow>(
+    `select ${ARTICLE_COLUMNS} from articles a where a.id in (select value from json_each(?))`,
+    [JSON.stringify(ids)],
+  );
+  return rows.map(toArticle);
+}
+
 export async function getArticle(db: Executor, id: string): Promise<Article | null> {
   const [row] = await db.all<ArticleRow>(
     `select ${ARTICLE_COLUMNS} from articles a where a.id = ?`,

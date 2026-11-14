@@ -19,7 +19,7 @@ jobs:
   check:
     name: Check
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -61,6 +61,32 @@ jobs:
       - name: Build
         run: pnpm build
 
-      # 画面のスレッドの JS の大きさが予算に収まっているか（docs/decisions/performance.md）
+      # 画面のスレッドの JS と、DB のワーカーの JS・wasm が予算に収まっているか
+      # （docs/decisions/performance.md）
       - name: Size budget
         run: pnpm size
+
+      # 画面を通したテストと、起動から記事が出るまでの時間・操作の反応の関所
+      # （docs/decisions/performance.md）
+      - name: End-to-end tests
+        run: pnpm e2e
+
+      - name: Upload Playwright results
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: playwright-results
+          path: apps/web/test-results/
+          retention-days: 14
+
+      # 初回の読み込み（キャッシュなし）を Lighthouse で測って残す。上限は試作してから決める
+      - name: Lighthouse
+        run: pnpm --filter @sendo-reader/web lighthouse
+
+      - name: Upload Lighthouse results
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: lighthouse
+          path: apps/web/.lighthouseci/
+          retention-days: 14

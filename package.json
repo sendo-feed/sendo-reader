@@ -17,7 +17,8 @@
     "format": "biome check --write .",
     "test": "pnpm -r test",
     "size": "node scripts/check-size.mjs",
-    "check": "pnpm typecheck && pnpm lint && pnpm test"
+    "check": "pnpm typecheck && pnpm lint && pnpm test",
+    "e2e": "pnpm --filter @sendo-reader/web e2e"
   },
   "devDependencies": {
     "@biomejs/biome": "2.6.4",
