@@ -39,7 +39,10 @@ pnpm --filter @sendo-reader/core exec playwright install chromium   # ブラウ�
 pnpm dev
 ```
 
-`http://localhost:5173` で画面が開きます。`/api` へのリクエストは、Vite の dev サーバーが `http://localhost:8787` の Sendo に中継します。
+`http://localhost:5173` で画面が開きます。`/api` へのリクエストは、Vite の dev サーバーが `http://localhost:8787` の Sendo に中継します。最初の画面で、Sendo で `pnpm token:create --email <メール>` を実行して発行したアクセストークンを貼ってログインします。
+
+> [!NOTE]
+> 差分同期の API（`GET /api/v1/sync`）は Sendo でまだ作っている途中です。それまでは、ログインはできても記事は同期されません。
 
 ## コマンド
 
@@ -52,7 +55,7 @@ pnpm dev
 | `pnpm format` | 整形して、直せる lint の指摘を直す |
 | `pnpm test` | テスト（Vitest） |
 | `pnpm build` | 画面をビルドし、reader Worker をデプロイせずにバンドルして確かめる |
-| `pnpm size` | ビルドのあとに、画面の JS の大きさが予算に収まるか確かめる |
+| `pnpm size` | ビルドのあとに、画面の JS とワーカーの JS・wasm の大きさが予算に収まるか確かめる |
 | `pnpm --filter @sendo-reader/core api:fetch` | 手元の Sendo から API の定義（OpenAPI）を写す |
 | `pnpm --filter @sendo-reader/core api:generate` | 写した定義から API の型を作る |
 

@@ -28,6 +28,10 @@ function securityHeadersPlugin(): Plugin {
 
 export default defineConfig({
   plugins: [svelte(), securityHeadersPlugin()],
+  // DB のワーカー（src/db.worker.ts）は ES モジュールで作る。sqlite-wasm は wasm を自分の場所から
+  // 読むので、Vite の事前バンドルに入れない
+  worker: { format: "es" },
+  optimizeDeps: { exclude: ["@sqlite.org/sqlite-wasm"] },
   server: {
     // 手元では sendo（pnpm dev、ポート 8787）に中継する。本番は reader Worker が
     // Service binding で中継する（worker/index.ts）

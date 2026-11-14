@@ -1,12 +1,22 @@
-<main>
-  <h1>Sendo</h1>
-  <p>準備中です。</p>
-</main>
+<script lang="ts">
+  import { useReader } from "./lib/context";
+  import Login from "./routes/Login.svelte";
+  import Reader from "./routes/Reader.svelte";
+
+  const state = useReader();
+</script>
+
+{#if state.signedIn === null}
+  <p class="starting" aria-live="polite">起動しています…</p>
+{:else if state.signedIn}
+  <Reader />
+{:else}
+  <Login />
+{/if}
 
 <style>
-main {
-  max-width: 40rem;
-  margin: 0 auto;
-  padding: 1rem;
-}
+  .starting {
+    padding: 2rem;
+    color: var(--muted);
+  }
 </style>

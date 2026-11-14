@@ -43,7 +43,12 @@ const VISIBLE_SYNC_AFTER_MS = 30_000;
  */
 export function runReaderWorker(options: ReaderWorkerOptions = {}): void {
   const namespace = options.namespace ?? "sendo-reader";
-  const scope = globalThis as unknown as DedicatedWorkerGlobalScope;
+  // DedicatedWorkerGlobalScope の型は、画面（DOM）の型で調べると見えないので、使う形だけを書く
+  const scope = globalThis as unknown as {
+    postMessage(message: WorkerMessage): void;
+    addEventListener(type: "message", listener: (event: MessageEvent<TabMessage>) => void): void;
+    addEventListener(type: "online", listener: () => void): void;
+  };
   const workerId = crypto.randomUUID();
   const peers = new BroadcastChannel(`${namespace}:peers`);
 

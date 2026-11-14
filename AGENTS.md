@@ -20,7 +20,7 @@ Sendo の公式リーダー。`packages/core`（同期エンジン）と `apps/w
 - `pnpm format`：整形して、直せる lint の指摘を直す（Biome。`.svelte` も対象）
 - `pnpm dev`：画面の dev サーバー（http://localhost:5173）。`/api` は手元の sendo（http://localhost:8787）に中継する。sendo は sendo の README のとおりに別に動かす
 - `pnpm build`：画面をビルドし、reader Worker をデプロイせずにバンドルして確かめる
-- `pnpm size`：ビルドのあとに、画面のスレッドの JS が予算（gzip 後 100KB）に収まるか確かめる
+- `pnpm size`：ビルドのあとに、画面のスレッドの JS（gzip 後 100KB）と、DB のワーカーの JS と wasm（550KB）が予算に収まるか確かめる
 - `apps/web/wrangler.jsonc` を変えたら `pnpm --filter @sendo-reader/web cf-typegen` で型を作り直す
 - sendo の API が変わったら、`pnpm --filter @sendo-reader/core api:fetch`（手元の sendo の `/api/v1/openapi.json` を `packages/core/src/api/openapi.json` に写す。`SENDO_OPENAPI` で別の URL かファイルを指せる）と `pnpm --filter @sendo-reader/core api:generate`（`schema.gen.ts` を作る）を実行し、両方をコミットする。生成したファイルは手で直さない（CI で食い違いを検査している）
 
@@ -39,6 +39,12 @@ Sendo の公式リーダー。`packages/core`（同期エンジン）と `apps/w
   - `test/fake-sendo.ts`：sendo の差分同期の決定に沿った偽のサーバー。core のテストはこれを相手にし、外へは通信しない。手元の DB は、本番と同じ sqlite-wasm を Node のメモリーで開く（`test/helpers.ts`）
 - `apps/web/`：PWA（Svelte 5 ＋ Vite の SPA）
   - `src/`：画面。`main.ts` が入口、`App.svelte` が一番外の部品
+    - `db.worker.ts`：DB と同期を持つワーカーの入口（`@sendo-reader/core/web/worker` を動かすだけ）
+    - `lib/reader.ts`：ワーカーを起こす（Trusted Types の `sendo-worker` のポリシーで、自分のオリジンの URL だけを許す）
+    - `lib/state.svelte.ts`：画面の状態（フォルダ、フィード、未読の数、同期の様子）。手元の表が変わったら読み直す
+    - `lib/router.svelte.ts`：小さな自前のルーター（History API）
+    - `routes/`：画面（ログイン、読む画面）、`components/`：部品
+    - 画面は `@sendo-reader/core/web` の窓口だけを使い、DB や sendo の API に直接触れない
   - `worker/`：reader Worker。静的なファイルは Workers Static Assets が返し、`/api` だけを Service binding で sendo に中継する
   - `security-headers.ts`：CSP などのヘッダー。dev サーバーと、本番の `dist/_headers` の両方に使う
   - `test/`：reader Worker とヘッダーのテスト
