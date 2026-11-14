@@ -18,7 +18,13 @@ import {
   type OpmlImportResult,
   subscribe,
 } from "./online";
-import { LOCAL_ID_PREFIX, type MarkReadScope, type Operation, scopeCondition } from "./sync/ops";
+import {
+  getFolderIdRemaps,
+  LOCAL_ID_PREFIX,
+  type MarkReadScope,
+  type Operation,
+  scopeCondition,
+} from "./sync/ops";
 import { getCursor, type PullResult, pull } from "./sync/pull";
 import { countPending, enqueue, lastPendingId, type PushResult, push } from "./sync/queue";
 
@@ -98,6 +104,9 @@ export class ReaderCore {
     const core = new ReaderCore(options);
     core.#token = await getSetting(options.db, TOKEN_KEY);
     core.#lastOpId = await lastPendingId(options.db);
+    for (const [from, to] of Object.entries(await getFolderIdRemaps(options.db))) {
+      core.#folderIds.set(from, to);
+    }
     return core;
   }
 
@@ -285,9 +294,17 @@ export class ReaderCore {
     if (op !== null) this.#emit(new Set<Table>(["articles"]));
   }
 
-  /** フォルダを作る。sendo が ID を付けるまでは仮の ID で、作ったフォルダの ID を返す */
-  async createFolder(name: string): Promise<string> {
-    const folderId = `${LOCAL_ID_PREFIX}${crypto.randomUUID()}`;
+  /**
+   * フォルダを作る。sendo が ID を付けるまでは仮の ID（local- で始まる）で使え、その ID を返す。
+   * 仮の ID は呼ぶ側で決めてもよい（送り直しても二重に作らないように）。
+   */
+  async createFolder(
+    name: string,
+    folderId = `${LOCAL_ID_PREFIX}${crypto.randomUUID()}`,
+  ): Promise<string> {
+    if (!folderId.startsWith(LOCAL_ID_PREFIX)) {
+      throw new RangeError(`仮の ID は ${LOCAL_ID_PREFIX} で始める`);
+    }
     await this.#write(
       { kind: "createFolder", folderId, name: normalizeFolderName(name), at: this.#now() },
       ["folders"],

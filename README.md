@@ -35,6 +35,7 @@ Windows では、WSL の中（Linux 側のファイルシステム）にクロ�
 git clone https://github.com/sendo-feed/sendo-reader.git
 cd sendo-reader
 pnpm install
+pnpm --filter @sendo-reader/core exec playwright install chromium   # ブラウザーで動くテストのため（初回だけ）
 pnpm dev
 ```
 

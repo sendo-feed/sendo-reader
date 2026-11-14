@@ -15,4 +15,10 @@ export {
 export type { MarkReadScope } from "./sync/ops";
 export { LOCAL_RETENTION_MS, type PullResult } from "./sync/pull";
 export type { PushResult } from "./sync/queue";
+export {
+  PERIODIC_SYNC_MS,
+  type SchedulerOptions,
+  SyncScheduler,
+  type SyncStatus,
+} from "./sync/scheduler";
 export { toSafeHttpUrl } from "./url";
