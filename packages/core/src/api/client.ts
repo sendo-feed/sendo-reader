@@ -1,35 +1,13 @@
 import createClient from "openapi-fetch";
+import type { SyncPage } from "../sync/page";
+import { ApiError, errorFromBody, toApiError } from "./errors";
 import type { paths } from "./schema.gen";
-import type { SyncResponse } from "./sync-contract";
+import { toSyncPage } from "./sync-contract";
 
-/** sendo の API の失敗を、扱い方ごとに分けたもの */
-export type ApiErrorKind =
-  /** 届かなかった（オフライン、タイムアウトなど）。あとでやり直す */
-  | "network"
-  /** トークンがない、または取り消された。ログインし直す */
-  | "unauthorized"
-  /** 差分を出せないほどカーソルが古い。最初から同期し直す */
-  | "cursor_expired"
-  /** 相手がない（404） */
-  | "not_found"
-  /** ぶつかった（409） */
-  | "conflict"
-  /** リクエストが正しくない（そのほかの 4xx）。やり直しても変わらない */
-  | "invalid"
-  /** サーバーの不具合（5xx、429）。あとでやり直す */
-  | "server";
+export { ApiError, type ApiErrorKind, errorFromBody, toApiError } from "./errors";
 
-export class ApiError extends Error {
-  constructor(
-    readonly kind: ApiErrorKind,
-    message: string,
-    readonly status?: number,
-    readonly code?: string,
-  ) {
-    super(message);
-    this.name = "ApiError";
-  }
-}
+/** 1 つのリクエストを待つ上限。止まった通信で同期がいつまでも終わらないようにする */
+export const REQUEST_TIMEOUT_MS = 30_000;
 
 export interface SendoApiOptions {
   /** API の入口。画面では同じオリジンの "/api/v1"（reader Worker が sendo に中継する） */
@@ -37,6 +15,7 @@ export interface SendoApiOptions {
   /** アクセストークン。ないときは null */
   token: () => string | null;
   fetch?: typeof fetch;
+  timeoutMs?: number;
 }
 
 export type SendoApi = ReturnType<typeof createSendoApi>;
@@ -44,20 +23,32 @@ export type SendoApi = ReturnType<typeof createSendoApi>;
 export function createSendoApi(options: SendoApiOptions) {
   const doFetch = options.fetch ?? ((input, init) => globalThis.fetch(input, init));
   const baseUrl = resolveBase(options.baseUrl.replace(/\/+$/, ""));
+  const timeoutMs = options.timeoutMs ?? REQUEST_TIMEOUT_MS;
 
   /**
-   * トークンを付けて送る（リクエストにすでに付いていれば、それを使う）。
-   * 届かなかったら ApiError("network") にする。トークンはエラーの文言に入れない。
+   * トークンを付けて送る（リクエストにすでに付いていれば、それを使う）。届かない、時間切れ、
+   * 中断は ApiError("network") にする。トークンはエラーの文言に入れない。
+   *
+   * 中断の合図は、呼び出す側がリクエストの signal に付ける（ログアウトしたら、そのログインで
+   * 始めたリクエストを止める）。
    */
   async function send(request: Request): Promise<Response> {
     const token = options.token();
-    if (token !== null && !request.headers.has("authorization")) {
-      request.headers.set("authorization", `Bearer ${token}`);
+    const headers = new Headers(request.headers);
+    if (token !== null && !headers.has("authorization")) {
+      headers.set("authorization", `Bearer ${token}`);
     }
+    const caller = request.signal;
+    const signal = AbortSignal.any([caller, AbortSignal.timeout(timeoutMs)]);
     try {
-      return await doFetch(request);
+      return await doFetch(new Request(request, { headers, signal }));
     } catch (error) {
-      throw new ApiError("network", `sendo に届かなかった：${String(error)}`);
+      const reason = caller.aborted
+        ? "中断した"
+        : error instanceof DOMException && error.name === "TimeoutError"
+          ? `${timeoutMs}ms 待っても応答がなかった`
+          : String(error);
+      throw new ApiError("network", `sendo に届かなかった：${reason}`);
     }
   }
 
@@ -68,20 +59,27 @@ export function createSendoApi(options: SendoApiOptions) {
     client,
 
     /** 差分を 1 ページ取る（docs/decisions/sync.md）。cursor が null なら最初の同期 */
-    async sync(cursor: string | null): Promise<SyncResponse> {
+    async sync(cursor: string | null, signal?: AbortSignal): Promise<SyncPage> {
       const url = new URL(`${baseUrl}/sync`);
       if (cursor !== null) url.searchParams.set("cursor", cursor);
-      const response = await send(new Request(url));
+      const response = await send(new Request(url, signal === undefined ? {} : { signal }));
       if (!response.ok) throw await toApiError(response);
-      return (await response.json()) as SyncResponse;
+      let body: unknown;
+      try {
+        body = await response.json();
+      } catch {
+        throw new ApiError("server", "sendo の同期の応答が JSON でない", response.status);
+      }
+      return toSyncPage(body);
     },
 
     /** トークンが使えるかを確かめる。使えなければ ApiError("unauthorized") */
-    async verifyToken(token: string): Promise<void> {
+    async verifyToken(token: string, signal?: AbortSignal): Promise<void> {
       const { error, response } = await client.GET("/folders", {
         headers: { authorization: `Bearer ${token}` },
+        ...(signal === undefined ? {} : { signal }),
       });
-      if (error !== undefined || !response.ok) throw classify(response.status, error);
+      if (error !== undefined || !response.ok) throw errorFromBody(response.status, error);
     },
   };
 }
@@ -96,34 +94,4 @@ function resolveBase(baseUrl: string): string {
   if (here === undefined)
     throw new Error(`相対の baseUrl（${baseUrl}）は、ブラウザの中でだけ使える`);
   return new URL(baseUrl, here).href.replace(/\/+$/, "");
-}
-
-/** 失敗した応答を ApiError にする（本文は sendo の共通のエラーの形） */
-export async function toApiError(response: Response): Promise<ApiError> {
-  let body: unknown;
-  try {
-    body = await response.json();
-  } catch {
-    // 本文が JSON でなければ、状態コードだけで分ける
-  }
-  return classify(response.status, body);
-}
-
-function classify(status: number, body: unknown): ApiError {
-  const error = (body as { error?: { code?: unknown; message?: unknown } } | undefined)?.error;
-  const code = typeof error?.code === "string" ? error.code : undefined;
-  const message = typeof error?.message === "string" ? error.message : `HTTP ${status}`;
-  const kind: ApiErrorKind =
-    status === 401
-      ? "unauthorized"
-      : status === 410 && code === "cursor_expired"
-        ? "cursor_expired"
-        : status === 404
-          ? "not_found"
-          : status === 409
-            ? "conflict"
-            : status === 429 || status >= 500
-              ? "server"
-              : "invalid";
-  return new ApiError(kind, message, status, code);
 }

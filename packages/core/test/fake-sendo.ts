@@ -71,7 +71,7 @@ export class FakeSendo {
   readonly #maxSeq: Record<TableName, number> = { folders: 0, feeds: 0, articles: 0 };
   /** 消した印を回収した範囲。これより古いカーソルでは差分を出せない */
   readonly #purgedUpTo: Record<"folders" | "feeds", number> = { folders: 0, feeds: 0 };
-  readonly #failures: ("network" | number | null)[] = [];
+  readonly #failures: ("network" | number | "hang" | null)[] = [];
   #nextId = 1;
 
   // --- テストから状態を作る ---
@@ -183,9 +183,10 @@ export class FakeSendo {
 
   /**
    * 次からのリクエストを、順に失敗させる。"network" なら届かない、数ならその状態コードを返す、
-   * null ならふつうに答える（例：failNext(null, "network") で 2 つめだけ届かない）
+   * "hang" なら中断されるまで答えない、null ならふつうに答える
+   * （例：failNext(null, "network") で 2 つめだけ届かない）
    */
-  failNext(...failures: ("network" | number | null)[]): void {
+  failNext(...failures: ("network" | number | "hang" | null)[]): void {
     this.#failures.push(...failures);
   }
 
@@ -199,6 +200,13 @@ export class FakeSendo {
 
     const failure = this.#failures.shift();
     if (failure === "network") throw new TypeError("fetch failed");
+    if (failure === "hang") {
+      return new Promise((_, reject) => {
+        const abort = () => reject(request.signal.reason);
+        if (request.signal.aborted) abort();
+        else request.signal.addEventListener("abort", abort, { once: true });
+      });
+    }
     if (typeof failure === "number") return error(failure, "injected", "injected failure");
 
     if (request.headers.get("authorization") !== `Bearer ${this.token}`) {

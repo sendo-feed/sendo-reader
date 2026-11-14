@@ -1,5 +1,5 @@
 import { ApiError, createSendoApi, type SendoApi } from "./api/client";
-import type { Database } from "./db/database";
+import type { Database, Executor } from "./db/database";
 import {
   type ArticleQuery,
   countUnread,
@@ -9,9 +9,9 @@ import {
   listFolders,
 } from "./db/queries";
 import { migrate } from "./db/schema";
-import { deleteSetting, getSetting, setSetting } from "./db/settings";
+import { getSetting, setSetting } from "./db/settings";
 import type { Article, Feed, Folder, Table, UnreadCounts } from "./models";
-import { clearSyncedData, type PullResult, pull } from "./sync/pull";
+import { type PullResult, pull } from "./sync/pull";
 
 const TOKEN_KEY = "auth.token";
 
@@ -21,6 +21,8 @@ export interface ReaderCoreOptions {
   baseUrl: string;
   fetch?: typeof fetch;
   now?: () => number;
+  /** 1 つのリクエストを待つ上限（ミリ秒） */
+  requestTimeoutMs?: number;
 }
 
 export type ChangeListener = (tables: ReadonlySet<Table>) => void;
@@ -39,6 +41,11 @@ export class ReaderCore {
   readonly #listeners = new Set<ChangeListener>();
   /** 手元にあるトークン。毎回 DB を読まずに済むように持っておく */
   #token: string | null = null;
+  /**
+   * 今のログインの中断の合図。ログアウトやログインのし直しで中断し、送っている途中の
+   * リクエストを止め、その同期が手元の DB に書き戻さないようにする
+   */
+  #session = new AbortController();
   #syncing: Promise<PullResult> | null = null;
 
   private constructor(options: ReaderCoreOptions) {
@@ -48,6 +55,7 @@ export class ReaderCore {
       baseUrl: options.baseUrl,
       token: () => this.#token,
       ...(options.fetch === undefined ? {} : { fetch: options.fetch }),
+      ...(options.requestTimeoutMs === undefined ? {} : { timeoutMs: options.requestTimeoutMs }),
     });
   }
 
@@ -66,24 +74,42 @@ export class ReaderCore {
   }
 
   /**
-   * sendo で発行したアクセストークンを確かめてから、手元に置く。
-   * 使えないトークンなら ApiError（unauthorized）を投げ、何も置かない。
+   * sendo で発行したアクセストークンを確かめてから、手元に置く。使えないトークンなら
+   * ApiError（unauthorized）を投げ、何も変えない。
+   *
+   * 手元のデータは、どのアカウントのものか分からないので、いったん消して最初から同期し直す
+   * （別のアカウントのトークンに替えたときに、前のアカウントの記事を見せない）。
    */
   async signIn(token: string): Promise<void> {
     const trimmed = token.trim();
     if (trimmed === "") throw new ApiError("unauthorized", "トークンが空");
-    await this.#api.verifyToken(trimmed);
-    await setSetting(this.#db, TOKEN_KEY, trimmed);
+    await this.#api.verifyToken(trimmed, this.#session.signal);
+
+    this.#endSession();
+    await this.#db.transaction(async (tx) => {
+      await clearAll(tx);
+      await setSetting(tx, TOKEN_KEY, trimmed);
+    });
     this.#token = trimmed;
+    this.#emit(new Set<Table>(["folders", "feeds", "articles"]));
   }
 
-  /** トークンと、同期で届いた手元のデータをまとめて消す */
+  /**
+   * トークンと、同期で届いた手元のデータをまとめて消す。送っている途中の同期は待たずに
+   * 中断する（通信が止まっていても、すぐに終わる）。
+   */
   async signOut(): Promise<void> {
-    await this.#syncing?.catch(() => undefined);
-    await clearSyncedData(this.#db);
-    await deleteSetting(this.#db, TOKEN_KEY);
+    this.#endSession();
     this.#token = null;
+    await this.#db.transaction((tx) => clearAll(tx));
     this.#emit(new Set<Table>(["folders", "feeds", "articles"]));
+  }
+
+  /** 今のログインで動いている同期を中断し、新しいログインを始める */
+  #endSession(): void {
+    this.#session.abort();
+    this.#session = new AbortController();
+    this.#syncing = null;
   }
 
   // --- 同期 ---
@@ -94,16 +120,18 @@ export class ReaderCore {
    */
   sync(): Promise<PullResult> {
     if (this.#syncing !== null) return this.#syncing;
-    this.#syncing = this.#runSync().finally(() => {
-      this.#syncing = null;
+    const running: Promise<PullResult> = this.#runSync(this.#session.signal).finally(() => {
+      if (this.#syncing === running) this.#syncing = null;
     });
-    return this.#syncing;
+    this.#syncing = running;
+    return running;
   }
 
-  async #runSync(): Promise<PullResult> {
+  async #runSync(signal: AbortSignal): Promise<PullResult> {
     if (this.#token === null) throw new ApiError("unauthorized", "ログインしていない");
     return pull(this.#db, this.#api, {
       now: this.#now,
+      signal,
       onPage: (changed) => this.#emit(changed),
     });
   }
@@ -147,4 +175,12 @@ export class ReaderCore {
       }
     }
   }
+}
+
+/** 手元のデータ（同期で届いた行、カーソル、トークンなどの設定）をすべて消す */
+async function clearAll(tx: Executor): Promise<void> {
+  await tx.run("delete from articles");
+  await tx.run("delete from feeds");
+  await tx.run("delete from folders");
+  await tx.run("delete from settings");
 }

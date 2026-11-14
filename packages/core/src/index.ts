@@ -1,4 +1,4 @@
-export { ApiError, type ApiErrorKind } from "./api/client";
+export { ApiError, type ApiErrorKind } from "./api/errors";
 export type { Database, Executor, Row, SqlValue } from "./db/database";
 export type { ArticleQuery } from "./db/queries";
 export { NewerSchemaError, SCHEMA_VERSION } from "./db/schema";

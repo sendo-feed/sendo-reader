@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
-import { ApiError, LOCAL_RETENTION_MS } from "../src";
-import { DAY, setup } from "./helpers";
+import { ApiError, LOCAL_RETENTION_MS, ReaderCore } from "../src";
+import { DAY, openMemoryDb, setup } from "./helpers";
 
 const ids = (rows: { id: string }[]) => rows.map((row) => row.id).sort();
 
@@ -229,3 +229,48 @@ describe("変更の通知", () => {
     expect(received).toEqual([2]);
   });
 });
+
+describe("フォルダの削除の通知と、応答の形", () => {
+  test("フォルダを消した印だけのページでも、入っていたフィードが変わったことを知らせる", async () => {
+    const { server, core } = await setup();
+    const folder = server.createFolder("Tech");
+    server.subscribe({ url: "https://example.com/feed.xml", folderId: folder.id });
+    await core.sync();
+
+    // sendo はフィードの行より先に、フォルダを消した印を返すことがある（別のページ）
+    server.pageSize = 1;
+    server.deleteFolder(folder.id);
+    server.failNext(null, "network");
+    const changes: string[][] = [];
+    core.onChange((tables) => changes.push([...tables].sort()));
+    await core.sync().catch(() => undefined);
+
+    expect(changes[0]).toEqual(["feeds", "folders"]);
+    expect(await core.listFeeds()).toMatchObject([{ folderId: null }]);
+  });
+
+  test("応答の形が違えば server として失敗し、手元は変えない", async () => {
+    const { core } = await setup({ signIn: false });
+    const bad = await setupWithResponse({ cursor: "c", hasMore: false, folders: [{ id: 1 }] });
+    const error = await bad.sync().catch((e: unknown) => e);
+    expect((error as ApiError).kind).toBe("server");
+    expect((error as ApiError).message).toContain("folders[0].id");
+    expect(await bad.listFolders()).toEqual([]);
+    expect(core.isSignedIn()).toBe(false);
+  });
+});
+
+/** /sync が決まった本文を返す sendo につないだ ReaderCore */
+async function setupWithResponse(body: unknown) {
+  const db = await openMemoryDb();
+  const core = await ReaderCore.open({
+    db,
+    baseUrl: "https://sendo.test/api/v1",
+    fetch: async (input) => {
+      const url = new URL((input as Request).url);
+      return new Response(JSON.stringify(url.pathname.endsWith("/sync") ? body : { items: [] }));
+    },
+  });
+  await core.signIn("sendo_x");
+  return core;
+}

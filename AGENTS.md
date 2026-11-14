@@ -28,7 +28,7 @@ Sendo の公式リーダー。`packages/core`（同期エンジン）と `apps/w
 
 - `packages/core/`：同期エンジンとローカル DB（UI に依存しない）。`test/` にテスト（Vitest、Node で動く）
   - `src/reader.ts`：`ReaderCore`。ログイン、同期、手元の DB の読み出し、変更の通知をまとめる窓口
-  - `src/api/`：sendo の API。`schema.gen.ts` は OpenAPI から生成したもの。`sync-contract.ts` は、sendo の OpenAPI に `/sync` が入るまでの仮の応答の形（仮の形を使うのは、このファイルと `client.ts` の `sync()` だけにする）
+  - `src/api/`：sendo の API。`schema.gen.ts` は OpenAPI から生成したもの。`sync-contract.ts` は、sendo の OpenAPI に `/sync` が入るまでの仮の応答の形と、core の中の形（`src/sync/page.ts` の `SyncPage`）への変換。仮の形を使うのはこのファイルだけにし、同期のロジックは `SyncPage` だけを扱う
   - `src/db/`：DB の窓口（`database.ts`）、スキーマとマイグレーション（`schema.ts`。足すだけにし、出したものは書き換えない）、画面のための読み出し（`queries.ts`）、sqlite-wasm の実装（`sqlite-wasm.ts`）
   - `src/sync/`：差分同期（`pull.ts`）
   - `test/fake-sendo.ts`：sendo の差分同期の決定に沿った偽のサーバー。core のテストはこれを相手にし、外へは通信しない。手元の DB は、本番と同じ sqlite-wasm を Node のメモリーで開く（`test/helpers.ts`）
