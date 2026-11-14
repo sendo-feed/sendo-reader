@@ -22,11 +22,19 @@ function world() {
   const namespace = `test-${crypto.randomUUID()}`;
   const server = new FakeSendo();
   cleanups.push(serveFakeSendo(server, `${namespace}:fake-sendo`));
-  const open = (): Tab => {
-    const worker = new Worker(new URL("./reader-worker.ts", import.meta.url), {
-      type: "module",
-      name: namespace,
-    });
+  /** タブを開く。"failing" なら、DB を開けないワーカーにする */
+  const open = (kind: "ok" | "failing" = "ok"): Tab => {
+    // Vite はワーカーのオプションを、その場に書いた値からしか読めない
+    const worker =
+      kind === "ok"
+        ? new Worker(new URL("./reader-worker.ts", import.meta.url), {
+            type: "module",
+            name: namespace,
+          })
+        : new Worker(new URL("./failing-reader-worker.ts", import.meta.url), {
+            type: "module",
+            name: namespace,
+          });
     cleanups.push(() => worker.terminate());
     const client = connectReader(worker);
     const tab: Tab = { worker, client, changes: [], statuses: [] };
@@ -204,5 +212,28 @@ describe("代表が名乗り直したときと、代表が替わったとき", (
     await second.client.syncNow();
     expect(server.folders.get(created?.id ?? "")?.name).toBe("Technology");
     expect(await second.client.countPending()).toBe(0);
+  });
+});
+
+describe("DB を開けなかったとき", () => {
+  test("待っている呼び出しも、そのあとの呼び出しも、止まらずに失敗で返す", async () => {
+    const { open } = world();
+    const { client } = open("failing");
+    const first = await client.isSignedIn().catch((e: unknown) => e);
+    expect(first).toBeInstanceOf(Error);
+    expect((first as Error).message).toContain("OPFS を開けない");
+    // そのあとに呼んでも、もう一度開こうとして、また失敗で返す
+    const second = await client.listArticles().catch((e: unknown) => e);
+    expect((second as Error).message).toContain("OPFS を開けない");
+  });
+
+  test("ロックを放すので、ほかのタブが代表になれ、開けなかったタブもその代表に頼んで使える", async () => {
+    const { open } = world();
+    const failing = open("failing");
+    await expect(failing.client.isSignedIn()).rejects.toThrow("OPFS を開けない");
+
+    const ok = open();
+    await ok.client.signIn(TOKEN);
+    expect(await failing.client.isSignedIn()).toBe(true);
   });
 });

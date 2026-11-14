@@ -48,6 +48,10 @@ export function runReaderWorker(options: ReaderWorkerOptions = {}): void {
   const peers = new BroadcastChannel(`${namespace}:peers`);
 
   let leader: { core: ReaderCore; scheduler: SyncScheduler } | null = null;
+  /** 代表になるロックを頼んでいる（待っている、DB を開いている、または代表である） */
+  let seeking = false;
+  /** 開いた（開いている途中の）DB */
+  let opened: Promise<Database> | null = null;
   /** 今の代表（自分が代表でないとき） */
   let currentLeader: string | null = null;
   /** 代表に渡して、まだ答えの来ていない呼び出し */
@@ -79,6 +83,9 @@ export function runReaderWorker(options: ReaderWorkerOptions = {}): void {
       } else {
         forwarded.set(message.id, message);
         toPeers({ ...message, from: workerId });
+        // 前に代表になれなかったら、もう一度なろうとする（ほかのタブが代表なら、その代表が
+        // 答え、こちらはロックを待つだけ）
+        seekLeadership();
       }
     } else if (message.type === "visible") {
       if (leader !== null) onVisible(leader);
@@ -137,15 +144,40 @@ export function runReaderWorker(options: ReaderWorkerOptions = {}): void {
   scope.addEventListener("online", () => leader?.scheduler.requestNow());
 
   toPeers({ type: "hello", from: workerId });
+  seekLeadership();
 
-  // 代表になれるまで待つ。なったら、ワーカーが終わるまでロックを持ち続ける
-  void navigator.locks.request(`${namespace}:leader`, async () => {
-    leader = await becomeLeader();
-    await new Promise(() => {});
-  });
+  /**
+   * 代表になれるまで待つ。なったら、ワーカーが終わるまでロックを持ち続ける。
+   *
+   * DB を開けなかったら、自分のタブから待っている呼び出しに失敗を返し、ロックを放す（ほかの
+   * タブが代表になれるように）。次に自分のタブから呼ばれたら、もう一度なろうとする。間隔を
+   * 決めて試し続けないのは、開けない理由が続くことが多く、そのたびに wasm を読み直すため。
+   */
+  function seekLeadership(): void {
+    if (seeking) return;
+    seeking = true;
+    void navigator.locks.request(`${namespace}:leader`, async () => {
+      try {
+        leader = await becomeLeader();
+      } catch (error) {
+        console.error("代表になれなかった（DB を開けない）", error);
+        seeking = false;
+        const result: Result = { ok: false, error: serializeError(error) };
+        for (const call of forwarded.values()) toTab({ type: "result", id: call.id, result });
+        forwarded.clear();
+        return;
+      }
+      await new Promise(() => {});
+    });
+  }
 
   async function becomeLeader() {
-    const db = await (options.openDatabase ?? openWebDatabase)(namespace);
+    // 開けた DB は、ReaderCore の準備で失敗しても開き直さずに使う（OPFS の取っ手を二重に取らない）
+    opened ??= (options.openDatabase ?? openWebDatabase)(namespace);
+    const db = await opened.catch((error: unknown) => {
+      opened = null;
+      throw error;
+    });
     const core = await ReaderCore.open({
       db,
       baseUrl: options.baseUrl ?? "/api/v1",
