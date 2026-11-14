@@ -26,10 +26,11 @@
 
 トークンは、ページの JS から読める場所（OPFS の DB）に置く。XSS などでページに他人の JS が入ると、トークンを盗まれ、取り消すまで API を使われる（アプリ用パスワードとして、Reeder などからも使える）。手元の記事や購読のデータも読まれる。そこで、次の対策を取る。
 
-- **CSP を厳しくする。** reader Worker と Vite の dev サーバーで、すべての応答に付ける。
+- **CSP を厳しくする。** 本番（Workers Static Assets）と、手元の Vite の dev サーバー・preview で、画面のすべての応答に付ける。
   - `default-src 'none'`、`script-src 'self' 'wasm-unsafe-eval'`（wasm のため）、`worker-src 'self'`、`connect-src 'self'`、`img-src 'self' data:`、`style-src 'self'`、`manifest-src 'self'`、`base-uri 'none'`、`form-action 'none'`、`frame-ancestors 'none'`、`object-src 'none'`
   - インラインのスクリプトと `eval` を許さない。ほかのオリジンへの通信を許さないので、盗んだトークンを `fetch` で外に送れない
   - 記事の画像を出すときなど、緩める必要が出たら、そのときに範囲を決めてこのファイルを直す
+  - 手元の dev サーバーだけは、2 つ緩める。Vite が開発中の CSS を `<style>` で差し込むので `style-src` に `'unsafe-inline'` を足し、Vite のエラーの表示が `innerHTML` を使うので Trusted Types を強制しない。それ以外（ほかのオリジンへの通信、インラインのスクリプト、`eval` を許さない）は本番と同じにする。本番と同じヘッダーは、本番のビルドを `vite preview` と Playwright で開いて確かめる
 - **Trusted Types を強制する**（`require-trusted-types-for 'script'`）。許すポリシーは、Svelte が作るもの（`svelte-trusted-html`）と、ワーカーの URL を自分のオリジンに限るものだけにする。対応していないブラウザでは効かないので、ほかの対策と重ねる。
 - **記事のデータを HTML として出さない。** `{@html}` を使わず、URL は http ／ https を確かめてから `href` に入れる（[UI とツール](ui.md)の守る規約）。
 - **トークンを外に出さない。** ログ、エラーの表示、URL、Service Worker のキャッシュに入れない。
