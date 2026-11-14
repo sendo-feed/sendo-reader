@@ -61,6 +61,8 @@ export class FakeSendo {
   pageSize = 100;
   /** 受け付けるトークン */
   token = TOKEN;
+  /** ほかに受け付けるトークン（別のアカウントに見立てる） */
+  readonly otherTokens = new Set<string>();
 
   readonly folders = new Map<string, FolderRow>();
   readonly feeds = new Map<string, FeedRow>();
@@ -212,7 +214,8 @@ export class FakeSendo {
     }
     if (typeof failure === "number") return error(failure, "injected", "injected failure");
 
-    if (request.headers.get("authorization") !== `Bearer ${this.token}`) {
+    const auth = request.headers.get("authorization");
+    if (![this.token, ...this.otherTokens].some((token) => auth === `Bearer ${token}`)) {
       return error(401, "unauthorized", "a valid access token is required");
     }
     if (request.method === "GET" && path === "/sync") {

@@ -90,6 +90,9 @@ export class ReaderCore {
 
     await this.#db.transaction(async (tx) => {
       session.throwIfAborted();
+      // 確かめている間に始まった同期は、前のトークンで動いている。ここで中断して、
+      // 前のアカウントの応答を、消したあとの手元に書き戻させない
+      this.#beginSession();
       await clearAll(tx);
       await setSetting(tx, TOKEN_KEY, trimmed);
       // DB の呼び出しは 1 列に並ぶので、手元のトークンもトランザクションの中で替える

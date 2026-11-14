@@ -165,3 +165,32 @@ describe("ログインとログアウトが重なったとき", () => {
     ]);
   });
 });
+
+describe("トークンを確かめている間に始まった同期", () => {
+  test("前のトークンで始まった同期の応答は、ログインし直したあとの手元に書き戻さない", async () => {
+    const { server, core, db } = await setup();
+    const feed = server.subscribe({ url: "https://example.com/feed.xml" });
+    server.deliver(feed.id);
+    await core.sync();
+    server.otherTokens.add("sendo_b");
+    // 前のアカウントに新しい記事が届いている（止めた同期の応答に載る）
+    server.deliver(feed.id);
+
+    let release = () => {};
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let syncing: Promise<unknown> | undefined;
+    server.onRequest = async (path) => {
+      if (path === "GET /folders") syncing = core.sync().catch(() => undefined);
+      if (path.startsWith("GET /sync")) await held;
+    };
+    await core.signIn("sendo_b");
+    release();
+    await syncing;
+
+    expect(await core.listArticles()).toEqual([]);
+    expect(await core.listFeeds()).toEqual([]);
+    expect(await db.all("select key from settings where key = 'sync.cursor'")).toEqual([]);
+  });
+});
