@@ -428,3 +428,38 @@ describe("付け替えの通知と、取り直したあとのまとめて既読"
     expect(await core.countPending()).toBe(0);
   });
 });
+
+describe("送る途中で届かなくなったとき", () => {
+  test("断られた操作を戻したあと、残りの操作を手元に重ね直す（このあと届かなくても）", async () => {
+    const { server, core, feed } = await withArticle();
+    const tech = server.createFolder("Tech");
+    server.createFolder("News");
+    await core.sync();
+
+    await core.renameFolder(tech.id, "News");
+    await core.moveFeed(feed.id, tech.id);
+    await core.renameFolder(tech.id, "Technology");
+    // 名前の変更（409）と読み直しは届き、フィードの移動で届かなくなる
+    server.failNext(null, null, "network");
+    const error = await core.sync().catch((e: unknown) => e);
+    expect((error as ApiError).kind).toBe("network");
+    expect((await core.listFolders()).find((f) => f.id === tech.id)?.name).toBe("Technology");
+    expect(await core.listFeeds()).toMatchObject([{ folderId: tech.id }]);
+  });
+
+  test("付け替えたあとに届かなくなっても、付け替えたことは知らせる", async () => {
+    const { server, core, article } = await withArticle();
+    const existing = server.createFolder("Tech");
+    await core.sync();
+    await core.createFolder("Tech");
+    await core.setStarred(article.id, true);
+    const changes: string[][] = [];
+    core.onChange((tables) => changes.push([...tables].sort()));
+
+    // フォルダの作成（409）と探し直しは届き、スターで届かなくなる
+    server.failNext(null, null, "network");
+    await core.sync().catch(() => undefined);
+    expect(changes).toContainEqual(["feeds", "folders"]);
+    expect((await core.listFolders()).map((f) => f.id)).toEqual([existing.id]);
+  });
+});

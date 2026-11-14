@@ -1,5 +1,6 @@
 import { ApiError, type SendoApi } from "../api/client";
 import type { Database, Executor } from "../db/database";
+import type { Table } from "../models";
 import { applyLocally, keyOf, merge, type Operation, remapFolderId, send, undo } from "./ops";
 
 /**
@@ -87,7 +88,20 @@ export interface PushResult {
  * 積んだ操作を順に送る。届かない、サーバーの不具合、トークンが使えないときは、そこで止めて
  * ApiError を投げる（操作は残る）。受け付けられなかった操作は、手元の反映を戻して捨てる。
  */
-export async function push(db: Database, api: SendoApi, signal: AbortSignal): Promise<PushResult> {
+export interface PushOptions {
+  /**
+   * 手元の DB を変えたら、確定したその時点で呼ぶ（フォルダの付け替え、断られた操作の戻し）。
+   * あとの操作が届かずに push が投げても、確定した変更は知らせる
+   */
+  onChange?: (tables: ReadonlySet<Table>) => void;
+}
+
+export async function push(
+  db: Database,
+  api: SendoApi,
+  signal: AbortSignal,
+  options: PushOptions = {},
+): Promise<PushResult> {
   const result: PushResult = { sent: 0, rejected: [], remapped: [] };
   while (true) {
     signal.throwIfAborted();
@@ -106,7 +120,11 @@ export async function push(db: Database, api: SendoApi, signal: AbortSignal): Pr
         await complete(tx, next.id, next.rev);
       });
       result.sent += 1;
-      if (sent.remap !== undefined) result.remapped.push(sent.remap);
+      if (sent.remap !== undefined) {
+        result.remapped.push(sent.remap);
+        // フォルダと、そこに入れたフィードが変わる
+        options.onChange?.(new Set<Table>(["folders", "feeds"]));
+      }
     } catch (error) {
       if (!(error instanceof ApiError)) throw error;
       if (isTransient(error)) {
@@ -137,7 +155,10 @@ export async function push(db: Database, api: SendoApi, signal: AbortSignal): Pr
         signal.throwIfAborted();
         // 戻している間にまとめられたら残す（次の同期で、重ね直してから送る）
         await complete(tx, next.id, next.rev);
+        // 戻したところに、残りの操作を重ね直す（このあと届かなくても、手元は最新の操作のまま）
+        await reapplyPending(tx);
       });
+      options.onChange?.(new Set<Table>(["folders", "feeds", "articles"]));
       result.rejected.push({ op, error });
     }
   }

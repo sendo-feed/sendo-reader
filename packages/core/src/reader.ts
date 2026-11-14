@@ -153,13 +153,9 @@ export class ReaderCore {
 
   async #runSync(signal: AbortSignal): Promise<SyncResult> {
     if (this.#token === null) throw new ApiError("unauthorized", "ログインしていない");
-    const pushed = await push(this.#db, this.#api, signal);
-    if (pushed.rejected.length > 0) {
-      this.#emit(new Set<Table>(["folders", "feeds", "articles"]));
-    } else if (pushed.remapped.length > 0) {
-      // フォルダの仮の ID を付け替えた（フォルダと、そこに入れたフィードが変わる）
-      this.#emit(new Set<Table>(["folders", "feeds"]));
-    }
+    const pushed = await push(this.#db, this.#api, signal, {
+      onChange: (tables) => this.#emit(tables),
+    });
     const pulled = await pull(this.#db, this.#api, {
       now: this.#now,
       signal,
