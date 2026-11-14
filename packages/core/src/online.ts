@@ -22,9 +22,8 @@ export async function discoverFeeds(
   url: string,
   signal: AbortSignal,
 ): Promise<FeedCandidate[]> {
-  const { data, error, response } = await api.client.GET("/feeds/discover", {
+  const { data, error, response } = await api.client(signal).GET("/feeds/discover", {
     params: { query: { url } },
-    signal,
   });
   if (data === undefined) throw errorFromBody(response.status, error);
   return data.candidates.map((candidate) => ({ url: candidate.url, title: candidate.title }));
@@ -45,9 +44,8 @@ export async function subscribe(
   signal: AbortSignal,
   afterWrite: (tx: Executor, feed: Feed) => Promise<void> = async () => {},
 ): Promise<Feed | null> {
-  const { data, error, response } = await api.client.POST("/feeds", {
+  const { data, error, response } = await api.client(signal).POST("/feeds", {
     body: { url: input.url, folderId: input.folderId },
-    signal,
   });
   if (data === undefined) throw errorFromBody(response.status, error);
   const { feed } = data;
@@ -95,11 +93,10 @@ export async function importOpml(
   xml: string,
   signal: AbortSignal,
 ): Promise<OpmlImportResult> {
-  const { data, error, response } = await api.client.POST("/opml", {
+  const { data, error, response } = await api.client(signal).POST("/opml", {
     body: xml,
     headers: { "content-type": "text/x-opml" },
     bodySerializer: (body: string) => body,
-    signal,
   });
   if (data === undefined) throw errorFromBody(response.status, error);
   return data;

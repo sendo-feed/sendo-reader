@@ -218,10 +218,13 @@ export class FakeSendo {
     const failure = this.#failures.shift();
     if (failure === "network") throw new TypeError("fetch failed");
     if (failure === "hang") {
+      // 呼ぶ側が init に渡した合図を直接見る（Request の signal の引き継ぎは、Node では
+      // 弱い参照で、回収されると中断が届かないことがある）
+      const signal = init?.signal ?? request.signal;
       return new Promise((_, reject) => {
-        const abort = () => reject(request.signal.reason);
-        if (request.signal.aborted) abort();
-        else request.signal.addEventListener("abort", abort, { once: true });
+        const abort = () => reject(signal.reason);
+        if (signal.aborted) abort();
+        else signal.addEventListener("abort", abort, { once: true });
       });
     }
     if (typeof failure === "number") return error(failure, "injected", "injected failure");
