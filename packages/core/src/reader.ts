@@ -65,6 +65,7 @@ export class ReaderCore {
    */
   #session = new AbortController();
   #syncing: Promise<SyncResult> | null = null;
+  #lane: Promise<unknown> = Promise.resolve();
   /** 手元で作ったフォルダの仮の ID から、sendo が付けた ID へ（画面が仮の ID を持ったままでも使えるように） */
   readonly #folderIds = new Map<string, string>();
 
@@ -154,11 +155,25 @@ export class ReaderCore {
    */
   sync(): Promise<SyncResult> {
     if (this.#syncing !== null) return this.#syncing;
-    const running: Promise<SyncResult> = this.#runSync(this.#session.signal).finally(() => {
-      if (this.#syncing === running) this.#syncing = null;
-    });
+    const signal = this.#session.signal;
+    const running: Promise<SyncResult> = this.#exclusive(() => this.#runSync(signal)).finally(
+      () => {
+        if (this.#syncing === running) this.#syncing = null;
+      },
+    );
     this.#syncing = running;
     return running;
+  }
+
+  /**
+   * sendo とのやり取り（同期、購読、OPML の取り込み）を 1 つずつ順に行う。購読の応答を待って
+   * いる間に同期が走ると、その間にした操作（購読の停止など）を送り終えてから古い応答を書き込み、
+   * 操作を取り消してしまうため。
+   */
+  #exclusive<T>(fn: () => Promise<T>): Promise<T> {
+    const run = this.#lane.then(fn, fn);
+    this.#lane = run.catch(() => undefined);
+    return run;
   }
 
   async #runSync(signal: AbortSignal): Promise<SyncResult> {
@@ -278,48 +293,59 @@ export class ReaderCore {
    */
   async subscribe(url: string, folderId: string | null = null): Promise<Feed | null> {
     this.#requireSignedIn();
-    // まだ送っていない操作（同じフィードの購読の停止など）を先に送り、順番を入れ替えない
-    await this.#flushQueue();
-    const wanted = folderId === null ? null : (this.#folderIds.get(folderId) ?? folderId);
-    const isLocalFolder = wanted?.startsWith(LOCAL_ID_PREFIX) === true;
-    const feed = await subscribe(
-      this.#db,
-      this.#api,
-      { url, folderId: isLocalFolder ? null : wanted },
-      this.#session.signal,
-      async (tx, feed) => {
-        // sendo はすでに購読していたフィードのフォルダを変えずに返すので、ここで移す。
-        // ただし、待っている間にこのフィードを操作していたら（移動、購読の停止）、そちらを採る。
-        // 移す先のフォルダを待っている間に消していたら、移さない（フォルダなしのまま）
-        const [later] = await tx.all<{ id: number }>(
-          "select id from pending_ops where key = ? and kind in ('moveFeed', 'unsubscribe') limit 1",
-          [feed.id],
-        );
-        const [target] =
-          wanted === null
-            ? [{ id: null }]
-            : await tx.all<{ id: string }>("select id from folders where id = ?", [wanted]);
-        if (feed.folderId !== wanted && later === undefined && target !== undefined) {
-          await enqueue(tx, { kind: "moveFeed", feedId: feed.id, folderId: wanted }, this.#now());
-        }
-      },
-    );
+    const signal = this.#session.signal;
+    const feed = await this.#exclusive(async () => {
+      // まだ送っていない操作（同じフィードの購読の停止など）を先に送り、順番を入れ替えない
+      await this.#flushQueue(signal);
+      const wanted = folderId === null ? null : (this.#folderIds.get(folderId) ?? folderId);
+      const isLocalFolder = wanted?.startsWith(LOCAL_ID_PREFIX) === true;
+      return subscribe(
+        this.#db,
+        this.#api,
+        { url, folderId: isLocalFolder ? null : wanted },
+        signal,
+        async (tx, feed) => {
+          // sendo はすでに購読していたフィードのフォルダを変えずに返すので、ここで移す。
+          // ただし、待っている間にこのフィードを操作していたら（移動、購読の停止）、そちらを採る。
+          // 移す先のフォルダを待っている間に消していたら、移さない（フォルダなしのまま）。
+          // 待っている間の操作は、この列が空くまで送られないので、必ずキューに残っている
+          const [later] = await tx.all<{ id: number }>(
+            "select id from pending_ops where key = ? and kind in ('moveFeed', 'unsubscribe') limit 1",
+            [feed.id],
+          );
+          const [target] =
+            wanted === null
+              ? [{ id: null }]
+              : await tx.all<{ id: string }>("select id from folders where id = ?", [wanted]);
+          if (feed.folderId !== wanted && later === undefined && target !== undefined) {
+            await enqueue(tx, { kind: "moveFeed", feedId: feed.id, folderId: wanted }, this.#now());
+          }
+        },
+      );
+    });
     this.#emit(new Set<Table>(["feeds"]));
     return feed;
   }
 
   /** OPML を取り込む。sendo が順に登録し、フィードと記事は次からの同期で届く */
-  async importOpml(xml: string): Promise<OpmlImportResult> {
+  importOpml(xml: string): Promise<OpmlImportResult> {
     this.#requireSignedIn();
-    // まだ送っていない操作（取り込むフィードの購読の停止など）を先に送り、順番を入れ替えない
-    await this.#flushQueue();
-    return importOpml(this.#api, xml, this.#session.signal);
+    const signal = this.#session.signal;
+    return this.#exclusive(async () => {
+      // まだ送っていない操作（取り込むフィードの購読の停止など）を先に送り、順番を入れ替えない
+      await this.#flushQueue(signal);
+      return importOpml(this.#api, xml, signal);
+    });
   }
 
-  /** まだ送っていない操作がなくなるまで同期する（通信が要る操作の前に、順番を守るため） */
-  async #flushQueue(): Promise<void> {
-    // 走っている同期が、そのあとに積んだ操作を送らずに終わることがあるので、数回まで繰り返す
-    for (let i = 0; i < 3 && (await countPending(this.#db)) > 0; i++) await this.sync();
+  /**
+   * まだ送っていない操作がなくなるまで送る（通信が要る操作の前に、順番を守るため）。
+   * sendo とのやり取りの列の中から呼ぶ。送っている間にも操作が積まれうるので、数回まで繰り返す
+   */
+  async #flushQueue(signal: AbortSignal): Promise<void> {
+    for (let i = 0; i < 3 && (await countPending(this.#db)) > 0; i++) {
+      await this.#runSync(signal);
+    }
   }
 
   #requireSignedIn(): void {

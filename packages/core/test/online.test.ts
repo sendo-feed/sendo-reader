@@ -191,3 +191,24 @@ describe("購読と OPML の、まだ送っていない操作との順番", () =
     expect(await core.countPending()).toBe(0);
   });
 });
+
+describe("購読と同期を 1 つずつ行う", () => {
+  test("応答を待っている間に購読をやめて同期しても、古い応答でフィードを戻さない", async () => {
+    const { server, core } = await setup();
+    const existing = server.subscribe({ url: "https://blog.example/feed.xml" });
+    await core.sync();
+
+    let syncing: Promise<unknown> | undefined;
+    server.onRequest = async (path) => {
+      if (path === "POST /feeds") {
+        server.onRequest = null;
+        await core.unsubscribe(existing.id);
+        syncing = core.sync();
+      }
+    };
+    expect(await core.subscribe("https://blog.example/feed.xml")).toBeNull();
+    await syncing;
+    expect(await core.listFeeds()).toEqual([]);
+    expect(server.feeds.get(existing.id)?.deletedAt).not.toBeNull();
+  });
+});
