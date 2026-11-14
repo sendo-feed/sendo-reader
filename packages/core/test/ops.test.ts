@@ -435,6 +435,22 @@ describe("まとめて既読の境界（sendo のカーソルの決まり）", (
     expect((await core.getArticle(article.id))?.readAt).toEqual(expect.any(Number));
   });
 
+  test("押したあと送る前に、ほかの端末で未読に戻した記事が届いたら、ID でも頼む", async () => {
+    const context = await withArticle();
+    const { server, core, article } = context;
+    await core.markAllRead({ all: true });
+    // 送る前に、ほかの端末で既読にしてから未読に戻し、それが届く（重ね直して手元は既読のまま）
+    server.setArticleState(article.id, { read: true });
+    server.setArticleState(article.id, { read: false });
+    await pullOnly(context);
+    expect((await core.getArticle(article.id))?.readAt).toEqual(expect.any(Number));
+
+    await core.sync();
+    expect(kinds(server.markReadRequests)).toEqual(["cursor", "ids"]);
+    expect(server.inbox.get(article.id)?.readAt).toEqual(expect.any(Number));
+    expect((await core.getArticle(article.id))?.readAt).toEqual(expect.any(Number));
+  });
+
   test("最後まで同期し終えた記事は、カーソルだけで頼む", async () => {
     const { server, core, article } = await withArticle();
     await core.markAllRead({ all: true });

@@ -94,6 +94,32 @@ export async function reapplyPending(tx: Executor): Promise<void> {
   for (const { op } of await listPending(tx)) await applyLocally(tx, op);
 }
 
+/**
+ * 同期で届いた記事を、まだ送り終えていないまとめて既読の「ID でも頼む記事」（extraIds）に足す。
+ * 押したあとに届いた記事は、sendo で既読・未読が変わっていて（ほかの端末で未読に戻した、など）、
+ * 押したときのカーソルでは既読にならないことがある。ID でも頼めば、あとから送ったまとめて既読が
+ * 採られ、手元（重ね直して既読）と sendo が揃う。
+ */
+export async function widenPendingMarkRead(
+  tx: Executor,
+  deliveredIds: readonly string[],
+): Promise<void> {
+  if (deliveredIds.length === 0) return;
+  const delivered = new Set(deliveredIds);
+  for (const { id, op } of await listPending(tx)) {
+    if (op.kind !== "markRead") continue;
+    const extra = new Set(op.extraIds);
+    const added = op.articleIds.filter(
+      (articleId) => delivered.has(articleId) && !extra.has(articleId),
+    );
+    if (added.length === 0) continue;
+    await tx.run("update pending_ops set payload = ? where id = ?", [
+      JSON.stringify({ ...op, extraIds: [...op.extraIds, ...added] }),
+      id,
+    ]);
+  }
+}
+
 export interface PushResult {
   /** sendo が受け付けた操作の数 */
   sent: number;

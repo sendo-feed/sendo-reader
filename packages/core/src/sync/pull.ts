@@ -10,7 +10,7 @@ import {
 } from "../db/synced";
 import type { Article, Table } from "../models";
 import type { SyncPage } from "./page";
-import { reapplyPending } from "./queue";
+import { reapplyPending, widenPendingMarkRead } from "./queue";
 
 /** 手元に置く既読の記事の期間。受信箱に入ってからこれより古い既読の記事は、手元から消す */
 export const LOCAL_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
@@ -74,6 +74,7 @@ export async function pull(db: Database, api: SendoApi, options: PullOptions): P
       // ので、ここで確かめれば、ログアウトの消去のあとに書き戻すことはない）
       options.signal?.throwIfAborted();
       const changed = await applyPage(tx, page);
+      await widenPendingMarkRead(tx, deliveredIds(page));
       await reapplyPending(tx);
       await setSetting(tx, CURSOR_KEY, page.cursor);
       if (!page.hasMore) await markSyncComplete(tx, page.cursor);
@@ -120,7 +121,10 @@ async function resync(
        )`,
     );
     await clearSyncedRows(tx);
-    for (const page of pages) await applyPage(tx, page);
+    for (const page of pages) {
+      await applyPage(tx, page);
+      await widenPendingMarkRead(tx, deliveredIds(page));
+    }
     for (const row of kept) {
       const columns = Object.keys(row);
       await tx.run(
@@ -149,6 +153,11 @@ async function finish(db: Database, options: PullOptions, result: PullResult) {
     options.onPage?.(new Set<Table>(["articles"]));
   }
   return result;
+}
+
+/** ページで届いた（受信箱にある）記事の ID */
+function deliveredIds(page: SyncPage): string[] {
+  return page.articles.filter((article) => !article.deleted).map((article) => article.id);
 }
 
 /** 同期で届いた 1 ページを書き込む。変わった表を返す */
