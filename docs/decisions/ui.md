@@ -1,7 +1,7 @@
 # UI とツール
 
 - 状態：提案中
-- 関連：sendo の[テックスタック](https://github.com/sendo-feed/sendo/blob/main/docs/decisions/tech-stack.md)、[技術構成](https://github.com/sendo-feed/sendo/blob/main/docs/tech-deck.md)（4・7・8 の未決事項 1・6）
+- 関連：[ローカルファースト](local-first.md)、sendo の[テックスタック](https://github.com/sendo-feed/sendo/blob/main/docs/decisions/tech-stack.md)、[技術構成](https://github.com/sendo-feed/sendo/blob/main/docs/tech-deck.md)（4・7・8 の未決事項 1・6）
 
 ## 決定
 
