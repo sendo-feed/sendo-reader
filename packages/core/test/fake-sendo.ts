@@ -1,11 +1,17 @@
 /**
- * テスト用の偽の sendo。差分同期の決定（sendo の docs/decisions/sync.md）と、仮の応答の形
- * （src/api/sync-contract.ts）に沿って、手元のメモリーで動く。
+ * テスト用の偽の sendo。差分同期の決定（sendo の docs/decisions/sync.md）と、sendo の OpenAPI
+ * （src/api/openapi.json の /sync と /articles/mark-read）に沿って、手元のメモリーで動く。
  *
  * - 人ごとの行（フォルダ、購読、受信箱）は、表ごとに書き込み順の変更番号（seq）を持つ
  * - カーソルは表ごとの番号をまとめたもの。中身はクライアントに見せない
- * - フォルダと購読は、消すときに消した印を付ける。印を回収したら、それより古いカーソルは 410
- * - 最初の同期は、未読・スター・直近 30 日に受信箱に入った記事だけ
+ * - フォルダと購読は、消すときに消した印（deleted: true）を付ける
+ * - 受信箱の行は物理的に消し、消した記録（{ id, deleted: true }）を受信箱の続きの番号で残す。
+ *   購読をやめると、スターのない記事が受信箱から消える
+ * - 印と記録を回収したら、それより古いカーソルは 400（invalid_cursor）
+ * - 最初の同期は、未読・スター・直近 30 日に受信箱に入った記事だけ（消した印と記録は送らない）
+ * - カーソルを境界にしたまとめて既読は、最後まで同期し終えたカーソルだけを受け付け
+ *   （途中なら 400 の sync_incomplete）、既読・未読が最後に変わった番号（readSeq）が境界まで
+ *   の未読の記事だけを既読にする
  */
 
 type TableName = "folders" | "feeds" | "articles";
@@ -41,8 +47,8 @@ interface InboxRow {
   readAt: number | null;
   starredAt: number | null;
   seq: number;
-  /** 受信箱に入ったときの番号（カーソルを境界にした「まとめて既読」に使う） */
-  firstSeq: number;
+  /** 既読・未読が最後に変わったときの番号（カーソルを境界にした「まとめて既読」に使う） */
+  readSeq: number;
 }
 
 interface Cursor {
@@ -51,6 +57,8 @@ interface Cursor {
   articles: number;
   /** 最初の同期の途中なら、その範囲の起点（直近 30 日の始まり） */
   initialSince?: number;
+  /** 最後まで送り終えた（この応答の hasMore が false だった） */
+  done: boolean;
 }
 
 type Failure = "network" | number | "hang" | "hang-body" | null;
@@ -71,6 +79,8 @@ export class FakeSendo {
   readonly folders = new Map<string, FolderRow>();
   readonly feeds = new Map<string, FeedRow>();
   readonly inbox = new Map<string, InboxRow>();
+  /** 受信箱から消えた記事の記録（記事の ID と、受信箱の続きの番号） */
+  readonly removals = new Map<string, number>();
   /** 受けたリクエスト（"GET /sync?cursor=…" の形） */
   readonly requests: string[] = [];
   /** 受けた「まとめて既読」の本文 */
@@ -86,7 +96,7 @@ export class FakeSendo {
 
   readonly #maxSeq: Record<TableName, number> = { folders: 0, feeds: 0, articles: 0 };
   /** 消した印を回収した範囲。これより古いカーソルでは差分を出せない */
-  readonly #purgedUpTo: Record<"folders" | "feeds", number> = { folders: 0, feeds: 0 };
+  readonly #purgedUpTo: Record<TableName, number> = { folders: 0, feeds: 0, articles: 0 };
   readonly #failures: Failure[] = [];
   /** "hang-body" で止めた本文のうち、読み手に取り消されたものの数 */
   cancelledBodies = 0;
@@ -139,14 +149,21 @@ export class FakeSendo {
     feed.seq = this.#bump("feeds");
   }
 
-  /** 購読をやめる。受信箱からは、スターを付けたもの以外を物理的に消す（sendo と同じ） */
+  /** 購読をやめる。受信箱からは、スターを付けたもの以外を消し、消した記録を残す（sendo と同じ） */
   unsubscribe(feedId: string): void {
     const feed = this.#mustGet(this.feeds, feedId);
     feed.deletedAt = this.now;
     feed.seq = this.#bump("feeds");
-    for (const [id, row] of this.inbox) {
-      if (row.feedId === feedId && row.starredAt === null) this.inbox.delete(id);
+    for (const row of [...this.inbox.values()]) {
+      if (row.feedId === feedId && row.starredAt === null) this.removeFromInbox(row.id);
     }
+  }
+
+  /** 記事を受信箱から消し、消した記録を残す */
+  removeFromInbox(id: string): void {
+    this.#mustGet(this.inbox, id);
+    this.inbox.delete(id);
+    this.removals.set(id, this.#bump("articles"));
   }
 
   /** 記事を受信箱に配る（受信の時刻はサーバーの今） */
@@ -167,7 +184,7 @@ export class FakeSendo {
       readAt: null,
       starredAt: null,
       seq,
-      firstSeq: seq,
+      readSeq: seq,
     };
     this.inbox.set(row.id, row);
     return row;
@@ -176,14 +193,18 @@ export class FakeSendo {
   /** 別の端末で既読・スターを変えたことにする */
   setArticleState(id: string, state: { read?: boolean; starred?: boolean }): void {
     const row = this.#mustGet(this.inbox, id);
-    if (state.read !== undefined) row.readAt = state.read ? (row.readAt ?? this.now) : null;
+    row.seq = this.#bump("articles");
+    if (state.read !== undefined) {
+      const readAt = state.read ? (row.readAt ?? this.now) : null;
+      if (readAt !== row.readAt) row.readSeq = row.seq;
+      row.readAt = readAt;
+    }
     if (state.starred !== undefined) {
       row.starredAt = state.starred ? (row.starredAt ?? this.now) : null;
     }
-    row.seq = this.#bump("articles");
   }
 
-  /** 消した印をすべて物理的に消す。それより古いカーソルには 410 を返すようになる */
+  /** 消した印と記録をすべて物理的に消す。それより古いカーソルには 400 を返すようになる */
   purgeTombstones(): void {
     for (const [table, rows] of [
       ["folders", this.folders],
@@ -195,6 +216,10 @@ export class FakeSendo {
         this.#purgedUpTo[table] = Math.max(this.#purgedUpTo[table], row.seq);
       }
     }
+    for (const seq of this.removals.values()) {
+      this.#purgedUpTo.articles = Math.max(this.#purgedUpTo.articles, seq);
+    }
+    this.removals.clear();
   }
 
   advance(ms: number): void {
@@ -351,10 +376,30 @@ export class FakeSendo {
     return error(404, "not_found", "Not Found");
   };
 
-  /** カーソルを境界にした「まとめて既読」（仮の形。src/api/sync-contract.ts） */
+  /** まとめて既読（ID で、またはカーソルを境界に。sendo の POST /articles/mark-read） */
   #markRead(body: Record<string, unknown>): Response {
-    const cursor = typeof body.cursor === "string" ? decodeCursor(body.cursor) : null;
-    if (cursor === null) return error(400, "invalid_request", "cursor: required");
+    this.markReadRequests.push(body);
+    if (Array.isArray(body.ids)) {
+      if (body.ids.length === 0 || body.ids.length > 90) {
+        return error(400, "invalid_request", "ids: 1 to 90 items");
+      }
+      let updated = 0;
+      for (const id of body.ids as string[]) {
+        const row = this.inbox.get(id);
+        if (row === undefined || row.readAt !== null) continue;
+        this.setArticleState(id, { read: true });
+        updated += 1;
+      }
+      return json(200, { updated });
+    }
+    if (typeof body.cursor !== "string") {
+      return error(400, "invalid_request", "until or cursor: required");
+    }
+    const cursor = decodeCursor(body.cursor);
+    if (cursor === null) return error(400, "invalid_cursor", "cursor is invalid");
+    if (!cursor.done) {
+      return error(400, "sync_incomplete", "sync until hasMore is false, then pass that cursor");
+    }
     const inScope = (row: InboxRow): boolean => {
       if (body.all === true) return true;
       if (typeof body.feedId === "string") return row.feedId === body.feedId;
@@ -364,13 +409,11 @@ export class FakeSendo {
       return false;
     };
     let updated = 0;
-    for (const row of this.inbox.values()) {
-      if (row.readAt !== null || row.firstSeq > cursor.articles || !inScope(row)) continue;
-      row.readAt = this.now;
-      row.seq = this.#bump("articles");
+    for (const row of [...this.inbox.values()]) {
+      if (row.readAt !== null || row.readSeq > cursor.articles || !inScope(row)) continue;
+      this.setArticleState(row.id, { read: true });
       updated += 1;
     }
-    this.markReadRequests.push(body);
     return json(200, { updated });
   }
 
@@ -380,17 +423,17 @@ export class FakeSendo {
 
   #sync(rawCursor: string | null): Response {
     const cursor = rawCursor === null ? null : decodeCursor(rawCursor);
-    if (rawCursor !== null && cursor === null) {
-      return error(400, "invalid_request", "cursor: invalid");
-    }
     if (
-      cursor !== null &&
-      (cursor.folders < this.#purgedUpTo.folders || cursor.feeds < this.#purgedUpTo.feeds)
+      (rawCursor !== null && cursor === null) ||
+      (cursor !== null &&
+        (cursor.folders < this.#purgedUpTo.folders ||
+          cursor.feeds < this.#purgedUpTo.feeds ||
+          cursor.articles < this.#purgedUpTo.articles))
     ) {
-      return error(410, "cursor_expired", "cursor is too old; sync from the beginning");
+      return error(400, "invalid_cursor", "cursor is invalid; start over without it");
     }
 
-    const since: Cursor = cursor ?? { folders: 0, feeds: 0, articles: 0 };
+    const since: Cursor = cursor ?? { folders: 0, feeds: 0, articles: 0, done: false };
     const initialSince = cursor === null ? this.now - 30 * DAY : cursor.initialSince;
     const initial = initialSince !== undefined;
 
@@ -401,22 +444,34 @@ export class FakeSendo {
       feeds: [...this.feeds.values()]
         .filter((row) => row.seq > since.feeds && !(initial && row.deletedAt !== null))
         .sort(bySeq),
-      articles: [...this.inbox.values()]
-        .filter(
-          (row) =>
-            row.seq > since.articles &&
-            (!initial ||
-              row.readAt === null ||
-              row.starredAt !== null ||
-              row.receivedAt >= (initialSince ?? 0)),
-        )
-        .sort(bySeq),
+      articles: [
+        ...[...this.inbox.values()]
+          .filter(
+            (row) =>
+              row.seq > since.articles &&
+              (!initial ||
+                row.readAt === null ||
+                row.starredAt !== null ||
+                row.receivedAt >= (initialSince ?? 0)),
+          )
+          .map((row) => ({ seq: row.seq, row })),
+        // 消した記録は差分でだけ送る
+        ...(initial
+          ? []
+          : [...this.removals]
+              .filter(([, seq]) => seq > since.articles)
+              .map(([id, seq]) => ({ seq, removed: id }))),
+      ].sort(bySeq),
     };
 
     let room = this.pageSize;
     const next: Cursor = { ...since };
     let hasMore = false;
-    const page = { folders: [] as FolderRow[], feeds: [] as FeedRow[], articles: [] as InboxRow[] };
+    const page = {
+      folders: [] as FolderRow[],
+      feeds: [] as FeedRow[],
+      articles: [] as (typeof pending)["articles"],
+    };
     for (const table of ["folders", "feeds", "articles"] as const) {
       const rows = pending[table];
       const taken = rows.slice(0, room);
@@ -433,30 +488,43 @@ export class FakeSendo {
     }
     if (hasMore && initialSince !== undefined) next.initialSince = initialSince;
     else delete next.initialSince;
+    next.done = !hasMore;
 
     return json(200, {
       cursor: encodeCursor(next),
       hasMore,
       folders: page.folders.map((row) => ({
-        ...folderJson(row),
-        deletedAt: row.deletedAt === null ? null : iso(row.deletedAt),
+        id: row.id,
+        name: row.name,
+        createdAt: iso(row.createdAt),
+        deleted: row.deletedAt !== null,
       })),
       feeds: page.feeds.map((row) => ({
-        ...feedJson(row),
-        deletedAt: row.deletedAt === null ? null : iso(row.deletedAt),
-      })),
-      articles: page.articles.map((row) => ({
         id: row.id,
-        feedId: row.feedId,
         url: row.url,
         title: row.title,
-        summary: row.summary,
-        author: row.author,
-        publishedAt: iso(row.publishedAt),
-        receivedAt: iso(row.receivedAt),
-        readAt: row.readAt === null ? null : iso(row.readAt),
-        starredAt: row.starredAt === null ? null : iso(row.starredAt),
+        siteUrl: row.siteUrl,
+        folderId: row.folderId,
+        createdAt: iso(row.createdAt),
+        deleted: row.deletedAt !== null,
       })),
+      articles: page.articles.map((item) =>
+        "removed" in item
+          ? { id: item.removed, deleted: true }
+          : {
+              id: item.row.id,
+              feedId: item.row.feedId,
+              url: item.row.url,
+              title: item.row.title,
+              summary: item.row.summary,
+              author: item.row.author,
+              publishedAt: iso(item.row.publishedAt),
+              receivedAt: iso(item.row.receivedAt),
+              readAt: item.row.readAt === null ? null : iso(item.row.readAt),
+              starredAt: item.row.starredAt === null ? null : iso(item.row.starredAt),
+              deleted: false,
+            },
+      ),
     });
   }
 
@@ -523,7 +591,8 @@ function decodeCursor(value: string): Cursor | null {
     const parsed = JSON.parse(atob(value.replaceAll("-", "+").replaceAll("_", "/"))) as Cursor;
     return typeof parsed.folders === "number" &&
       typeof parsed.feeds === "number" &&
-      typeof parsed.articles === "number"
+      typeof parsed.articles === "number" &&
+      typeof parsed.done === "boolean"
       ? parsed
       : null;
   } catch {

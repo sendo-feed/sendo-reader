@@ -118,6 +118,49 @@ describe("差分の同期", () => {
     expect(await core.getArticle(plain.id)).toBeNull();
   });
 
+  test("購読をやめた印だけでは記事を消さず、記事ごとの消した記録が届いてから消す", async () => {
+    const { server, core } = await setup();
+    const feed = server.subscribe({ url: "https://example.com/a.xml" });
+    const article = server.deliver(feed.id);
+    await core.sync();
+
+    server.unsubscribe(feed.id);
+    // 1 ページめ（購読をやめた印）だけ届いて止まる
+    server.pageSize = 1;
+    server.failNext(null, "network");
+    await core.sync().catch(() => undefined);
+    expect(await core.listFeeds()).toEqual([]);
+    expect(await core.getArticle(article.id)).not.toBeNull();
+
+    await core.sync();
+    expect(await core.getArticle(article.id)).toBeNull();
+  });
+
+  test("受信箱から消えた記録が届いたら、スターがあっても手元から消す", async () => {
+    const { server, core } = await setup();
+    const feed = server.subscribe({ url: "https://example.com/a.xml" });
+    const article = server.deliver(feed.id);
+    server.setArticleState(article.id, { starred: true });
+    await core.sync();
+
+    server.removeFromInbox(article.id);
+    await core.sync();
+    expect(await core.getArticle(article.id)).toBeNull();
+    expect(ids(await core.listFeeds())).toEqual([feed.id]);
+  });
+
+  test("消した記録のあとに受信箱に入り直した記事は、手元に残る", async () => {
+    const { server, core } = await setup();
+    const feed = server.subscribe({ url: "https://example.com/a.xml" });
+    const article = server.deliver(feed.id);
+    await core.sync();
+
+    server.removeFromInbox(article.id);
+    server.deliver(feed.id, { id: article.id, title: "again" });
+    await core.sync();
+    expect((await core.getArticle(article.id))?.title).toBe("again");
+  });
+
   test("カーソルが古すぎると言われたら、手元を作り直して最初から同期する", async () => {
     const { server, core } = await setup();
     const keep = server.createFolder("Keep");

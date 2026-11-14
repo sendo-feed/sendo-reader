@@ -73,7 +73,8 @@
           },
           "createdAt": {
             "type": "string",
-            "format": "date-time"
+            "format": "date-time",
+            "description": "購読した時刻"
           }
         },
         "required": [
@@ -192,9 +193,10 @@
             "type": "string",
             "format": "date-time"
           },
-          "createdAt": {
+          "receivedAt": {
             "type": "string",
-            "format": "date-time"
+            "format": "date-time",
+            "description": "受信箱に入った時刻（サーバーの DB の時計）"
           },
           "readAt": {
             "type": [
@@ -221,7 +223,7 @@
           "summary",
           "author",
           "publishedAt",
-          "createdAt",
+          "receivedAt",
           "readAt",
           "starredAt"
         ]
@@ -269,7 +271,12 @@
           "until": {
             "type": "string",
             "format": "date-time",
-            "description": "この時刻より前に取り込んだ記事だけを既読にする（ids 以外では必須）。記事の一覧の最初のページの asOf を渡す。クライアントの時計の時刻は使わない（サーバーとずれていると、一覧に出ていなかった記事まで既読になる）"
+            "description": "この時刻より前に受信箱に入った記事だけを既読にする。記事の一覧の最初のページの asOf を渡す。クライアントの時計の時刻は使わない（サーバーとずれていると、一覧に出ていなかった記事まで既読になる）"
+          },
+          "cursor": {
+            "type": "string",
+            "maxLength": 1024,
+            "description": "同期で未読のまま手元に届いた記事だけを既読にする。hasMore が false になるまで同期した、最後の応答の cursor を渡す（ローカルファーストのクライアント向け）。途中の応答の cursor は 400（sync_incomplete）。その同期のあとに未読に戻した記事は、どの端末で戻したかによらず入らない（既読にするなら ids で送る）"
           }
         }
       },
@@ -400,6 +407,167 @@
           "accepted",
           "skippedCount",
           "skipped"
+        ]
+      },
+      "SyncChanges": {
+        "type": "object",
+        "properties": {
+          "cursor": {
+            "type": "string"
+          },
+          "hasMore": {
+            "type": "boolean"
+          },
+          "folders": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SyncFolder"
+            }
+          },
+          "feeds": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SyncFeed"
+            }
+          },
+          "articles": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SyncArticle"
+            }
+          }
+        },
+        "required": [
+          "cursor",
+          "hasMore",
+          "folders",
+          "feeds",
+          "articles"
+        ]
+      },
+      "SyncFolder": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "deleted": {
+            "type": "boolean",
+            "description": "消した印。true なら、手元からも消す（ほかの項目は最後の状態）"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "createdAt",
+          "deleted"
+        ]
+      },
+      "SyncFeed": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "フィードの ID"
+          },
+          "url": {
+            "type": "string"
+          },
+          "title": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "siteUrl": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "folderId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "購読した時刻"
+          },
+          "deleted": {
+            "type": "boolean",
+            "description": "購読をやめた印。true なら、手元の購読を消す。記事は消さない（受信箱から消えた記事は、articles に deleted: true で届く）"
+          }
+        },
+        "required": [
+          "id",
+          "url",
+          "title",
+          "siteUrl",
+          "folderId",
+          "createdAt",
+          "deleted"
+        ]
+      },
+      "SyncArticle": {
+        "anyOf": [
+          {
+            "$ref": "#/components/schemas/SyncInboxArticle"
+          },
+          {
+            "$ref": "#/components/schemas/SyncRemovedArticle"
+          }
+        ]
+      },
+      "SyncInboxArticle": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/Article"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "deleted": {
+                "type": "boolean",
+                "enum": [
+                  false
+                ],
+                "description": "受信箱にある記事"
+              }
+            },
+            "required": [
+              "deleted"
+            ]
+          }
+        ]
+      },
+      "SyncRemovedArticle": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "記事の ID"
+          },
+          "deleted": {
+            "type": "boolean",
+            "enum": [
+              true
+            ],
+            "description": "受信箱から消えた記事。手元から消す"
+          }
+        },
+        "required": [
+          "id",
+          "deleted"
         ]
       }
     },
@@ -649,7 +817,7 @@
       },
       "delete": {
         "summary": "購読をやめる",
-        "description": "フィードと、その記事をすべて消す。",
+        "description": "フィードの記事は、スターを付けたものを除いて受信箱から消える。フィードと記事そのものは、ほかの人のために残る。",
         "parameters": [
           {
             "schema": {
@@ -1176,6 +1344,47 @@
               "text/x-opml": {
                 "schema": {
                   "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/sync": {
+      "get": {
+        "summary": "前回の同期からの差分を取る",
+        "description": "カーソルなしで呼ぶと、最初の同期を始める（消した印の付いていないフォルダと購読、未読・スター・直近 30 日の記事）。\n応答の cursor を次に渡すと、そのあとに変わったものだけを返す。hasMore が true なら、すぐにもう一度呼ぶ。\n配列は変更番号の順に並んでいる。同じ id が続けて来たら、後のものを採る。\ndeleted が true のものは手元から消す。手元の行を消すのは、その行の deleted が届いたときだけにする。購読をやめた（feeds の deleted）からといって、そのフィードの記事を消さない（配列ごとにページを送るので、配列をまたいだ順序は保証されない）。\ncursor の中身には意味を持たせていないので、クライアントはそのまま送り返すだけにする。",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "maxLength": 1024,
+              "description": "前回の応答の cursor"
+            },
+            "required": false,
+            "description": "前回の応答の cursor",
+            "name": "cursor",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "差分",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SyncChanges"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "カーソルが読めない（最初から同期し直す）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
                 }
               }
             }

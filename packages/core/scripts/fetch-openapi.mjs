@@ -3,7 +3,8 @@
 //   pnpm --filter @sendo-reader/core api:fetch                 # 手元の sendo（http://localhost:8787）から
 //   SENDO_OPENAPI=<URL か パス> pnpm --filter @sendo-reader/core api:fetch
 //
-// sendo が spec/openapi.json を書き出すようになったら、そのファイルを指す。
+// sendo は、OpenAPI の定義を spec/openapi.json に書き出している。sendo のクローンがあれば、
+// SENDO_OPENAPI=<sendo>/spec/openapi.json でそのファイルを指せる（sendo を動かさなくてよい）。
 // 写したあとは `api:generate` で型を作り直し、両方をコミットする。
 
 import { readFile, writeFile } from "node:fs/promises";

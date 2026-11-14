@@ -1,109 +1,104 @@
 /**
- * 差分同期（GET /api/v1/sync）の応答の形。
- *
- * sendo の差分同期の決定（docs/decisions/sync.md）に沿った「仮の形」。sendo の OpenAPI に
- * /sync が入ったら、ここは生成した型（schema.gen.ts）に置き換え、この形との違いを直す。
- * 仮の形を使うのはこのファイルだけにし、core の中では SyncPage（sync/page.ts）を使う。
+ * 差分同期（GET /api/v1/sync）の応答を確かめて、core の中の形（SyncPage、sync/page.ts）にする。
+ * 決まりは sendo の差分同期の決定（docs/decisions/sync.md）と、OpenAPI の /sync の説明が正。
  *
  * - カーソルの中身は解釈しない。受け取ったものをそのまま次に送る
  * - カーソルなしで呼ぶと、最初の同期（未読、スター、直近 30 日に受信箱に入った記事）
  * - hasMore が true なら、返ってきたカーソルですぐ続きを取る
- * - 消したフォルダと購読は deletedAt の付いた行で届く
- * - カーソルが古すぎて差分を出せないときは 410 と error.code = "cursor_expired"。最初から同期し直す
- * - まとめて既読（POST /api/v1/articles/mark-read）は、until（時刻）の代わりにカーソルを境界に
- *   できる（sync.md の 6）。カーソルの時点で受信箱に入っていた記事だけを既読にする
+ * - 消したフォルダと購読は deleted: true の行で、受信箱から消えた記事は { id, deleted: true } で届く
+ * - カーソルが読めない（古すぎる、など）ときは 400 と error.code = "invalid_cursor"。最初から同期し直す
+ *
+ * 応答は外から来たデータなので、生成した型を当てる前に形を確かめる。確かめたものを生成した型
+ * （SyncChanges）として組み立てるので、sendo が形を変えたら、ここが型チェックで止まる。
  */
 
-import type { SyncPage } from "../sync/page";
+import type { SyncArticle, SyncPage } from "../sync/page";
 import { ApiError } from "./errors";
+import type { components } from "./schema.gen";
 
-export interface SyncResponse {
-  cursor: string;
-  hasMore: boolean;
-  folders: SyncFolder[];
-  feeds: SyncFeed[];
-  articles: SyncArticle[];
-}
+type Schemas = components["schemas"];
+export type SyncChanges = Schemas["SyncChanges"];
 
-export interface SyncFolder {
-  id: string;
-  name: string;
-  createdAt: string;
-  /** 消したなら、その時刻 */
-  deletedAt: string | null;
-}
-
-/** 購読しているフィード。id は REST API の /feeds/{id} と同じ */
-export interface SyncFeed {
-  id: string;
-  url: string;
-  title: string | null;
-  siteUrl: string | null;
-  folderId: string | null;
-  createdAt: string;
-  /** 購読をやめたなら、その時刻 */
-  deletedAt: string | null;
-}
-
-/** 受信箱の記事。記事の本体と、既読・スター */
-export interface SyncArticle {
-  id: string;
-  feedId: string;
-  /** http ／ https の URL だけ */
-  url: string | null;
-  /** プレーンテキスト */
-  title: string | null;
-  /** プレーンテキスト */
-  summary: string | null;
-  author: string | null;
-  publishedAt: string;
-  /** 受信箱に入った時刻 */
-  receivedAt: string;
-  readAt: string | null;
-  starredAt: string | null;
-}
-
-/** POST /api/v1/articles/mark-read の、カーソルを境界にする形（本文は scope を展開して cursor を足す） */
-export interface MarkReadUpToCursorRequest {
-  scope: { all: true } | { feedId: string } | { folderId: string };
-  /** 同期で受け取ったカーソル。中身は解釈しない */
-  cursor: string;
+/** sendo の応答を確かめて、core の中の形にする。形が違えば ApiError（server）を投げる */
+export function toSyncPage(body: unknown): SyncPage {
+  const changes = parseSyncChanges(body);
+  return {
+    cursor: changes.cursor,
+    hasMore: changes.hasMore,
+    folders: changes.folders.map((folder) => ({
+      id: folder.id,
+      name: folder.name,
+      createdAt: Date.parse(folder.createdAt),
+      deleted: folder.deleted,
+    })),
+    feeds: changes.feeds.map((feed) => ({
+      id: feed.id,
+      url: feed.url,
+      title: feed.title,
+      siteUrl: feed.siteUrl,
+      folderId: feed.folderId,
+      createdAt: Date.parse(feed.createdAt),
+      deleted: feed.deleted,
+    })),
+    articles: changes.articles.map(
+      (article): SyncArticle =>
+        article.deleted
+          ? { id: article.id, deleted: true }
+          : {
+              id: article.id,
+              feedId: article.feedId,
+              url: article.url,
+              title: article.title,
+              summary: article.summary,
+              author: article.author,
+              publishedAt: Date.parse(article.publishedAt),
+              receivedAt: Date.parse(article.receivedAt),
+              readAt: article.readAt === null ? null : Date.parse(article.readAt),
+              starredAt: article.starredAt === null ? null : Date.parse(article.starredAt),
+              deleted: false,
+            },
+    ),
+  };
 }
 
 /**
- * sendo の応答を、core の中の形（SyncPage）にする。形が違えば ApiError（server）を投げる。
- * 記事のタイトルや要約は信頼できないデータだが、ここでは文字列であることだけを確かめる
- * （画面では HTML として出さない）。
+ * 応答の形を確かめる。記事のタイトルや要約は信頼できないデータだが、ここでは文字列であることだけを
+ * 確かめる（画面では HTML として出さない）。時刻は読める形であることを確かめる。
  */
-export function toSyncPage(body: unknown): SyncPage {
+function parseSyncChanges(body: unknown): SyncChanges {
   const root = record(body, "(root)");
   return {
     cursor: string(root.cursor, "cursor"),
     hasMore: boolean(root.hasMore, "hasMore"),
-    folders: array(root.folders, "folders").map((value, i) => {
+    folders: array(root.folders, "folders").map((value, i): Schemas["SyncFolder"] => {
       const row = record(value, `folders[${i}]`);
+      const at = (field: string) => `folders[${i}].${field}`;
       return {
-        id: string(row.id, `folders[${i}].id`),
-        name: string(row.name, `folders[${i}].name`),
-        createdAt: time(row.createdAt, `folders[${i}].createdAt`),
-        deleted: nullableTime(row.deletedAt, `folders[${i}].deletedAt`) !== null,
+        id: string(row.id, at("id")),
+        name: string(row.name, at("name")),
+        createdAt: time(row.createdAt, at("createdAt")),
+        deleted: boolean(row.deleted, at("deleted")),
       };
     }),
-    feeds: array(root.feeds, "feeds").map((value, i) => {
+    feeds: array(root.feeds, "feeds").map((value, i): Schemas["SyncFeed"] => {
       const row = record(value, `feeds[${i}]`);
+      const at = (field: string) => `feeds[${i}].${field}`;
       return {
-        id: string(row.id, `feeds[${i}].id`),
-        url: string(row.url, `feeds[${i}].url`),
-        title: nullableString(row.title, `feeds[${i}].title`),
-        siteUrl: nullableString(row.siteUrl, `feeds[${i}].siteUrl`),
-        folderId: nullableString(row.folderId, `feeds[${i}].folderId`),
-        createdAt: time(row.createdAt, `feeds[${i}].createdAt`),
-        deleted: nullableTime(row.deletedAt, `feeds[${i}].deletedAt`) !== null,
+        id: string(row.id, at("id")),
+        url: string(row.url, at("url")),
+        title: nullableString(row.title, at("title")),
+        siteUrl: nullableString(row.siteUrl, at("siteUrl")),
+        folderId: nullableString(row.folderId, at("folderId")),
+        createdAt: time(row.createdAt, at("createdAt")),
+        deleted: boolean(row.deleted, at("deleted")),
       };
     }),
-    articles: array(root.articles, "articles").map((value, i) => {
+    articles: array(root.articles, "articles").map((value, i): Schemas["SyncArticle"] => {
       const row = record(value, `articles[${i}]`);
       const at = (field: string) => `articles[${i}].${field}`;
+      if (boolean(row.deleted, at("deleted"))) {
+        return { id: string(row.id, at("id")), deleted: true };
+      }
       return {
         id: string(row.id, at("id")),
         feedId: string(row.feedId, at("feedId")),
@@ -115,6 +110,7 @@ export function toSyncPage(body: unknown): SyncPage {
         receivedAt: time(row.receivedAt, at("receivedAt")),
         readAt: nullableTime(row.readAt, at("readAt")),
         starredAt: nullableTime(row.starredAt, at("starredAt")),
+        deleted: false,
       };
     }),
   };
@@ -148,12 +144,13 @@ function boolean(value: unknown, field: string): boolean {
   return value;
 }
 
-function time(value: unknown, field: string): number {
-  const ms = Date.parse(string(value, field));
-  if (Number.isNaN(ms)) throw invalid(field);
-  return ms;
+/** 読める時刻の文字列なら、そのまま返す */
+function time(value: unknown, field: string): string {
+  const text = string(value, field);
+  if (Number.isNaN(Date.parse(text))) throw invalid(field);
+  return text;
 }
 
-function nullableTime(value: unknown, field: string): number | null {
+function nullableTime(value: unknown, field: string): string | null {
   return value === null ? null : time(value, field);
 }

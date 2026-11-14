@@ -24,7 +24,8 @@ async function syncError(fetcher: typeof fetch): Promise<ApiError> {
 describe("sendo の API の失敗の分け方", () => {
   test.each([
     [401, { error: { code: "unauthorized", message: "no" } }, "unauthorized"],
-    [410, { error: { code: "cursor_expired", message: "old" } }, "cursor_expired"],
+    [400, { error: { code: "invalid_cursor", message: "old" } }, "cursor_invalid"],
+    [400, { error: { code: "sync_incomplete", message: "x" } }, "invalid"],
     [410, { error: { code: "gone", message: "gone" } }, "invalid"],
     [404, { error: { code: "not_found", message: "x" } }, "not_found"],
     [409, { error: { code: "folder_exists", message: "x" } }, "conflict"],

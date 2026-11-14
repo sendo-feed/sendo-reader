@@ -26,7 +26,7 @@ import {
   type Operation,
   scopeCondition,
 } from "./sync/ops";
-import { getCursor, type PullResult, pull } from "./sync/pull";
+import { getCompleteCursor, type PullResult, pull } from "./sync/pull";
 import { countPending, enqueue, lastPendingId, type PushResult, push } from "./sync/queue";
 
 const TOKEN_KEY = "auth.token";
@@ -265,7 +265,8 @@ export class ReaderCore {
 
   /**
    * まとめて既読にする。押した時点で手元で未読だった記事だけを既読にし、sendo にも同期済みの
-   * 範囲（カーソル）までだけを頼む（sync.md の 6）。まだ一度も同期していないか、未読がなければ
+   * 範囲（最後まで同期し終えたカーソル）までだけを頼む（sync.md の 6）。カーソルの範囲に入らない
+   * 記事（そのあとに届いた、そのあとに手元で既読・未読を変えた）は、ID で頼む。未読がなければ
    * 何もしない。
    */
   async markAllRead(scope: MarkReadScope): Promise<void> {
@@ -274,11 +275,10 @@ export class ReaderCore {
     const op = await this.#db.transaction(async (tx) => {
       // 書き込みが DB の列で待っている間にログインし直したら、前のアカウントの操作を積まない
       throwIfSessionEnded(session);
-      const cursor = await getCursor(tx);
-      if (cursor === null) return null;
+      const cursor = await getCompleteCursor(tx);
       const [condition, params] = scopeCondition(scope);
-      const unread = await tx.all<{ id: string }>(
-        `select id from articles where read_at is null and ${condition}`,
+      const unread = await tx.all<{ id: string; read_synced: number }>(
+        `select id, read_synced from articles where read_at is null and ${condition}`,
         params,
       );
       if (unread.length === 0) return null;
@@ -287,6 +287,9 @@ export class ReaderCore {
         scope,
         articleIds: unread.map((row) => row.id),
         cursor,
+        extraIds: unread
+          .filter((row) => cursor === null || row.read_synced === 0)
+          .map((row) => row.id),
         at: this.#now(),
       };
       await this.#enqueue(tx, op);

@@ -66,6 +66,17 @@ const migrations: readonly (readonly string[])[] = [
       last_error text
     ) strict`,
   ],
+  [
+    // 手元の既読・未読が、最後まで同期し終えたカーソル（sync.completeCursor）の時点の sendo と
+    // 同じなら 1。sendo のまとめて既読は、カーソルを境界にすると、そのあとに届いた記事や、そのあと
+    // 既読・未読を変えた記事を含めないので、0 の記事は ID でも頼む（sync/ops.ts の markRead）
+    "alter table articles add column read_synced integer not null default 0",
+    // それより前に積んだまとめて既読には、ID で頼む記事（extraIds）がない。手元で既読にした記事を
+    // すべて ID でも頼む（カーソルは途中のものかもしれない）
+    `update pending_ops
+     set payload = json_set(payload, '$.extraIds', json(json_extract(payload, '$.articleIds')))
+     where kind = 'markRead' and json_type(payload, '$.extraIds') is null`,
+  ],
 ];
 
 export const SCHEMA_VERSION = migrations.length;
@@ -77,13 +88,16 @@ export class NewerSchemaError extends Error {
   }
 }
 
-/** まだ当てていないマイグレーションを、1 版ずつトランザクションで当てる */
-export async function migrate(db: Database): Promise<void> {
+/**
+ * まだ当てていないマイグレーションを、1 版ずつトランザクションで当てる。
+ * target はテストで前の版の DB を作るときだけ渡す
+ */
+export async function migrate(db: Database, target = SCHEMA_VERSION): Promise<void> {
   const [row] = await db.all<{ user_version: number }>("pragma user_version");
   const current = row?.user_version ?? 0;
   if (current > SCHEMA_VERSION) throw new NewerSchemaError(current);
 
-  for (let version = current; version < SCHEMA_VERSION; version++) {
+  for (let version = current; version < target; version++) {
     const statements = migrations[version] ?? [];
     await db.transaction(async (tx) => {
       for (const sql of statements) await tx.run(sql);

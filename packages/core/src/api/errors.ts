@@ -4,8 +4,8 @@ export type ApiErrorKind =
   | "network"
   /** トークンがない、または取り消された。ログインし直す */
   | "unauthorized"
-  /** 差分を出せないほどカーソルが古い。最初から同期し直す */
-  | "cursor_expired"
+  /** カーソルが読めない（古すぎて差分を出せない、形が変わった）。最初から同期し直す */
+  | "cursor_invalid"
   /** 相手がない（404） */
   | "not_found"
   /** ぶつかった（409） */
@@ -46,8 +46,8 @@ export function errorFromBody(status: number, body: unknown): ApiError {
   const kind: ApiErrorKind =
     status === 401
       ? "unauthorized"
-      : status === 410 && code === "cursor_expired"
-        ? "cursor_expired"
+      : status === 400 && code === "invalid_cursor"
+        ? "cursor_invalid"
         : status === 404
           ? "not_found"
           : status === 409
