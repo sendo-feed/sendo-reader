@@ -73,6 +73,11 @@ export class ReaderCore {
    * までは、これより後に積んだ操作を送らず、これ以下の操作にまとめない（呼んだ順を守る）
    */
   readonly #barriers = new Set<{ readonly id: number }>();
+  /**
+   * 通信が要る操作が、応答を受けて積んだ操作（購読で頼んだフォルダへの移動）。呼んだ順では、
+   * その操作の位置にあるので、あとから呼んだ通信が要る操作より前に送ってよい
+   */
+  readonly #onlineOps = new Set<number>();
   /** 手元で作ったフォルダの仮の ID から、sendo が付けた ID へ（画面が仮の ID を持ったままでも使えるように） */
   readonly #folderIds = new Map<string, string>();
 
@@ -151,6 +156,7 @@ export class ReaderCore {
     this.#session = new AbortController();
     this.#syncing = null;
     this.#folderIds.clear();
+    this.#onlineOps.clear();
     return this.#session.signal;
   }
 
@@ -186,7 +192,10 @@ export class ReaderCore {
 
   async #runSync(signal: AbortSignal): Promise<SyncResult> {
     if (this.#token === null) throw new ApiError("unauthorized", "ログインしていない");
-    const pushed = await this.#push(signal, () => this.#pushLimit());
+    const pushed = await this.#push(signal, (id) => {
+      const limit = this.#pushLimit();
+      return limit === null || id <= limit || this.#onlineOps.has(id);
+    });
     const pulled = await pull(this.#db, this.#api, {
       now: this.#now,
       signal,
@@ -195,11 +204,11 @@ export class ReaderCore {
     return { push: pushed, pull: pulled };
   }
 
-  #push(signal: AbortSignal, limit: () => number | null): Promise<PushResult> {
+  #push(signal: AbortSignal, allow: (id: number) => boolean): Promise<PushResult> {
     return push(this.#db, this.#api, signal, {
       onChange: (tables) => this.#emit(tables),
       onRemap: ({ from, to }) => this.#folderIds.set(from, to),
-      limit,
+      allow,
     });
   }
 
@@ -210,14 +219,19 @@ export class ReaderCore {
 
   /** 積むときに、まとめてはいけない番号（通信が要る操作より前に送る操作） */
   #mergeAbove(): number {
-    const ids = [...this.#barriers].map((barrier) => barrier.id);
+    // 通信が要る操作が積んだ操作にも、あとの操作をまとめない（その操作の位置で送るため）
+    const ids = [...[...this.#barriers].map((barrier) => barrier.id), ...this.#onlineOps];
     return ids.length === 0 ? 0 : Math.max(...ids);
   }
 
-  /** 操作を手元に反映して積む（すべての書き込みはここを通す） */
-  async #enqueue(tx: Executor, op: Operation): Promise<void> {
+  /**
+   * 操作を手元に反映して積む（すべての書き込みはここを通す）。fromOnline は、通信が要る操作が
+   * 応答を受けて積むもの
+   */
+  async #enqueue(tx: Executor, op: Operation, fromOnline = false): Promise<void> {
     const id = await enqueue(tx, op, this.#now(), { mergeAbove: this.#mergeAbove() });
     this.#lastOpId = Math.max(this.#lastOpId, id);
+    if (fromOnline) this.#onlineOps.add(id);
   }
 
   /** まだ sendo に送り終えていない操作の数 */
@@ -345,7 +359,7 @@ export class ReaderCore {
               ? [{ id: null }]
               : await tx.all<{ id: string }>("select id from folders where id = ?", [wanted]);
           if (feed.folderId !== wanted && later === undefined && target !== undefined) {
-            await this.#enqueue(tx, { kind: "moveFeed", feedId: feed.id, folderId: wanted });
+            await this.#enqueue(tx, { kind: "moveFeed", feedId: feed.id, folderId: wanted }, true);
           }
         },
       );
@@ -371,7 +385,8 @@ export class ReaderCore {
     this.#barriers.add(barrier);
     try {
       return await this.#exclusive(async () => {
-        await this.#push(signal, () => barrier.id);
+        // 呼んだ時点までの操作と、先に呼んだ通信が要る操作が積んだ操作を、先に送る
+        await this.#push(signal, (id) => id <= barrier.id || this.#onlineOps.has(id));
         return fn(signal);
       });
     } finally {

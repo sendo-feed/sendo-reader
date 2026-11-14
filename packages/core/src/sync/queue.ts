@@ -116,10 +116,10 @@ export interface PushOptions {
   /** フォルダの仮の ID を付け替えたら、確定したその時点で呼ぶ（あとの操作が失敗しても失わない） */
   onRemap?: (remap: { from: string; to: string }) => void;
   /**
-   * この番号より後の操作は送らない（呼ぶたびに読む）。通信が要る操作（購読など）を呼んだあとに
-   * 積んだ操作を、その操作より先に送らないため
+   * この操作を送ってよいか（積んだ順に見て、送ってはいけない操作に来たらそこで止める）。
+   * 通信が要る操作（購読など）を呼んだあとに積んだ操作を、その操作より先に送らないため
    */
-  limit?: () => number | null;
+  allow?: (id: number) => boolean;
 }
 
 export async function push(
@@ -135,8 +135,7 @@ export async function push(
       "select id, kind, key, payload, rev from pending_ops order by id limit 1",
     );
     if (next === undefined) return result;
-    const limit = options.limit?.() ?? null;
-    if (limit !== null && next.id > limit) return result;
+    if (options.allow !== undefined && !options.allow(next.id)) return result;
     const op = JSON.parse(next.payload) as Operation;
 
     try {

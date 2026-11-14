@@ -262,3 +262,20 @@ describe("購読を呼んだあとの操作は、購読より先に送らない"
     expect(await core.listFeeds()).toMatchObject([{ folderId: news.id }]);
   });
 });
+
+describe("続けて呼んだ購読", () => {
+  test("同じフィードを続けて別のフォルダに購読したら、あとから呼んだほうのフォルダになる", async () => {
+    const { server, core } = await setup();
+    const tech = server.createFolder("Tech");
+    const news = server.createFolder("News");
+    const existing = server.subscribe({ url: "https://blog.example/feed.xml" });
+    await core.sync();
+
+    const first = core.subscribe("https://blog.example/feed.xml", tech.id);
+    const second = core.subscribe("https://blog.example/feed.xml", news.id);
+    await Promise.all([first, second]);
+    await core.sync();
+    expect(server.feeds.get(existing.id)?.folderId).toBe(news.id);
+    expect(await core.listFeeds()).toMatchObject([{ folderId: news.id }]);
+  });
+});
