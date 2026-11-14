@@ -130,3 +130,38 @@ describe("ログインのし直しと中断", () => {
     expect((error as ApiError).message).toContain("20ms");
   });
 });
+
+describe("ログインとログアウトが重なったとき", () => {
+  test("トークンを確かめている間にログアウトしたら、ログインは中断され、トークンを置かない", async () => {
+    const { server, core, db } = await setup({ signIn: false });
+    server.onRequest = async (path) => {
+      if (path === "GET /folders") await core.signOut();
+    };
+    const error = await core.signIn(TOKEN).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(Error);
+    expect(core.isSignedIn()).toBe(false);
+    expect(await db.all("select key from settings")).toEqual([]);
+  });
+
+  test("確かめている間にログアウトして答えが止まっていても、ログインは中断される", async () => {
+    const { server, core } = await setup({ signIn: false });
+    server.failNext("hang");
+    const signingIn = core.signIn(TOKEN);
+    await core.signOut();
+    const error = await signingIn.catch((e: unknown) => e);
+    expect((error as ApiError).kind).toBe("network");
+    expect(core.isSignedIn()).toBe(false);
+  });
+
+  test("あとから始めたログインが勝つ", async () => {
+    const { server, core, db } = await setup({ signIn: false });
+    server.failNext("hang");
+    const first = core.signIn("sendo_first");
+    server.token = "sendo_second";
+    await core.signIn("sendo_second");
+    await first.catch(() => undefined);
+    expect(await db.all("select value from settings where key = 'auth.token'")).toEqual([
+      { value: "sendo_second" },
+    ]);
+  });
+});

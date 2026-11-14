@@ -83,33 +83,42 @@ export class ReaderCore {
   async signIn(token: string): Promise<void> {
     const trimmed = token.trim();
     if (trimmed === "") throw new ApiError("unauthorized", "トークンが空");
-    await this.#api.verifyToken(trimmed, this.#session.signal);
+    // 新しいログインを始める（前のログインの同期は中断する）。確かめている間にログアウトや
+    // 別のログインが始まったら、このログインは中断され、トークンを置かない
+    const session = this.#beginSession();
+    await this.#api.verifyToken(trimmed, session);
 
-    this.#endSession();
     await this.#db.transaction(async (tx) => {
+      session.throwIfAborted();
       await clearAll(tx);
       await setSetting(tx, TOKEN_KEY, trimmed);
+      // DB の呼び出しは 1 列に並ぶので、手元のトークンもトランザクションの中で替える
+      // （あとに並んだログアウトが、確実に消す）
+      this.#token = trimmed;
     });
-    this.#token = trimmed;
     this.#emit(new Set<Table>(["folders", "feeds", "articles"]));
   }
 
   /**
-   * トークンと、同期で届いた手元のデータをまとめて消す。送っている途中の同期は待たずに
-   * 中断する（通信が止まっていても、すぐに終わる）。
+   * トークンと、同期で届いた手元のデータをまとめて消す。送っている途中の同期や、確かめている
+   * 途中のログインは待たずに中断する（通信が止まっていても、すぐに終わる）。
    */
   async signOut(): Promise<void> {
-    this.#endSession();
+    this.#beginSession();
     this.#token = null;
-    await this.#db.transaction((tx) => clearAll(tx));
+    await this.#db.transaction(async (tx) => {
+      await clearAll(tx);
+      this.#token = null;
+    });
     this.#emit(new Set<Table>(["folders", "feeds", "articles"]));
   }
 
-  /** 今のログインで動いている同期を中断し、新しいログインを始める */
-  #endSession(): void {
+  /** 今のログインで動いている処理を中断し、新しいログインの中断の合図を返す */
+  #beginSession(): AbortSignal {
     this.#session.abort();
     this.#session = new AbortController();
     this.#syncing = null;
+    return this.#session.signal;
   }
 
   // --- 同期 ---

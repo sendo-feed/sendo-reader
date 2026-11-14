@@ -67,6 +67,8 @@ export class FakeSendo {
   readonly inbox = new Map<string, InboxRow>();
   /** 受けたリクエスト（"GET /sync?cursor=…" の形） */
   readonly requests: string[] = [];
+  /** リクエストを受けて、答える前に呼ぶ（送っている途中に画面で操作したことにする、など） */
+  onRequest: ((path: string) => Promise<void>) | null = null;
 
   readonly #maxSeq: Record<TableName, number> = { folders: 0, feeds: 0, articles: 0 };
   /** 消した印を回収した範囲。これより古いカーソルでは差分を出せない */
@@ -198,6 +200,7 @@ export class FakeSendo {
     const path = url.pathname.replace(/^\/api\/v1/, "");
     this.requests.push(`${request.method} ${path}${url.search}`);
 
+    await this.onRequest?.(`${request.method} ${path}`);
     const failure = this.#failures.shift();
     if (failure === "network") throw new TypeError("fetch failed");
     if (failure === "hang") {
