@@ -6,6 +6,7 @@
  * - /starred         スター
  * - /feeds/:id       フィード
  * - /folders/:id     フォルダ
+ * - /manage          購読の管理（追加、フォルダ、OPML の取り込み）
  * 開いている記事は ?article=<id> に持つ。
  */
 export type View =
@@ -13,7 +14,8 @@ export type View =
   | { kind: "all" }
   | { kind: "starred" }
   | { kind: "feed"; id: string }
-  | { kind: "folder"; id: string };
+  | { kind: "folder"; id: string }
+  | { kind: "manage" };
 
 class Router {
   url = $state(new URL(location.href));
@@ -28,6 +30,7 @@ class Router {
     const path = this.url.pathname;
     if (path === "/all") return { kind: "all" };
     if (path === "/starred") return { kind: "starred" };
+    if (path === "/manage") return { kind: "manage" };
     const feed = /^\/feeds\/([^/]+)$/.exec(path);
     if (feed?.[1] !== undefined) return { kind: "feed", id: decodeURIComponent(feed[1]) };
     const folder = /^\/folders\/([^/]+)$/.exec(path);
@@ -69,6 +72,8 @@ export function viewHref(view: View): string {
       return `/feeds/${encodeURIComponent(view.id)}`;
     case "folder":
       return `/folders/${encodeURIComponent(view.id)}`;
+    case "manage":
+      return "/manage";
   }
 }
 

@@ -43,7 +43,8 @@ Sendo の公式リーダー。`packages/core`（同期エンジン）と `apps/w
     - `lib/reader.ts`：ワーカーを起こす（Trusted Types の `sendo-worker` のポリシーで、自分のオリジンの URL だけを許す）
     - `lib/state.svelte.ts`：画面の状態（フォルダ、フィード、未読の数、同期の様子）。手元の表が変わったら読み直す
     - `lib/router.svelte.ts`：小さな自前のルーター（History API）
-    - `routes/`：画面（ログイン、読む画面）、`components/`：部品
+    - `routes/`：画面（ログイン、読む画面、購読の管理）、`components/`：部品（`components/manage/` は購読の管理の部品）
+    - `lib/errors.ts`：失敗（`ApiError` の `code` ／ `kind`）を、画面に出す文にする
     - 画面は `@sendo-reader/core/web` の窓口だけを使い、DB や sendo の API に直接触れない
   - `worker/`：reader Worker。静的なファイルは Workers Static Assets が返し、`/api` だけを Service binding で sendo に中継する
   - `security-headers.ts`：CSP などのヘッダー。dev サーバーと、本番の `dist/_headers` の両方に使う
