@@ -463,3 +463,19 @@ describe("送る途中で届かなくなったとき", () => {
     expect((await core.listFolders()).map((f) => f.id)).toEqual([existing.id]);
   });
 });
+
+describe("同じ名前のフォルダに付け替えたあと", () => {
+  test("仮のフォルダに重ねていた名前の変更を、付け替えた ID で重ね直す（このあと届かなくても）", async () => {
+    const { server, core } = await withArticle();
+    const existing = server.createFolder("Tech");
+    await core.sync();
+    const tempId = await core.createFolder("Tech");
+    await core.renameFolder(tempId, "Technology");
+
+    // フォルダの作成（409）と探し直しは届き、名前の変更で届かなくなる
+    server.failNext(null, null, "network");
+    await core.sync().catch(() => undefined);
+    expect(await core.listFolders()).toMatchObject([{ id: existing.id, name: "Technology" }]);
+    expect(await core.countPending()).toBe(1);
+  });
+});

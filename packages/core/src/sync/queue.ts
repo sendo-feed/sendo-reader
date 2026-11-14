@@ -116,8 +116,13 @@ export async function push(
       await db.transaction(async (tx) => {
         // 送っている間にログアウトしていたら、手元には書かない
         signal.throwIfAborted();
-        if (sent.remap !== undefined) await remapFolderId(tx, sent.remap.from, sent.remap.to);
         await complete(tx, next.id, next.rev);
+        if (sent.remap !== undefined) {
+          await remapFolderId(tx, sent.remap.from, sent.remap.to);
+          // 同じ名前のフォルダに付け替えると仮のフォルダの行が消え、そこに重ねていた操作（名前の
+          // 変更など）も消える。付け替えた ID で残りの操作を重ね直す
+          await reapplyPending(tx);
+        }
       });
       result.sent += 1;
       if (sent.remap !== undefined) {
