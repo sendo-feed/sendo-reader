@@ -130,6 +130,46 @@ describe("ログインのし直しと中断", () => {
     expect((error as ApiError).kind).toBe("network");
     expect((error as ApiError).message).toContain("20ms");
   });
+
+  test("ヘッダーのあとで本文が止まっても、時間切れで network として失敗し、本文を取り消す", async () => {
+    const server = new FakeSendo();
+    const core = await ReaderCore.open({
+      db: await openMemoryDb(),
+      baseUrl: "https://sendo.test/api/v1",
+      fetch: server.fetch,
+      requestTimeoutMs: 20,
+    });
+    await core.signIn(TOKEN);
+    server.failNext("hang-body");
+    const error = await core.sync().catch((e: unknown) => e);
+    expect((error as ApiError).kind).toBe("network");
+    expect((error as ApiError).message).toContain("20ms");
+    expect(server.cancelledBodies).toBe(1);
+
+    // 同期の列が止まったままにならず、次の同期は進む
+    const feed = server.subscribe({ url: "https://example.com/feed.xml" });
+    server.deliver(feed.id);
+    await core.sync();
+    expect(await core.listArticles()).toHaveLength(1);
+  });
+
+  test("本文が止まっていても、ログアウトで終わり、ログインし直せば同期できる", async () => {
+    const { server, core } = await setup();
+    server.failNext("hang-body");
+    const syncing = core.sync();
+    await vi.waitFor(() => expect(server.requests).toContain("GET /sync"));
+
+    await core.signOut();
+    const error = await syncing.catch((e: unknown) => e);
+    expect(["network", "unauthorized"]).toContain((error as ApiError).kind);
+    expect(server.cancelledBodies).toBe(1);
+
+    await core.signIn(TOKEN);
+    const feed = server.subscribe({ url: "https://example.com/feed.xml" });
+    server.deliver(feed.id);
+    await core.sync();
+    expect(await core.listArticles()).toHaveLength(1);
+  });
 });
 
 describe("ログインとログアウトが重なったとき", () => {
@@ -152,6 +192,18 @@ describe("ログインとログアウトが重なったとき", () => {
     const error = await signingIn.catch((e: unknown) => e);
     expect((error as ApiError).kind).toBe("network");
     expect(core.isSignedIn()).toBe(false);
+  });
+
+  test("確かめている間にログアウトして本文が止まっていても、ログインは中断される", async () => {
+    const { server, core } = await setup({ signIn: false });
+    server.failNext("hang-body");
+    const signingIn = core.signIn(TOKEN);
+    await vi.waitFor(() => expect(server.requests).toEqual(["GET /folders"]));
+    await core.signOut();
+    const error = await signingIn.catch((e: unknown) => e);
+    expect((error as ApiError).kind).toBe("network");
+    expect(core.isSignedIn()).toBe(false);
+    expect(server.cancelledBodies).toBe(1);
   });
 
   test("あとから始めたログインが勝つ", async () => {

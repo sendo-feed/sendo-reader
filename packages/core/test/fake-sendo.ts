@@ -53,6 +53,8 @@ interface Cursor {
   initialSince?: number;
 }
 
+type Failure = "network" | number | "hang" | "hang-body" | null;
+
 const DAY = 24 * 60 * 60 * 1000;
 export const TOKEN = "sendo_test_token";
 
@@ -85,7 +87,9 @@ export class FakeSendo {
   readonly #maxSeq: Record<TableName, number> = { folders: 0, feeds: 0, articles: 0 };
   /** 消した印を回収した範囲。これより古いカーソルでは差分を出せない */
   readonly #purgedUpTo: Record<"folders" | "feeds", number> = { folders: 0, feeds: 0 };
-  readonly #failures: ("network" | number | "hang" | null)[] = [];
+  readonly #failures: Failure[] = [];
+  /** "hang-body" で止めた本文のうち、読み手に取り消されたものの数 */
+  cancelledBodies = 0;
   #nextId = 1;
 
   // --- テストから状態を作る ---
@@ -199,10 +203,11 @@ export class FakeSendo {
 
   /**
    * 次からのリクエストを、順に失敗させる。"network" なら届かない、数ならその状態コードを返す、
-   * "hang" なら中断されるまで答えない、null ならふつうに答える
+   * "hang" なら中断されるまで答えない、"hang-body" ならヘッダーと本文の頭だけ返して本文を止める
+   * （中断の合図を見ず、読み手が取り消すまで止まったまま）、null ならふつうに答える
    * （例：failNext(null, "network") で 2 つめだけ届かない）
    */
-  failNext(...failures: ("network" | number | "hang" | null)[]): void {
+  failNext(...failures: Failure[]): void {
     this.#failures.push(...failures);
   }
 
@@ -226,6 +231,17 @@ export class FakeSendo {
         if (signal.aborted) abort();
         else signal.addEventListener("abort", abort, { once: true });
       });
+    }
+    if (failure === "hang-body") {
+      return new Response(
+        new ReadableStream<Uint8Array>({
+          start: (controller) => controller.enqueue(new TextEncoder().encode('{"cursor":')),
+          cancel: () => {
+            this.cancelledBodies += 1;
+          },
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
     }
     if (typeof failure === "number") return error(failure, "injected", "injected failure");
 

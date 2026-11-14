@@ -33,6 +33,9 @@ export function createSendoApi(options: SendoApiOptions) {
    * 入れずに別に受け取り、自分の AbortController に直接つないで、終わるまで持っておく。
    * Request の signal や AbortSignal.any の引き継ぎは、Node（undici）では弱い参照でつながって
    * いて、途中のオブジェクトが回収されると中断が届かないことがある（Node 24 で確かめた）。
+   *
+   * 本文も、ここで読み終えてから返す。ヘッダーのあとで本文が止まっても、時間切れとログアウトで
+   * 終わるようにするため（呼ぶ側は、どれも本文をすべて読むので、流れのまま渡す利点はない）。
    */
   async function send(request: Request, signal: AbortSignal | undefined): Promise<Response> {
     const token = options.token();
@@ -50,7 +53,15 @@ export function createSendoApi(options: SendoApiOptions) {
       controller.abort(new DOMException(`${timeoutMs}ms`, "TimeoutError"));
     }, timeoutMs);
     try {
-      return await doFetch(new Request(request, { headers }), { signal: controller.signal });
+      const response = await doFetch(new Request(request, { headers }), {
+        signal: controller.signal,
+      });
+      const body = await readBody(response, controller.signal);
+      return new Response(body, {
+        status: response.status,
+        statusText: response.statusText,
+        headers: response.headers,
+      });
     } catch (error) {
       const reason =
         signal?.aborted === true
@@ -116,6 +127,44 @@ export function createSendoApi(options: SendoApiOptions) {
       if (error !== undefined || !response.ok) throw errorFromBody(response.status, error);
     },
   };
+}
+
+/**
+ * 本文をすべて読む。空なら null（204 などの本文のない応答も、作り直せるように）。
+ * signal で止めたら、読みかけでも失敗にする。fetch の実装が本文に中断を伝えなくても
+ * 終わるよう、自分で読み手を取り消す。
+ */
+async function readBody(
+  response: Response,
+  signal: AbortSignal,
+): Promise<Uint8Array<ArrayBuffer> | null> {
+  if (response.body === null) return null;
+  const reader = response.body.getReader();
+  const cancel = () => {
+    reader.cancel(signal.reason).catch(() => undefined);
+  };
+  signal.addEventListener("abort", cancel, { once: true });
+  if (signal.aborted) cancel();
+  try {
+    const chunks: Uint8Array[] = [];
+    let size = 0;
+    for (let read = await reader.read(); !read.done; read = await reader.read()) {
+      chunks.push(read.value);
+      size += read.value.byteLength;
+    }
+    // 取り消すと、読みかけでも「読み終えた」になるので、ここで失敗にする
+    signal.throwIfAborted();
+    if (size === 0) return null;
+    const body = new Uint8Array(size);
+    let offset = 0;
+    for (const chunk of chunks) {
+      body.set(chunk, offset);
+      offset += chunk.byteLength;
+    }
+    return body;
+  } finally {
+    signal.removeEventListener("abort", cancel);
+  }
 }
 
 /**
