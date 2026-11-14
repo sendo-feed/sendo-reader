@@ -12,7 +12,14 @@ describe("手元の DB のスキーマ", () => {
     const tables = await db.all<{ name: string }>(
       "select name from sqlite_schema where type = 'table' order by name",
     );
-    expect(tables.map((t) => t.name)).toEqual(["articles", "feeds", "folders", "settings"]);
+    expect(tables.map((t) => t.name)).toEqual([
+      "articles",
+      "feeds",
+      "folders",
+      "pending_ops",
+      "settings",
+      "sqlite_sequence",
+    ]);
   });
 
   test("2 回当てても何も変わらない", async () => {

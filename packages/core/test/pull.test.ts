@@ -20,7 +20,7 @@ describe("最初の同期", () => {
     server.setArticleState(recentRead.id, { read: true });
 
     const result = await core.sync();
-    expect(result.reset).toBe(false);
+    expect(result.pull.reset).toBe(false);
     expect(await core.listFolders()).toEqual([
       { id: folder.id, name: "Tech", createdAt: folder.createdAt },
     ]);
@@ -49,9 +49,11 @@ describe("最初の同期", () => {
     for (let i = 0; i < 7; i++) expected.push(server.deliver(feed.id, { title: `new ${i}` }));
 
     const result = await core.sync();
-    expect(result.pages).toBeGreaterThan(1);
+    expect(result.pull.pages).toBeGreaterThan(1);
     expect(ids(await core.listArticles({ limit: 200 }))).toEqual(ids(expected));
-    expect(server.requests.filter((r) => r.startsWith("GET /sync"))).toHaveLength(result.pages);
+    expect(server.requests.filter((r) => r.startsWith("GET /sync"))).toHaveLength(
+      result.pull.pages,
+    );
   });
 });
 
@@ -128,11 +130,11 @@ describe("差分の同期", () => {
     server.purgeTombstones();
     const result = await core.sync();
 
-    expect(result.reset).toBe(true);
+    expect(result.pull.reset).toBe(true);
     expect(ids(await core.listFolders())).toEqual([keep.id]);
     expect(ids(await core.listArticles())).toEqual([article.id]);
     // 作り直したあとは、ふつうの差分の同期に戻る
-    expect((await core.sync()).reset).toBe(false);
+    expect((await core.sync()).pull.reset).toBe(false);
   });
 
   test("ページの途中で届かなくなっても、書き込んだページまでは残り、次はその続きから取る", async () => {

@@ -1,16 +1,16 @@
 import { ApiError, type SendoApi } from "../api/client";
-import type { Database, Executor } from "../db/database";
+import type { Database, Executor, SqlValue } from "../db/database";
 import { deleteSetting, getSetting, setSetting } from "../db/settings";
+import { CURSOR_KEY, clearSyncedRows, RESYNC_KEY } from "../db/synced";
 import type { Article, Table } from "../models";
 import type { SyncPage } from "./page";
+import { reapplyPending } from "./queue";
 
 /** 手元に置く既読の記事の期間。受信箱に入ってからこれより古い既読の記事は、手元から消す */
 export const LOCAL_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 
 /** 1 回の同期で取るページの上限。サーバーが続きを返し続けても止まるようにする */
 const MAX_PAGES = 1000;
-
-const CURSOR_KEY = "sync.cursor";
 
 export interface PullResult {
   /** 取ったページの数 */
@@ -34,11 +34,19 @@ export interface PullOptions {
  *
  * ページごとに、行の書き込みと新しいカーソルの保存を 1 つのトランザクションで行う。途中で
  * 失敗しても、書き込んだページまでのカーソルが残るので、次はその続きから取れる。
+ *
+ * 届いた行は sendo の状態なので、手元でまだ送り終えていない操作は、同じトランザクションの中で
+ * その上に重ね直す（楽観的な更新を保つ）。
  */
 export async function pull(db: Database, api: SendoApi, options: PullOptions): Promise<PullResult> {
   const result: PullResult = { pages: 0, reset: false, changed: new Set() };
-  let cursor = await getSetting(db, CURSOR_KEY);
+  // 断られた操作を戻せなかったときなどに、最初から取り直すよう頼まれている
+  if ((await getSetting(db, RESYNC_KEY)) !== null) {
+    await resync(db, api, options, result);
+    return finish(db, options, result);
+  }
 
+  let cursor = await getSetting(db, CURSOR_KEY);
   while (true) {
     if (result.pages >= MAX_PAGES) {
       throw new Error(`同期が ${MAX_PAGES} ページで終わらなかった`);
@@ -47,14 +55,10 @@ export async function pull(db: Database, api: SendoApi, options: PullOptions): P
     try {
       page = await api.sync(cursor, options.signal);
     } catch (error) {
-      if (error instanceof ApiError && error.kind === "cursor_expired" && !result.reset) {
-        // 消した印が回収され、差分を出せない。手元を空にして最初から取り直す
-        await clearSyncedData(db, options.signal);
-        for (const table of ["folders", "feeds", "articles"] as const) result.changed.add(table);
-        options.onPage?.(new Set(result.changed));
-        cursor = null;
-        result.reset = true;
-        continue;
+      if (error instanceof ApiError && error.kind === "cursor_expired") {
+        // 消した印が回収され、差分を出せない。最初から取り直す
+        await resync(db, api, options, result);
+        break;
       }
       throw error;
     }
@@ -64,6 +68,7 @@ export async function pull(db: Database, api: SendoApi, options: PullOptions): P
       // ので、ここで確かめれば、ログアウトの消去のあとに書き戻すことはない）
       options.signal?.throwIfAborted();
       const changed = await applyPage(tx, page);
+      await reapplyPending(tx);
       await setSetting(tx, CURSOR_KEY, page.cursor);
       return changed;
     });
@@ -74,7 +79,61 @@ export async function pull(db: Database, api: SendoApi, options: PullOptions): P
     cursor = page.cursor;
     if (!page.hasMore) break;
   }
+  return finish(db, options, result);
+}
 
+/**
+ * 最初から取り直す。すべてのページを取り終えてから、1 つのトランザクションで手元を置き換える
+ * （途中で届かなくなっても、手元の行は前のまま残る。オフラインで空にならない）。
+ */
+async function resync(
+  db: Database,
+  api: SendoApi,
+  options: PullOptions,
+  result: PullResult,
+): Promise<void> {
+  const pages: SyncPage[] = [];
+  let cursor: string | null = null;
+  while (true) {
+    if (pages.length >= MAX_PAGES) throw new Error(`同期が ${MAX_PAGES} ページで終わらなかった`);
+    const page: SyncPage = await api.sync(cursor, options.signal);
+    pages.push(page);
+    cursor = page.cursor;
+    if (!page.hasMore) break;
+  }
+  await db.transaction(async (tx) => {
+    options.signal?.throwIfAborted();
+    // まだ送っていない操作が指す記事は、取り直した中になくても残す（最初の同期の範囲の外の
+    // 古い記事にスターを付けた、など。消すと、重ね直す先がなくなる）
+    const kept = await tx.all<Record<string, SqlValue>>(
+      `select * from articles where id in (
+         select json_extract(payload, '$.articleId') from pending_ops
+         union
+         select value from pending_ops, json_each(json_extract(payload, '$.articleIds'))
+       )`,
+    );
+    await clearSyncedRows(tx);
+    for (const page of pages) await applyPage(tx, page);
+    for (const row of kept) {
+      const columns = Object.keys(row);
+      await tx.run(
+        `insert into articles (${columns.join(", ")}) values (${columns.map(() => "?").join(", ")})
+         on conflict (id) do nothing`,
+        columns.map((column) => row[column] ?? null),
+      );
+    }
+    await reapplyPending(tx);
+    if (cursor !== null) await setSetting(tx, CURSOR_KEY, cursor);
+    await deleteSetting(tx, RESYNC_KEY);
+  });
+  result.pages += pages.length;
+  result.reset = true;
+  const all = new Set<Table>(["folders", "feeds", "articles"]);
+  for (const table of all) result.changed.add(table);
+  options.onPage?.(all);
+}
+
+async function finish(db: Database, options: PullOptions, result: PullResult) {
   if (await pruneOldArticles(db, options.now(), options.signal)) {
     result.changed.add("articles");
     options.onPage?.(new Set<Table>(["articles"]));
@@ -184,17 +243,6 @@ async function pruneOldArticles(
     );
   });
   return removed.length > 0;
-}
-
-/** 同期で届いたデータとカーソルを消す（トークンなどの設定は残す） */
-export async function clearSyncedData(db: Database, signal?: AbortSignal): Promise<void> {
-  await db.transaction(async (tx) => {
-    signal?.throwIfAborted();
-    await tx.run("delete from articles");
-    await tx.run("delete from feeds");
-    await tx.run("delete from folders");
-    await deleteSetting(tx, CURSOR_KEY);
-  });
 }
 
 /** 同期済みのカーソル。まだ一度も同期していなければ null */
