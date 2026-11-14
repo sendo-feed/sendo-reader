@@ -233,11 +233,15 @@ export async function undo(
       const folder = check(await api.client.GET("/folders", { signal })).items.find(
         (item) => item.id === op.folderId,
       );
-      await write((tx) =>
-        folder === undefined
-          ? tx.run("delete from folders where id = ?", [op.folderId])
-          : tx.run("update folders set name = ? where id = ?", [folder.name, folder.id]),
-      );
+      await write(async (tx) => {
+        if (folder === undefined) {
+          // sendo でもう消えている。入っていたフィードもフォルダなしに戻す（sendo と同じ決まり）
+          await tx.run("delete from folders where id = ?", [op.folderId]);
+          await tx.run("update feeds set folder_id = null where folder_id = ?", [op.folderId]);
+        } else {
+          await tx.run("update folders set name = ? where id = ?", [folder.name, folder.id]);
+        }
+      });
       return;
     }
     case "moveFeed": {

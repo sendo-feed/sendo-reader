@@ -574,3 +574,22 @@ describe("取り直しとログインのし直しが、操作と重なったと�
     expect(await core.listFolders()).toEqual([]);
   });
 });
+
+describe("消えたフォルダの名前の変更を戻すとき", () => {
+  test("フォルダを消し、入っていたフィードもフォルダなしに戻す（このあと届かなくても）", async () => {
+    const { server, core, feed, article } = await withArticle();
+    const folder = server.createFolder("Tech");
+    server.moveFeed(feed.id, folder.id);
+    await core.sync();
+    await core.renameFolder(folder.id, "Technology");
+    await core.setStarred(article.id, true);
+    // 別の端末でフォルダを消した
+    server.deleteFolder(folder.id);
+
+    // 名前の変更（404）と読み直しは届き、スターで届かなくなる
+    server.failNext(null, null, "network");
+    await core.sync().catch(() => undefined);
+    expect(await core.listFolders()).toEqual([]);
+    expect(await core.listFeeds()).toMatchObject([{ id: feed.id, folderId: null }]);
+  });
+});
