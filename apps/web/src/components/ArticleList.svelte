@@ -20,9 +20,17 @@
   /** 一覧を読んだあとに届いた、条件に合う記事の数 */
   let fresh = $state(0);
 
+  /**
+   * 読み出しの世代。条件を変えて読み直すたびに増やし、それより前に始めた読み出し（前の条件の
+   * 一覧を元にした読み直しなど）の結果は当てない
+   */
+  let generation = 0;
+
   async function load() {
+    const current = ++generation;
     loading = true;
     const page = await reader.client.listArticles({ ...query, limit: PAGE });
+    if (current !== generation) return;
     articles = page;
     hasMore = page.length === PAGE;
     fresh = 0;
@@ -35,6 +43,7 @@
   async function loadMore() {
     const last = articles.at(-1);
     if (last === undefined || loadingMore) return;
+    const current = generation;
     loadingMore = true;
     try {
       const page = await reader.client.listArticles({
@@ -42,6 +51,7 @@
         limit: PAGE,
         after: { publishedAt: last.publishedAt, id: last.id },
       });
+      if (current !== generation) return;
       const shown = new Set(articles.map((article) => article.id));
       articles = [...articles, ...page.filter((article) => !shown.has(article.id))];
       hasMore = page.length === PAGE;
@@ -59,11 +69,13 @@
       await load();
       return;
     }
+    const current = generation;
     const shown = new Set(articles.map((article) => article.id));
     const [latest, top] = await Promise.all([
       Promise.all(articles.map((article) => reader.client.getArticle(article.id))),
       reader.client.listArticles({ ...query, limit: PAGE }),
     ]);
+    if (current !== generation) return;
     articles = latest.filter((article): article is Article => article !== null);
     fresh = top.filter((article) => !shown.has(article.id)).length;
   }

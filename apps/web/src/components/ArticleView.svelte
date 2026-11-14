@@ -18,9 +18,11 @@
     if (id !== articleId) return;
     article = found;
     missing = found === null;
-    if (found !== null && found.readAt === null && markedFor !== id) {
+    // 開いて初めて読み出したときだけ、未読なら既読にする（既読の記事を開いたときも、
+    // 済んだことを覚える。表示している間に「未読に戻す」を押したら、そのままにする）
+    if (found !== null && markedFor !== id) {
       markedFor = id;
-      await reader.client.setRead(id, true);
+      if (found.readAt === null) await reader.client.setRead(id, true);
     }
   }
 
