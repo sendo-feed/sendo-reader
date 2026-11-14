@@ -8,6 +8,7 @@ sendo-reader で決めたことを、テーマごとに1ファイルで置く。
 |---|---|---|
 | [決定の残し方](documentation.md) | 提案中 | sendo と同じ。テーマごとに1ファイルを書き換え、履歴は git が持つ |
 | [UI とツール](ui.md) | 提案中 | Svelte 5 ＋ Vite の SPA（SvelteKit・Void は使わない）。ネイティブは Capacitor。lint と整形は Biome |
+| [ローカルファースト](local-first.md) | 提案中 | 画面は手元の SQLite（公式の Wasm ＋ opfs-sahpool）だけを読み書きし、sendo の差分同期に従う。どのタブでも使える。トークンを置く間は CSP を厳しくする |
 
 経緯を知りたいとき：
 
