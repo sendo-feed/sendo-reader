@@ -21,6 +21,7 @@ export const READER_METHODS = [
   "listFeeds",
   "listArticles",
   "getArticle",
+  "getArticles",
   "countUnread",
   "setRead",
   "setStarred",

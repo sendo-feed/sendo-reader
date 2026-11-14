@@ -4,6 +4,7 @@ import {
   type ArticleQuery,
   countUnread,
   getArticle,
+  getArticles,
   listArticles,
   listFeeds,
   listFolders,
@@ -449,6 +450,11 @@ export class ReaderCore {
 
   getArticle(id: string): Promise<Article | null> {
     return getArticle(this.#db, id);
+  }
+
+  /** 記事をまとめて読む（見つからない ID は飛ばす） */
+  getArticles(ids: readonly string[]): Promise<Article[]> {
+    return getArticles(this.#db, ids);
   }
 
   countUnread(): Promise<UnreadCounts> {

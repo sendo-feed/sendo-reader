@@ -47,6 +47,19 @@
     });
   });
 
+  /**
+   * 押したらすぐ画面に出し（楽観的な更新）、手元の DB への書き込みはそのあとに待つ
+   * （docs/decisions/performance.md の操作の反応 100ms）
+   */
+  async function toggle(field: "readAt" | "starredAt") {
+    const current = article;
+    if (current === null) return;
+    const on = current[field] === null;
+    article = { ...current, [field]: on ? Date.now() : null };
+    if (field === "readAt") await reader.client.setRead(current.id, on);
+    else await reader.client.setStarred(current.id, on);
+  }
+
   /** 記事の URL は、http ／ https のものだけをリンクにする（記事のデータは信頼できない） */
   const link = $derived(article === null ? null : toSafeHttpUrl(article.url));
 </script>
@@ -69,15 +82,11 @@
         <button
           type="button"
           aria-pressed={article.starredAt !== null}
-          onclick={() =>
-            article && reader.client.setStarred(article.id, article.starredAt === null)}
+          onclick={() => toggle("starredAt")}
         >
           {article.starredAt === null ? "☆ スターを付ける" : "★ スターを外す"}
         </button>
-        <button
-          type="button"
-          onclick={() => article && reader.client.setRead(article.id, article.readAt === null)}
-        >
+        <button type="button" onclick={() => toggle("readAt")}>
           {article.readAt === null ? "既読にする" : "未読に戻す"}
         </button>
         {#if link !== null}

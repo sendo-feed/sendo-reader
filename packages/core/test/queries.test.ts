@@ -99,3 +99,14 @@ describe("未読の数", () => {
     });
   });
 });
+
+describe("記事をまとめて読む", () => {
+  test("渡した ID の記事を返し、見つからない ID は飛ばす", async () => {
+    const { core, articles } = await seeded();
+    const found = await core.getArticles([articles.a1.id, "missing", articles.c1.id]);
+    expect(found.map((article) => article.id).sort()).toEqual(
+      [articles.a1.id, articles.c1.id].sort(),
+    );
+    expect(await core.getArticles([])).toEqual([]);
+  });
+});
