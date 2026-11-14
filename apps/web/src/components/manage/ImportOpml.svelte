@@ -60,8 +60,9 @@
       {/if}
     </p>
     {#if result.skipped.length > 0}
+      <!-- 同じ URL が何度も飛ばされることがあるので、並びの番号をキーにする -->
       <ul class="skipped">
-        {#each result.skipped as skipped (skipped.url)}
+        {#each result.skipped as skipped, i (i)}
           <li><span class="url">{skipped.url}</span>（{REASONS[skipped.reason]}）</li>
         {/each}
       </ul>
