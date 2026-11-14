@@ -22,6 +22,32 @@ describe("手元の DB のスキーマ", () => {
     ]);
   });
 
+  test("前の版で積んだまとめて既読には、手元で既読にした記事をすべて ID でも頼む印を足す", async () => {
+    const db = await openMemoryDb();
+    await migrate(db, 2);
+    const old = {
+      kind: "markRead",
+      scope: { all: true },
+      articleIds: ["a1", "a2"],
+      cursor: "c",
+      at: 1,
+    };
+    await db.run(
+      "insert into pending_ops (kind, key, payload, created_at) values ('markRead', 'all', ?, 1)",
+      [JSON.stringify(old)],
+    );
+    await db.run(
+      "insert into pending_ops (kind, key, payload, created_at) values ('setArticleState', 'a1', ?, 1)",
+      [JSON.stringify({ kind: "setArticleState", articleId: "a1", read: true, at: 1 })],
+    );
+    await migrate(db);
+    const rows = await db.all<{ payload: string }>("select payload from pending_ops order by id");
+    expect(rows.map((row) => JSON.parse(row.payload))).toEqual([
+      { ...old, extraIds: ["a1", "a2"] },
+      { kind: "setArticleState", articleId: "a1", read: true, at: 1 },
+    ]);
+  });
+
   test("2 回当てても何も変わらない", async () => {
     const db = await openMemoryDb();
     await migrate(db);
