@@ -156,3 +156,38 @@ describe("購読の応答を待っている間の操作", () => {
     expect(server.feeds.get(feed?.id ?? "")?.folderId).toBe(created?.id);
   });
 });
+
+describe("購読と OPML の、まだ送っていない操作との順番", () => {
+  test("待っている間に移す先のフォルダを消したら、そのフォルダには移さない", async () => {
+    const { server, core } = await setup();
+    const tech = server.createFolder("Tech");
+    const news = server.createFolder("News");
+    const existing = server.subscribe({ url: "https://blog.example/feed.xml", folderId: tech.id });
+    await core.sync();
+
+    server.onRequest = async (path) => {
+      if (path === "POST /feeds") await core.deleteFolder(news.id);
+    };
+    const feed = await core.subscribe("https://blog.example/feed.xml", news.id);
+    expect(feed?.folderId).toBe(tech.id);
+    await core.sync();
+    expect(server.feeds.get(existing.id)?.folderId).toBe(tech.id);
+    expect(server.folders.get(news.id)?.deletedAt).not.toBeNull();
+  });
+
+  test("OPML を取り込む前に、まだ送っていない購読の停止を送る", async () => {
+    const { server, core } = await setup();
+    const existing = server.subscribe({ url: "https://a.example/feed" });
+    await core.sync();
+    await core.unsubscribe(existing.id);
+
+    server.onRequest = async (path) => {
+      if (path === "POST /opml") {
+        // 取り込みを受けた時点で、購読の停止はもう届いている
+        expect(server.feeds.get(existing.id)?.deletedAt).not.toBeNull();
+      }
+    };
+    await core.importOpml('<opml><body><outline xmlUrl="https://a.example/feed"/></body></opml>');
+    expect(await core.countPending()).toBe(0);
+  });
+});

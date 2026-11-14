@@ -289,12 +289,17 @@ export class ReaderCore {
       this.#session.signal,
       async (tx, feed) => {
         // sendo はすでに購読していたフィードのフォルダを変えずに返すので、ここで移す。
-        // ただし、待っている間にこのフィードを操作していたら（移動、購読の停止）、そちらを採る
+        // ただし、待っている間にこのフィードを操作していたら（移動、購読の停止）、そちらを採る。
+        // 移す先のフォルダを待っている間に消していたら、移さない（フォルダなしのまま）
         const [later] = await tx.all<{ id: number }>(
           "select id from pending_ops where key = ? and kind in ('moveFeed', 'unsubscribe') limit 1",
           [feed.id],
         );
-        if (feed.folderId !== wanted && later === undefined) {
+        const [target] =
+          wanted === null
+            ? [{ id: null }]
+            : await tx.all<{ id: string }>("select id from folders where id = ?", [wanted]);
+        if (feed.folderId !== wanted && later === undefined && target !== undefined) {
           await enqueue(tx, { kind: "moveFeed", feedId: feed.id, folderId: wanted }, this.#now());
         }
       },
@@ -304,8 +309,10 @@ export class ReaderCore {
   }
 
   /** OPML を取り込む。sendo が順に登録し、フィードと記事は次からの同期で届く */
-  importOpml(xml: string): Promise<OpmlImportResult> {
+  async importOpml(xml: string): Promise<OpmlImportResult> {
     this.#requireSignedIn();
+    // まだ送っていない操作（取り込むフィードの購読の停止など）を先に送り、順番を入れ替えない
+    await this.#flushQueue();
     return importOpml(this.#api, xml, this.#session.signal);
   }
 
