@@ -47,3 +47,6 @@ work/
 test-results/
 playwright-report/
 .lighthouseci/
+# WSL で Lighthouse を動かすと、chrome-launcher が Windows の一時フォルダの名前
+# （C:\Users\…）でディレクトリを作る
+C:*

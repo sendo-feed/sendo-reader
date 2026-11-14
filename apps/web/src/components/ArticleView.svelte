@@ -31,6 +31,7 @@
     untrack(() => {
       // 開く記事が替わったら（閉じたときも）、次に開いたときにまた既読にする
       if (markedFor !== id) markedFor = null;
+      saveError = null;
       if (id === null) {
         article = null;
         missing = false;
@@ -56,9 +57,19 @@
     if (current === null) return;
     const on = current[field] === null;
     article = { ...current, [field]: on ? Date.now() : null };
-    if (field === "readAt") await reader.client.setRead(current.id, on);
-    else await reader.client.setStarred(current.id, on);
+    saveError = null;
+    try {
+      if (field === "readAt") await reader.client.setRead(current.id, on);
+      else await reader.client.setStarred(current.id, on);
+    } catch {
+      // 手元に書けなかった（容量不足など）。表示を手元の DB の状態に戻す
+      saveError = "保存できませんでした。";
+      if (articleId === current.id) await load(current.id);
+    }
   }
+
+  /** 書き込みに失敗したときの知らせ */
+  let saveError = $state<string | null>(null);
 
   /** 記事の URL は、http ／ https のものだけをリンクにする（記事のデータは信頼できない） */
   const link = $derived(article === null ? null : toSafeHttpUrl(article.url));
@@ -89,6 +100,9 @@
         <button type="button" onclick={() => toggle("readAt")}>
           {article.readAt === null ? "既読にする" : "未読に戻す"}
         </button>
+        {#if saveError !== null}
+          <span class="error" role="alert">{saveError}</span>
+        {/if}
         {#if link !== null}
           <a href={link} target="_blank" rel="noopener noreferrer">元の記事を開く</a>
         {/if}
@@ -139,6 +153,10 @@
 
   .empty {
     color: var(--muted);
+  }
+
+  .error {
+    color: var(--danger);
   }
 
   .back {
