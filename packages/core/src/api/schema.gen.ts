@@ -179,7 +179,7 @@ export interface paths {
         post?: never;
         /**
          * 購読をやめる
-         * @description フィードと、その記事をすべて消す。
+         * @description フィードの記事は、スターを付けたものを除いて受信箱から消える。フィードと記事そのものは、ほかの人のために残る。
          */
         delete: {
             parameters: {
@@ -752,6 +752,61 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/sync": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 前回の同期からの差分を取る
+         * @description カーソルなしで呼ぶと、最初の同期を始める（消した印の付いていないフォルダと購読、未読・スター・直近 30 日の記事）。
+         *     応答の cursor を次に渡すと、そのあとに変わったものだけを返す。hasMore が true なら、すぐにもう一度呼ぶ。
+         *     配列は変更番号の順に並んでいる。同じ id が続けて来たら、後のものを採る。
+         *     deleted が true のものは手元から消す。手元の行を消すのは、その行の deleted が届いたときだけにする。購読をやめた（feeds の deleted）からといって、そのフィードの記事を消さない（配列ごとにページを送るので、配列をまたいだ順序は保証されない）。
+         *     cursor の中身には意味を持たせていないので、クライアントはそのまま送り返すだけにする。
+         */
+        get: {
+            parameters: {
+                query?: {
+                    /** @description 前回の応答の cursor */
+                    cursor?: string;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description 差分 */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["SyncChanges"];
+                    };
+                };
+                /** @description カーソルが読めない（最初から同期し直す） */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -769,7 +824,10 @@ export interface components {
             nextFetchAt: string;
             errorCount: number;
             lastError: string | null;
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description 購読した時刻
+             */
             createdAt: string;
         };
         Error: {
@@ -803,8 +861,11 @@ export interface components {
             author: string | null;
             /** Format: date-time */
             publishedAt: string;
-            /** Format: date-time */
-            createdAt: string;
+            /**
+             * Format: date-time
+             * @description 受信箱に入った時刻（サーバーの DB の時計）
+             */
+            receivedAt: string;
             /**
              * Format: date-time
              * @description 既読にした時刻。未読なら null
@@ -828,9 +889,11 @@ export interface components {
             all?: true;
             /**
              * Format: date-time
-             * @description この時刻より前に取り込んだ記事だけを既読にする（ids 以外では必須）。記事の一覧の最初のページの asOf を渡す。クライアントの時計の時刻は使わない（サーバーとずれていると、一覧に出ていなかった記事まで既読になる）
+             * @description この時刻より前に受信箱に入った記事だけを既読にする。記事の一覧の最初のページの asOf を渡す。クライアントの時計の時刻は使わない（サーバーとずれていると、一覧に出ていなかった記事まで既読になる）
              */
             until?: string;
+            /** @description 同期で未読のまま手元に届いた記事だけを既読にする。hasMore が false になるまで同期した、最後の応答の cursor を渡す（ローカルファーストのクライアント向け）。途中の応答の cursor は 400（sync_incomplete）。その同期のあとに未読に戻した記事は、どの端末で戻したかによらず入らない（既読にするなら ids で送る） */
+            cursor?: string;
         };
         UnreadCounts: {
             total: number;
@@ -863,6 +926,53 @@ export interface components {
                 /** @enum {string} */
                 reason: "url_not_allowed" | "url_too_long" | "duplicate" | "too_many";
             }[];
+        };
+        SyncChanges: {
+            cursor: string;
+            hasMore: boolean;
+            folders: components["schemas"]["SyncFolder"][];
+            feeds: components["schemas"]["SyncFeed"][];
+            articles: components["schemas"]["SyncArticle"][];
+        };
+        SyncFolder: {
+            id: string;
+            name: string;
+            /** Format: date-time */
+            createdAt: string;
+            /** @description 消した印。true なら、手元からも消す（ほかの項目は最後の状態） */
+            deleted: boolean;
+        };
+        SyncFeed: {
+            /** @description フィードの ID */
+            id: string;
+            url: string;
+            title: string | null;
+            siteUrl: string | null;
+            folderId: string | null;
+            /**
+             * Format: date-time
+             * @description 購読した時刻
+             */
+            createdAt: string;
+            /** @description 購読をやめた印。true なら、手元の購読を消す。記事は消さない（受信箱から消えた記事は、articles に deleted: true で届く） */
+            deleted: boolean;
+        };
+        SyncArticle: components["schemas"]["SyncInboxArticle"] | components["schemas"]["SyncRemovedArticle"];
+        SyncInboxArticle: components["schemas"]["Article"] & {
+            /**
+             * @description 受信箱にある記事
+             * @enum {boolean}
+             */
+            deleted: false;
+        };
+        SyncRemovedArticle: {
+            /** @description 記事の ID */
+            id: string;
+            /**
+             * @description 受信箱から消えた記事。手元から消す
+             * @enum {boolean}
+             */
+            deleted: true;
         };
     };
     responses: never;
