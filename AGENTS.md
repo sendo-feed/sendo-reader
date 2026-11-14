@@ -24,13 +24,13 @@ Sendo の公式リーダー。`packages/core`（同期エンジン）と `apps/w
 - `pnpm e2e`：画面を通したテスト（Playwright）。`pnpm build` のあとに動かす。本番のビルドを `vite preview` で開き、`/api` には `packages/core/test/fake-sendo.ts` の偽の sendo が答える。速さの予算（キャッシュ済みの起動から記事まで 1 秒、操作の反応 100ms）も、CPU を 4 倍遅くして確かめる
 - `pnpm --filter @sendo-reader/web lighthouse`：初回の読み込みを Lighthouse で測り、`apps/web/.lighthouseci/` に残す（上限はまだ決めていない）。手元では `CHROME_PATH` に Chromium の場所を渡す
 - `apps/web/wrangler.jsonc` を変えたら `pnpm --filter @sendo-reader/web cf-typegen` で型を作り直す
-- sendo の API が変わったら、`pnpm --filter @sendo-reader/core api:fetch`（手元の sendo の `/api/v1/openapi.json` を `packages/core/src/api/openapi.json` に写す。`SENDO_OPENAPI` で別の URL かファイルを指せる）と `pnpm --filter @sendo-reader/core api:generate`（`schema.gen.ts` を作る）を実行し、両方をコミットする。生成したファイルは手で直さない（CI で食い違いを検査している）
+- sendo の API が変わったら、`pnpm --filter @sendo-reader/core api:fetch`（sendo の OpenAPI を `packages/core/src/api/openapi.json` に写す。既定は手元の sendo の `/api/v1/openapi.json`。`SENDO_OPENAPI` で、sendo の `spec/openapi.json` などの別のファイルか URL を指せる）と `pnpm --filter @sendo-reader/core api:generate`（`schema.gen.ts` を作る）を実行し、両方をコミットする。生成したファイルは手で直さない（CI で食い違いを検査している）
 
 ## ディレクトリ
 
 - `packages/core/`：同期エンジンとローカル DB（UI に依存しない）。`test/` にテスト（Vitest、Node で動く）
   - `src/reader.ts`：`ReaderCore`。ログイン、同期、手元の DB の読み出し、変更の通知をまとめる窓口
-  - `src/api/`：sendo の API。`schema.gen.ts` は OpenAPI から生成したもの。`sync-contract.ts` は、sendo の OpenAPI に `/sync` が入るまでの仮の応答の形と、core の中の形（`src/sync/page.ts` の `SyncPage`）への変換。仮の形を使うのはこのファイルだけにし、同期のロジックは `SyncPage` だけを扱う
+  - `src/api/`：sendo の API。`schema.gen.ts` は OpenAPI から生成したもの。`sync-contract.ts` は、`/sync` の応答の形を確かめて（外から来たデータなので）、core の中の形（`src/sync/page.ts` の `SyncPage`）に変える。応答の形を扱うのはこのファイルだけにし、同期のロジックは `SyncPage` だけを扱う
   - `src/db/`：DB の窓口（`database.ts`）、スキーマとマイグレーション（`schema.ts`。足すだけにし、出したものは書き換えない）、画面のための読み出し（`queries.ts`）、sqlite-wasm の実装（`sqlite-wasm.ts`）
   - `src/online.ts`：sendo に問い合わせないとできない操作（フィードの候補探し、購読、OPML の取り込み）。手元にすぐ反映できないので、画面では待っている間の表示を出す
   - `src/sync/`：差分同期（`pull.ts`）と操作キュー（`ops.ts` が操作ごとの「手元への反映・送り方・戻し方」、`queue.ts` が積む・まとめる・送る）。操作は手元への反映と同じトランザクションで積み、同期で届いた行の上に重ね直す。どの操作も冪等にする

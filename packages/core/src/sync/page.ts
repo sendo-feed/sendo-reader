@@ -9,7 +9,12 @@ export interface SyncPage {
   cursor: string;
   /** 続きがある */
   hasMore: boolean;
+  /** deleted なら、消した印。手元からも消す */
   folders: (Folder & { deleted: boolean })[];
+  /** deleted なら、購読をやめた印。手元の購読を消す（記事は消さない） */
   feeds: (Feed & { deleted: boolean })[];
-  articles: Article[];
+  /** 受信箱の記事か、受信箱から消えた記録 */
+  articles: SyncArticle[];
 }
+
+export type SyncArticle = (Article & { deleted: false }) | { id: string; deleted: true };

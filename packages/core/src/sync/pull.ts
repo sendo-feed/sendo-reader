@@ -1,7 +1,13 @@
 import { ApiError, type SendoApi } from "../api/client";
 import type { Database, Executor, SqlValue } from "../db/database";
 import { deleteSetting, getSetting, setSetting } from "../db/settings";
-import { CURSOR_KEY, clearSyncedRows, RESYNC_KEY } from "../db/synced";
+import {
+  COMPLETE_CURSOR_KEY,
+  CURSOR_KEY,
+  clearSyncedRows,
+  markSyncComplete,
+  RESYNC_KEY,
+} from "../db/synced";
 import type { Article, Table } from "../models";
 import type { SyncPage } from "./page";
 import { reapplyPending } from "./queue";
@@ -15,7 +21,7 @@ const MAX_PAGES = 1000;
 export interface PullResult {
   /** 取ったページの数 */
   pages: number;
-  /** カーソルが古すぎて、最初から同期し直した */
+  /** カーソルが読めないと言われた（または頼まれた）ので、最初から同期し直した */
   reset: boolean;
   /** 中身が変わった表 */
   changed: Set<Table>;
@@ -55,8 +61,8 @@ export async function pull(db: Database, api: SendoApi, options: PullOptions): P
     try {
       page = await api.sync(cursor, options.signal);
     } catch (error) {
-      if (error instanceof ApiError && error.kind === "cursor_expired") {
-        // 消した印が回収され、差分を出せない。最初から取り直す
+      if (error instanceof ApiError && error.kind === "cursor_invalid") {
+        // 消した印が回収されて差分を出せない、カーソルの形が変わった、など。最初から取り直す
         await resync(db, api, options, result);
         break;
       }
@@ -70,6 +76,7 @@ export async function pull(db: Database, api: SendoApi, options: PullOptions): P
       const changed = await applyPage(tx, page);
       await reapplyPending(tx);
       await setSetting(tx, CURSOR_KEY, page.cursor);
+      if (!page.hasMore) await markSyncComplete(tx, page.cursor);
       return changed;
     });
     result.pages += 1;
@@ -123,7 +130,10 @@ async function resync(
       );
     }
     await reapplyPending(tx);
-    if (cursor !== null) await setSetting(tx, CURSOR_KEY, cursor);
+    if (cursor !== null) {
+      await setSetting(tx, CURSOR_KEY, cursor);
+      await markSyncComplete(tx, cursor);
+    }
     await deleteSetting(tx, RESYNC_KEY);
   });
   result.pages += pages.length;
@@ -144,15 +154,14 @@ async function finish(db: Database, options: PullOptions, result: PullResult) {
 /** 同期で届いた 1 ページを書き込む。変わった表を返す */
 async function applyPage(tx: Executor, page: SyncPage): Promise<Set<Table>> {
   const changed = new Set<Table>();
-  // フォルダ → 購読 → 記事の順に当てる。購読をやめた印で記事を消してから、届いた記事を入れる
+  // 表ごとに、届いた順（sendo の変更番号の順）に当てる。手元の行を消すのは、その行の消した印や
+  // 消した記録が届いたときだけ（表をまたいだ順序は保証されないので、ほかの表の変化からは消さない）
   for (const folder of page.folders) {
     // フォルダを消すと、入っていたフィードもフォルダなしに変わる
     if (await applyFolder(tx, folder)) changed.add("feeds");
   }
   if (page.folders.length > 0) changed.add("folders");
-  for (const feed of page.feeds) {
-    if (await applyFeed(tx, feed)) changed.add("articles");
-  }
+  for (const feed of page.feeds) await applyFeed(tx, feed);
   if (page.feeds.length > 0) changed.add("feeds");
   for (const article of page.articles) await applyArticle(tx, article);
   if (page.articles.length > 0) changed.add("articles");
@@ -178,16 +187,12 @@ async function applyFolder(tx: Executor, folder: SyncPage["folders"][number]): P
   return false;
 }
 
-/** 購読を書き込む。購読をやめた印で記事を消したら true */
-async function applyFeed(tx: Executor, feed: SyncPage["feeds"][number]): Promise<boolean> {
+/** 購読を書き込む */
+async function applyFeed(tx: Executor, feed: SyncPage["feeds"][number]): Promise<void> {
   if (feed.deleted) {
+    // 記事は消さない。受信箱から消えた記事は、記事ごとの消した記録で届く（sync.md の 3）
     await tx.run("delete from feeds where id = ?", [feed.id]);
-    // 購読をやめたフィードの記事は、スターを付けたもの以外を手元から消す（sync.md）
-    const removed = await tx.all<{ id: string }>(
-      "delete from articles where feed_id = ? and starred_at is null returning id",
-      [feed.id],
-    );
-    return removed.length > 0;
+    return;
   }
   await tx.run(
     `insert into feeds (id, url, title, site_url, folder_id, created_at) values (?, ?, ?, ?, ?, ?)
@@ -196,19 +201,32 @@ async function applyFeed(tx: Executor, feed: SyncPage["feeds"][number]): Promise
        folder_id = excluded.folder_id, created_at = excluded.created_at`,
     [feed.id, feed.url, feed.title, feed.siteUrl, feed.folderId, feed.createdAt],
   );
-  return false;
 }
 
-async function applyArticle(tx: Executor, article: Article): Promise<void> {
+/** 記事を書き込むか、受信箱から消えた記録なら手元から消す */
+async function applyArticle(tx: Executor, article: SyncPage["articles"][number]): Promise<void> {
+  if (article.deleted) {
+    await tx.run("delete from articles where id = ?", [article.id]);
+    return;
+  }
+  await writeArticle(tx, article);
+}
+
+/**
+ * 届いた記事を書き込む。最後まで同期し終えるまでは、そのカーソルの範囲の外として扱う
+ * （read_synced = 0。終えたら markSyncComplete が 1 にする）
+ */
+async function writeArticle(tx: Executor, article: Article): Promise<void> {
   await tx.run(
     `insert into articles (
-       id, feed_id, url, title, summary, author, published_at, received_at, read_at, starred_at
-     ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       id, feed_id, url, title, summary, author, published_at, received_at, read_at, starred_at,
+       read_synced
+     ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
      on conflict (id) do update set
        feed_id = excluded.feed_id, url = excluded.url, title = excluded.title,
        summary = excluded.summary, author = excluded.author,
        published_at = excluded.published_at, received_at = excluded.received_at,
-       read_at = excluded.read_at, starred_at = excluded.starred_at`,
+       read_at = excluded.read_at, starred_at = excluded.starred_at, read_synced = 0`,
     [
       article.id,
       article.feedId,
@@ -245,7 +263,10 @@ async function pruneOldArticles(
   return removed.length > 0;
 }
 
-/** 同期済みのカーソル。まだ一度も同期していなければ null */
-export function getCursor(db: Executor): Promise<string | null> {
-  return getSetting(db, CURSOR_KEY);
+/**
+ * 最後まで（hasMore が false になるまで）同期し終えたカーソル。まとめて既読の境界に使う。
+ * まだ一度も終えていなければ null
+ */
+export function getCompleteCursor(db: Executor): Promise<string | null> {
+  return getSetting(db, COMPLETE_CURSOR_KEY);
 }

@@ -390,6 +390,90 @@ describe("受け付けられなかった操作の扱い", () => {
   });
 });
 
+describe("まとめて既読の境界（sendo のカーソルの決まり）", () => {
+  const kinds = (requests: Record<string, unknown>[]) =>
+    requests.map((body) => ("ids" in body ? "ids" : "cursor"));
+
+  test("途中で止まった同期のカーソルは使わず、そのあとに届いた記事は ID で頼む", async () => {
+    const { server, core } = await setup();
+    server.pageSize = 1;
+    const feed = server.subscribe({ url: "https://example.com/feed.xml" });
+    await core.sync();
+    const first = server.deliver(feed.id);
+    const second = server.deliver(feed.id);
+    // 1 ページめ（first）だけ届いて止まる
+    server.failNext(null, "network");
+    await core.sync().catch(() => undefined);
+    expect(await core.getArticle(first.id)).not.toBeNull();
+    expect(await core.getArticle(second.id)).toBeNull();
+
+    await core.markAllRead({ all: true });
+    await core.sync();
+    // カーソルは最後まで同期し終えたもの（sync_incomplete で断られない）。first はその範囲の外
+    expect(kinds(server.markReadRequests)).toEqual(["cursor", "ids"]);
+    expect(server.markReadRequests[1]).toEqual({ ids: [first.id] });
+    expect(server.inbox.get(first.id)?.readAt).toEqual(expect.any(Number));
+    expect(server.inbox.get(second.id)?.readAt).toBeNull();
+    expect((await core.getArticle(first.id))?.readAt).toEqual(expect.any(Number));
+    expect((await core.getArticle(second.id))?.readAt).toBeNull();
+    expect(await core.countPending()).toBe(0);
+  });
+
+  test("同期のあとに手元で未読に戻した記事も、ID で頼んで既読にする", async () => {
+    const { server, core, article } = await withArticle();
+    await core.setRead(article.id, true);
+    await core.sync();
+
+    // 送る前に、未読に戻してからまとめて既読にする。sendo はカーソルでは、未読に戻した記事を
+    // 既読にしない
+    await core.setRead(article.id, false);
+    await core.markAllRead({ all: true });
+    await core.sync();
+    expect(kinds(server.markReadRequests)).toEqual(["cursor", "ids"]);
+    expect(server.markReadRequests[1]).toEqual({ ids: [article.id] });
+    expect(server.inbox.get(article.id)?.readAt).toEqual(expect.any(Number));
+    expect((await core.getArticle(article.id))?.readAt).toEqual(expect.any(Number));
+  });
+
+  test("最後まで同期し終えた記事は、カーソルだけで頼む", async () => {
+    const { server, core, article } = await withArticle();
+    await core.markAllRead({ all: true });
+    await core.sync();
+    expect(kinds(server.markReadRequests)).toEqual(["cursor"]);
+    expect(server.inbox.get(article.id)?.readAt).toEqual(expect.any(Number));
+  });
+
+  test("一度も最後まで同期し終えていなければ、手元の未読を 90 件ずつ ID で頼む", async () => {
+    const { server, core } = await setup();
+    const feed = server.subscribe({ url: "https://example.com/feed.xml" });
+    const delivered = Array.from({ length: 100 }, () => server.deliver(feed.id));
+    // 最初の同期の 1 ページめ（フィードと記事 99 件）だけ届いて止まる
+    server.pageSize = 100;
+    server.failNext(null, "network");
+    await core.sync().catch(() => undefined);
+    expect((await core.countUnread()).total).toBe(99);
+
+    await core.markAllRead({ all: true });
+    await core.sync();
+    expect(server.markReadRequests.map((body) => (body.ids as string[]).length)).toEqual([90, 9]);
+    expect(delivered.filter((a) => server.inbox.get(a.id)?.readAt === null)).toHaveLength(1);
+    expect((await core.countUnread()).total).toBe(1);
+  });
+
+  test("sendo がカーソルを受け付けなかったら、手元で既読にした記事をすべて ID で頼む", async () => {
+    const { server, core, db, article } = await withArticle();
+    await db.run("update settings set value = 'broken' where key = 'sync.completeCursor'");
+    await core.markAllRead({ all: true });
+    await core.sync();
+    expect(server.markReadRequests).toEqual([
+      { all: true, cursor: "broken" },
+      { ids: [article.id] },
+    ]);
+    expect(server.inbox.get(article.id)?.readAt).toEqual(expect.any(Number));
+    expect(await core.countPending()).toBe(0);
+  });
+});
+
 describe("付け替えの通知と、取り直したあとのまとめて既読", () => {
   test("同じ名前のフォルダに付け替えたら、差分がなくても、フォルダとフィードの変更を知らせる", async () => {
     const { server, core, feed } = await withArticle();
@@ -509,7 +593,7 @@ describe("最初から取り直すあいだも、手元を空にしない", () =
     server.deleteFolder(gone.id);
     server.purgeTombstones();
     server.pageSize = 1;
-    // 410 のあと、取り直しの 2 ページめで届かなくなる
+    // カーソルが読めないと言われたあと、取り直しの 2 ページめで届かなくなる
     server.failNext(null, null, "network");
     await core.sync().catch(() => undefined);
     expect((await core.getArticle(article.id))?.id).toBe(article.id);
@@ -595,7 +679,7 @@ describe("消えたフォルダの名前の変更を戻すとき", () => {
 });
 
 describe("消えたフィードへの移動を戻すとき", () => {
-  test("フィードと、スターのない記事を手元から消す（このあと届かなくても）", async () => {
+  test("フィードだけを手元から消し、記事は消した記録が届いてから消す", async () => {
     const { server, core, feed, article } = await withArticle();
     const folder = server.createFolder("Tech");
     const other = server.subscribe({ url: "https://other.example/feed" });
@@ -610,6 +694,12 @@ describe("消えたフィードへの移動を戻すとき", () => {
     server.failNext(null, null, "network");
     await core.sync().catch(() => undefined);
     expect((await core.listFeeds()).map((f) => f.id)).toEqual([other.id]);
+    // ほかの表の変化（購読がない）からは、記事を消さない（docs/decisions/local-first.md）
+    expect(await core.getArticle(article.id)).not.toBeNull();
+    expect(await core.getArticle(otherArticle.id)).not.toBeNull();
+
+    // 次の同期で、受信箱から消えた記録が届いて消える
+    await core.sync();
     expect(await core.getArticle(article.id)).toBeNull();
     expect(await core.getArticle(otherArticle.id)).not.toBeNull();
   });

@@ -1,5 +1,4 @@
 import { ApiError, errorFromBody, type SendoApi } from "../api/client";
-import type { MarkReadUpToCursorRequest } from "../api/sync-contract";
 import type { Executor } from "../db/database";
 import { getSetting, setSetting } from "../db/settings";
 import { requestResync } from "../db/synced";
@@ -20,8 +19,16 @@ export type Operation =
        * 巻き込まない。カーソルが古すぎて取り直したあとも、同じ記事を既読に重ね直せる）
        */
       articleIds: string[];
-      /** 押したときの同期のカーソル。sendo には、これより後に届いた記事を既読にしないよう頼む */
-      cursor: string;
+      /**
+       * 押したときに、最後まで同期し終えていたカーソル（一度も終えていなければ null）。sendo には、
+       * このカーソルまでに未読のまま届いた記事だけを既読にするよう頼む（sync.md の 6）
+       */
+      cursor: string | null;
+      /**
+       * articleIds のうち、カーソルの範囲に入らない記事（カーソルのあとに届いた、またはカーソルの
+       * あとに手元で既読・未読を変えた）。sendo はカーソルではこれらを既読にしないので、ID で頼む
+       */
+      extraIds: string[];
       at: number;
     }
   | { kind: "createFolder"; folderId: string; name: string; at: number }
@@ -30,7 +37,11 @@ export type Operation =
   | { kind: "moveFeed"; feedId: string; folderId: string | null }
   | { kind: "unsubscribe"; feedId: string };
 
-export type MarkReadScope = MarkReadUpToCursorRequest["scope"];
+/** まとめて既読の範囲 */
+export type MarkReadScope = { all: true } | { feedId: string } | { folderId: string };
+
+/** まとめて既読で、1 回に ID で頼める記事の数（sendo の MarkReadRequest の ids の上限） */
+export const MAX_MARK_READ_IDS = 90;
 
 /** 手元で作ったフォルダの仮の ID。sendo が ID を返したら、それに付け替える */
 export const LOCAL_ID_PREFIX = "local-";
@@ -88,10 +99,12 @@ export async function applyLocally(tx: Executor, op: Operation): Promise<void> {
       // sendo と同じく、すでにその状態なら時刻は変えない
       const read = op.read === undefined ? null : op.read ? 1 : 0;
       const starred = op.starred === undefined ? null : op.starred ? 1 : 0;
+      // 既読・未読を変えたら、最後まで同期し終えたカーソルの範囲から外れる（db/schema.ts）
       await tx.run(
         `update articles set
            read_at = case ?1 when 1 then coalesce(read_at, ?3) when 0 then null else read_at end,
-           starred_at = case ?2 when 1 then coalesce(starred_at, ?3) when 0 then null else starred_at end
+           starred_at = case ?2 when 1 then coalesce(starred_at, ?3) when 0 then null else starred_at end,
+           read_synced = case when ?1 is null then read_synced else 0 end
          where id = ?4`,
         [read, starred, op.at, op.articleId],
       );
@@ -99,7 +112,7 @@ export async function applyLocally(tx: Executor, op: Operation): Promise<void> {
     }
     case "markRead":
       await tx.run(
-        `update articles set read_at = ?
+        `update articles set read_at = ?, read_synced = 0
          where read_at is null and id in (select value from json_each(?))`,
         [op.at, JSON.stringify(op.articleIds)],
       );
@@ -122,7 +135,9 @@ export async function applyLocally(tx: Executor, op: Operation): Promise<void> {
       return;
     case "unsubscribe":
       await tx.run("delete from feeds where id = ?", [op.feedId]);
-      // 購読をやめたフィードの記事は、スターを付けたもの以外を手元から消す（sync.md）
+      // sendo は、購読をやめたフィードの記事のうち、スターのないものを受信箱から消す。手元でも先に
+      // 同じように消しておく（自分の操作の楽観的な反映。同期では、記事ごとの消した記録が届いた
+      // ときにだけ消す。docs/decisions/local-first.md）
       await tx.run("delete from articles where feed_id = ? and starred_at is null", [op.feedId]);
       return;
   }
@@ -156,9 +171,30 @@ export async function send(api: SendoApi, op: Operation, signal: AbortSignal): P
       );
       return {};
     }
-    case "markRead":
-      await api.markReadUpToCursor({ scope: op.scope, cursor: op.cursor }, signal);
+    case "markRead": {
+      let ids = op.extraIds;
+      if (op.cursor !== null) {
+        try {
+          check(
+            await client.POST("/articles/mark-read", { body: { ...op.scope, cursor: op.cursor } }),
+          );
+        } catch (error) {
+          // カーソルを受け付けなかった（sendo の版が変わって読めない、など）。手元で既読にした
+          // 記事をすべて ID で頼む（どちらで頼んでも、押したときに手元にあった記事だけになる）
+          if (!(error instanceof ApiError && isCursorRejected(error))) throw error;
+          ids = op.articleIds;
+        }
+      }
+      // 何度送っても同じ結果になる。途中で届かなくなったら、次は最初から送り直す
+      for (let i = 0; i < ids.length; i += MAX_MARK_READ_IDS) {
+        check(
+          await client.POST("/articles/mark-read", {
+            body: { ids: ids.slice(i, i + MAX_MARK_READ_IDS) },
+          }),
+        );
+      }
       return {};
+    }
     case "createFolder": {
       const created = await client.POST("/folders", { body: { name: op.name } });
       if (created.response.status === 409) {
@@ -254,11 +290,9 @@ export async function undo(
       );
       await write(async (tx) => {
         if (feed === undefined) {
-          // sendo でもう購読をやめている。購読をやめたときと同じく、スターのない記事も消す
+          // sendo でもう購読をやめている。記事は消さない（受信箱から消えた記事は、記事ごとの
+          // 消した記録が同期で届く。docs/decisions/local-first.md）
           await tx.run("delete from feeds where id = ?", [op.feedId]);
-          await tx.run("delete from articles where feed_id = ? and starred_at is null", [
-            op.feedId,
-          ]);
         } else {
           await tx.run("update feeds set folder_id = ? where id = ?", [feed.folderId, feed.id]);
         }
@@ -311,6 +345,11 @@ async function findFolderByName(
 ): Promise<string | null> {
   const { items } = check(await api.client(signal).GET("/folders"));
   return items.find((item) => item.name === name)?.id ?? null;
+}
+
+/** まとめて既読のカーソルを sendo が受け付けなかった */
+function isCursorRejected(error: ApiError): boolean {
+  return error.kind === "cursor_invalid" || error.code === "sync_incomplete";
 }
 
 /** openapi-fetch の結果から、成功ならデータを返し、失敗なら ApiError を投げる */

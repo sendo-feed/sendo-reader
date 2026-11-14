@@ -66,6 +66,12 @@ const migrations: readonly (readonly string[])[] = [
       last_error text
     ) strict`,
   ],
+  [
+    // 手元の既読・未読が、最後まで同期し終えたカーソル（sync.completeCursor）の時点の sendo と
+    // 同じなら 1。sendo のまとめて既読は、カーソルを境界にすると、そのあとに届いた記事や、そのあと
+    // 既読・未読を変えた記事を含めないので、0 の記事は ID でも頼む（sync/ops.ts の markRead）
+    "alter table articles add column read_synced integer not null default 0",
+  ],
 ];
 
 export const SCHEMA_VERSION = migrations.length;
