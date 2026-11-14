@@ -140,6 +140,8 @@ export class SyncScheduler {
   async #runOnce(): Promise<void> {
     if (!this.#core.isSignedIn()) {
       this.#update({ signedIn: false, syncing: false, error: null });
+      // ログアウトで消えた操作の数も、画面から消す
+      await this.#refreshPending();
       return;
     }
     this.#update({ signedIn: true, syncing: true });

@@ -130,6 +130,23 @@ describe("同期の予定", () => {
     expect(statuses.at(-1)).toMatchObject({ signedIn: false, syncing: false });
   });
 
+  test("送っていない操作を残してログアウトしたら、その数も 0 に戻す", async () => {
+    const { server, core, scheduler, statuses } = await scheduled();
+    const feed = server.subscribe({ url: "https://example.com/feed.xml" });
+    const article = server.deliver(feed.id);
+    await core.sync();
+    await core.setStarred(article.id, true);
+    scheduler.requestSoon();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(statuses.at(-1)?.pending).toBe(1);
+
+    await core.signOut();
+    scheduler.requestNow();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(statuses.at(-1)).toMatchObject({ signedIn: false, pending: 0 });
+    expect(scheduler.status.pending).toBe(0);
+  });
+
   test("止めたら、予定していた同期もしない", async () => {
     const { server, scheduler } = await scheduled();
     scheduler.requestSoon();
