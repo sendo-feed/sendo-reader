@@ -59,9 +59,11 @@
     fresh = top.filter((article) => !shown.has(article.id)).length;
   }
 
-  // 条件が変わったら読み直す
+  // 条件が変わったときだけ読み直す（記事を開いたり閉じたりしただけでは読み直さない。
+  // query は URL が変わるたびに作り直されるので、中身を文字列にして比べる）
+  const queryKey = $derived(JSON.stringify(query));
   $effect(() => {
-    void JSON.stringify(query);
+    void queryKey;
     untrack(() => void load());
   });
 

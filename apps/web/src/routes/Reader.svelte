@@ -8,6 +8,15 @@
 
   const reader = useReader();
 
+  /** 狭い画面で、左のメニューを開いている */
+  let menuOpen = $state(false);
+
+  // 別の画面に移ったら、メニューを閉じる
+  $effect(() => {
+    void router.url;
+    menuOpen = false;
+  });
+
   /** 開いている一覧の、読み出しの条件と見出し */
   const list = $derived.by((): { query: ArticleQuery; title: string; scope: Scope } => {
     const view = router.view;
@@ -36,8 +45,16 @@
   type Scope = { all: true } | { feedId: string } | { folderId: string } | null;
 </script>
 
-<div class="reader" class:reading={router.articleId !== null}>
+<div class="reader" class:reading={router.articleId !== null} class:menu-open={menuOpen}>
   <Sidebar />
+  <button
+    type="button"
+    class="menu"
+    aria-expanded={menuOpen}
+    onclick={() => (menuOpen = !menuOpen)}
+  >
+    {menuOpen ? "閉じる" : "メニュー"}
+  </button>
   <ArticleList query={list.query} title={list.title} markScope={list.scope} />
   <ArticleView articleId={router.articleId} />
 </div>
@@ -49,14 +66,34 @@
     height: 100dvh;
   }
 
-  /* 狭い画面では、一覧か記事のどちらかだけを出す */
+  .menu {
+    display: none;
+  }
+
+  /* 狭い画面では、一覧か記事のどちらかだけを出し、メニュー（左のフィードの一覧、同期、
+     ログアウト）は、ボタンで重ねて開く */
   @media (max-width: 60rem) {
     .reader {
       grid-template-columns: 1fr;
     }
 
+    .menu {
+      display: block;
+      position: fixed;
+      right: 0.75rem;
+      bottom: calc(0.75rem + env(safe-area-inset-bottom, 0px));
+      z-index: 2;
+    }
+
     .reader > :global(nav) {
       display: none;
+    }
+
+    .reader.menu-open > :global(nav) {
+      display: flex;
+      position: fixed;
+      inset: 0;
+      z-index: 1;
     }
 
     .reader.reading > :global(.article-list) {
