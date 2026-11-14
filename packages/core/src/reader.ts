@@ -11,6 +11,13 @@ import {
 import { migrate } from "./db/schema";
 import { getSetting, setSetting } from "./db/settings";
 import type { Article, Feed, Folder, Table, UnreadCounts } from "./models";
+import {
+  discoverFeeds,
+  type FeedCandidate,
+  importOpml,
+  type OpmlImportResult,
+  subscribe,
+} from "./online";
 import { LOCAL_ID_PREFIX, type MarkReadScope, type Operation, scopeCondition } from "./sync/ops";
 import { getCursor, type PullResult, pull } from "./sync/pull";
 import { countPending, enqueue, type PushResult, push } from "./sync/queue";
@@ -58,6 +65,8 @@ export class ReaderCore {
    */
   #session = new AbortController();
   #syncing: Promise<SyncResult> | null = null;
+  /** 手元で作ったフォルダの仮の ID から、sendo が付けた ID へ（画面が仮の ID を持ったままでも使えるように） */
+  readonly #folderIds = new Map<string, string>();
 
   private constructor(options: ReaderCoreOptions) {
     this.#db = options.db;
@@ -132,6 +141,7 @@ export class ReaderCore {
     this.#session.abort();
     this.#session = new AbortController();
     this.#syncing = null;
+    this.#folderIds.clear();
     return this.#session.signal;
   }
 
@@ -156,6 +166,7 @@ export class ReaderCore {
     const pushed = await push(this.#db, this.#api, signal, {
       onChange: (tables) => this.#emit(tables),
     });
+    for (const { from, to } of pushed.remapped) this.#folderIds.set(from, to);
     const pulled = await pull(this.#db, this.#api, {
       now: this.#now,
       signal,
@@ -226,19 +237,22 @@ export class ReaderCore {
   }
 
   renameFolder(folderId: string, name: string): Promise<void> {
-    return this.#write({ kind: "renameFolder", folderId, name: normalizeFolderName(name) }, [
+    const id = this.#folderIds.get(folderId) ?? folderId;
+    return this.#write({ kind: "renameFolder", folderId: id, name: normalizeFolderName(name) }, [
       "folders",
     ]);
   }
 
   /** フォルダを消す。入っていたフィードはフォルダなしに戻す（フィードは消さない） */
   deleteFolder(folderId: string): Promise<void> {
-    return this.#write({ kind: "deleteFolder", folderId }, ["folders", "feeds"]);
+    const id = this.#folderIds.get(folderId) ?? folderId;
+    return this.#write({ kind: "deleteFolder", folderId: id }, ["folders", "feeds"]);
   }
 
   /** フィードを別のフォルダに移す。null ならフォルダなし */
   moveFeed(feedId: string, folderId: string | null): Promise<void> {
-    return this.#write({ kind: "moveFeed", feedId, folderId }, ["feeds"]);
+    const resolved = folderId === null ? null : (this.#folderIds.get(folderId) ?? folderId);
+    return this.#write({ kind: "moveFeed", feedId, folderId: resolved }, ["feeds"]);
   }
 
   /** 購読をやめる。記事はスターを付けたものだけが残る */
@@ -246,8 +260,60 @@ export class ReaderCore {
     return this.#write({ kind: "unsubscribe", feedId }, ["feeds", "articles"]);
   }
 
-  async #write(op: Operation, tables: Table[]): Promise<void> {
+  // --- 通信が要る操作（画面では待っている間の表示を出す） ---
+
+  /** サイトの URL から、購読できるフィードの候補を探す */
+  discoverFeeds(url: string): Promise<FeedCandidate[]> {
+    this.#requireSignedIn();
+    return discoverFeeds(this.#api, url, this.#session.signal);
+  }
+
+  /**
+   * フィードを購読し、手元にもすぐ入れる（記事は次の同期で届く）。folderId には、手元で作った
+   * ばかりのフォルダ（仮の ID）も渡せる。そのときは、フォルダなしで購読してから、操作キューで
+   * そのフォルダに移す（sendo がフォルダに ID を付けたら、付け替わる）。
+   */
+  async subscribe(url: string, folderId: string | null = null): Promise<Feed> {
+    this.#requireSignedIn();
+    // まだ送っていない操作（同じフィードの購読の停止など）を先に送り、順番を入れ替えない
+    await this.#flushQueue();
+    folderId = folderId === null ? null : (this.#folderIds.get(folderId) ?? folderId);
+    const isLocalFolder = folderId?.startsWith(LOCAL_ID_PREFIX) === true;
+    const feed = await subscribe(
+      this.#db,
+      this.#api,
+      { url, folderId: isLocalFolder ? null : folderId },
+      this.#session.signal,
+    );
+    // すでに購読していたフィードは、sendo がフォルダを変えずに返すので、ここで移す
+    if (feed.folderId !== folderId) {
+      await this.#db.transaction((tx) =>
+        enqueue(tx, { kind: "moveFeed", feedId: feed.id, folderId }, this.#now()),
+      );
+      feed.folderId = folderId;
+    }
+    this.#emit(new Set<Table>(["feeds"]));
+    return feed;
+  }
+
+  /** OPML を取り込む。sendo が順に登録し、フィードと記事は次からの同期で届く */
+  importOpml(xml: string): Promise<OpmlImportResult> {
+    this.#requireSignedIn();
+    return importOpml(this.#api, xml, this.#session.signal);
+  }
+
+  /** まだ送っていない操作がなくなるまで同期する（通信が要る操作の前に、順番を守るため） */
+  async #flushQueue(): Promise<void> {
+    // 走っている同期が、そのあとに積んだ操作を送らずに終わることがあるので、数回まで繰り返す
+    for (let i = 0; i < 3 && (await countPending(this.#db)) > 0; i++) await this.sync();
+  }
+
+  #requireSignedIn(): void {
     if (this.#token === null) throw new ApiError("unauthorized", "ログインしていない");
+  }
+
+  async #write(op: Operation, tables: Table[]): Promise<void> {
+    this.#requireSignedIn();
     const session = this.#session.signal;
     await this.#db.transaction(async (tx) => {
       // 書き込みが DB の列で待っている間にログインし直したら、前のアカウントの操作を積まない
