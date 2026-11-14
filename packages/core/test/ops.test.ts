@@ -593,3 +593,24 @@ describe("消えたフォルダの名前の変更を戻すとき", () => {
     expect(await core.listFeeds()).toMatchObject([{ id: feed.id, folderId: null }]);
   });
 });
+
+describe("消えたフィードへの移動を戻すとき", () => {
+  test("フィードと、スターのない記事を手元から消す（このあと届かなくても）", async () => {
+    const { server, core, feed, article } = await withArticle();
+    const folder = server.createFolder("Tech");
+    const other = server.subscribe({ url: "https://other.example/feed" });
+    const otherArticle = server.deliver(other.id);
+    await core.sync();
+    await core.moveFeed(feed.id, folder.id);
+    await core.setStarred(otherArticle.id, true);
+    // 別の端末で購読をやめた
+    server.unsubscribe(feed.id);
+
+    // 移動（404）と読み直しは届き、スターで届かなくなる
+    server.failNext(null, null, "network");
+    await core.sync().catch(() => undefined);
+    expect((await core.listFeeds()).map((f) => f.id)).toEqual([other.id]);
+    expect(await core.getArticle(article.id)).toBeNull();
+    expect(await core.getArticle(otherArticle.id)).not.toBeNull();
+  });
+});

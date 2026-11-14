@@ -248,11 +248,17 @@ export async function undo(
       const feed = check(await api.client.GET("/feeds", { signal })).items.find(
         (item) => item.id === op.feedId,
       );
-      await write((tx) =>
-        feed === undefined
-          ? tx.run("delete from feeds where id = ?", [op.feedId])
-          : tx.run("update feeds set folder_id = ? where id = ?", [feed.folderId, feed.id]),
-      );
+      await write(async (tx) => {
+        if (feed === undefined) {
+          // sendo でもう購読をやめている。購読をやめたときと同じく、スターのない記事も消す
+          await tx.run("delete from feeds where id = ?", [op.feedId]);
+          await tx.run("delete from articles where feed_id = ? and starred_at is null", [
+            op.feedId,
+          ]);
+        } else {
+          await tx.run("update feeds set folder_id = ? where id = ?", [feed.folderId, feed.id]);
+        }
+      });
       return;
     }
     case "markRead":
