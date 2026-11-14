@@ -1,5 +1,5 @@
-import { describe, expect, test } from "vitest";
-import type { ApiError } from "../src";
+import { describe, expect, test, vi } from "vitest";
+import type { ApiError, Executor } from "../src";
 import { createSendoApi } from "../src/api/client";
 import { normalizeFolderName } from "../src/reader";
 import { pull } from "../src/sync/pull";
@@ -55,11 +55,11 @@ describe("既読とスター", () => {
     const error = await core.sync().catch((e: unknown) => e);
     expect((error as ApiError).kind).toBe("network");
     expect(await core.countPending()).toBe(1);
-    expect((await core.getArticle(article.id))?.readAt).not.toBeNull();
+    expect((await core.getArticle(article.id))?.readAt).toEqual(expect.any(Number));
 
     await core.sync();
     expect(await core.countPending()).toBe(0);
-    expect(server.inbox.get(article.id)?.readAt).not.toBeNull();
+    expect(server.inbox.get(article.id)?.readAt).toEqual(expect.any(Number));
   });
 
   test("まだ送っていない操作は、同期で届いた古い状態の上に重ね直す", async () => {
@@ -133,7 +133,7 @@ describe("既読とスター", () => {
     // まとめた操作を、同じ同期の中でもう一度送る
     expect(server.requests.filter((r) => r.startsWith("PATCH /articles/"))).toHaveLength(2);
     expect(await core.countPending()).toBe(0);
-    expect(server.inbox.get(article.id)?.starredAt).not.toBeNull();
+    expect(server.inbox.get(article.id)?.starredAt).toEqual(expect.any(Number));
   });
 
   test("sendo になくなった記事への操作は捨て、手元からも消す", async () => {
@@ -169,7 +169,7 @@ describe("すべて既読", () => {
     expect(server.markReadRequests).toHaveLength(1);
     expect(server.markReadRequests[0]).toMatchObject({ all: true });
     expect(typeof server.markReadRequests[0]?.cursor).toBe("string");
-    expect(server.inbox.get(article.id)?.readAt).not.toBeNull();
+    expect(server.inbox.get(article.id)?.readAt).toEqual(expect.any(Number));
     expect(server.inbox.get(later.id)?.readAt).toBeNull();
     expect((await core.getArticle(later.id))?.readAt).toBeNull();
   });
@@ -193,10 +193,10 @@ describe("すべて既読", () => {
     await core.sync();
 
     await core.markAllRead({ folderId: folder.id });
-    expect((await core.getArticle(inA.id))?.readAt).not.toBeNull();
+    expect((await core.getArticle(inA.id))?.readAt).toEqual(expect.any(Number));
     expect((await core.getArticle(inB.id))?.readAt).toBeNull();
     await core.sync();
-    expect(server.inbox.get(inA.id)?.readAt).not.toBeNull();
+    expect(server.inbox.get(inA.id)?.readAt).toEqual(expect.any(Number));
     expect(server.inbox.get(inB.id)?.readAt).toBeNull();
   });
 
@@ -293,7 +293,7 @@ describe("購読をやめる", () => {
     expect(await core.listFeeds()).toEqual([]);
     expect((await core.listArticles()).map((a) => a.id)).toEqual([starred.id]);
     await core.sync();
-    expect(server.feeds.get(feed.id)?.deletedAt).not.toBeNull();
+    expect(server.feeds.get(feed.id)?.deletedAt).toEqual(expect.any(Number));
     expect(await core.getArticle(article.id)).toBeNull();
   });
 });
@@ -335,7 +335,7 @@ describe("ログインとの関係", () => {
 
     const result = await pullOnly(context);
     expect(result.reset).toBe(true);
-    expect((await core.getArticle(article.id))?.starredAt).not.toBeNull();
+    expect((await core.getArticle(article.id))?.starredAt).toEqual(expect.any(Number));
     expect(await core.countPending()).toBe(1);
   });
 });
@@ -364,7 +364,7 @@ describe("受け付けられなかった操作の扱い", () => {
   test("まとめて既読を断られたら、最初から取り直して sendo の状態に戻す", async () => {
     const { server, core, article } = await withArticle();
     await core.markAllRead({ all: true });
-    expect((await core.getArticle(article.id))?.readAt).not.toBeNull();
+    expect((await core.getArticle(article.id))?.readAt).toEqual(expect.any(Number));
 
     server.failNext(400);
     const result = await core.sync();
@@ -384,8 +384,8 @@ describe("受け付けられなかった操作の扱い", () => {
     await core.sync();
     // フォルダの削除は断られたので戻り、スターは送られている
     expect((await core.listFolders()).map((f) => f.id)).toEqual([folder.id]);
-    expect(server.inbox.get(article.id)?.starredAt).not.toBeNull();
-    expect((await core.getArticle(article.id))?.starredAt).not.toBeNull();
+    expect(server.inbox.get(article.id)?.starredAt).toEqual(expect.any(Number));
+    expect((await core.getArticle(article.id))?.starredAt).toEqual(expect.any(Number));
     expect(await core.listFeeds()).toMatchObject([{ id: feed.id }]);
   });
 });
@@ -417,7 +417,7 @@ describe("付け替えの通知と、取り直したあとのまとめて既読"
 
     const result = await pullOnly(context);
     expect(result.reset).toBe(true);
-    expect((await core.getArticle(article.id))?.readAt).not.toBeNull();
+    expect((await core.getArticle(article.id))?.readAt).toEqual(expect.any(Number));
   });
 
   test("未読がなければ、まとめて既読は何もしない", async () => {
@@ -492,14 +492,14 @@ describe("最初から取り直すあいだも、手元を空にしない", () =
     server.failNext(400, "network");
     await core.sync().catch(() => undefined);
     expect(await core.listFeeds()).toMatchObject([{ id: feed.id }]);
-    expect((await core.getArticle(article.id))?.starredAt).not.toBeNull();
+    expect((await core.getArticle(article.id))?.starredAt).toEqual(expect.any(Number));
     expect(await core.countPending()).toBe(1);
 
     const result = await core.sync();
     expect(result.pull.reset).toBe(true);
     expect((await core.listFolders()).map((f) => f.id)).toEqual([folder.id]);
-    expect(server.inbox.get(article.id)?.starredAt).not.toBeNull();
-    expect((await core.getArticle(article.id))?.starredAt).not.toBeNull();
+    expect(server.inbox.get(article.id)?.starredAt).toEqual(expect.any(Number));
+    expect((await core.getArticle(article.id))?.starredAt).toEqual(expect.any(Number));
   });
 
   test("最初から取り直している途中で届かなくなっても、手元の行は前のまま残る", async () => {
@@ -513,5 +513,64 @@ describe("最初から取り直すあいだも、手元を空にしない", () =
     server.failNext(null, null, "network");
     await core.sync().catch(() => undefined);
     expect((await core.getArticle(article.id))?.id).toBe(article.id);
+  });
+});
+
+describe("取り直しとログインのし直しが、操作と重なったとき", () => {
+  test("取り直しに含まれない古い記事でも、まだ送っていない操作が指すものは残す", async () => {
+    const { server, core, article } = await withArticle();
+    const gone = server.createFolder("Gone");
+    await core.sync();
+    // 31 日たち、別の端末で既読にした（最初の同期の範囲の外になる）
+    server.advance(31 * 24 * 60 * 60 * 1000);
+    server.setArticleState(article.id, { read: true });
+    server.deleteFolder(gone.id);
+    server.purgeTombstones();
+
+    // 取り直しの通信を待っている間に、手元でスターを付ける
+    server.onRequest = async (path) => {
+      if (path === "GET /sync") {
+        server.onRequest = null;
+        await core.setStarred(article.id, true);
+      }
+    };
+    const result = await core.sync();
+    expect(result.pull.reset).toBe(true);
+    const kept = await core.getArticle(article.id);
+    expect(kept).not.toBeNull();
+    expect(kept?.starredAt).toEqual(expect.any(Number));
+  });
+
+  test("ログインし直している途中に呼んだ書き込みは、新しいアカウントの操作キューに積まない", async () => {
+    const { server, core, db } = await withArticle();
+    server.otherTokens.add("sendo_b");
+
+    // ログインし直すトランザクションを、中で止められるようにする
+    const original = db.transaction.bind(db);
+    let pauseNext = false;
+    let release = () => {};
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    db.transaction = (<T>(fn: (tx: Executor) => Promise<T>) => {
+      if (!pauseNext) return original(fn);
+      pauseNext = false;
+      return original(async (tx) => {
+        await held;
+        return fn(tx);
+      });
+    }) as typeof db.transaction;
+    server.onRequest = async (path) => {
+      if (path === "GET /folders") pauseNext = true;
+    };
+
+    const signingIn = core.signIn("sendo_b");
+    await vi.waitFor(() => expect(pauseNext).toBe(false));
+    const writing = core.createFolder("X").catch((e: unknown) => e);
+    release();
+    await signingIn;
+    expect(((await writing) as ApiError).kind).toBe("unauthorized");
+    expect(await db.all("select id from pending_ops")).toEqual([]);
+    expect(await core.listFolders()).toEqual([]);
   });
 });

@@ -190,7 +190,10 @@ export class ReaderCore {
    */
   async markAllRead(scope: MarkReadScope): Promise<void> {
     if (this.#token === null) throw new ApiError("unauthorized", "ログインしていない");
+    const session = this.#session.signal;
     const op = await this.#db.transaction(async (tx) => {
+      // 書き込みが DB の列で待っている間にログインし直したら、前のアカウントの操作を積まない
+      throwIfSessionEnded(session);
       const cursor = await getCursor(tx);
       if (cursor === null) return null;
       const [condition, params] = scopeCondition(scope);
@@ -245,7 +248,12 @@ export class ReaderCore {
 
   async #write(op: Operation, tables: Table[]): Promise<void> {
     if (this.#token === null) throw new ApiError("unauthorized", "ログインしていない");
-    await this.#db.transaction((tx) => enqueue(tx, op, this.#now()));
+    const session = this.#session.signal;
+    await this.#db.transaction(async (tx) => {
+      // 書き込みが DB の列で待っている間にログインし直したら、前のアカウントの操作を積まない
+      throwIfSessionEnded(session);
+      await enqueue(tx, op, this.#now());
+    });
     this.#emit(new Set(tables));
   }
 
@@ -315,4 +323,9 @@ export function normalizeFolderName(value: string): string {
     out += char;
   }
   return out;
+}
+
+/** 書き込みを始めたときのログインが、もう終わっていたら投げる */
+function throwIfSessionEnded(session: AbortSignal): void {
+  if (session.aborted) throw new ApiError("unauthorized", "ログインし直したので書き込まなかった");
 }

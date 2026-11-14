@@ -1,5 +1,5 @@
 import { ApiError, type SendoApi } from "../api/client";
-import type { Database, Executor } from "../db/database";
+import type { Database, Executor, SqlValue } from "../db/database";
 import { deleteSetting, getSetting, setSetting } from "../db/settings";
 import { CURSOR_KEY, clearSyncedRows, RESYNC_KEY } from "../db/synced";
 import type { Article, Table } from "../models";
@@ -103,8 +103,25 @@ async function resync(
   }
   await db.transaction(async (tx) => {
     options.signal?.throwIfAborted();
+    // まだ送っていない操作が指す記事は、取り直した中になくても残す（最初の同期の範囲の外の
+    // 古い記事にスターを付けた、など。消すと、重ね直す先がなくなる）
+    const kept = await tx.all<Record<string, SqlValue>>(
+      `select * from articles where id in (
+         select json_extract(payload, '$.articleId') from pending_ops
+         union
+         select value from pending_ops, json_each(json_extract(payload, '$.articleIds'))
+       )`,
+    );
     await clearSyncedRows(tx);
     for (const page of pages) await applyPage(tx, page);
+    for (const row of kept) {
+      const columns = Object.keys(row);
+      await tx.run(
+        `insert into articles (${columns.join(", ")}) values (${columns.map(() => "?").join(", ")})
+         on conflict (id) do nothing`,
+        columns.map((column) => row[column] ?? null),
+      );
+    }
     await reapplyPending(tx);
     if (cursor !== null) await setSetting(tx, CURSOR_KEY, cursor);
     await deleteSetting(tx, RESYNC_KEY);
