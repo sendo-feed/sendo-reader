@@ -1,7 +1,7 @@
 import { ApiError, type SendoApi } from "../api/client";
 import type { Database, Executor } from "../db/database";
-import { getSetting, setSetting } from "../db/settings";
-import { CURSOR_KEY, clearSyncedRows } from "../db/synced";
+import { deleteSetting, getSetting, setSetting } from "../db/settings";
+import { CURSOR_KEY, clearSyncedRows, RESYNC_KEY } from "../db/synced";
 import type { Article, Table } from "../models";
 import type { SyncPage } from "./page";
 import { reapplyPending } from "./queue";
@@ -40,8 +40,13 @@ export interface PullOptions {
  */
 export async function pull(db: Database, api: SendoApi, options: PullOptions): Promise<PullResult> {
   const result: PullResult = { pages: 0, reset: false, changed: new Set() };
-  let cursor = await getSetting(db, CURSOR_KEY);
+  // 断られた操作を戻せなかったときなどに、最初から取り直すよう頼まれている
+  if ((await getSetting(db, RESYNC_KEY)) !== null) {
+    await resync(db, api, options, result);
+    return finish(db, options, result);
+  }
 
+  let cursor = await getSetting(db, CURSOR_KEY);
   while (true) {
     if (result.pages >= MAX_PAGES) {
       throw new Error(`同期が ${MAX_PAGES} ページで終わらなかった`);
@@ -50,14 +55,10 @@ export async function pull(db: Database, api: SendoApi, options: PullOptions): P
     try {
       page = await api.sync(cursor, options.signal);
     } catch (error) {
-      if (error instanceof ApiError && error.kind === "cursor_expired" && !result.reset) {
-        // 消した印が回収され、差分を出せない。手元を空にして最初から取り直す
-        await clearSyncedData(db, options.signal);
-        for (const table of ["folders", "feeds", "articles"] as const) result.changed.add(table);
-        options.onPage?.(new Set(result.changed));
-        cursor = null;
-        result.reset = true;
-        continue;
+      if (error instanceof ApiError && error.kind === "cursor_expired") {
+        // 消した印が回収され、差分を出せない。最初から取り直す
+        await resync(db, api, options, result);
+        break;
       }
       throw error;
     }
@@ -78,7 +79,44 @@ export async function pull(db: Database, api: SendoApi, options: PullOptions): P
     cursor = page.cursor;
     if (!page.hasMore) break;
   }
+  return finish(db, options, result);
+}
 
+/**
+ * 最初から取り直す。すべてのページを取り終えてから、1 つのトランザクションで手元を置き換える
+ * （途中で届かなくなっても、手元の行は前のまま残る。オフラインで空にならない）。
+ */
+async function resync(
+  db: Database,
+  api: SendoApi,
+  options: PullOptions,
+  result: PullResult,
+): Promise<void> {
+  const pages: SyncPage[] = [];
+  let cursor: string | null = null;
+  while (true) {
+    if (pages.length >= MAX_PAGES) throw new Error(`同期が ${MAX_PAGES} ページで終わらなかった`);
+    const page: SyncPage = await api.sync(cursor, options.signal);
+    pages.push(page);
+    cursor = page.cursor;
+    if (!page.hasMore) break;
+  }
+  await db.transaction(async (tx) => {
+    options.signal?.throwIfAborted();
+    await clearSyncedRows(tx);
+    for (const page of pages) await applyPage(tx, page);
+    await reapplyPending(tx);
+    if (cursor !== null) await setSetting(tx, CURSOR_KEY, cursor);
+    await deleteSetting(tx, RESYNC_KEY);
+  });
+  result.pages += pages.length;
+  result.reset = true;
+  const all = new Set<Table>(["folders", "feeds", "articles"]);
+  for (const table of all) result.changed.add(table);
+  options.onPage?.(all);
+}
+
+async function finish(db: Database, options: PullOptions, result: PullResult) {
   if (await pruneOldArticles(db, options.now(), options.signal)) {
     result.changed.add("articles");
     options.onPage?.(new Set<Table>(["articles"]));
@@ -188,17 +226,6 @@ async function pruneOldArticles(
     );
   });
   return removed.length > 0;
-}
-
-/**
- * 同期で届いたデータとカーソルを消す。トークンと、まだ送り終えていない操作は残す
- * （作り直したあと、届いた行の上に重ね直す）。手元に入った順の番号は戻さない。
- */
-export async function clearSyncedData(db: Database, signal?: AbortSignal): Promise<void> {
-  await db.transaction(async (tx) => {
-    signal?.throwIfAborted();
-    await clearSyncedRows(tx);
-  });
 }
 
 /** 同期済みのカーソル。まだ一度も同期していなければ null */

@@ -479,3 +479,39 @@ describe("同じ名前のフォルダに付け替えたあと", () => {
     expect(await core.countPending()).toBe(1);
   });
 });
+
+describe("最初から取り直すあいだも、手元を空にしない", () => {
+  test("断られた操作のあとに届かなくなっても、記事とフィードは残り、次の同期で取り直す", async () => {
+    const { server, core, feed, article } = await withArticle();
+    const folder = server.createFolder("Tech");
+    await core.sync();
+    await core.deleteFolder(folder.id);
+    await core.setStarred(article.id, true);
+
+    // フォルダの削除は断られ（400）、スターで届かなくなる
+    server.failNext(400, "network");
+    await core.sync().catch(() => undefined);
+    expect(await core.listFeeds()).toMatchObject([{ id: feed.id }]);
+    expect((await core.getArticle(article.id))?.starredAt).not.toBeNull();
+    expect(await core.countPending()).toBe(1);
+
+    const result = await core.sync();
+    expect(result.pull.reset).toBe(true);
+    expect((await core.listFolders()).map((f) => f.id)).toEqual([folder.id]);
+    expect(server.inbox.get(article.id)?.starredAt).not.toBeNull();
+    expect((await core.getArticle(article.id))?.starredAt).not.toBeNull();
+  });
+
+  test("最初から取り直している途中で届かなくなっても、手元の行は前のまま残る", async () => {
+    const { server, core, article } = await withArticle();
+    const gone = server.createFolder("Gone");
+    await core.sync();
+    server.deleteFolder(gone.id);
+    server.purgeTombstones();
+    server.pageSize = 1;
+    // 410 のあと、取り直しの 2 ページめで届かなくなる
+    server.failNext(null, null, "network");
+    await core.sync().catch(() => undefined);
+    expect((await core.getArticle(article.id))?.id).toBe(article.id);
+  });
+});

@@ -1,7 +1,7 @@
 import { ApiError, errorFromBody, type SendoApi } from "../api/client";
 import type { MarkReadUpToCursorRequest } from "../api/sync-contract";
 import type { Executor } from "../db/database";
-import { clearSyncedRows } from "../db/synced";
+import { requestResync } from "../db/synced";
 
 /**
  * 手元にすぐ反映して、あとで sendo に送る操作（docs/decisions/local-first.md、sendo の sync.md）。
@@ -205,7 +205,7 @@ export async function send(api: SendoApi, op: Operation, signal: AbortSignal): P
  * 戻す先は sendo の今の状態にする。通信が要るものは、ここで読み直す。
  *
  * 戻し方が決まっていないもの（sendo が状態を変えずに断ったので、次の差分にも載らないもの）は、
- * 同期で届いた手元の行を消して、最初から取り直す。
+ * 次の同期で最初から取り直す（手元の行は、取り直し終えるまで残す）。
  */
 export async function undo(
   api: SendoApi,
@@ -256,7 +256,7 @@ export async function undo(
     case "unsubscribe":
       break;
   }
-  await write(clearSyncedRows);
+  await write(requestResync);
 }
 
 /**
