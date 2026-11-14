@@ -1,6 +1,7 @@
 import { ApiError, type SendoApi } from "../api/client";
 import type { Database, Executor } from "../db/database";
-import { deleteSetting, getSetting, setSetting } from "../db/settings";
+import { getSetting, setSetting } from "../db/settings";
+import { CURSOR_KEY, clearSyncedRows } from "../db/synced";
 import type { Article, Table } from "../models";
 import type { SyncPage } from "./page";
 import { reapplyPending } from "./queue";
@@ -11,7 +12,6 @@ export const LOCAL_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 /** 1 回の同期で取るページの上限。サーバーが続きを返し続けても止まるようにする */
 const MAX_PAGES = 1000;
 
-const CURSOR_KEY = "sync.cursor";
 /** 記事が手元に初めて入った順の番号（articles.local_seq）の、最後に振った値 */
 const ARTICLE_SEQ_KEY = "local.articleSeq";
 
@@ -212,10 +212,7 @@ async function pruneOldArticles(
 export async function clearSyncedData(db: Database, signal?: AbortSignal): Promise<void> {
   await db.transaction(async (tx) => {
     signal?.throwIfAborted();
-    await tx.run("delete from articles");
-    await tx.run("delete from feeds");
-    await tx.run("delete from folders");
-    await deleteSetting(tx, CURSOR_KEY);
+    await clearSyncedRows(tx);
   });
 }
 

@@ -339,3 +339,53 @@ describe("ログインとの関係", () => {
     expect(await core.countPending()).toBe(1);
   });
 });
+
+describe("受け付けられなかった操作の扱い", () => {
+  test("送っている間に新しい操作がまとめられていたら、断られても捨てずに送り直す", async () => {
+    const { server, core } = await withArticle();
+    const tech = server.createFolder("Tech");
+    server.createFolder("News");
+    await core.sync();
+
+    await core.renameFolder(tech.id, "News");
+    server.onRequest = async (path) => {
+      if (path === `PATCH /folders/${tech.id}` && server.folders.get(tech.id)?.name === "Tech") {
+        server.onRequest = null;
+        await core.renameFolder(tech.id, "Technology");
+      }
+    };
+    const result = await core.sync();
+    expect(result.push.rejected).toEqual([]);
+    expect(server.folders.get(tech.id)?.name).toBe("Technology");
+    expect((await core.listFolders()).find((f) => f.id === tech.id)?.name).toBe("Technology");
+    expect(await core.countPending()).toBe(0);
+  });
+
+  test("まとめて既読を断られたら、最初から取り直して sendo の状態に戻す", async () => {
+    const { server, core, article } = await withArticle();
+    await core.markAllRead({ all: true });
+    expect((await core.getArticle(article.id))?.readAt).not.toBeNull();
+
+    server.failNext(400);
+    const result = await core.sync();
+    expect(result.push.rejected.map((r) => r.error.kind)).toEqual(["invalid"]);
+    expect(result.pull.pages).toBeGreaterThan(0);
+    expect((await core.getArticle(article.id))?.readAt).toBeNull();
+  });
+
+  test("戻し方の決まっていない操作を断られても、残りの操作は取り直したあとに重ね直す", async () => {
+    const { server, core, feed, article } = await withArticle();
+    const folder = server.createFolder("Tech");
+    await core.sync();
+    await core.deleteFolder(folder.id);
+    await core.setStarred(article.id, true);
+
+    server.failNext(400);
+    await core.sync();
+    // フォルダの削除は断られたので戻り、スターは送られている
+    expect((await core.listFolders()).map((f) => f.id)).toEqual([folder.id]);
+    expect(server.inbox.get(article.id)?.starredAt).not.toBeNull();
+    expect((await core.getArticle(article.id))?.starredAt).not.toBeNull();
+    expect(await core.listFeeds()).toMatchObject([{ id: feed.id }]);
+  });
+});

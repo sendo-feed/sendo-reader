@@ -1,6 +1,7 @@
 import { ApiError, errorFromBody, type SendoApi } from "../api/client";
 import type { MarkReadUpToCursorRequest } from "../api/sync-contract";
 import type { Executor } from "../db/database";
+import { clearSyncedRows } from "../db/synced";
 
 /**
  * 手元にすぐ反映して、あとで sendo に送る操作（docs/decisions/local-first.md、sendo の sync.md）。
@@ -199,19 +200,27 @@ export async function send(api: SendoApi, op: Operation, signal: AbortSignal): P
 /**
  * sendo が受け付けなかった（やり直しても変わらない）操作の、手元への反映を戻す。
  * 戻す先は sendo の今の状態にする。通信が要るものは、ここで読み直す。
+ *
+ * 戻し方が決まっていないもの（sendo が状態を変えずに断ったので、次の差分にも載らないもの）は、
+ * 同期で届いた手元の行を消して、最初から取り直す。
  */
 export async function undo(
   api: SendoApi,
   op: Operation,
+  error: ApiError,
   write: (fn: (tx: Executor) => Promise<void>) => Promise<void>,
   signal: AbortSignal,
 ): Promise<void> {
   switch (op.kind) {
     case "setArticleState":
-      // 記事が受信箱にない（購読をやめた、など）。手元からも消す
-      await write((tx) => tx.run("delete from articles where id = ?", [op.articleId]));
-      return;
+      if (error.kind === "not_found") {
+        // 記事が受信箱にない（購読をやめた、など）。手元からも消す
+        await write((tx) => tx.run("delete from articles where id = ?", [op.articleId]));
+        return;
+      }
+      break;
     case "createFolder":
+      // sendo にはないフォルダ。手元からも消す
       await write(async (tx) => {
         await tx.run("delete from folders where id = ?", [op.folderId]);
         await tx.run("update feeds set folder_id = null where folder_id = ?", [op.folderId]);
@@ -242,9 +251,9 @@ export async function undo(
     case "markRead":
     case "deleteFolder":
     case "unsubscribe":
-      // 次の同期で sendo の状態が届く（消す操作は、消えていれば成功として扱っている）
-      return;
+      break;
   }
+  await write(clearSyncedRows);
 }
 
 /**

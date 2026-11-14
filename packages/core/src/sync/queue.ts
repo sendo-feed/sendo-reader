@@ -115,10 +115,14 @@ export async function push(db: Database, api: SendoApi, signal: AbortSignal): Pr
         }
         throw error;
       }
-      // やり直しても変わらない。手元の反映を sendo の状態に戻し、捨てる
+      // やり直しても変わらない。ただし、送っている間に同じものへの操作がまとめられていたら
+      // （rev が変わっていたら）、まとめた新しい操作を送り直す（戻さない、捨てない）
+      if ((await currentRev(db, next.id)) !== next.rev) continue;
+      // 手元の反映を sendo の状態に戻し、捨てる
       await undo(
         api,
         op,
+        error,
         (fn) =>
           db.transaction(async (tx) => {
             signal.throwIfAborted();
@@ -128,11 +132,17 @@ export async function push(db: Database, api: SendoApi, signal: AbortSignal): Pr
       );
       await db.transaction(async (tx) => {
         signal.throwIfAborted();
-        await tx.run("delete from pending_ops where id = ?", [next.id]);
+        // 戻している間にまとめられたら残す（次の同期で、重ね直してから送る）
+        await complete(tx, next.id, next.rev);
       });
       result.rejected.push({ op, error });
     }
   }
+}
+
+async function currentRev(db: Executor, id: number): Promise<number | null> {
+  const [row] = await db.all<{ rev: number }>("select rev from pending_ops where id = ?", [id]);
+  return row?.rev ?? null;
 }
 
 /** 送り終えた操作を消す。送っている間にまとめられていたら（rev が変わっていたら）残す */
