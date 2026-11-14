@@ -133,7 +133,7 @@ export type SendResult = { remap?: { from: string; to: string } };
 
 /** 操作を sendo に送る。失敗したら ApiError を投げる。signal で中断する（ログアウトなど） */
 export async function send(api: SendoApi, op: Operation, signal: AbortSignal): Promise<SendResult> {
-  const { client } = api;
+  const client = api.client(signal);
   switch (op.kind) {
     case "setArticleState": {
       const body: { read?: boolean; starred?: boolean } = {};
@@ -143,7 +143,6 @@ export async function send(api: SendoApi, op: Operation, signal: AbortSignal): P
         await client.PATCH("/articles/{id}", {
           params: { path: { id: op.articleId } },
           body,
-          signal,
         }),
       );
       return {};
@@ -152,7 +151,7 @@ export async function send(api: SendoApi, op: Operation, signal: AbortSignal): P
       await api.markReadUpToCursor({ scope: op.scope, cursor: op.cursor }, signal);
       return {};
     case "createFolder": {
-      const created = await client.POST("/folders", { body: { name: op.name }, signal });
+      const created = await client.POST("/folders", { body: { name: op.name } });
       if (created.response.status === 409) {
         // 同じ名前のフォルダがすでにある（前に送って応答だけ失った、または別の端末で作った）。
         // それに付け替える
@@ -167,15 +166,12 @@ export async function send(api: SendoApi, op: Operation, signal: AbortSignal): P
         await client.PATCH("/folders/{id}", {
           params: { path: { id: op.folderId } },
           body: { name: op.name },
-          signal,
         }),
       );
       return {};
     case "deleteFolder":
       try {
-        check(
-          await client.DELETE("/folders/{id}", { params: { path: { id: op.folderId } }, signal }),
-        );
+        check(await client.DELETE("/folders/{id}", { params: { path: { id: op.folderId } } }));
       } catch (error) {
         // すでにない。消したかった状態になっている
         if (!(error instanceof ApiError && error.kind === "not_found")) throw error;
@@ -186,13 +182,12 @@ export async function send(api: SendoApi, op: Operation, signal: AbortSignal): P
         await client.PATCH("/feeds/{id}", {
           params: { path: { id: op.feedId } },
           body: { folderId: op.folderId },
-          signal,
         }),
       );
       return {};
     case "unsubscribe":
       try {
-        check(await client.DELETE("/feeds/{id}", { params: { path: { id: op.feedId } }, signal }));
+        check(await client.DELETE("/feeds/{id}", { params: { path: { id: op.feedId } } }));
       } catch (error) {
         if (!(error instanceof ApiError && error.kind === "not_found")) throw error;
       }
@@ -230,7 +225,7 @@ export async function undo(
       });
       return;
     case "renameFolder": {
-      const folder = check(await api.client.GET("/folders", { signal })).items.find(
+      const folder = check(await api.client(signal).GET("/folders")).items.find(
         (item) => item.id === op.folderId,
       );
       await write(async (tx) => {
@@ -245,7 +240,7 @@ export async function undo(
       return;
     }
     case "moveFeed": {
-      const feed = check(await api.client.GET("/feeds", { signal })).items.find(
+      const feed = check(await api.client(signal).GET("/feeds")).items.find(
         (item) => item.id === op.feedId,
       );
       await write(async (tx) => {
@@ -301,7 +296,7 @@ async function findFolderByName(
   name: string,
   signal: AbortSignal,
 ): Promise<string | null> {
-  const { items } = check(await api.client.GET("/folders", { signal }));
+  const { items } = check(await api.client(signal).GET("/folders"));
   return items.find((item) => item.name === name)?.id ?? null;
 }
 
