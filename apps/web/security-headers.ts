@@ -21,8 +21,9 @@ const productionDirectives: Record<string, string[]> = {
   "frame-ancestors": ["'none'"],
   "object-src": ["'none'"],
   "require-trusted-types-for": ["'script'"],
-  // Svelte がテンプレートを作るときのポリシーだけを許す
-  "trusted-types": ["svelte-trusted-html"],
+  // Svelte がテンプレートを作るときのポリシーと、ワーカーの URL を自分のオリジンに限るポリシー
+  // （src/lib/reader.ts）だけを許す
+  "trusted-types": ["svelte-trusted-html", "sendo-worker"],
 };
 
 /**
