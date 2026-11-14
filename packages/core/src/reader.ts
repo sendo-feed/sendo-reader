@@ -18,7 +18,13 @@ import {
   type OpmlImportResult,
   subscribe,
 } from "./online";
-import { LOCAL_ID_PREFIX, type MarkReadScope, type Operation, scopeCondition } from "./sync/ops";
+import {
+  getFolderIdRemaps,
+  LOCAL_ID_PREFIX,
+  type MarkReadScope,
+  type Operation,
+  scopeCondition,
+} from "./sync/ops";
 import { getCursor, type PullResult, pull } from "./sync/pull";
 import { countPending, enqueue, lastPendingId, type PushResult, push } from "./sync/queue";
 
@@ -98,6 +104,9 @@ export class ReaderCore {
     const core = new ReaderCore(options);
     core.#token = await getSetting(options.db, TOKEN_KEY);
     core.#lastOpId = await lastPendingId(options.db);
+    for (const [from, to] of Object.entries(await getFolderIdRemaps(options.db))) {
+      core.#folderIds.set(from, to);
+    }
     return core;
   }
 

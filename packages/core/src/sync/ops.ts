@@ -1,6 +1,7 @@
 import { ApiError, errorFromBody, type SendoApi } from "../api/client";
 import type { MarkReadUpToCursorRequest } from "../api/sync-contract";
 import type { Executor } from "../db/database";
+import { getSetting, setSetting } from "../db/settings";
 import { requestResync } from "../db/synced";
 
 /**
@@ -33,6 +34,14 @@ export type MarkReadScope = MarkReadUpToCursorRequest["scope"];
 
 /** 手元で作ったフォルダの仮の ID。sendo が ID を返したら、それに付け替える */
 export const LOCAL_ID_PREFIX = "local-";
+
+const FOLDER_ID_REMAPS_KEY = "local.folderIdRemaps";
+
+/** 仮の ID から、sendo が付けた ID への対応 */
+export async function getFolderIdRemaps(db: Executor): Promise<Record<string, string>> {
+  const raw = await getSetting(db, FOLDER_ID_REMAPS_KEY);
+  return raw === null ? {} : (JSON.parse(raw) as Record<string, string>);
+}
 
 /** 同じものへの操作をまとめるときの鍵 */
 export function keyOf(op: Operation): string {
@@ -270,6 +279,10 @@ export async function undo(
  */
 export async function remapFolderId(tx: Executor, from: string, to: string): Promise<void> {
   if (from === to) return;
+  // 画面が仮の ID を持ったままでも使えるよう、付け替えを覚えておく（代表のタブが替わっても残る）
+  const remaps = await getFolderIdRemaps(tx);
+  remaps[from] = to;
+  await setSetting(tx, FOLDER_ID_REMAPS_KEY, JSON.stringify(remaps));
   // 同期ですでに届いていれば、仮のほうを消す
   await tx.run("delete from folders where id = ? and exists (select 1 from folders where id = ?)", [
     from,

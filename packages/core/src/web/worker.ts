@@ -27,6 +27,9 @@ export interface ReaderWorkerOptions {
   openDatabase?: (name: string) => Promise<Database>;
 }
 
+/** 代表として受けた呼び出しを覚えておく数 */
+const MAX_HANDLED = 1000;
+
 /** タブがしばらく前に出ていなかったら、前に出たときに同期する（ミリ秒） */
 const VISIBLE_SYNC_AFTER_MS = 30_000;
 
@@ -45,8 +48,15 @@ export function runReaderWorker(options: ReaderWorkerOptions = {}): void {
   const peers = new BroadcastChannel(`${namespace}:peers`);
 
   let leader: { core: ReaderCore; scheduler: SyncScheduler } | null = null;
+  /** 今の代表（自分が代表でないとき） */
+  let currentLeader: string | null = null;
   /** 代表に渡して、まだ答えの来ていない呼び出し */
   const forwarded = new Map<number, Extract<TabMessage, { type: "call" }>>();
+  /**
+   * 代表として受けた呼び出し（同じ呼び出しを二重に動かさない）。タブは代表が替わったと思うと
+   * 送り直すので、答えたあとにも同じ呼び出しが届きうる。古いものから捨てる
+   */
+  const handled = new Set<string>();
 
   const toTab = (message: WorkerMessage) => scope.postMessage(message);
   const toPeers = (message: PeerMessage) => peers.postMessage(message);
@@ -79,12 +89,20 @@ export function runReaderWorker(options: ReaderWorkerOptions = {}): void {
   peers.addEventListener("message", (event: MessageEvent<PeerMessage>) => {
     const message = event.data;
     switch (message.type) {
-      case "call":
+      case "call": {
         if (leader === null || !isMethod(message.method)) return;
+        const key = `${message.from}:${message.id}`;
+        if (handled.has(key)) return;
+        handled.add(key);
+        if (handled.size > MAX_HANDLED) {
+          const oldest = handled.values().next().value;
+          if (oldest !== undefined) handled.delete(oldest);
+        }
         void dispatch(leader, message.method, message.args).then((result) =>
           toPeers({ type: "result", to: message.from, id: message.id, result }),
         );
         return;
+      }
       case "result":
         if (message.to !== workerId || !forwarded.delete(message.id)) return;
         toTab({ type: "result", id: message.id, result: message.result });
@@ -96,8 +114,10 @@ export function runReaderWorker(options: ReaderWorkerOptions = {}): void {
         if (leader === null) toTab(message);
         return;
       case "leader":
-        // 新しい代表に、答えの来ていない呼び出しを送り直す
-        if (leader === null) {
+        // 代表が替わったときだけ、答えの来ていない呼び出しを新しい代表に送り直す
+        // （同じ代表が名乗り直しただけなら、すでに受けているので送らない）
+        if (leader === null && message.leaderId !== currentLeader) {
+          currentLeader = message.leaderId;
           for (const call of forwarded.values()) toPeers({ ...call, from: workerId });
         }
         return;

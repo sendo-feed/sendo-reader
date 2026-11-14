@@ -157,3 +157,52 @@ describe("複数のタブ", () => {
     expect([...server.folders.values()].map((f) => f.name)).toEqual(["Tech"]);
   });
 });
+
+describe("代表が名乗り直したときと、代表が替わったとき", () => {
+  test("タブを開き足しても、ほかのタブが頼んで答えを待っている呼び出しを二重に動かさない", async () => {
+    const { server, open } = world();
+    const first = open();
+    expect(await first.client.isSignedIn()).toBe(false);
+    const second = open();
+    expect(await second.client.isSignedIn()).toBe(false);
+
+    let release = () => {};
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let verifications = 0;
+    server.onRequest = async (path) => {
+      if (path === "GET /folders") {
+        verifications += 1;
+        await held;
+      }
+    };
+    const signingIn = second.client.signIn(TOKEN);
+    await vi.waitFor(() => expect(verifications).toBe(1));
+    // 3 つめのタブを開くと、代表が名乗り直す
+    const third = open();
+    expect(await third.client.countPending()).toBe(0);
+    release();
+    await signingIn;
+    expect(verifications).toBe(1);
+    expect(await first.client.isSignedIn()).toBe(true);
+  });
+
+  test("代表が替わっても、画面が持っている仮のフォルダの ID で操作できる", async () => {
+    const { server, open } = world();
+    const first = open();
+    await first.client.signIn(TOKEN);
+    await first.client.syncNow();
+    const second = open();
+    const tempId = await second.client.createFolder("Tech");
+    await second.client.syncNow();
+    const [created] = [...server.folders.values()];
+    expect(created?.name).toBe("Tech");
+
+    first.worker.terminate();
+    await second.client.renameFolder(tempId, "Technology");
+    await second.client.syncNow();
+    expect(server.folders.get(created?.id ?? "")?.name).toBe("Technology");
+    expect(await second.client.countPending()).toBe(0);
+  });
+});
