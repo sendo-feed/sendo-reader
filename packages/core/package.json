@@ -1,0 +1,20 @@
+{
+  "name": "@sendo-reader/core",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Sync engine and local database for sendo-reader. Independent of any UI framework.",
+  "license": "UNLICENSED",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "devDependencies": {
+    "typescript": "6.0.3",
+    "vitest": "5.0.5"
+  }
+}

@@ -1,0 +1,8 @@
+{
+  "recommendations": [
+    "biomejs.biome",
+    "editorconfig.editorconfig",
+    "svelte.svelte-vscode",
+    "vitest.explorer"
+  ]
+}

@@ -1,0 +1,31 @@
+{
+  "name": "@sendo-reader/web",
+  "version": "0.0.0",
+  "private": true,
+  "description": "sendo-reader for the web (PWA). Svelte 5 + Vite, served by Workers Static Assets.",
+  "license": "UNLICENSED",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build && wrangler deploy --dry-run --outdir .wrangler/dry-run",
+    "preview": "wrangler dev",
+    "deploy": "vite build && wrangler deploy",
+    "cf-typegen": "wrangler types worker/worker-configuration.d.ts",
+    "postinstall": "wrangler types worker/worker-configuration.d.ts",
+    "typecheck": "svelte-check --tsconfig ./tsconfig.json --fail-on-warnings && tsc --noEmit -p worker && tsc --noEmit -p test",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "@sendo-reader/core": "workspace:*",
+    "svelte": "5.57.3"
+  },
+  "devDependencies": {
+    "@sveltejs/vite-plugin-svelte": "7.3.1",
+    "svelte-check": "4.7.7",
+    "typescript": "6.0.3",
+    "vite": "8.3.5",
+    "vitest": "5.0.5",
+    "wrangler": "4.156.0"
+  }
+}

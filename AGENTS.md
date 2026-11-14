@@ -6,11 +6,33 @@ Sendo の公式リーダー。`packages/core`（同期エンジン）と `apps/w
 
 ## 最初に読むもの
 
-- `docs/decisions/`：このリポジトリの今の決定。ほかの文書と食い違ったら、こちらが正しい
+- `docs/decisions/`：このリポジトリの今の決定。ほかの文書と食い違ったら、こちらが正しい。特に `local-first.md`（同期とローカル DB）、`ui.md`（UI とツール）、`performance.md`（速さの予算）
+- サーバーとの約束ごと（認証、差分同期）は sendo の決定が正：`accounts.md`、`sync.md`
 - プロダクト全体の目的・進め方・技術構成は sendo リポジトリにある：
   - https://github.com/sendo-feed/sendo/tree/main/docs/decisions
   - https://github.com/sendo-feed/sendo/blob/main/docs/inception-deck.md
   - https://github.com/sendo-feed/sendo/blob/main/docs/tech-deck.md
+
+## 開発コマンド
+
+- `pnpm install`：依存を入れる。あわせて `apps/web/worker/worker-configuration.d.ts`（reader Worker の型）を生成する
+- `pnpm check`：型チェック、lint、テストをまとめて実行する。変更したら、コミットの前に必ず通す
+- `pnpm format`：整形して、直せる lint の指摘を直す（Biome。`.svelte` も対象）
+- `pnpm dev`：画面の dev サーバー（http://localhost:5173）。`/api` は手元の sendo（http://localhost:8787）に中継する。sendo は sendo の README のとおりに別に動かす
+- `pnpm build`：画面をビルドし、reader Worker をデプロイせずにバンドルして確かめる
+- `pnpm size`：ビルドのあとに、画面のスレッドの JS が予算（gzip 後 100KB）に収まるか確かめる
+- `apps/web/wrangler.jsonc` を変えたら `pnpm --filter @sendo-reader/web cf-typegen` で型を作り直す
+
+## ディレクトリ
+
+- `packages/core/`：同期エンジンとローカル DB（UI に依存しない）。`src/` に本体、`test/` にテスト（Vitest、Node で動く）
+- `apps/web/`：PWA（Svelte 5 ＋ Vite の SPA）
+  - `src/`：画面。`main.ts` が入口、`App.svelte` が一番外の部品
+  - `worker/`：reader Worker。静的なファイルは Workers Static Assets が返し、`/api` だけを Service binding で sendo に中継する
+  - `security-headers.ts`：CSP などのヘッダー。dev サーバーと、本番の `dist/_headers` の両方に使う
+  - `test/`：reader Worker とヘッダーのテスト
+- `scripts/`：手元と CI で動かす道具（Node で動く。`node:*` を使ってよい）
+- `apps/mobile/`：Capacitor（あとで作る）
 
 ## 言語
 
@@ -30,13 +52,21 @@ Conventional Commits を土台にする。全文は https://github.com/sendo-fee
 
 - 決定は `docs/decisions/<テーマ>.md` にテーマごとに置き、今の決定だけを書く。決定が変わったらファイルを書き換え、古い内容は残さない
 - 経緯を聞かれたら `git log -p -- docs/decisions/<テーマ>.md` を読んで答える
+- 決定ファイルを足したり状態を変えたりしたら、`docs/decisions/README.md` の一覧も直す
 
 ## 守る規約
 
-- 同期とローカル DB のロジックはすべて `packages/core` に入れる。`packages/core` は UI のフレームワークに依存しない
+- 同期とローカル DB のロジックはすべて `packages/core` に入れる。`packages/core` は UI のフレームワーク（`svelte`）と `apps/` に依存しない（Biome の `noRestrictedImports` で検査している）
+- `packages/core`、`apps/web/src`、`apps/web/worker` では `node:*` を使わない（ブラウザと Workers で動くため。Biome で検査している）
 - 画面はネットワークを待たない。読み書きはローカル DB に対して行い、サーバーとは同期で揃える
 - OpenAPI から生成したファイルは手で直さない。sendo の OpenAPI を直して生成し直す
-- 記事の本文は信頼できないデータとして扱い、表示する前に HTML をサニタイズする
+- 記事のデータ（タイトル、要約、本文）は信頼できないデータとして扱う
+  - `{@html}` を使わない（Biome の `noSvelteAtHtmlTags` で検査している）。本文の HTML を出すときは、サニタイズしてから専用の部品で出す
+  - URL は `toSafeHttpUrl`（`packages/core`）を通し、http ／ https のものだけを `href` に入れる
+- CSP を緩めない（`apps/web/security-headers.ts`）。インラインのスクリプト、`eval`、テンプレートの `style` 属性（本番の CSP で止まる。`style:` ディレクティブか CSS のクラスを使う）、ほかのオリジンへの通信を使わない。緩める必要が出たら、`docs/decisions/local-first.md` を直してから変える
+- アクセストークンを、ログ、エラーの表示、URL、Service Worker のキャッシュに入れない
+- 速さの予算（`docs/decisions/performance.md`）を超える依存を足さない。足す前に `pnpm build && pnpm size` で確かめる
+- Svelte の `generics="…"` の中に `{` を書かない（Biome が解析に失敗する）。型に名前を付けてから使う
 
 ## 変更の進め方
 
@@ -62,7 +92,7 @@ Conventional Commits を土台にする。全文は https://github.com/sendo-fee
 2. **core と画面の境界**：`packages/core` が UI のフレームワークや `apps/` に依存していないか。同期やデータのロジックが `apps/` に漏れていないか
 3. **ローカルファースト**：画面の操作がネットワークの応答を待っていないか。オフラインで操作したときに、操作キューと楽観的更新で正しく戻せるか
 4. **速さの予算**：JS が gzip 後 100KB を超えそうな依存の追加や、操作の反応が 100ms を超えそうな処理がないか
-5. **セキュリティ**：記事本文の HTML のサニタイズ漏れ（XSS）、トークンの保存場所、ログへの秘密情報の出力
+5. **セキュリティ**：記事のデータの HTML の出し方（XSS）、URL のスキームの確かめ漏れ、CSP や Trusted Types を緩める変更、トークンの保存場所、ログへの秘密情報の出力
 6. **生成物**：OpenAPI から生成したファイルを手で直していないか
 7. **テスト**：振る舞いを変える変更に、それを確かめるテストがあるか
 8. **PR の書き方**：タイトルがコミットメッセージの形式か。説明に「なぜ」が書かれているか
