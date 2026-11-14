@@ -20,6 +20,11 @@ type BridgeResponse =
 /** テストのページで、偽の sendo を答えさせる。やめるときは返した関数を呼ぶ */
 export function serveFakeSendo(server: FakeSendo, channelName: string): () => void {
   const channel = new BroadcastChannel(channelName);
+  // テストが終わってチャンネルを閉じたあとに、遅れて届いた頼み（裏の同期など）に答えない
+  let closed = false;
+  const reply = (message: BridgeResponse) => {
+    if (!closed) channel.postMessage(message);
+  };
   channel.onmessage = async (event: MessageEvent<BridgeRequest | BridgeResponse>) => {
     const message = event.data;
     if (message.kind !== "request") return;
@@ -27,18 +32,21 @@ export function serveFakeSendo(server: FakeSendo, channelName: string): () => vo
       const init: RequestInit = { method: message.method, headers: message.headers };
       if (message.body !== null) init.body = message.body;
       const response = await server.fetch(new Request(message.url, init));
-      channel.postMessage({
+      reply({
         kind: "response",
         id: message.id,
         status: response.status,
         headers: [...response.headers],
         body: await response.text(),
-      } satisfies BridgeResponse);
+      });
     } catch (error) {
-      channel.postMessage({ kind: "error", id: message.id, message: String(error) });
+      reply({ kind: "error", id: message.id, message: String(error) });
     }
   };
-  return () => channel.close();
+  return () => {
+    closed = true;
+    channel.close();
+  };
 }
 
 /** ワーカーの中で使う fetch。テストのページの偽の sendo に送る */
