@@ -7,6 +7,7 @@ sendo-reader で決めたことを、テーマごとに1ファイルで置く。
 | テーマ | 状態 | 概要 |
 |---|---|---|
 | [決定の残し方](documentation.md) | 提案中 | sendo と同じ。テーマごとに1ファイルを書き換え、履歴は git が持つ |
+| [UI とツール](ui.md) | 提案中 | Svelte 5 ＋ Vite の SPA（SvelteKit・Void は使わない）。ネイティブは Capacitor。lint と整形は Biome |
 
 経緯を知りたいとき：
 
