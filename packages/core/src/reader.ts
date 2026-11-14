@@ -165,8 +165,8 @@ export class ReaderCore {
     if (this.#token === null) throw new ApiError("unauthorized", "ログインしていない");
     const pushed = await push(this.#db, this.#api, signal, {
       onChange: (tables) => this.#emit(tables),
+      onRemap: ({ from, to }) => this.#folderIds.set(from, to),
     });
-    for (const { from, to } of pushed.remapped) this.#folderIds.set(from, to);
     const pulled = await pull(this.#db, this.#api, {
       now: this.#now,
       signal,
@@ -272,26 +272,33 @@ export class ReaderCore {
    * フィードを購読し、手元にもすぐ入れる（記事は次の同期で届く）。folderId には、手元で作った
    * ばかりのフォルダ（仮の ID）も渡せる。そのときは、フォルダなしで購読してから、操作キューで
    * そのフォルダに移す（sendo がフォルダに ID を付けたら、付け替わる）。
+   *
+   * 返すのは手元の状態（応答を待っている間にした操作を重ねたもの）。待っている間に購読を
+   * やめていれば null。
    */
-  async subscribe(url: string, folderId: string | null = null): Promise<Feed> {
+  async subscribe(url: string, folderId: string | null = null): Promise<Feed | null> {
     this.#requireSignedIn();
     // まだ送っていない操作（同じフィードの購読の停止など）を先に送り、順番を入れ替えない
     await this.#flushQueue();
-    folderId = folderId === null ? null : (this.#folderIds.get(folderId) ?? folderId);
-    const isLocalFolder = folderId?.startsWith(LOCAL_ID_PREFIX) === true;
+    const wanted = folderId === null ? null : (this.#folderIds.get(folderId) ?? folderId);
+    const isLocalFolder = wanted?.startsWith(LOCAL_ID_PREFIX) === true;
     const feed = await subscribe(
       this.#db,
       this.#api,
-      { url, folderId: isLocalFolder ? null : folderId },
+      { url, folderId: isLocalFolder ? null : wanted },
       this.#session.signal,
+      async (tx, feed) => {
+        // sendo はすでに購読していたフィードのフォルダを変えずに返すので、ここで移す。
+        // ただし、待っている間にこのフィードを操作していたら（移動、購読の停止）、そちらを採る
+        const [later] = await tx.all<{ id: number }>(
+          "select id from pending_ops where key = ? and kind in ('moveFeed', 'unsubscribe') limit 1",
+          [feed.id],
+        );
+        if (feed.folderId !== wanted && later === undefined) {
+          await enqueue(tx, { kind: "moveFeed", feedId: feed.id, folderId: wanted }, this.#now());
+        }
+      },
     );
-    // すでに購読していたフィードは、sendo がフォルダを変えずに返すので、ここで移す
-    if (feed.folderId !== folderId) {
-      await this.#db.transaction((tx) =>
-        enqueue(tx, { kind: "moveFeed", feedId: feed.id, folderId }, this.#now()),
-      );
-      feed.folderId = folderId;
-    }
     this.#emit(new Set<Table>(["feeds"]));
     return feed;
   }

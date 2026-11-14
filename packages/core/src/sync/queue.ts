@@ -94,6 +94,8 @@ export interface PushOptions {
    * あとの操作が届かずに push が投げても、確定した変更は知らせる
    */
   onChange?: (tables: ReadonlySet<Table>) => void;
+  /** フォルダの仮の ID を付け替えたら、確定したその時点で呼ぶ（あとの操作が失敗しても失わない） */
+  onRemap?: (remap: { from: string; to: string }) => void;
 }
 
 export async function push(
@@ -127,6 +129,7 @@ export async function push(
       result.sent += 1;
       if (sent.remap !== undefined) {
         result.remapped.push(sent.remap);
+        options.onRemap?.(sent.remap);
         // フォルダと、そこに入れたフィードが変わる
         options.onChange?.(new Set<Table>(["folders", "feeds"]));
       }

@@ -1,6 +1,8 @@
 import { errorFromBody, type SendoApi } from "./api/client";
-import type { Database } from "./db/database";
+import type { Database, Executor } from "./db/database";
+import { listFeeds } from "./db/queries";
 import type { Feed } from "./models";
+import { reapplyPending } from "./sync/queue";
 
 /**
  * sendo に問い合わせないとできない操作（フィードの候補探し、購読、OPML の取り込み）。
@@ -30,22 +32,26 @@ export async function discoverFeeds(
 
 /**
  * フィードを購読する。すでに購読していれば、それを返す。購読したフィードはすぐ手元にも入れる
- * （記事は次の同期で届く）。folderId は sendo の ID で渡す（手元で作ったばかりのフォルダなら、
- * 先に操作キューを送って ID を付けてもらう）。
+ * （記事は次の同期で届く）。folderId は sendo の ID で渡す。
+ *
+ * 応答を書き込むトランザクションの中で、afterWrite を呼び、まだ送っていない操作を重ね直す
+ * （応答を待っている間にした操作の、手元の表示を保つ）。返すのは重ね直したあとの手元の状態で、
+ * 待っている間に購読をやめていれば null。
  */
 export async function subscribe(
   db: Database,
   api: SendoApi,
   input: { url: string; folderId: string | null },
   signal: AbortSignal,
-): Promise<Feed> {
+  afterWrite: (tx: Executor, feed: Feed) => Promise<void> = async () => {},
+): Promise<Feed | null> {
   const { data, error, response } = await api.client.POST("/feeds", {
     body: { url: input.url, folderId: input.folderId },
     signal,
   });
   if (data === undefined) throw errorFromBody(response.status, error);
   const { feed } = data;
-  const local: Feed = {
+  const received: Feed = {
     id: feed.id,
     url: feed.url,
     title: feed.title,
@@ -53,17 +59,26 @@ export async function subscribe(
     folderId: feed.folderId,
     createdAt: Date.parse(feed.createdAt),
   };
-  await db.transaction(async (tx) => {
+  return db.transaction(async (tx) => {
     signal.throwIfAborted();
     await tx.run(
       `insert into feeds (id, url, title, site_url, folder_id, created_at) values (?, ?, ?, ?, ?, ?)
        on conflict (id) do update set
          url = excluded.url, title = excluded.title, site_url = excluded.site_url,
          folder_id = excluded.folder_id`,
-      [local.id, local.url, local.title, local.siteUrl, local.folderId, local.createdAt],
+      [
+        received.id,
+        received.url,
+        received.title,
+        received.siteUrl,
+        received.folderId,
+        received.createdAt,
+      ],
     );
+    await afterWrite(tx, received);
+    await reapplyPending(tx);
+    return (await listFeeds(tx)).find((local) => local.id === received.id) ?? null;
   });
-  return local;
 }
 
 export interface OpmlImportResult {
