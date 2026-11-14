@@ -82,6 +82,7 @@
   {/if}
 
   <footer>
+    {@render item({ kind: "manage" }, "購読の管理", 0)}
     <SyncStatus />
     <button type="button" class="link" onclick={signOut}>ログアウト</button>
   </footer>
