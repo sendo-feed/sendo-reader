@@ -30,27 +30,46 @@ export interface PendingOperation {
  * 操作を手元に反映し、キューに積む。列の最後が同じものへのまとめられる操作なら、まとめる
  * （途中の操作を飛び越えてまとめると、送る順番が変わって意味が変わるので、最後だけ）。
  */
-export async function enqueue(tx: Executor, op: Operation, now: number): Promise<void> {
+export async function enqueue(
+  tx: Executor,
+  op: Operation,
+  now: number,
+  options: {
+    /** この番号以下の操作にはまとめない（通信が要る操作より前に送る操作に、あとの意図を混ぜない） */
+    mergeAbove?: number;
+  } = {},
+): Promise<number> {
   await applyLocally(tx, op);
   const [last] = await tx.all<PendingRow>(
     "select id, kind, key, payload, rev from pending_ops order by id desc limit 1",
   );
-  if (last !== undefined && last.kind === op.kind && last.key === keyOf(op)) {
+  if (
+    last !== undefined &&
+    last.id > (options.mergeAbove ?? 0) &&
+    last.kind === op.kind &&
+    last.key === keyOf(op)
+  ) {
     const merged = merge(JSON.parse(last.payload) as Operation, op);
     if (merged !== null) {
       await tx.run("update pending_ops set payload = ?, rev = rev + 1 where id = ?", [
         JSON.stringify(merged),
         last.id,
       ]);
-      return;
+      return last.id;
     }
   }
-  await tx.run("insert into pending_ops (kind, key, payload, created_at) values (?, ?, ?, ?)", [
-    op.kind,
-    keyOf(op),
-    JSON.stringify(op),
-    now,
-  ]);
+  const [inserted] = await tx.all<{ id: number }>(
+    "insert into pending_ops (kind, key, payload, created_at) values (?, ?, ?, ?) returning id",
+    [op.kind, keyOf(op), JSON.stringify(op), now],
+  );
+  if (inserted === undefined) throw new Error("操作を積めなかった");
+  return inserted.id;
+}
+
+/** 最後に積んだ操作の番号（まだ何もなければ 0） */
+export async function lastPendingId(db: Executor): Promise<number> {
+  const [row] = await db.all<{ id: number | null }>("select max(id) as id from pending_ops");
+  return row?.id ?? 0;
 }
 
 /** まだ送り終えていない操作を、積んだ順に読む */
@@ -96,6 +115,11 @@ export interface PushOptions {
   onChange?: (tables: ReadonlySet<Table>) => void;
   /** フォルダの仮の ID を付け替えたら、確定したその時点で呼ぶ（あとの操作が失敗しても失わない） */
   onRemap?: (remap: { from: string; to: string }) => void;
+  /**
+   * この番号より後の操作は送らない（呼ぶたびに読む）。通信が要る操作（購読など）を呼んだあとに
+   * 積んだ操作を、その操作より先に送らないため
+   */
+  limit?: () => number | null;
 }
 
 export async function push(
@@ -111,6 +135,8 @@ export async function push(
       "select id, kind, key, payload, rev from pending_ops order by id limit 1",
     );
     if (next === undefined) return result;
+    const limit = options.limit?.() ?? null;
+    if (limit !== null && next.id > limit) return result;
     const op = JSON.parse(next.payload) as Operation;
 
     try {

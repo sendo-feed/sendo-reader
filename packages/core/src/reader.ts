@@ -20,7 +20,7 @@ import {
 } from "./online";
 import { LOCAL_ID_PREFIX, type MarkReadScope, type Operation, scopeCondition } from "./sync/ops";
 import { getCursor, type PullResult, pull } from "./sync/pull";
-import { countPending, enqueue, type PushResult, push } from "./sync/queue";
+import { countPending, enqueue, lastPendingId, type PushResult, push } from "./sync/queue";
 
 const TOKEN_KEY = "auth.token";
 
@@ -66,6 +66,13 @@ export class ReaderCore {
   #session = new AbortController();
   #syncing: Promise<SyncResult> | null = null;
   #lane: Promise<unknown> = Promise.resolve();
+  /** 最後に積んだ操作の番号 */
+  #lastOpId = 0;
+  /**
+   * 通信が要る操作（購読、OPML の取り込み）を呼んだ時点の、最後の操作の番号。その操作が終わる
+   * までは、これより後に積んだ操作を送らず、これ以下の操作にまとめない（呼んだ順を守る）
+   */
+  readonly #barriers = new Set<{ readonly id: number }>();
   /** 手元で作ったフォルダの仮の ID から、sendo が付けた ID へ（画面が仮の ID を持ったままでも使えるように） */
   readonly #folderIds = new Map<string, string>();
 
@@ -85,6 +92,7 @@ export class ReaderCore {
     await migrate(options.db);
     const core = new ReaderCore(options);
     core.#token = await getSetting(options.db, TOKEN_KEY);
+    core.#lastOpId = await lastPendingId(options.db);
     return core;
   }
 
@@ -178,16 +186,38 @@ export class ReaderCore {
 
   async #runSync(signal: AbortSignal): Promise<SyncResult> {
     if (this.#token === null) throw new ApiError("unauthorized", "ログインしていない");
-    const pushed = await push(this.#db, this.#api, signal, {
-      onChange: (tables) => this.#emit(tables),
-      onRemap: ({ from, to }) => this.#folderIds.set(from, to),
-    });
+    const pushed = await this.#push(signal, () => this.#pushLimit());
     const pulled = await pull(this.#db, this.#api, {
       now: this.#now,
       signal,
       onPage: (changed) => this.#emit(changed),
     });
     return { push: pushed, pull: pulled };
+  }
+
+  #push(signal: AbortSignal, limit: () => number | null): Promise<PushResult> {
+    return push(this.#db, this.#api, signal, {
+      onChange: (tables) => this.#emit(tables),
+      onRemap: ({ from, to }) => this.#folderIds.set(from, to),
+      limit,
+    });
+  }
+
+  #pushLimit(): number | null {
+    const ids = [...this.#barriers].map((barrier) => barrier.id);
+    return ids.length === 0 ? null : Math.min(...ids);
+  }
+
+  /** 積むときに、まとめてはいけない番号（通信が要る操作より前に送る操作） */
+  #mergeAbove(): number {
+    const ids = [...this.#barriers].map((barrier) => barrier.id);
+    return ids.length === 0 ? 0 : Math.max(...ids);
+  }
+
+  /** 操作を手元に反映して積む（すべての書き込みはここを通す） */
+  async #enqueue(tx: Executor, op: Operation): Promise<void> {
+    const id = await enqueue(tx, op, this.#now(), { mergeAbove: this.#mergeAbove() });
+    this.#lastOpId = Math.max(this.#lastOpId, id);
   }
 
   /** まだ sendo に送り終えていない操作の数 */
@@ -235,7 +265,7 @@ export class ReaderCore {
         cursor,
         at: this.#now(),
       };
-      await enqueue(tx, op, this.#now());
+      await this.#enqueue(tx, op);
       return op;
     });
     if (op !== null) this.#emit(new Set<Table>(["articles"]));
@@ -293,10 +323,7 @@ export class ReaderCore {
    */
   async subscribe(url: string, folderId: string | null = null): Promise<Feed | null> {
     this.#requireSignedIn();
-    const signal = this.#session.signal;
-    const feed = await this.#exclusive(async () => {
-      // まだ送っていない操作（同じフィードの購読の停止など）を先に送り、順番を入れ替えない
-      await this.#flushQueue(signal);
+    const feed = await this.#online(async (signal) => {
       const wanted = folderId === null ? null : (this.#folderIds.get(folderId) ?? folderId);
       const isLocalFolder = wanted?.startsWith(LOCAL_ID_PREFIX) === true;
       return subscribe(
@@ -318,7 +345,7 @@ export class ReaderCore {
               ? [{ id: null }]
               : await tx.all<{ id: string }>("select id from folders where id = ?", [wanted]);
           if (feed.folderId !== wanted && later === undefined && target !== undefined) {
-            await enqueue(tx, { kind: "moveFeed", feedId: feed.id, folderId: wanted }, this.#now());
+            await this.#enqueue(tx, { kind: "moveFeed", feedId: feed.id, folderId: wanted });
           }
         },
       );
@@ -330,21 +357,25 @@ export class ReaderCore {
   /** OPML を取り込む。sendo が順に登録し、フィードと記事は次からの同期で届く */
   importOpml(xml: string): Promise<OpmlImportResult> {
     this.#requireSignedIn();
-    const signal = this.#session.signal;
-    return this.#exclusive(async () => {
-      // まだ送っていない操作（取り込むフィードの購読の停止など）を先に送り、順番を入れ替えない
-      await this.#flushQueue(signal);
-      return importOpml(this.#api, xml, signal);
-    });
+    return this.#online((signal) => importOpml(this.#api, xml, signal));
   }
 
   /**
-   * まだ送っていない操作がなくなるまで送る（通信が要る操作の前に、順番を守るため）。
-   * sendo とのやり取りの列の中から呼ぶ。送っている間にも操作が積まれうるので、数回まで繰り返す
+   * 通信が要る操作を、呼んだ順を守って行う。呼んだ時点までに積んだ操作を先に送り、そのあとに
+   * 積んだ操作は、この操作が終わるまで送らない（応答を書き込むときに、上に重ね直す）。
+   * sendo とのやり取りの列の中で行う。
    */
-  async #flushQueue(signal: AbortSignal): Promise<void> {
-    for (let i = 0; i < 3 && (await countPending(this.#db)) > 0; i++) {
-      await this.#runSync(signal);
+  async #online<T>(fn: (signal: AbortSignal) => Promise<T>): Promise<T> {
+    const signal = this.#session.signal;
+    const barrier = { id: this.#lastOpId };
+    this.#barriers.add(barrier);
+    try {
+      return await this.#exclusive(async () => {
+        await this.#push(signal, () => barrier.id);
+        return fn(signal);
+      });
+    } finally {
+      this.#barriers.delete(barrier);
     }
   }
 
@@ -358,7 +389,7 @@ export class ReaderCore {
     await this.#db.transaction(async (tx) => {
       // 書き込みが DB の列で待っている間にログインし直したら、前のアカウントの操作を積まない
       throwIfSessionEnded(session);
-      await enqueue(tx, op, this.#now());
+      await this.#enqueue(tx, op);
     });
     this.#emit(new Set(tables));
   }

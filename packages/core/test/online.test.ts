@@ -1,4 +1,4 @@
-import { describe, expect, test } from "vitest";
+import { describe, expect, test, vi } from "vitest";
 import type { ApiError } from "../src";
 import { setup } from "./helpers";
 
@@ -210,5 +210,55 @@ describe("購読と同期を 1 つずつ行う", () => {
     await syncing;
     expect(await core.listFeeds()).toEqual([]);
     expect(server.feeds.get(existing.id)?.deletedAt).not.toBeNull();
+  });
+});
+
+describe("購読を呼んだあとの操作は、購読より先に送らない", () => {
+  test("先に積んだ操作を送っている間に購読をやめても、購読のあとに送る（呼んだ順を守る）", async () => {
+    const { server, core } = await setup();
+    const existing = server.subscribe({ url: "https://blog.example/feed.xml" });
+    await core.sync();
+    await core.createFolder("Tech");
+
+    let release = () => {};
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    server.onRequest = async (path) => {
+      if (path === "POST /folders") {
+        server.onRequest = null;
+        await held;
+      }
+    };
+    const subscribing = core.subscribe("https://blog.example/feed.xml");
+    await vi.waitFor(() => expect(server.requests).toContain("POST /folders"));
+    await core.unsubscribe(existing.id);
+    release();
+
+    expect(await subscribing).toBeNull();
+    expect(server.requests.filter((r) => r.startsWith("DELETE /feeds/"))).toEqual([]);
+    await core.sync();
+    expect(server.feeds.get(existing.id)?.deletedAt).not.toBeNull();
+    expect(await core.listFeeds()).toEqual([]);
+  });
+
+  test("購読を呼んだあとの移動を、購読より前に送る移動にまとめない", async () => {
+    const { server, core } = await setup();
+    const tech = server.createFolder("Tech");
+    const news = server.createFolder("News");
+    const existing = server.subscribe({ url: "https://blog.example/feed.xml" });
+    await core.sync();
+    await core.moveFeed(existing.id, tech.id);
+
+    server.onRequest = async (path) => {
+      if (path.startsWith("PATCH /feeds/")) {
+        server.onRequest = null;
+        await core.moveFeed(existing.id, news.id);
+      }
+    };
+    await core.subscribe("https://blog.example/feed.xml", tech.id);
+    await core.sync();
+    expect(server.feeds.get(existing.id)?.folderId).toBe(news.id);
+    expect(await core.listFeeds()).toMatchObject([{ folderId: news.id }]);
   });
 });
