@@ -14,8 +14,11 @@ export type Operation =
   | {
       kind: "markRead";
       scope: MarkReadScope;
-      /** 押したときに手元にあった記事の範囲（articles.local_seq がこれ以下） */
-      upTo: number;
+      /**
+       * 押したときに手元で未読だった記事。手元ではこれだけを既読にする（あとから届いた記事を
+       * 巻き込まない。カーソルが古すぎて取り直したあとも、同じ記事を既読に重ね直せる）
+       */
+      articleIds: string[];
       /** 押したときの同期のカーソル。sendo には、これより後に届いた記事を既読にしないよう頼む */
       cursor: string;
       at: number;
@@ -85,14 +88,13 @@ export async function applyLocally(tx: Executor, op: Operation): Promise<void> {
       );
       return;
     }
-    case "markRead": {
-      const [condition, params] = scopeCondition(op.scope);
+    case "markRead":
       await tx.run(
-        `update articles set read_at = ? where read_at is null and local_seq <= ? and ${condition}`,
-        [op.at, op.upTo, ...params],
+        `update articles set read_at = ?
+         where read_at is null and id in (select value from json_each(?))`,
+        [op.at, JSON.stringify(op.articleIds)],
       );
       return;
-    }
     case "createFolder":
       await tx.run(
         "insert into folders (id, name, created_at) values (?, ?, ?) on conflict (id) do nothing",
@@ -117,7 +119,8 @@ export async function applyLocally(tx: Executor, op: Operation): Promise<void> {
   }
 }
 
-function scopeCondition(scope: MarkReadScope): [string, string[]] {
+/** まとめて既読の範囲を、articles の条件にする */
+export function scopeCondition(scope: MarkReadScope): [string, string[]] {
   if ("feedId" in scope) return ["feed_id = ?", [scope.feedId]];
   if ("folderId" in scope) {
     return ["feed_id in (select id from feeds where folder_id = ?)", [scope.folderId]];

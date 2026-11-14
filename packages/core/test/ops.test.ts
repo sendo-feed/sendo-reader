@@ -270,7 +270,7 @@ describe("フォルダ", () => {
     expect(await core.listFeeds()).toMatchObject([{ folderId: null }]);
     server.deleteFolder(folder.id);
     const result = await core.sync();
-    expect(result.push).toEqual({ sent: 1, rejected: [] });
+    expect(result.push).toEqual({ sent: 1, rejected: [], remapped: [] });
   });
 
   test("フォルダ名は空白をまとめ、200 文字（UTF-16）で切り、サロゲートペアの途中では切らない", () => {
@@ -387,5 +387,44 @@ describe("受け付けられなかった操作の扱い", () => {
     expect(server.inbox.get(article.id)?.starredAt).not.toBeNull();
     expect((await core.getArticle(article.id))?.starredAt).not.toBeNull();
     expect(await core.listFeeds()).toMatchObject([{ id: feed.id }]);
+  });
+});
+
+describe("付け替えの通知と、取り直したあとのまとめて既読", () => {
+  test("同じ名前のフォルダに付け替えたら、差分がなくても、フォルダとフィードの変更を知らせる", async () => {
+    const { server, core, feed } = await withArticle();
+    const existing = server.createFolder("Tech");
+    await core.sync();
+    const tempId = await core.createFolder("Tech");
+    await core.moveFeed(feed.id, tempId);
+    // フィードの移動は送ったあと、差分には何も載らないようにする
+    const changes: string[][] = [];
+    core.onChange((tables) => changes.push([...tables].sort()));
+
+    await core.sync();
+    expect(changes[0]).toEqual(["feeds", "folders"]);
+    expect((await core.listFolders()).map((f) => f.id)).toEqual([existing.id]);
+  });
+
+  test("カーソルが古すぎて取り直しても、まだ送っていないまとめて既読を重ね直す", async () => {
+    const context = await withArticle();
+    const { server, core, article } = context;
+    const gone = server.createFolder("Gone");
+    await core.sync();
+    await core.markAllRead({ all: true });
+    server.deleteFolder(gone.id);
+    server.purgeTombstones();
+
+    const result = await pullOnly(context);
+    expect(result.reset).toBe(true);
+    expect((await core.getArticle(article.id))?.readAt).not.toBeNull();
+  });
+
+  test("未読がなければ、まとめて既読は何もしない", async () => {
+    const { core, article } = await withArticle();
+    await core.setRead(article.id, true);
+    await core.sync();
+    await core.markAllRead({ all: true });
+    expect(await core.countPending()).toBe(0);
   });
 });

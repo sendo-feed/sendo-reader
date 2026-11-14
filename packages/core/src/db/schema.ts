@@ -65,9 +65,6 @@ const migrations: readonly (readonly string[])[] = [
       attempts integer not null default 0,
       last_error text
     ) strict`,
-    // 記事が手元に初めて入った順の番号。「すべて既読」で、押したときに手元にあった記事だけを
-    // 既読にするのに使う（あとから届いた記事を巻き込まない）
-    "alter table articles add column local_seq integer not null default 0",
   ],
 ];
 

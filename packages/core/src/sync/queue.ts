@@ -79,6 +79,8 @@ export interface PushResult {
   sent: number;
   /** sendo が受け付けなかった（やり直しても変わらない）ので捨てた操作 */
   rejected: { op: Operation; error: ApiError }[];
+  /** 手元で作ったフォルダの仮の ID と、sendo が付けた ID */
+  remapped: { from: string; to: string }[];
 }
 
 /**
@@ -86,7 +88,7 @@ export interface PushResult {
  * ApiError を投げる（操作は残る）。受け付けられなかった操作は、手元の反映を戻して捨てる。
  */
 export async function push(db: Database, api: SendoApi, signal: AbortSignal): Promise<PushResult> {
-  const result: PushResult = { sent: 0, rejected: [] };
+  const result: PushResult = { sent: 0, rejected: [], remapped: [] };
   while (true) {
     signal.throwIfAborted();
     const [next] = await db.all<PendingRow>(
@@ -104,6 +106,7 @@ export async function push(db: Database, api: SendoApi, signal: AbortSignal): Pr
         await complete(tx, next.id, next.rev);
       });
       result.sent += 1;
+      if (sent.remap !== undefined) result.remapped.push(sent.remap);
     } catch (error) {
       if (!(error instanceof ApiError)) throw error;
       if (isTransient(error)) {

@@ -12,9 +12,6 @@ export const LOCAL_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 /** 1 回の同期で取るページの上限。サーバーが続きを返し続けても止まるようにする */
 const MAX_PAGES = 1000;
 
-/** 記事が手元に初めて入った順の番号（articles.local_seq）の、最後に振った値 */
-const ARTICLE_SEQ_KEY = "local.articleSeq";
-
 export interface PullResult {
   /** 取ったページの数 */
   pages: number;
@@ -102,12 +99,8 @@ async function applyPage(tx: Executor, page: SyncPage): Promise<Set<Table>> {
     if (await applyFeed(tx, feed)) changed.add("articles");
   }
   if (page.feeds.length > 0) changed.add("feeds");
-  if (page.articles.length > 0) {
-    const localSeq = (await getArticleSeq(tx)) + 1;
-    await setSetting(tx, ARTICLE_SEQ_KEY, String(localSeq));
-    for (const article of page.articles) await applyArticle(tx, article, localSeq);
-    changed.add("articles");
-  }
+  for (const article of page.articles) await applyArticle(tx, article);
+  if (page.articles.length > 0) changed.add("articles");
   return changed;
 }
 
@@ -151,13 +144,11 @@ async function applyFeed(tx: Executor, feed: SyncPage["feeds"][number]): Promise
   return false;
 }
 
-/** 記事を書き込む。初めて手元に入る記事には localSeq を振る（すでにあれば変えない） */
-async function applyArticle(tx: Executor, article: Article, localSeq: number): Promise<void> {
+async function applyArticle(tx: Executor, article: Article): Promise<void> {
   await tx.run(
     `insert into articles (
-       id, feed_id, url, title, summary, author, published_at, received_at, read_at, starred_at,
-       local_seq
-     ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       id, feed_id, url, title, summary, author, published_at, received_at, read_at, starred_at
+     ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      on conflict (id) do update set
        feed_id = excluded.feed_id, url = excluded.url, title = excluded.title,
        summary = excluded.summary, author = excluded.author,
@@ -174,14 +165,8 @@ async function applyArticle(tx: Executor, article: Article, localSeq: number): P
       article.receivedAt,
       article.readAt,
       article.starredAt,
-      localSeq,
     ],
   );
-}
-
-/** 今までに手元に入った記事の範囲（「すべて既読」の境界に使う） */
-export async function getArticleSeq(db: Executor): Promise<number> {
-  return Number((await getSetting(db, ARTICLE_SEQ_KEY)) ?? "0");
 }
 
 /**

@@ -11,8 +11,8 @@ import {
 import { migrate } from "./db/schema";
 import { getSetting, setSetting } from "./db/settings";
 import type { Article, Feed, Folder, Table, UnreadCounts } from "./models";
-import { LOCAL_ID_PREFIX, type MarkReadScope, type Operation } from "./sync/ops";
-import { getArticleSeq, getCursor, type PullResult, pull } from "./sync/pull";
+import { LOCAL_ID_PREFIX, type MarkReadScope, type Operation, scopeCondition } from "./sync/ops";
+import { getCursor, type PullResult, pull } from "./sync/pull";
 import { countPending, enqueue, type PushResult, push } from "./sync/queue";
 
 const TOKEN_KEY = "auth.token";
@@ -156,6 +156,9 @@ export class ReaderCore {
     const pushed = await push(this.#db, this.#api, signal);
     if (pushed.rejected.length > 0) {
       this.#emit(new Set<Table>(["folders", "feeds", "articles"]));
+    } else if (pushed.remapped.length > 0) {
+      // フォルダの仮の ID を付け替えた（フォルダと、そこに入れたフィードが変わる）
+      this.#emit(new Set<Table>(["folders", "feeds"]));
     }
     const pulled = await pull(this.#db, this.#api, {
       now: this.#now,
@@ -185,17 +188,25 @@ export class ReaderCore {
   }
 
   /**
-   * まとめて既読にする。押した時点で手元にあった記事だけを既読にし、sendo にも同期済みの範囲
-   * （カーソル）までだけを頼む（sync.md の 6）。まだ一度も同期していなければ何もしない。
+   * まとめて既読にする。押した時点で手元で未読だった記事だけを既読にし、sendo にも同期済みの
+   * 範囲（カーソル）までだけを頼む（sync.md の 6）。まだ一度も同期していないか、未読がなければ
+   * 何もしない。
    */
   async markAllRead(scope: MarkReadScope): Promise<void> {
+    if (this.#token === null) throw new ApiError("unauthorized", "ログインしていない");
     const op = await this.#db.transaction(async (tx) => {
       const cursor = await getCursor(tx);
       if (cursor === null) return null;
+      const [condition, params] = scopeCondition(scope);
+      const unread = await tx.all<{ id: string }>(
+        `select id from articles where read_at is null and ${condition}`,
+        params,
+      );
+      if (unread.length === 0) return null;
       const op: Operation = {
         kind: "markRead",
         scope,
-        upTo: await getArticleSeq(tx),
+        articleIds: unread.map((row) => row.id),
         cursor,
         at: this.#now(),
       };
