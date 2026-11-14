@@ -1,0 +1,46 @@
+version: 2
+
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      timezone: Asia/Tokyo
+    # pnpm-workspace.yaml の minimumReleaseAge と揃え、公開から 14 日たったものだけを提案させる
+    cooldown:
+      default-days: 14
+    commit-message:
+      prefix: build
+      include: scope
+    ignore:
+      # svelte-check が TypeScript 7 に対応するまで、6 系に留める（docs/decisions/ui.md）
+      - dependency-name: typescript
+        update-types: ["version-update:semver-major"]
+    groups:
+      # Svelte の本体と道具は揃えて上げないと噛み合わないことがあるのでまとめる
+      svelte:
+        patterns: ["svelte", "svelte-check", "@sveltejs/*"]
+      # Vitest は Vite の版に合わせて動くのでまとめる
+      vite:
+        patterns: ["vite", "vitest"]
+      # Cloudflare の開発ツールは揃えて上げないと噛み合わないことがあるのでまとめる
+      cloudflare:
+        patterns: ["wrangler", "@cloudflare/*"]
+      minor-and-patch:
+        update-types: [minor, patch]
+    open-pull-requests-limit: 5
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      timezone: Asia/Tokyo
+    cooldown:
+      default-days: 14
+    commit-message:
+      prefix: ci
+    groups:
+      actions:
+        patterns: ["*"]

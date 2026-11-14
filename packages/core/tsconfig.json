@@ -1,0 +1,8 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    // core は Web Worker と画面のスレッドの両方で動く。DOM（document など）には触れない
+    "lib": ["es2024", "webworker"]
+  },
+  "include": ["src", "test", "vitest.config.ts"]
+}
