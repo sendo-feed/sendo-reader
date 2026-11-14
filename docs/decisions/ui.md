@@ -1,7 +1,7 @@
 # UI とツール
 
 - 状態：提案中
-- 関連：[ローカルファースト](local-first.md)、sendo の[テックスタック](https://github.com/sendo-feed/sendo/blob/main/docs/decisions/tech-stack.md)、[技術構成](https://github.com/sendo-feed/sendo/blob/main/docs/tech-deck.md)（4・7・8 の未決事項 1・6）
+- 関連：[ローカルファースト](local-first.md)、[速さの予算](performance.md)、sendo の[テックスタック](https://github.com/sendo-feed/sendo/blob/main/docs/decisions/tech-stack.md)、[技術構成](https://github.com/sendo-feed/sendo/blob/main/docs/tech-deck.md)（4・7・8 の未決事項 1・6）
 
 ## 決定
 
@@ -25,7 +25,7 @@
 
 ## 理由
 
-- **Svelte 5**：コンパイラが画面ごとに必要なコードだけを出すので、JS が小さく、速い。ネイティブは Capacitor（WebView）で包むので、React Native とコードを共有する利点はない。
+- **Svelte 5**：コンパイラが画面ごとに必要なコードだけを出すので、JS が小さく、速い（[速さの予算](performance.md)）。ネイティブは Capacitor（WebView）で包むので、React Native とコードを共有する利点はない。
 - **SvelteKit を使わない**：サーバー側の仕組み（SSR、API のルート）は sendo がすでに持っている。SPA として書き出すと使わない機能が多く、ランタイムの分だけ JS が増える。画面の数は多くないので、ルーターは自前で足りる。
 - **Void を使わない**：Void の強みはフルスタックの仕組みで、sendo がすでに持っている。UI のアダプタは React と Vue で、Svelte では使えない。公開（2026 年 10 月）から日も浅い。
 - **Capacitor**：Web のビルドをそのまま包めて、画面を作り直さずに済む。バックグラウンドの更新、共有の拡張、APNs など、ネイティブの機能はプラグインで足せる。
