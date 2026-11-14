@@ -11,9 +11,16 @@ import {
 import { migrate } from "./db/schema";
 import { getSetting, setSetting } from "./db/settings";
 import type { Article, Feed, Folder, Table, UnreadCounts } from "./models";
+import {
+  discoverFeeds,
+  type FeedCandidate,
+  importOpml,
+  type OpmlImportResult,
+  subscribe,
+} from "./online";
 import { LOCAL_ID_PREFIX, type MarkReadScope, type Operation, scopeCondition } from "./sync/ops";
 import { getCursor, type PullResult, pull } from "./sync/pull";
-import { countPending, enqueue, type PushResult, push } from "./sync/queue";
+import { countPending, enqueue, lastPendingId, type PushResult, push } from "./sync/queue";
 
 const TOKEN_KEY = "auth.token";
 
@@ -58,6 +65,21 @@ export class ReaderCore {
    */
   #session = new AbortController();
   #syncing: Promise<SyncResult> | null = null;
+  #lane: Promise<unknown> = Promise.resolve();
+  /** 最後に積んだ操作の番号 */
+  #lastOpId = 0;
+  /**
+   * 通信が要る操作（購読、OPML の取り込み）を呼んだ時点の、最後の操作の番号。その操作が終わる
+   * までは、これより後に積んだ操作を送らず、これ以下の操作にまとめない（呼んだ順を守る）
+   */
+  readonly #barriers = new Set<{ readonly id: number }>();
+  /**
+   * 通信が要る操作が、応答を受けて積んだ操作（購読で頼んだフォルダへの移動）。呼んだ順では、
+   * その操作の位置にあるので、あとから呼んだ通信が要る操作より前に送ってよい
+   */
+  readonly #onlineOps = new Set<number>();
+  /** 手元で作ったフォルダの仮の ID から、sendo が付けた ID へ（画面が仮の ID を持ったままでも使えるように） */
+  readonly #folderIds = new Map<string, string>();
 
   private constructor(options: ReaderCoreOptions) {
     this.#db = options.db;
@@ -75,6 +97,7 @@ export class ReaderCore {
     await migrate(options.db);
     const core = new ReaderCore(options);
     core.#token = await getSetting(options.db, TOKEN_KEY);
+    core.#lastOpId = await lastPendingId(options.db);
     return core;
   }
 
@@ -132,6 +155,8 @@ export class ReaderCore {
     this.#session.abort();
     this.#session = new AbortController();
     this.#syncing = null;
+    this.#folderIds.clear();
+    this.#onlineOps.clear();
     return this.#session.signal;
   }
 
@@ -144,17 +169,32 @@ export class ReaderCore {
    */
   sync(): Promise<SyncResult> {
     if (this.#syncing !== null) return this.#syncing;
-    const running: Promise<SyncResult> = this.#runSync(this.#session.signal).finally(() => {
-      if (this.#syncing === running) this.#syncing = null;
-    });
+    const signal = this.#session.signal;
+    const running: Promise<SyncResult> = this.#exclusive(() => this.#runSync(signal)).finally(
+      () => {
+        if (this.#syncing === running) this.#syncing = null;
+      },
+    );
     this.#syncing = running;
     return running;
   }
 
+  /**
+   * sendo とのやり取り（同期、購読、OPML の取り込み）を 1 つずつ順に行う。購読の応答を待って
+   * いる間に同期が走ると、その間にした操作（購読の停止など）を送り終えてから古い応答を書き込み、
+   * 操作を取り消してしまうため。
+   */
+  #exclusive<T>(fn: () => Promise<T>): Promise<T> {
+    const run = this.#lane.then(fn, fn);
+    this.#lane = run.catch(() => undefined);
+    return run;
+  }
+
   async #runSync(signal: AbortSignal): Promise<SyncResult> {
     if (this.#token === null) throw new ApiError("unauthorized", "ログインしていない");
-    const pushed = await push(this.#db, this.#api, signal, {
-      onChange: (tables) => this.#emit(tables),
+    const pushed = await this.#push(signal, (id) => {
+      const limit = this.#pushLimit();
+      return limit === null || id <= limit || this.#onlineOps.has(id);
     });
     const pulled = await pull(this.#db, this.#api, {
       now: this.#now,
@@ -162,6 +202,36 @@ export class ReaderCore {
       onPage: (changed) => this.#emit(changed),
     });
     return { push: pushed, pull: pulled };
+  }
+
+  #push(signal: AbortSignal, allow: (id: number) => boolean): Promise<PushResult> {
+    return push(this.#db, this.#api, signal, {
+      onChange: (tables) => this.#emit(tables),
+      onRemap: ({ from, to }) => this.#folderIds.set(from, to),
+      allow,
+    });
+  }
+
+  #pushLimit(): number | null {
+    const ids = [...this.#barriers].map((barrier) => barrier.id);
+    return ids.length === 0 ? null : Math.min(...ids);
+  }
+
+  /** 積むときに、まとめてはいけない番号（通信が要る操作より前に送る操作） */
+  #mergeAbove(): number {
+    // 通信が要る操作が積んだ操作にも、あとの操作をまとめない（その操作の位置で送るため）
+    const ids = [...[...this.#barriers].map((barrier) => barrier.id), ...this.#onlineOps];
+    return ids.length === 0 ? 0 : Math.max(...ids);
+  }
+
+  /**
+   * 操作を手元に反映して積む（すべての書き込みはここを通す）。fromOnline は、通信が要る操作が
+   * 応答を受けて積むもの
+   */
+  async #enqueue(tx: Executor, op: Operation, fromOnline = false): Promise<void> {
+    const id = await enqueue(tx, op, this.#now(), { mergeAbove: this.#mergeAbove() });
+    this.#lastOpId = Math.max(this.#lastOpId, id);
+    if (fromOnline) this.#onlineOps.add(id);
   }
 
   /** まだ sendo に送り終えていない操作の数 */
@@ -189,7 +259,7 @@ export class ReaderCore {
    * 何もしない。
    */
   async markAllRead(scope: MarkReadScope): Promise<void> {
-    if (this.#token === null) throw new ApiError("unauthorized", "ログインしていない");
+    this.#requireSignedIn();
     const session = this.#session.signal;
     const op = await this.#db.transaction(async (tx) => {
       // 書き込みが DB の列で待っている間にログインし直したら、前のアカウントの操作を積まない
@@ -209,7 +279,7 @@ export class ReaderCore {
         cursor,
         at: this.#now(),
       };
-      await enqueue(tx, op, this.#now());
+      await this.#enqueue(tx, op);
       return op;
     });
     if (op !== null) this.#emit(new Set<Table>(["articles"]));
@@ -226,19 +296,22 @@ export class ReaderCore {
   }
 
   renameFolder(folderId: string, name: string): Promise<void> {
-    return this.#write({ kind: "renameFolder", folderId, name: normalizeFolderName(name) }, [
+    const id = this.#folderIds.get(folderId) ?? folderId;
+    return this.#write({ kind: "renameFolder", folderId: id, name: normalizeFolderName(name) }, [
       "folders",
     ]);
   }
 
   /** フォルダを消す。入っていたフィードはフォルダなしに戻す（フィードは消さない） */
   deleteFolder(folderId: string): Promise<void> {
-    return this.#write({ kind: "deleteFolder", folderId }, ["folders", "feeds"]);
+    const id = this.#folderIds.get(folderId) ?? folderId;
+    return this.#write({ kind: "deleteFolder", folderId: id }, ["folders", "feeds"]);
   }
 
   /** フィードを別のフォルダに移す。null ならフォルダなし */
   moveFeed(feedId: string, folderId: string | null): Promise<void> {
-    return this.#write({ kind: "moveFeed", feedId, folderId }, ["feeds"]);
+    const resolved = folderId === null ? null : (this.#folderIds.get(folderId) ?? folderId);
+    return this.#write({ kind: "moveFeed", feedId, folderId: resolved }, ["feeds"]);
   }
 
   /** 購読をやめる。記事はスターを付けたものだけが残る */
@@ -246,13 +319,99 @@ export class ReaderCore {
     return this.#write({ kind: "unsubscribe", feedId }, ["feeds", "articles"]);
   }
 
-  async #write(op: Operation, tables: Table[]): Promise<void> {
+  // --- 通信が要る操作（画面では待っている間の表示を出す） ---
+
+  /** サイトの URL から、購読できるフィードの候補を探す */
+  discoverFeeds(url: string): Promise<FeedCandidate[]> {
+    this.#requireSignedIn();
+    return discoverFeeds(this.#api, url, this.#session.signal);
+  }
+
+  /**
+   * フィードを購読し、手元にもすぐ入れる（記事は次の同期で届く）。folderId には、手元で作った
+   * ばかりのフォルダ（仮の ID）も渡せる。そのときは、フォルダなしで購読してから、操作キューで
+   * そのフォルダに移す（sendo がフォルダに ID を付けたら、付け替わる）。
+   *
+   * 返すのは手元の状態（応答を待っている間にした操作を重ねたもの）。待っている間に購読を
+   * やめていれば null。
+   */
+  async subscribe(url: string, folderId: string | null = null): Promise<Feed | null> {
+    this.#requireSignedIn();
+    const feed = await this.#online(async (signal) => {
+      const wanted = folderId === null ? null : (this.#folderIds.get(folderId) ?? folderId);
+      const isLocalFolder = wanted?.startsWith(LOCAL_ID_PREFIX) === true;
+      return subscribe(
+        this.#db,
+        this.#api,
+        { url, folderId: isLocalFolder ? null : wanted },
+        signal,
+        async (tx, feed) => {
+          // sendo はすでに購読していたフィードのフォルダを変えずに返すので、ここで移す。
+          // ただし、待っている間にこのフィードを操作していたら（移動、購読の停止）、そちらを採る。
+          // 移す先のフォルダを待っている間に消していたら、移さない（フォルダなしのまま）。
+          // 待っている間の操作は、この列が空くまで送られないので、必ずキューに残っている
+          const [later] = await tx.all<{ id: number }>(
+            "select id from pending_ops where key = ? and kind in ('moveFeed', 'unsubscribe') limit 1",
+            [feed.id],
+          );
+          const [target] =
+            wanted === null
+              ? [{ id: null }]
+              : await tx.all<{ id: string }>("select id from folders where id = ?", [wanted]);
+          if (feed.folderId !== wanted && later === undefined && target !== undefined) {
+            await this.#enqueue(tx, { kind: "moveFeed", feedId: feed.id, folderId: wanted }, true);
+          }
+        },
+      );
+    });
+    this.#emit(new Set<Table>(["feeds"]));
+    return feed;
+  }
+
+  /** OPML を取り込む。sendo が順に登録し、フィードと記事は次からの同期で届く */
+  importOpml(xml: string): Promise<OpmlImportResult> {
+    this.#requireSignedIn();
+    return this.#online((signal) => importOpml(this.#api, xml, signal));
+  }
+
+  /**
+   * 通信が要る操作を、呼んだ順を守って行う。呼んだ時点までに積んだ操作を先に送り、そのあとに
+   * 積んだ操作は、この操作が終わるまで送らない（応答を書き込むときに、上に重ね直す）。
+   * sendo とのやり取りの列の中で行う。
+   */
+  async #online<T>(fn: (signal: AbortSignal) => Promise<T>): Promise<T> {
+    const signal = this.#session.signal;
+    const barrier = { id: this.#lastOpId };
+    this.#barriers.add(barrier);
+    // 呼ぶ前に始めた書き込みは、まだ積み終えていなくても、DB の列ではこれより前に並んでいる。
+    // 列の中で、それらを含む最後の番号まで境界を上げる（あとから呼んだ書き込みより前に済む）
+    const ready = this.#db.transaction(async (tx) => {
+      barrier.id = Math.max(barrier.id, await lastPendingId(tx));
+    });
+    ready.catch(() => undefined);
+    try {
+      return await this.#exclusive(async () => {
+        await ready;
+        // 呼んだ時点までの操作と、先に呼んだ通信が要る操作が積んだ操作を、先に送る
+        await this.#push(signal, (id) => id <= barrier.id || this.#onlineOps.has(id));
+        return fn(signal);
+      });
+    } finally {
+      this.#barriers.delete(barrier);
+    }
+  }
+
+  #requireSignedIn(): void {
     if (this.#token === null) throw new ApiError("unauthorized", "ログインしていない");
+  }
+
+  async #write(op: Operation, tables: Table[]): Promise<void> {
+    this.#requireSignedIn();
     const session = this.#session.signal;
     await this.#db.transaction(async (tx) => {
       // 書き込みが DB の列で待っている間にログインし直したら、前のアカウントの操作を積まない
       throwIfSessionEnded(session);
-      await enqueue(tx, op, this.#now());
+      await this.#enqueue(tx, op);
     });
     this.#emit(new Set(tables));
   }

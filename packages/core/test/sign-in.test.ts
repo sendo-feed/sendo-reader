@@ -93,7 +93,8 @@ describe("ログインのし直しと中断", () => {
 
     await core.signOut();
     const error = await syncing.catch((e: unknown) => e);
-    expect((error as ApiError).kind).toBe("network");
+    // 送っている途中なら中断（network）、始まる前ならログインしていない（unauthorized）
+    expect(["network", "unauthorized"]).toContain((error as ApiError).kind);
     expect(core.isSignedIn()).toBe(false);
     expect(await core.listFeeds()).toEqual([]);
     expect(await db.all("select key from settings")).toEqual([]);

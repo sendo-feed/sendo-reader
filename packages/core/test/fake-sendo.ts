@@ -73,6 +73,12 @@ export class FakeSendo {
   readonly requests: string[] = [];
   /** 受けた「まとめて既読」の本文 */
   readonly markReadRequests: Record<string, unknown>[] = [];
+  /** サイトの URL ごとの、フィードの候補（GET /feeds/discover） */
+  readonly discoverable = new Map<string, { url: string; title: string | null }[]>();
+  /** 購読できるフィードの URL と、そのタイトル（POST /feeds で取得できたことにする） */
+  readonly fetchable = new Map<string, string | null>();
+  /** 受けた OPML */
+  readonly opmlImports: string[] = [];
   /** リクエストを受けて、答える前に呼ぶ（送っている途中に画面で操作したことにする、など） */
   onRequest: ((path: string) => Promise<void>) | null = null;
 
@@ -235,7 +241,35 @@ export class FakeSendo {
       const items = [...this.feeds.values()].filter((row) => row.deletedAt === null);
       return json(200, { items: items.map(feedJson) });
     }
+    if (request.method === "GET" && path === "/feeds/discover") {
+      const target = url.searchParams.get("url") ?? "";
+      if (!target.startsWith("https://")) return error(400, "url_not_allowed", "not allowed");
+      const candidates = this.discoverable.get(target);
+      if (candidates === undefined) return error(422, "fetch_failed", "could not fetch");
+      return json(200, { candidates });
+    }
+    if (request.method === "POST" && path === "/opml") {
+      const xml = await request.text();
+      this.opmlImports.push(xml);
+      const accepted = (xml.match(/xmlUrl=/g) ?? []).length;
+      return json(202, { accepted, skippedCount: 0, skipped: [] });
+    }
     const body = request.body === null ? {} : ((await request.json()) as Record<string, unknown>);
+    if (request.method === "POST" && path === "/feeds") {
+      const feedUrl = String(body.url ?? "");
+      const folderId = (body.folderId as string | null | undefined) ?? null;
+      if (folderId !== null && this.folders.get(folderId)?.deletedAt !== null) {
+        return error(400, "folder_not_found", "folder does not exist");
+      }
+      const existing = [...this.feeds.values()].find(
+        (row) => row.url === feedUrl && row.deletedAt === null,
+      );
+      if (existing !== undefined) return json(200, { feed: feedJson(existing) });
+      if (!this.fetchable.has(feedUrl)) return error(422, "feed_not_found", "no feed");
+      const title = this.fetchable.get(feedUrl) ?? undefined;
+      const created = this.subscribe({ url: feedUrl, folderId, ...(title ? { title } : {}) });
+      return json(201, { feed: feedJson(created) });
+    }
 
     let match = /^\/articles\/([^/]+)$/.exec(path);
     if (request.method === "PATCH" && match !== null && match[1] !== "mark-read") {
@@ -434,6 +468,10 @@ function feedJson(row: FeedRow) {
     title: row.title,
     siteUrl: row.siteUrl,
     folderId: row.folderId,
+    lastFetchedAt: null,
+    nextFetchAt: iso(row.createdAt),
+    errorCount: 0,
+    lastError: null,
     createdAt: iso(row.createdAt),
   };
 }

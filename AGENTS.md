@@ -30,6 +30,7 @@ Sendo の公式リーダー。`packages/core`（同期エンジン）と `apps/w
   - `src/reader.ts`：`ReaderCore`。ログイン、同期、手元の DB の読み出し、変更の通知をまとめる窓口
   - `src/api/`：sendo の API。`schema.gen.ts` は OpenAPI から生成したもの。`sync-contract.ts` は、sendo の OpenAPI に `/sync` が入るまでの仮の応答の形と、core の中の形（`src/sync/page.ts` の `SyncPage`）への変換。仮の形を使うのはこのファイルだけにし、同期のロジックは `SyncPage` だけを扱う
   - `src/db/`：DB の窓口（`database.ts`）、スキーマとマイグレーション（`schema.ts`。足すだけにし、出したものは書き換えない）、画面のための読み出し（`queries.ts`）、sqlite-wasm の実装（`sqlite-wasm.ts`）
+  - `src/online.ts`：sendo に問い合わせないとできない操作（フィードの候補探し、購読、OPML の取り込み）。手元にすぐ反映できないので、画面では待っている間の表示を出す
   - `src/sync/`：差分同期（`pull.ts`）と操作キュー（`ops.ts` が操作ごとの「手元への反映・送り方・戻し方」、`queue.ts` が積む・まとめる・送る）。操作は手元への反映と同じトランザクションで積み、同期で届いた行の上に重ね直す。どの操作も冪等にする
   - `test/fake-sendo.ts`：sendo の差分同期の決定に沿った偽のサーバー。core のテストはこれを相手にし、外へは通信しない。手元の DB は、本番と同じ sqlite-wasm を Node のメモリーで開く（`test/helpers.ts`）
 - `apps/web/`：PWA（Svelte 5 ＋ Vite の SPA）

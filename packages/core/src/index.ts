@@ -4,6 +4,7 @@ export type { ArticleQuery } from "./db/queries";
 export { NewerSchemaError, SCHEMA_VERSION } from "./db/schema";
 export { wrapSqliteWasm } from "./db/sqlite-wasm";
 export type { Article, Feed, Folder, Table, UnreadCounts } from "./models";
+export type { FeedCandidate, OpmlImportResult } from "./online";
 export {
   type ChangeListener,
   MAX_FOLDER_NAME_LENGTH,
