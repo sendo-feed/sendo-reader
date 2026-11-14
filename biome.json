@@ -8,7 +8,11 @@
   },
   "files": {
     "ignoreUnknown": true,
-    "includes": ["**"]
+    "includes": [
+      "**",
+      "!packages/core/src/api/schema.gen.ts",
+      "!packages/core/src/api/openapi.json"
+    ]
   },
   "formatter": {
     "enabled": true,

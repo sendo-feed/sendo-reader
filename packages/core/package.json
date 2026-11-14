@@ -11,10 +11,17 @@
   "scripts": {
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "api:fetch": "node scripts/fetch-openapi.mjs",
+    "api:generate": "openapi-typescript src/api/openapi.json --output src/api/schema.gen.ts"
   },
   "devDependencies": {
+    "openapi-typescript": "7.13.0",
     "typescript": "6.0.3",
     "vitest": "5.0.5"
+  },
+  "dependencies": {
+    "@sqlite.org/sqlite-wasm": "3.54.1-build1",
+    "openapi-fetch": "0.17.0"
   }
 }
