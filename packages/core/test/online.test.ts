@@ -279,3 +279,21 @@ describe("続けて呼んだ購読", () => {
     expect(await core.listFeeds()).toMatchObject([{ folderId: news.id }]);
   });
 });
+
+describe("書き込みを待たずに購読を呼んだとき", () => {
+  test("購読の停止を待たずに同じフィードを購読しても、呼んだ順に、購読が残る", async () => {
+    const { server, core } = await setup();
+    const existing = server.subscribe({ url: "https://blog.example/feed.xml" });
+    server.fetchable.set("https://blog.example/feed.xml", null);
+    await core.sync();
+
+    const unsubscribing = core.unsubscribe(existing.id);
+    const feed = await core.subscribe("https://blog.example/feed.xml");
+    await unsubscribing;
+    await core.sync();
+    expect(feed).not.toBeNull();
+    const active = [...server.feeds.values()].filter((f) => f.deletedAt === null);
+    expect(active.map((f) => f.url)).toEqual(["https://blog.example/feed.xml"]);
+    expect(await core.listFeeds()).toMatchObject([{ url: "https://blog.example/feed.xml" }]);
+  });
+});

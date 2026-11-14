@@ -383,8 +383,15 @@ export class ReaderCore {
     const signal = this.#session.signal;
     const barrier = { id: this.#lastOpId };
     this.#barriers.add(barrier);
+    // 呼ぶ前に始めた書き込みは、まだ積み終えていなくても、DB の列ではこれより前に並んでいる。
+    // 列の中で、それらを含む最後の番号まで境界を上げる（あとから呼んだ書き込みより前に済む）
+    const ready = this.#db.transaction(async (tx) => {
+      barrier.id = Math.max(barrier.id, await lastPendingId(tx));
+    });
+    ready.catch(() => undefined);
     try {
       return await this.#exclusive(async () => {
+        await ready;
         // 呼んだ時点までの操作と、先に呼んだ通信が要る操作が積んだ操作を、先に送る
         await this.#push(signal, (id) => id <= barrier.id || this.#onlineOps.has(id));
         return fn(signal);
