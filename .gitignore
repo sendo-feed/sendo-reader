@@ -30,3 +30,15 @@ Thumbs.db
 
 # Claude Code の個人設定
 .claude/settings.local.json
+
+# 手元の作業用（試しに動かす、メモ、下書きなど。コミットしない）
+tmp/
+.tmp/
+temp/
+scratch/
+.scratch/
+work/
+.work/
+
+# Claude Code が作る作業用の worktree
+.claude/worktrees/
