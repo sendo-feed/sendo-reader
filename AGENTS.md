@@ -23,7 +23,7 @@ Conventional Commits を土台にする。全文は https://github.com/sendo-fee
 
 - 形式：`<type>(<scope>): <件名>`。type は feat ／ fix ／ docs ／ decision ／ refactor ／ perf ／ test ／ build ／ ci ／ chore ／ revert
 - 本文には「なぜ」を書く
-- `docs/decisions/` を変えるときは `decision(<テーマ>): …` にし、本文に何をなぜ変えたかを書く。コードの変更とは分けて単独のコミットにする
+- `docs/decisions/` を変えるときは `decision(<テーマ>): …` にし、本文に何をなぜ変えたかを書く。ほかの変更とは分けて単独の PR にする（スカッシュマージで PR が1つのコミットになるため）
 - `main` に force push しない
 
 ## 決定の扱い
@@ -38,7 +38,22 @@ Conventional Commits を土台にする。全文は https://github.com/sendo-fee
 - OpenAPI から生成したファイルは手で直さない。sendo の OpenAPI を直して生成し直す
 - 記事の本文は信頼できないデータとして扱い、表示する前に HTML をサニタイズする
 
+## 変更の進め方
+
+- すべての変更は下書きの PR で出す。`main` へは直接 push できない
+- 下書きの PR には Codex のレビューを回し、終了の条件を満たすまで直す。Claude Code では `/review-loop` スキルがこれを回す
+- 終了の条件、優先度の定義、指摘の扱いの全文は CONTRIBUTING.md の「レビューの進め方」にある
+
 ## Review guidelines
+
+指摘には、必ず次の優先度のどれかを付ける。終了の条件はこの優先度で判定するので、ぶれないようにする。
+
+| 優先度 | 意味 |
+|---|---|
+| P0 | データの消失や破損、セキュリティの穴、本番が動かなくなる |
+| P1 | 明らかなバグ、`docs/decisions/` との食い違い、下の観点で挙げた規約の破れ |
+| P2 | 直すべきだが今すぐでなくてよい（境界条件、テスト不足など） |
+| P3 | 軽微なことや好み |
 
 レビューは日本語で書く。いまは2人で試作を繰り返している段階なので、捨てる前提の試作の完成度や、書き方の好みは指摘しなくてよい（整形と lint は Biome に任せる）。次の観点を優先する。
 
