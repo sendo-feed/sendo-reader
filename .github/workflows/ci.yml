@@ -51,6 +51,10 @@ jobs:
             exit 1
           fi
 
+      # packages/core の Web のテスト（ワーカー、OPFS、タブの間のやり取り）は Chromium で動かす
+      - name: Install Chromium for browser tests
+        run: pnpm --filter @sendo-reader/core exec playwright install --with-deps chromium
+
       - name: Test
         run: pnpm test
 

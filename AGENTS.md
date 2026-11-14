@@ -32,6 +32,10 @@ Sendo の公式リーダー。`packages/core`（同期エンジン）と `apps/w
   - `src/db/`：DB の窓口（`database.ts`）、スキーマとマイグレーション（`schema.ts`。足すだけにし、出したものは書き換えない）、画面のための読み出し（`queries.ts`）、sqlite-wasm の実装（`sqlite-wasm.ts`）
   - `src/online.ts`：sendo に問い合わせないとできない操作（フィードの候補探し、購読、OPML の取り込み）。手元にすぐ反映できないので、画面では待っている間の表示を出す
   - `src/sync/`：差分同期（`pull.ts`）と操作キュー（`ops.ts` が操作ごとの「手元への反映・送り方・戻し方」、`queue.ts` が積む・まとめる・送る）。操作は手元への反映と同じトランザクションで積み、同期で届いた行の上に重ね直す。どの操作も冪等にする
+  - `src/sync/scheduler.ts`：いつ同期するか（起動時、書き込みのあと、一定の間隔、届かなければ間隔を延ばしてやり直す）
+  - `src/web/`：Web の実装（UI には依存しない）。`worker.ts` はタブごとの Dedicated Worker で動き、Web Locks で決めた代表だけが DB（`database.ts`、opfs-sahpool）と同期を持ち、ほかのタブは BroadcastChannel で代表に頼む。`client.ts` は画面から使う窓口（`@sendo-reader/core/web`）。やり取りの形は `protocol.ts`
+  - opfs-sahpool は、開くのに失敗すると既定でデータを消す。`preserveOnInitFailure` を外さない
+  - `test/web/*.browser.test.ts`：Web の実装のテスト。Vitest のブラウザーモードで Chromium の中で動く（初回は `pnpm --filter @sendo-reader/core exec playwright install chromium`）。ワーカーからは、ページの偽の sendo に BroadcastChannel で話す（`test/web/fake-bridge.ts`）
   - `test/fake-sendo.ts`：sendo の差分同期の決定に沿った偽のサーバー。core のテストはこれを相手にし、外へは通信しない。手元の DB は、本番と同じ sqlite-wasm を Node のメモリーで開く（`test/helpers.ts`）
 - `apps/web/`：PWA（Svelte 5 ＋ Vite の SPA）
   - `src/`：画面。`main.ts` が入口、`App.svelte` が一番外の部品

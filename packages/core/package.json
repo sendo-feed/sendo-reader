@@ -6,7 +6,9 @@
   "license": "UNLICENSED",
   "type": "module",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./web": "./src/web/client.ts",
+    "./web/worker": "./src/web/worker.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
@@ -16,7 +18,9 @@
     "api:generate": "openapi-typescript src/api/openapi.json --output src/api/schema.gen.ts"
   },
   "devDependencies": {
+    "@vitest/browser-playwright": "5.0.5",
     "openapi-typescript": "7.13.0",
+    "playwright": "1.64.1",
     "typescript": "6.0.3",
     "vitest": "5.0.5"
   },
