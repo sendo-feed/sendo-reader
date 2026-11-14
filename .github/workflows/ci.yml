@@ -41,6 +41,16 @@ jobs:
       - name: Typecheck
         run: pnpm typecheck
 
+      # OpenAPI から生成した型を手で直していないか（写した openapi.json から作り直して比べる）
+      - name: Check generated API types
+        run: |
+          pnpm --filter @sendo-reader/core api:generate
+          if [ -n "$(git status --porcelain -- packages/core/src/api)" ]; then
+            git status --porcelain -- packages/core/src/api
+            echo "::error::packages/core/src/api/schema.gen.ts が openapi.json と合っていない。pnpm --filter @sendo-reader/core api:generate を実行してコミットする"
+            exit 1
+          fi
+
       - name: Test
         run: pnpm test
 

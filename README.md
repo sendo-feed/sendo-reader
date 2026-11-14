@@ -52,6 +52,8 @@ pnpm dev
 | `pnpm test` | テスト（Vitest） |
 | `pnpm build` | 画面をビルドし、reader Worker をデプロイせずにバンドルして確かめる |
 | `pnpm size` | ビルドのあとに、画面の JS の大きさが予算に収まるか確かめる |
+| `pnpm --filter @sendo-reader/core api:fetch` | 手元の Sendo から API の定義（OpenAPI）を写す |
+| `pnpm --filter @sendo-reader/core api:generate` | 写した定義から API の型を作る |
 
 ## デプロイ
 
