@@ -27,6 +27,8 @@
   $effect(() => {
     const id = articleId;
     untrack(() => {
+      // 開く記事が替わったら（閉じたときも）、次に開いたときにまた既読にする
+      if (markedFor !== id) markedFor = null;
       if (id === null) {
         article = null;
         missing = false;

@@ -29,16 +29,25 @@
     loading = false;
   }
 
+  /** 続きを読んでいる（続けて押しても、同じページを二重に足さない） */
+  let loadingMore = $state(false);
+
   async function loadMore() {
     const last = articles.at(-1);
-    if (last === undefined) return;
-    const page = await reader.client.listArticles({
-      ...query,
-      limit: PAGE,
-      after: { publishedAt: last.publishedAt, id: last.id },
-    });
-    articles = [...articles, ...page];
-    hasMore = page.length === PAGE;
+    if (last === undefined || loadingMore) return;
+    loadingMore = true;
+    try {
+      const page = await reader.client.listArticles({
+        ...query,
+        limit: PAGE,
+        after: { publishedAt: last.publishedAt, id: last.id },
+      });
+      const shown = new Set(articles.map((article) => article.id));
+      articles = [...articles, ...page.filter((article) => !shown.has(article.id))];
+      hasMore = page.length === PAGE;
+    } finally {
+      loadingMore = false;
+    }
   }
 
   /**
@@ -119,7 +128,9 @@
       {/each}
     </ol>
     {#if hasMore}
-      <button type="button" class="more" onclick={loadMore}>もっと読む</button>
+      <button type="button" class="more" onclick={loadMore} disabled={loadingMore}>
+        {loadingMore ? "読んでいます…" : "もっと読む"}
+      </button>
     {/if}
   {/if}
 </section>
