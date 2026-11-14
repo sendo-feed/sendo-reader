@@ -200,7 +200,7 @@ export class ReaderCore {
    * 何もしない。
    */
   async markAllRead(scope: MarkReadScope): Promise<void> {
-    if (this.#token === null) throw new ApiError("unauthorized", "ログインしていない");
+    this.#requireSignedIn();
     const session = this.#session.signal;
     const op = await this.#db.transaction(async (tx) => {
       // 書き込みが DB の列で待っている間にログインし直したら、前のアカウントの操作を積まない
