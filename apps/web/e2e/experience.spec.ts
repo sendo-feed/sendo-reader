@@ -104,7 +104,10 @@ test("キーボードで、記事を移り、既読とスターを切り替え�
     .toBe(2);
 });
 
-test("一覧の形・並び順・絞り込みと、表示の設定は、開き直しても残る", async ({ page, context }) => {
+test("一覧の形・並び順・絞り込みは一覧ごとに覚え、表示の設定とともに、開き直しても残る", async ({
+  page,
+  context,
+}) => {
   const { server, blog } = seed();
   await routeFakeSendo(context, server);
   await page.goto("/");
@@ -119,10 +122,12 @@ test("一覧の形・並び順・絞り込みと、表示の設定は、開き�
   await list.getByRole("button", { name: "古い順に並べる" }).click();
   await expect(list.locator(".title")).toHaveText(["3 番目", "2 番目", "1 番目"]);
 
-  // フィードの一覧は既読の記事も出す。未読だけに絞れる
+  // フィードの一覧は既読の記事も出す。未読だけに絞れる。表示の設定は一覧ごとに覚えるので、
+  // 「未読」で変えた並び順と形は、ここには及ばない
   await list.getByText("3 番目").click();
   await page.locator("nav").getByRole("link", { name: "Blog" }).click();
-  await expect(list.locator(".title")).toHaveText(["3 番目", "1 番目"]);
+  await expect(list.locator(".title")).toHaveText(["1 番目", "3 番目"]);
+  await expect(list.getByText("1 番目の要約")).toBeVisible();
   await list.getByRole("button", { name: "未読だけを出す" }).click();
   await expect(list.locator(".title")).toHaveText(["1 番目"]);
 
@@ -142,12 +147,14 @@ test("一覧の形・並び順・絞り込みと、表示の設定は、開き�
   await page.reload();
   await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
   await expect(page.locator("html")).toHaveAttribute("data-text-size", "large");
+  const oldest = list.getByRole("button", { name: "古い順に並べる" });
   await page.goto(`/feeds/${blog.id}`);
   await expect(list.locator(".title")).toHaveText(["1 番目"]);
-  await expect(list.getByRole("button", { name: "古い順に並べる" })).toHaveAttribute(
-    "aria-pressed",
-    "true",
-  );
+  await expect(oldest).toHaveAttribute("aria-pressed", "false");
+  await page.goto("/");
+  await expect(list.locator(".title")).toHaveText(["2 番目", "1 番目"]);
+  await expect(oldest).toHaveAttribute("aria-pressed", "true");
+  await expect(list.getByText("1 番目の要約")).toHaveCount(0);
 });
 
 test("狭い画面では、メニューを左から開き、一覧と記事を行き来する", async ({ page, context }) => {

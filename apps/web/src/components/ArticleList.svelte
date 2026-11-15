@@ -4,7 +4,7 @@
   import { useReader } from "../lib/context";
   import { compactCount, dayLabel, shortTime } from "../lib/format";
   import type { ArticleListState, ListProgress } from "../lib/list.svelte";
-  import { prefs } from "../lib/prefs.svelte";
+  import { prefs, type ViewOptions } from "../lib/prefs.svelte";
   import { handleLink, isPlainClick, router } from "../lib/router.svelte";
   import Icon from "./Icon.svelte";
 
@@ -16,6 +16,8 @@
     onmarkall,
     progress,
     onprogress,
+    options,
+    onoption,
     onmenu,
     next,
     leading,
@@ -30,6 +32,9 @@
     /** この一覧の進み具合（出さない一覧は null） */
     progress: ListProgress | null;
     onprogress: () => void;
+    /** この一覧の表示の設定（一覧ごとに覚える） */
+    options: ViewOptions;
+    onoption: (patch: Partial<ViewOptions>) => void;
     /** 行を長く押した（右クリックした）とき。その記事の操作を出す */
     onmenu: (article: Article) => void;
     /** 一覧の終わりに出す、次へ進むボタン（出さないなら null） */
@@ -318,10 +323,10 @@
       <button
         type="button"
         class="icon-button"
-        aria-pressed={prefs.value.unreadOnly}
+        aria-pressed={options.unreadOnly}
         aria-label="未読だけを出す"
         title="未読だけを出す"
-        onclick={() => prefs.set({ unreadOnly: !prefs.value.unreadOnly })}
+        onclick={() => onoption({ unreadOnly: !options.unreadOnly })}
       >
         <Icon name="filter" />
       </button>
@@ -329,23 +334,23 @@
     <button
       type="button"
       class="icon-button"
-      aria-pressed={prefs.value.oldestFirst}
+      aria-pressed={options.oldestFirst}
       aria-label="古い順に並べる"
       title="古い順に並べる"
-      onclick={() => prefs.set({ oldestFirst: !prefs.value.oldestFirst })}
+      onclick={() => onoption({ oldestFirst: !options.oldestFirst })}
     >
       <Icon name="sort" />
     </button>
     <button
       type="button"
       class="icon-button"
-      aria-pressed={prefs.value.layout === "comfortable"}
+      aria-pressed={options.layout === "comfortable"}
       aria-label="要約も出す"
       title="要約も出す"
       onclick={() =>
-        prefs.set({ layout: prefs.value.layout === "comfortable" ? "compact" : "comfortable" })}
+        onoption({ layout: options.layout === "comfortable" ? "compact" : "comfortable" })}
     >
-      <Icon name={prefs.value.layout === "comfortable" ? "cards" : "rows"} />
+      <Icon name={options.layout === "comfortable" ? "cards" : "rows"} />
     </button>
     {#if unread !== null}
       <button
@@ -378,8 +383,7 @@
         <Icon name="rss" />
         <p>まだフィードを購読していません。</p>
         <a href="/manage" onclick={(e) => handleLink(e, "/manage")}>フィードを追加する</a>
-      {:else if kind === "unread" ||
-        ((kind === "feed" || kind === "folder") && prefs.value.unreadOnly)}
+      {:else if kind === "unread" || ((kind === "feed" || kind === "folder") && options.unreadOnly)}
         <Icon name="check" />
         <p>すべて読み終えました。</p>
       {:else if kind === "starred"}
@@ -393,7 +397,7 @@
       {/if}
     </div>
   {:else}
-    <ol class:compact={prefs.value.layout === "compact"}>
+    <ol class:compact={options.layout === "compact"}>
       {#each rows as { article, heading } (article.id)}
         <li data-article={article.id} use:watchPass>
           {#if heading !== null}
@@ -417,7 +421,7 @@
                 <span class="time">{shortTime(article.publishedAt)}</span>
               </span>
               <span class="title">{article.title ?? "（タイトルなし）"}</span>
-              {#if prefs.value.layout === "comfortable" && article.summary}
+              {#if options.layout === "comfortable" && article.summary}
                 <span class="summary">{article.summary.slice(0, 240)}</span>
               {/if}
             </a>

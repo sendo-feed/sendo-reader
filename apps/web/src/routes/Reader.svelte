@@ -46,11 +46,15 @@
     unread: number | null;
   }
 
+  /** 開いている一覧の表示の設定（要約を出すか、並び順、未読だけ）。一覧ごとに覚える */
+  const viewKey = $derived(viewHref(router.view));
+  const options = $derived(prefs.viewOptions(viewKey));
+
   /** 開いている一覧（購読の管理と設定の画面では null） */
   const listing = $derived.by((): Listing | null => {
     const view = router.view;
-    const order: ArticleQuery = prefs.value.oldestFirst ? { order: "oldest" } : {};
-    const state: ArticleQuery = prefs.value.unreadOnly ? { state: "unread" } : {};
+    const order: ArticleQuery = options.oldestFirst ? { order: "oldest" } : {};
+    const state: ArticleQuery = options.unreadOnly ? { state: "unread" } : {};
     switch (view.kind) {
       case "manage":
       case "settings":
@@ -239,7 +243,7 @@
     if (article === null) return;
     const edge = { publishedAt: article.publishedAt, id: article.id };
     // 新しい順なら、上にあるのは新しい記事。古い順なら逆
-    const newer = above !== prefs.value.oldestFirst;
+    const newer = above !== options.oldestFirst;
     void markAll(newer ? { newerThan: edge } : { olderThan: edge });
   }
 
@@ -417,6 +421,8 @@
       kind={listing.kind}
       unread={listing.scope === null ? null : listing.unread}
       onmarkall={askMarkAll}
+      {options}
+      onoption={(patch) => prefs.setViewOptions(viewKey, patch)}
       onmenu={openArticleMenu}
       {next}
       {progress}

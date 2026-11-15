@@ -8,6 +8,18 @@ export type TextSize = "small" | "medium" | "large";
 /** compact はタイトルだけ、comfortable は要約も出す */
 export type ListLayout = "compact" | "comfortable";
 
+/** 一覧ごとに変えられるもの */
+export interface ViewOptions {
+  layout: ListLayout;
+  /** 未読だけを出す（フィードとフォルダの一覧） */
+  unreadOnly: boolean;
+  /** 古い順に並べる */
+  oldestFirst: boolean;
+}
+
+/** 一覧ごとの設定を覚えておく数の上限（購読をやめたフィードの分が、たまり続けないように） */
+const MAX_VIEWS = 500;
+
 export interface PrefsValue {
   theme: Theme;
   textSize: TextSize;
@@ -22,6 +34,11 @@ export interface PrefsValue {
   hideReadFeeds: boolean;
   /** 左のメニューで、畳んでいるフォルダの ID */
   collapsed: string[];
+  /**
+   * 一覧ごとに変えた設定（鍵は一覧のパス。/feeds/<id> など）。変えていないものは、上の
+   * layout ／ unreadOnly ／ oldestFirst を既定として使う
+   */
+  views: Record<string, Partial<ViewOptions>>;
 }
 
 const KEY = "sendo.prefs";
@@ -35,6 +52,7 @@ const DEFAULTS: PrefsValue = {
   oldestFirst: false,
   hideReadFeeds: false,
   collapsed: [],
+  views: {},
 };
 
 function oneOf<T extends string>(value: unknown, allowed: readonly T[], fallback: T): T {
@@ -63,7 +81,23 @@ export function parsePrefs(text: string | null): PrefsValue {
     collapsed: Array.isArray(raw.collapsed)
       ? raw.collapsed.filter((id): id is string => typeof id === "string").slice(0, 500)
       : [],
+    views: parseViews(raw.views),
   };
+}
+
+function parseViews(raw: unknown): Record<string, Partial<ViewOptions>> {
+  if (typeof raw !== "object" || raw === null) return {};
+  const views: Record<string, Partial<ViewOptions>> = {};
+  for (const [key, value] of Object.entries(raw).slice(-MAX_VIEWS)) {
+    if (typeof value !== "object" || value === null) continue;
+    const entry = value as Record<string, unknown>;
+    const options: Partial<ViewOptions> = {};
+    if (entry.layout === "compact" || entry.layout === "comfortable") options.layout = entry.layout;
+    if (typeof entry.unreadOnly === "boolean") options.unreadOnly = entry.unreadOnly;
+    if (typeof entry.oldestFirst === "boolean") options.oldestFirst = entry.oldestFirst;
+    views[key] = options;
+  }
+  return views;
 }
 
 function read(): PrefsValue {
@@ -95,6 +129,23 @@ class Prefs {
     } catch {
       // 置けなくても、開いている間は効く
     }
+  }
+
+  /** その一覧の設定。その一覧で変えていないものは、既定を使う */
+  viewOptions(key: string): ViewOptions {
+    const own = this.value.views[key] ?? {};
+    return {
+      layout: own.layout ?? this.value.layout,
+      unreadOnly: own.unreadOnly ?? this.value.unreadOnly,
+      oldestFirst: own.oldestFirst ?? this.value.oldestFirst,
+    };
+  }
+
+  /** その一覧の設定を変える（ほかの一覧は変えない）。古いものから、上限を超えた分を捨てる */
+  setViewOptions(key: string, patch: Partial<ViewOptions>): void {
+    const { [key]: own, ...rest } = this.value.views;
+    const entries = [...Object.entries(rest), [key, { ...own, ...patch }] as const];
+    this.set({ views: Object.fromEntries(entries.slice(-MAX_VIEWS)) });
   }
 
   isCollapsed(folderId: string): boolean {

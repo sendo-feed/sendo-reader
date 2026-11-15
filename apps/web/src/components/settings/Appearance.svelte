@@ -61,7 +61,7 @@
 
   {#if !reading}
     <fieldset>
-      <legend>記事の一覧</legend>
+      <legend>記事の一覧（一覧ごとに変えていないとき）</legend>
       {#each LAYOUTS as [value, label] (value)}
         <label>
           <input
