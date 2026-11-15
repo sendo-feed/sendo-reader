@@ -6,6 +6,10 @@
   import { formatDateTime, truncate } from "../../lib/format";
   import Problem from "./Problem.svelte";
 
+  /** sendo に聞く前に、セッションのユーザーが手元のユーザーと同じかを確かめる */
+  let { confirm }: { confirm: (signal?: AbortSignal) => Promise<void> } = $props();
+
+  /** 画面を離れたら（アカウントが替わったら）、読み込みや送信を止める */
   const controller = new AbortController();
   onDestroy(() => controller.abort());
 
@@ -19,6 +23,7 @@
   async function load() {
     loadError = null;
     try {
+      await confirm(controller.signal);
       grants = await account.listGrants(controller.signal);
     } catch (error) {
       if (!controller.signal.aborted) loadError = error;
@@ -47,6 +52,7 @@
     confirming = null;
     message = null;
     try {
+      await confirm(controller.signal);
       await account.revokeGrant(grant.id, controller.signal);
       await load();
     } catch (error) {

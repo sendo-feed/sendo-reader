@@ -1,7 +1,11 @@
 import { ApiError } from "@sendo-reader/core";
+import { AccountChangedError } from "./account";
 
 /** 失敗を、画面に出す文にする */
 export function describeError(error: unknown): string {
+  if (error instanceof AccountChangedError) {
+    return "別のアカウントでログインしていたので、送りませんでした。そのアカウントに切り替えます。";
+  }
   if (error instanceof ApiError) {
     switch (error.code) {
       case "url_not_allowed":

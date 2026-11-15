@@ -12,6 +12,10 @@
   import Problem from "./Problem.svelte";
 
   /** 画面を離れたら、読み込みや送信を止める */
+  /** sendo に聞く前に、セッションのユーザーが手元のユーザーと同じかを確かめる */
+  let { confirm }: { confirm: (signal?: AbortSignal) => Promise<void> } = $props();
+
+  /** 画面を離れたら（アカウントが替わったら）、読み込みや送信を止める */
   const controller = new AbortController();
   onDestroy(() => controller.abort());
 
@@ -35,6 +39,7 @@
   async function load() {
     loadError = null;
     try {
+      await confirm(controller.signal);
       tokens = await account.listTokens(controller.signal);
     } catch (error) {
       if (!controller.signal.aborted) loadError = error;
@@ -50,6 +55,7 @@
     busy = true;
     message = null;
     try {
+      await confirm(controller.signal);
       issued = await account.createToken(
         {
           name: name.trim(),
@@ -91,6 +97,7 @@
     confirming = null;
     message = null;
     try {
+      await confirm(controller.signal);
       await account.revokeToken(token.id, controller.signal);
       await load();
     } catch (error) {

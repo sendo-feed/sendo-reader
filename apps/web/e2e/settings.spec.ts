@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { FakeSendo, routeFakeSendo, signIn } from "./fake-sendo";
+import { FakeSendo, routeFakeSendo, signIn, USER } from "./fake-sendo";
 
 test("設定の画面で、トークンを発行して一度だけ控え、取り消す", async ({ page, context }) => {
   const server = new FakeSendo();
@@ -95,4 +95,36 @@ test("設定の画面は、sendo に届かなければその旨を出し、読�
 
   await page.getByRole("button", { name: "読み込み直す" }).first().click();
   await expect(page.getByText("発行したトークンはまだありません。")).toBeVisible();
+});
+
+test("別のアカウントのセッションに替わっていたら、設定の操作は送らず、そのアカウントに切り替える", async ({
+  page,
+  context,
+}) => {
+  const server = new FakeSendo();
+  await routeFakeSendo(context, server);
+  await page.goto("/settings");
+  await signIn(page);
+  await expect(page.getByText(`ログインしているアカウント：${USER.email}`)).toBeVisible();
+  await expect(page.getByText("発行したトークンはまだありません。")).toBeVisible();
+
+  // 別のタブなどで、別のアカウントでログインし直した（ブラウザのクッキーが替わった）
+  const other = server.createSession({ id: "user-b", email: "b@example.com" });
+  await context.addCookies([
+    {
+      name: "__Host-sendo_session",
+      value: other,
+      url: "https://localhost/",
+      secure: true,
+      httpOnly: true,
+      sameSite: "Lax",
+    },
+  ]);
+  await page.getByLabel("名前").fill("Reeder");
+  await page.getByRole("button", { name: "発行する" }).click();
+
+  // 発行は送らず、同期が手元のユーザーを切り替え、設定の画面はそのアカウントで作り直す
+  await expect(page.getByText("ログインしているアカウント：b@example.com")).toBeVisible();
+  expect(server.tokens.size).toBe(0);
+  await expect(page.getByLabel("名前")).toHaveValue("");
 });

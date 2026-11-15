@@ -165,7 +165,7 @@ export class FakeSendo {
    */
   signInAs(user: FakeUser = USER): string {
     if (this.cookie !== null) this.sessions.delete(this.cookie);
-    const value = this.#createSession(user);
+    const value = this.createSession(user);
     this.cookie = value;
     return value;
   }
@@ -190,7 +190,8 @@ export class FakeSendo {
     if (this.cookie !== null) this.sessions.delete(this.cookie);
   }
 
-  #createSession(user: FakeUser): string {
+  /** user のセッションを作り、クッキーの値を返す（ブラウザに置くのはテストが行う） */
+  createSession(user: FakeUser): string {
     const value = `session-${this.#nextId++}`;
     this.sessions.set(value, { ...user });
     return value;
@@ -623,7 +624,7 @@ export class FakeSendo {
       });
     }
     if (previous !== null) this.sessions.delete(previous);
-    const value = this.#createSession(this.loginUser);
+    const value = this.createSession(this.loginUser);
     const target =
       returnTo?.startsWith("/") === true && !returnTo.startsWith("//") ? returnTo : "/";
     return new Response(null, {
