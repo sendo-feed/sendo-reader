@@ -501,11 +501,20 @@ test("記事の画面から、リンクを共有し、文字の大きさを変�
   await expect(page.getByRole("dialog")).not.toContainText("記事の一覧");
   await page.keyboard.press("Escape");
 
-  // 文字を大きくしても、狭い画面の下のバーから、ボタンがはみ出さない
-  await page.setViewportSize({ width: 360, height: 640 });
-  for (const name of ["一覧に戻る", "文字の大きさとテーマ"]) {
-    const box = await view.getByRole("button", { name }).boundingBox();
-    expect(box?.x).toBeGreaterThanOrEqual(0);
-    expect((box?.x ?? 0) + (box?.width ?? 0)).toBeLessThanOrEqual(360);
+  // 文字を大きくしても、記事の欄からボタンがはみ出さない（3 カラムの狭い欄でも、狭い画面の
+  // 下のバーでも）
+  for (const [width, first] of [
+    [1024, "記事を閉じる"],
+    [360, "一覧に戻る"],
+  ] as const) {
+    await page.setViewportSize({ width, height: 640 });
+    const pane = await view.boundingBox();
+    for (const name of [first, "文字の大きさとテーマ"]) {
+      const box = await view.getByRole("button", { name }).boundingBox();
+      expect(box?.x).toBeGreaterThanOrEqual(pane?.x ?? 0);
+      expect((box?.x ?? 0) + (box?.width ?? 0)).toBeLessThanOrEqual(
+        (pane?.x ?? 0) + (pane?.width ?? 0),
+      );
+    }
   }
 });

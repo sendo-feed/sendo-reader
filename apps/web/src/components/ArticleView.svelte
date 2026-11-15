@@ -352,6 +352,13 @@
     background: var(--background);
   }
 
+  /* 記事の欄が狭いとき（3 カラムで文字を大きくした、など）は、ボタンが縮んで収まる */
+  .toolbar > :global(.icon-button),
+  .open {
+    flex: 0 1 auto;
+    min-width: 0;
+  }
+
   .spacer {
     flex: 1;
     min-width: 0;
