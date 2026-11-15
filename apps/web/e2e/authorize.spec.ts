@@ -172,3 +172,34 @@ test("許可するアカウントが分からなければ、許可の操作を�
   await expect(page.locator("main")).toContainText(USER.email);
   await expect(page.getByRole("button", { name: "許可する" })).toBeVisible();
 });
+
+test("画面を出したあとにアカウントが替わっていたら、送らずに出し直し、もう一度選んでもらう", async ({
+  page,
+  context,
+}) => {
+  const server = await setup(context);
+  await signInBrowser(context, server);
+  await page.goto(authorizeUrl());
+  await expect(page.locator("main")).toContainText(USER.email);
+
+  // 別のタブで、別のアカウントでログインし直した
+  await context.addCookies([
+    {
+      name: "__Host-sendo_session",
+      value: server.createSession({ id: "user-b", email: "b@example.com" }),
+      url: "https://localhost/",
+      secure: true,
+      httpOnly: true,
+      sameSite: "Lax",
+    },
+  ]);
+  await page.getByRole("button", { name: "許可する" }).click();
+  await expect(page.getByRole("alert")).toContainText("ログインしているアカウントが替わりました");
+  await expect(page.locator("main")).toContainText("b@example.com");
+  expect(server.grants.size).toBe(0);
+
+  // 確かめてから、もう一度押す
+  await page.getByRole("button", { name: "許可する" }).click();
+  await page.waitForURL(/^https:\/\/agent\.example\/callback/);
+  expect(server.grants.size).toBe(1);
+});

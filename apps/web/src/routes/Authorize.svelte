@@ -43,6 +43,8 @@
   let view = $state<View>(query === null ? { kind: "missing" } : { kind: "loading" });
   let busy = $state(false);
   let decideError = $state<string | null>(null);
+  /** 画面を出したあとに、ログインしているアカウントが替わった（送らずに、出し直した） */
+  let accountChanged = $state(false);
 
   const SCOPES = {
     read: "購読、フォルダ、記事、未読の数を読む",
@@ -72,10 +74,22 @@
   }
 
   async function decide(approved: boolean) {
-    if (query === null || busy) return;
+    if (query === null || busy || view.kind !== "ready") return;
+    const shown = view;
     busy = true;
     decideError = null;
+    accountChanged = false;
     try {
+      // 送る前に、ログインしているアカウントが、画面に出したものと同じかを確かめる（別のタブで
+      // ログインし直していると、出したものと違うアカウントで許可してしまう）。替わっていたら
+      // 送らず、新しいアカウントを出して、もう一度選んでもらう
+      const current = await account.me();
+      if (current.id !== shown.user.id) {
+        view = { ...shown, user: current };
+        accountChanged = true;
+        busy = false;
+        return;
+      }
       leave(await account.decideAuthorization(query, approved));
     } catch (error) {
       busy = false;
@@ -164,6 +178,11 @@
       </button>
       <button type="button" onclick={() => decide(false)} disabled={busy}>拒否する</button>
     </div>
+    {#if accountChanged}
+      <p class="error" role="alert">
+        ログインしているアカウントが替わりました。許可するアカウントを確かめてから、もう一度選んでください。
+      </p>
+    {/if}
     {#if decideError !== null}
       <p class="error" role="alert">{decideError}</p>
     {/if}
