@@ -1,3 +1,14 @@
+export {
+  type AccessToken,
+  type AccountApi,
+  createAccountApi,
+  type IssuedAccessToken,
+  MAX_TOKEN_NAME_LENGTH,
+  type NewAccessToken,
+  type OAuthGrant,
+  type Scope,
+  type TokenPurpose,
+} from "./account";
 export { ApiError, type ApiErrorKind } from "./api/errors";
 export type { Database, Executor, Row, SqlValue } from "./db/database";
 export type { ArticleQuery } from "./db/queries";

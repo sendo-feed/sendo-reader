@@ -82,6 +82,7 @@
 
   <footer>
     {@render item({ kind: "manage" }, "購読の管理", 0)}
+    {@render item({ kind: "settings" }, "設定", 0)}
     <SyncStatus />
     {#if reader.user !== null}
       <span class="user" title={reader.user.email}>{reader.user.email}</span>

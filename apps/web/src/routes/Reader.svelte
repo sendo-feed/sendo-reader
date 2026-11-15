@@ -6,6 +6,7 @@
   import { useReader } from "../lib/context";
   import { router } from "../lib/router.svelte";
   import Manage from "./Manage.svelte";
+  import Settings from "./Settings.svelte";
 
   const reader = useReader();
 
@@ -48,7 +49,7 @@
 
 <div
   class="reader"
-  class:managing={router.view.kind === "manage"}
+  class:managing={router.view.kind === "manage" || router.view.kind === "settings"}
   class:reading={router.articleId !== null}
   class:menu-open={menuOpen}
 >
@@ -63,6 +64,8 @@
   </button>
   {#if router.view.kind === "manage"}
     <Manage />
+  {:else if router.view.kind === "settings"}
+    <Settings />
   {:else}
     <ArticleList query={list.query} title={list.title} markScope={list.scope} />
     <ArticleView articleId={router.articleId} />

@@ -21,6 +21,9 @@
  * - ブラウザから来た（cookie ヘッダーのある）状態を変えるリクエストは、Sec-Fetch-Site が
  *   same-origin のものだけを受ける
  * - 行はユーザーごとに分けない（どのユーザーでも同じ行を返す。手元を消すかの確かめに使う）
+ *
+ * アカウントの画面のための、アクセストークン（発行・一覧・取り消し）と OAuth の許可（一覧・
+ * 取り消し）にも、sendo と同じ形で答える。
  */
 
 type TableName = "folders" | "feeds" | "articles";
@@ -82,6 +85,26 @@ export interface FakeUser {
   email: string;
 }
 
+export interface FakeToken {
+  id: string;
+  name: string;
+  purpose: "reader" | "mcp";
+  scopes: ("read" | "write")[];
+  createdAt: number;
+  lastUsedAt: number | null;
+  secret: string;
+}
+
+export interface FakeGrant {
+  id: string;
+  clientId: string;
+  clientName: string | null;
+  clientKind: "metadata_document" | "registered";
+  scopes: ("read" | "write")[];
+  createdAt: number;
+  lastUsedAt: number | null;
+}
+
 /** 既定でログインしているユーザー */
 export const USER: FakeUser = { id: "user-1", email: "you@example.com" };
 
@@ -103,6 +126,10 @@ export class FakeSendo {
   loginUser: FakeUser | null = USER;
   /** POST /auth/logout を受けた数 */
   logouts = 0;
+  /** 発行したアクセストークン（secret は発行の応答でだけ返す） */
+  readonly tokens = new Map<string, FakeToken>();
+  /** OAuth で出した許可 */
+  readonly grants = new Map<string, FakeGrant>();
 
   readonly folders = new Map<string, FolderRow>();
   readonly feeds = new Map<string, FeedRow>();
@@ -141,6 +168,21 @@ export class FakeSendo {
     const value = this.#createSession(user);
     this.cookie = value;
     return value;
+  }
+
+  /** OAuth で許可を出したことにする */
+  addGrant(input: Partial<FakeGrant> & { clientId: string }): FakeGrant {
+    const grant: FakeGrant = {
+      id: this.#id("grant"),
+      clientName: null,
+      clientKind: "metadata_document",
+      scopes: ["read"],
+      createdAt: this.now,
+      lastUsedAt: null,
+      ...input,
+    };
+    this.grants.set(grant.id, grant);
+    return grant;
   }
 
   /** 今のセッションを切る（期限切れ、取り消し）。クッキーは残る */
@@ -353,6 +395,10 @@ export class FakeSendo {
     if (request.method === "GET" && path === "/me") {
       return json(200, { user: { id: user.id, email: user.email } });
     }
+    if (path === "/tokens" || path.startsWith("/tokens/")) return this.#tokens(request, path);
+    if (path === "/oauth/grants" || path.startsWith("/oauth/grants/")) {
+      return this.#grants(request, path);
+    }
     if (request.method === "GET" && path === "/sync") {
       return this.#sync(url.searchParams.get("cursor"));
     }
@@ -498,6 +544,70 @@ export class FakeSendo {
 
   #folderByName(name: string): FolderRow | undefined {
     return [...this.folders.values()].find((row) => row.deletedAt === null && row.name === name);
+  }
+
+  /** アクセストークンの発行・一覧・取り消し（sendo の src/api/tokens.ts と同じ決まり） */
+  async #tokens(request: Request, path: string): Promise<Response> {
+    if (request.method === "GET" && path === "/tokens") {
+      const items = [...this.tokens.values()].sort((a, b) => b.createdAt - a.createdAt);
+      return json(200, { items: items.map(tokenJson) });
+    }
+    if (request.method === "POST" && path === "/tokens") {
+      const body = (await request.json()) as {
+        name?: unknown;
+        purpose?: unknown;
+        scopes?: unknown;
+      };
+      const name = typeof body.name === "string" ? body.name.trim() : "";
+      if (name.length < 1 || name.length > 100) {
+        return error(400, "invalid_request", "name must be 1 to 100 characters");
+      }
+      const purpose = body.purpose === "mcp" ? "mcp" : "reader";
+      const asked = Array.isArray(body.scopes) ? (body.scopes as string[]) : null;
+      if (purpose === "reader" && asked !== null) {
+        return error(400, "invalid_request", "scopes are only for mcp tokens");
+      }
+      const scopes: FakeToken["scopes"] =
+        purpose === "reader"
+          ? []
+          : asked?.includes("write") === true
+            ? ["read", "write"]
+            : ["read"];
+      const id = this.#id("token");
+      const token: FakeToken = {
+        id,
+        name,
+        purpose,
+        scopes,
+        createdAt: this.now,
+        lastUsedAt: null,
+        secret: `sendo_${id}_secret`,
+      };
+      this.tokens.set(id, token);
+      return json(201, { token: token.secret, accessToken: tokenJson(token) });
+    }
+    const id = decodeURIComponent(path.slice("/tokens/".length));
+    if (request.method === "DELETE" && this.tokens.delete(id))
+      return new Response(null, { status: 204 });
+    return error(404, "not_found", "token not found");
+  }
+
+  /** OAuth で出した許可の一覧・取り消し */
+  #grants(request: Request, path: string): Response {
+    if (request.method === "GET" && path === "/oauth/grants") {
+      const items = [...this.grants.values()].sort((a, b) => b.createdAt - a.createdAt);
+      return json(200, {
+        items: items.map((grant) => ({
+          ...grant,
+          createdAt: iso(grant.createdAt),
+          lastUsedAt: grant.lastUsedAt === null ? null : iso(grant.lastUsedAt),
+        })),
+      });
+    }
+    const id = decodeURIComponent(path.slice("/oauth/grants/".length));
+    if (request.method === "DELETE" && this.grants.delete(id))
+      return new Response(null, { status: 204 });
+    return error(404, "not_found", "grant not found");
   }
 
   /**
@@ -718,4 +828,15 @@ function isSameOrigin(request: Request): boolean {
   const site = request.headers.get("sec-fetch-site");
   if (site !== null) return site === "same-origin";
   return request.headers.get("origin") === new URL(request.url).origin;
+}
+
+function tokenJson(token: FakeToken) {
+  return {
+    id: token.id,
+    name: token.name,
+    purpose: token.purpose,
+    scopes: token.scopes,
+    createdAt: iso(token.createdAt),
+    lastUsedAt: token.lastUsedAt === null ? null : iso(token.lastUsedAt),
+  };
 }

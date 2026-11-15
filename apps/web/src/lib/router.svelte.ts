@@ -7,6 +7,7 @@
  * - /feeds/:id       フィード
  * - /folders/:id     フォルダ
  * - /manage          購読の管理（追加、フォルダ、OPML の取り込み）
+ * - /settings        設定（アクセストークンと OAuth の許可。docs/decisions/account.md）
  * 開いている記事は ?article=<id> に持つ。
  */
 export type View =
@@ -15,7 +16,8 @@ export type View =
   | { kind: "starred" }
   | { kind: "feed"; id: string }
   | { kind: "folder"; id: string }
-  | { kind: "manage" };
+  | { kind: "manage" }
+  | { kind: "settings" };
 
 class Router {
   url = $state(new URL(location.href));
@@ -31,6 +33,7 @@ class Router {
     if (path === "/all") return { kind: "all" };
     if (path === "/starred") return { kind: "starred" };
     if (path === "/manage") return { kind: "manage" };
+    if (path === "/settings") return { kind: "settings" };
     const feed = /^\/feeds\/([^/]+)$/.exec(path);
     if (feed?.[1] !== undefined) return { kind: "feed", id: decodeURIComponent(feed[1]) };
     const folder = /^\/folders\/([^/]+)$/.exec(path);
@@ -74,6 +77,8 @@ export function viewHref(view: View): string {
       return `/folders/${encodeURIComponent(view.id)}`;
     case "manage":
       return "/manage";
+    case "settings":
+      return "/settings";
   }
 }
 

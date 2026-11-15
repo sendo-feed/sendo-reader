@@ -15,3 +15,12 @@ export function fromNow(ms: number, now = Date.now()): string {
 export function formatDateTime(ms: number): string {
   return dateTime.format(ms);
 }
+
+/**
+ * 外から来た長い文字列（クライアントの名前など）を、画面に出せる長さに切る
+ * （docs/decisions/account.md の 6）。サロゲートペアの途中では切らない
+ */
+export function truncate(text: string, max = 80): string {
+  const chars = [...text];
+  return chars.length <= max ? text : `${chars.slice(0, max).join("")}…`;
+}

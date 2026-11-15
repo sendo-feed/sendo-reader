@@ -80,7 +80,7 @@ Conventional Commits を土台にする。全文は https://github.com/sendo-fee
 
 - 同期とローカル DB のロジックはすべて `packages/core` に入れる。`packages/core` は UI のフレームワーク（`svelte`）と `apps/` に依存しない（Biome の `noRestrictedImports` で検査している）
 - `packages/core`、`apps/web/src`、`apps/web/worker` では `node:*` を使わない（ブラウザと Workers で動くため。Biome で検査している）
-- 画面はネットワークを待たない。読み書きはローカル DB に対して行い、サーバーとは同期で揃える
+- 画面はネットワークを待たない。読み書きはローカル DB に対して行い、サーバーとは同期で揃える。例外は、sendo にしかないものを扱うアカウントの画面（設定、OAuth の許可の画面。`docs/decisions/account.md`）で、手元の DB に置かず、core の API の窓口（`createAccountApi`）で sendo に聞く
 - OpenAPI から生成したファイルは手で直さない。sendo の OpenAPI を直して生成し直す
 - 記事のデータ（タイトル、要約、本文）は信頼できないデータとして扱う
   - `{@html}` を使わない（Biome の `noSvelteAtHtmlTags` で検査している）。本文の HTML を出すときは、サニタイズしてから専用の部品で出す
@@ -112,7 +112,7 @@ Conventional Commits を土台にする。全文は https://github.com/sendo-fee
 
 1. **決定との食い違い**：`docs/decisions/` や sendo 側の決定と食い違う変更がないか
 2. **core と画面の境界**：`packages/core` が UI のフレームワークや `apps/` に依存していないか。同期やデータのロジックが `apps/` に漏れていないか
-3. **ローカルファースト**：画面の操作がネットワークの応答を待っていないか。オフラインで操作したときに、操作キューと楽観的更新で正しく戻せるか
+3. **ローカルファースト**：画面の操作がネットワークの応答を待っていないか（アカウントの画面を除く）。オフラインで操作したときに、操作キューと楽観的更新で正しく戻せるか
 4. **速さの予算**：JS が gzip 後 100KB を超えそうな依存の追加や、操作の反応が 100ms を超えそうな処理がないか
 5. **セキュリティ**：記事のデータの HTML の出し方（XSS）、URL のスキームの確かめ漏れ、CSP や Trusted Types を緩める変更、秘密（発行したトークンなど）の置き場所、ログへの秘密情報の出力、状態を変えるリクエストを同じオリジンから送っているか
 6. **生成物**：OpenAPI から生成したファイルを手で直していないか
