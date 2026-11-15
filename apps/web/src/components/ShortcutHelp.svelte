@@ -41,6 +41,9 @@
 
 <Dialog bind:open title="キーボードの操作">
   <div class="groups">
+    <p class="touch">
+      指では、一覧の行を左へはじくとスター、右へはじくと既読・未読。記事を左右にはじくと次・前の記事。
+    </p>
     {#each GROUPS as group (group.title)}
       <section>
         <h3>{group.title}</h3>
@@ -65,6 +68,12 @@
   .groups {
     display: grid;
     gap: 1rem;
+  }
+
+  .touch {
+    margin: 0;
+    color: var(--muted);
+    font-size: 0.875rem;
   }
 
   h3 {

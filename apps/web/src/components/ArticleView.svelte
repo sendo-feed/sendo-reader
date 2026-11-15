@@ -98,6 +98,31 @@
     if (link !== null) window.open(link, "_blank", "noopener,noreferrer");
   }
 
+  /**
+   * 指で記事を横にはじくと、次（左へ）・前（右へ）の記事に移る。縦に読み進める動きや、
+   * 文字を選ぶ動きと取り違えないように、はっきり横に動かしたときだけにする
+   */
+  let touchStart: { x: number; y: number } | null = null;
+
+  function onTouchStart(event: TouchEvent) {
+    const touch = event.touches[0];
+    touchStart =
+      event.touches.length === 1 && touch !== undefined
+        ? { x: touch.clientX, y: touch.clientY }
+        : null;
+  }
+
+  function onTouchEnd(event: TouchEvent) {
+    const touch = event.changedTouches[0];
+    const start = touchStart;
+    touchStart = null;
+    if (start === null || touch === undefined || article === null) return;
+    if (getSelection()?.isCollapsed === false) return;
+    const dx = touch.clientX - start.x;
+    const dy = touch.clientY - start.y;
+    if (Math.abs(dx) >= 80 && Math.abs(dx) > Math.abs(dy) * 2) onstep(dx < 0 ? 1 : -1);
+  }
+
   /** 書き込みに失敗したときの知らせ */
   let saveError = $state<string | null>(null);
 
@@ -117,7 +142,14 @@
   );
 </script>
 
-<article class="article-view" aria-live="polite" bind:this={scroller}>
+<article
+  class="article-view"
+  aria-live="polite"
+  bind:this={scroller}
+  ontouchstart={onTouchStart}
+  ontouchend={onTouchEnd}
+  ontouchcancel={() => (touchStart = null)}
+>
   {#if article !== null}
     <div class="toolbar">
       <button

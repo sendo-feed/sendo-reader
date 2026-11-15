@@ -192,6 +192,27 @@ test("狭い画面では、メニューを左から開き、一覧と記事を�
   await expect(list).toBeHidden();
   await page.getByRole("button", { name: "次の記事" }).click();
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("3 番目");
+  // 記事を右へはじくと前の記事、左へはじくと次の記事（縦に読み進める動きでは移らない）
+  const flickArticle = (dx: number, dy: number) =>
+    page.locator(".article-view").evaluate(
+      (view, { dx, dy }) => {
+        const at = (x: number, y: number) =>
+          new Touch({ identifier: 1, target: view, clientX: x, clientY: y });
+        const fire = (type: string, touches: Touch[], changed: Touch[]) =>
+          view.dispatchEvent(
+            new TouchEvent(type, { bubbles: true, touches, changedTouches: changed }),
+          );
+        fire("touchstart", [at(200, 300)], [at(200, 300)]);
+        fire("touchend", [], [at(200 + dx, 300 + dy)]);
+      },
+      { dx, dy },
+    );
+  await flickArticle(60, -200);
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText("3 番目");
+  await flickArticle(140, 10);
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText("2 番目");
+  await flickArticle(-140, 10);
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText("3 番目");
   await page.goBack();
   await expect(list).toBeVisible();
   await expect(page).toHaveURL(/\/all$/);
