@@ -119,14 +119,16 @@ export class ArticleListState {
     const shown = new Set(requested);
     const last = this.articles.at(-1);
     const oldest = this.#query.order === "oldest";
-    // 新しい順なら、新しい記事は先頭に入る。古い順なら末尾に入るので、続きがあるかだけを見る
-    const [latest, edge] = await Promise.all([
+    const after = last === undefined ? undefined : { publishedAt: last.publishedAt, id: last.id };
+    const [latest, top, beyond] = await Promise.all([
       this.#client.getArticles(requested),
-      this.#client.listArticles(
-        oldest && last !== undefined
-          ? { ...this.#query, limit: 1, after: { publishedAt: last.publishedAt, id: last.id } }
-          : { ...this.#query, limit: PAGE },
-      ),
+      // 新しい順なら、新しく届いた記事は先頭のページに入る（古い順なら末尾に入るので、下の beyond で見る）
+      oldest ? [] : this.#client.listArticles({ ...this.#query, limit: PAGE }),
+      // 末尾まで出していたら、その先に条件に合う記事が加わっていないかを見る（新しく届いた、
+      // 別のタブでスターを付けた・未読に戻した、公開日時の古い記事が届いた）
+      this.hasMore || after === undefined
+        ? []
+        : this.#client.listArticles({ ...this.#query, limit: 1, after }),
     ]);
     if (current !== this.#generation) return;
     // 読み直した記事だけを差し替える（読み直している間に続きとして足した記事は残す。
@@ -135,18 +137,17 @@ export class ArticleListState {
     this.#articles = this.articles.flatMap((article) =>
       shown.has(article.id) ? (byId.get(article.id) ?? []) : [article],
     );
-    if (oldest) this.hasMore ||= edge.length > 0;
-    else {
-      // 出している最後の記事より新しいものだけを数える（未読の一覧で記事を読むと、その分だけ
-      // 古い記事が先頭のページに繰り上がるが、それは続きとして読む記事で、新しく届いたのではない）
-      this.fresh = edge.filter(
-        (article) =>
-          !shown.has(article.id) &&
-          (last === undefined ||
-            article.publishedAt > last.publishedAt ||
-            (article.publishedAt === last.publishedAt && article.id > last.id)),
-      ).length;
-    }
+    if (beyond.length > 0) this.hasMore = true;
+    // 出している最後の記事より前に入る記事だけを、新しい記事として数える。最後の記事より先の
+    // 記事は、続きとして読む（未読の一覧で記事を読むと、その分だけ先の記事が先頭のページに
+    // 繰り上がるが、それは新しく届いたのではない）
+    this.fresh = top.filter(
+      (article) =>
+        !shown.has(article.id) &&
+        (last === undefined ||
+          article.publishedAt > last.publishedAt ||
+          (article.publishedAt === last.publishedAt && article.id > last.id)),
+    ).length;
   }
 
   find(id: string | null): Article | null {

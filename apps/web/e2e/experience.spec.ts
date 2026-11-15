@@ -237,3 +237,25 @@ test("j を続けて押して通り過ぎた記事も、既読になる", async 
     page.getByRole("button", { name: "未読 0 件。この一覧の進み具合 100%" }),
   ).toBeVisible();
 });
+
+test("末尾まで出した一覧に、それより古い記事が加わったら、続きとして出す", async ({
+  page,
+  context,
+}) => {
+  const { server } = seed();
+  const [first, , third] = [...server.inbox.values()];
+  if (first === undefined || third === undefined) throw new Error("unreachable");
+  server.setArticleState(first.id, { starred: true });
+  await routeFakeSendo(context, server);
+  await page.goto("/");
+  await signIn(page);
+  await page.locator("nav").getByRole("link", { name: "スター" }).click();
+  const list = page.locator(".article-list");
+  await expect(list.locator(".title")).toHaveText(["1 番目"]);
+  await expect(list.getByText("ここまで")).toBeVisible();
+
+  // ほかの端末で、出している記事より古い記事にスターを付けた
+  server.setArticleState(third.id, { starred: true });
+  await page.getByRole("button", { name: "今すぐ同期" }).click();
+  await expect(list.locator(".title")).toHaveText(["1 番目", "3 番目"]);
+});
