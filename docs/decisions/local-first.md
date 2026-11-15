@@ -1,11 +1,11 @@
 # ローカルファースト
 
 - 状態：提案中
-- 関連：[UI とツール](ui.md)、sendo の[差分同期](https://github.com/sendo-feed/sendo/blob/main/docs/decisions/sync.md)・[ユーザーと認証](https://github.com/sendo-feed/sendo/blob/main/docs/decisions/accounts.md)、[技術構成](https://github.com/sendo-feed/sendo/blob/main/docs/tech-deck.md)（方針 03・06）
+- 関連：[UI とツール](ui.md)、[アカウントの画面](account.md)、sendo の[差分同期](https://github.com/sendo-feed/sendo/blob/main/docs/decisions/sync.md)・[ユーザーと認証](https://github.com/sendo-feed/sendo/blob/main/docs/decisions/accounts.md)、[技術構成](https://github.com/sendo-feed/sendo/blob/main/docs/tech-deck.md)（方針 03・06）
 
 ## 決定
 
-1. **最初からローカルファーストで作る。** 画面はネットワークを待たない。読み書きは手元の SQLite に対して行い、sendo とは同期で揃える。
+1. **最初からローカルファーストで作る。** 画面はネットワークを待たない。読み書きは手元の SQLite に対して行い、sendo とは同期で揃える。例外は、sendo にしかないものを扱うアカウントの画面（トークンと許可の管理、OAuth の許可の画面）で、[アカウントの画面](account.md)で決める。
 2. **同期とローカル DB のロジックは、すべて `packages/core` に置く。** core は UI のフレームワークにも `apps/` にも依存しない。SQLite には core の DB の窓口（インターフェース）越しに触れ、Web の実装（下の Wasm）と、ネイティブの実装（Capacitor で包むとき）を差し替えられるようにする。スキーマとマイグレーションは SQL で書き、どのプラットフォームでも同じにする。
 3. **同期は sendo の[差分同期](https://github.com/sendo-feed/sendo/blob/main/docs/decisions/sync.md)に従う。** 決まりはそちらが正で、ここには書き写さない。reader の側では、特に次を守る。
    - カーソルの中身は解釈せず、受け取ったものをそのまま送り返す
