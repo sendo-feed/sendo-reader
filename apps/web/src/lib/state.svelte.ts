@@ -1,5 +1,13 @@
-import type { Feed, Folder, SyncStatus, UnreadCounts } from "@sendo-reader/core";
+import {
+  ApiError,
+  type Feed,
+  type Folder,
+  type SyncStatus,
+  type UnreadCounts,
+  type User,
+} from "@sendo-reader/core";
 import type { ReaderClient } from "@sendo-reader/core/web";
+import { takeLoginError } from "./login";
 
 /**
  * 画面の状態。手元の DB を読み、変わったら読み直す（ネットワークは待たない）。
@@ -8,6 +16,14 @@ import type { ReaderClient } from "@sendo-reader/core/web";
 export class ReaderState {
   /** null はまだ分からない（起動したばかり） */
   signedIn = $state<boolean | null>(null);
+  /** 手元に置いた、ログインしたユーザー */
+  user = $state<User | null>(null);
+  /** 起動したときに sendo に届かず、ログインしているかを確かめられなかった */
+  offline = $state(false);
+  /** sendo がログインに失敗して戻した理由（画面に出す文） */
+  loginError = $state<string | null>(null);
+  /** ログアウトを sendo に送れず、この端末のデータだけを消した */
+  signOutPending = $state(false);
   status = $state<SyncStatus | null>(null);
   folders = $state<Folder[]>([]);
   feeds = $state<Feed[]>([]);
@@ -29,6 +45,7 @@ export class ReaderState {
     });
     client.onStatus((status) => {
       this.status = status;
+      this.user = status.user;
       if (this.signedIn !== status.signedIn) {
         this.signedIn = status.signedIn;
         if (status.signedIn) void this.#loadAll();
@@ -36,9 +53,32 @@ export class ReaderState {
     });
   }
 
+  /**
+   * 起動したときに呼ぶ。手元にユーザーがいれば、ネットワークを待たずに画面を出す。いなければ
+   * sendo のセッションを見る（Google のログインから戻ってきたとき）
+   */
   async init(): Promise<void> {
-    this.signedIn = await this.client.isSignedIn();
-    if (this.signedIn) await this.#loadAll();
+    this.loginError = takeLoginError();
+    try {
+      this.signedIn = await this.client.restoreSession();
+    } catch (error) {
+      // 手元にユーザーがいれば restoreSession は待たずに答えるので、ここに来るのは、手元に
+      // いなくて sendo に聞けなかったとき
+      this.offline = error instanceof ApiError && error.kind === "network";
+      this.signedIn = await this.client.isSignedIn();
+    }
+    if (this.signedIn) {
+      this.user = await this.client.currentUser();
+      await this.#loadAll();
+    }
+  }
+
+  /** ログアウトする。sendo に届かなくても、この端末のデータは消える */
+  async signOut(): Promise<void> {
+    this.signOutPending = !(await this.client.signOut());
+    this.signedIn = false;
+    this.user = null;
+    this.loginError = null;
   }
 
   feedTitle(feedId: string): string {

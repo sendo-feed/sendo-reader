@@ -14,7 +14,9 @@ import type { SyncStatus } from "../sync/scheduler";
 /** タブから呼べる ReaderCore のメソッド。これ以外は呼ばせない */
 export const READER_METHODS = [
   "isSignedIn",
-  "signIn",
+  "currentUser",
+  "restoreSession",
+  "prepareSignIn",
   "signOut",
   "countPending",
   "listFolders",
@@ -61,8 +63,16 @@ export const WRITE_METHODS = new Set<Method>([
   "unsubscribe",
 ]);
 
-/** 終わったらすぐ同期する（ログインした、購読した、OPML を取り込んだ、ログアウトした） */
-export const SYNC_NOW_METHODS = new Set<Method>(["signIn", "signOut", "subscribe", "importOpml"]);
+/**
+ * 終わったらすぐ同期する（タブを開いた・ログインから戻った、購読した、OPML を取り込んだ、
+ * ログアウトした）。ログインし直して戻ったタブが代表でなくても、止まっていた同期を再開する
+ */
+export const SYNC_NOW_METHODS = new Set<Method>([
+  "restoreSession",
+  "signOut",
+  "subscribe",
+  "importOpml",
+]);
 
 export type Result = { ok: true; value: unknown } | { ok: false; error: SerializedError };
 

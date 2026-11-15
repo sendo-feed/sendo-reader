@@ -4,7 +4,7 @@ import { createSendoApi } from "../src/api/client";
 import { normalizeFolderName } from "../src/reader";
 import { pull } from "../src/sync/pull";
 import { listPending } from "../src/sync/queue";
-import { TOKEN } from "./fake-sendo";
+import { USER } from "./fake-sendo";
 import { setup } from "./helpers";
 
 /** 記事が 1 件ある状態で同期を済ませる */
@@ -18,11 +18,7 @@ async function withArticle() {
 
 /** 送らずに、差分の取り込みだけをする（送り終えていない操作が残ったまま取り込む場面） */
 async function pullOnly(context: Awaited<ReturnType<typeof setup>>) {
-  const api = createSendoApi({
-    baseUrl: "https://sendo.test/api/v1",
-    token: () => TOKEN,
-    fetch: context.server.fetch,
-  });
+  const api = createSendoApi({ baseUrl: "https://sendo.test/api/v1", fetch: context.server.fetch });
   return pull(context.db, api, { now: () => context.server.now });
 }
 
@@ -146,14 +142,23 @@ describe("既読とスター", () => {
     expect(await core.countPending()).toBe(0);
   });
 
-  test("サーバーの不具合やトークンの取り消しでは止め、操作を残す", async () => {
+  test("サーバーの不具合やセッションの取り消しでは止め、操作を残す", async () => {
     const { server, core, article, db } = await withArticle();
     await core.setRead(article.id, true);
-    server.failNext(500);
+    // /me は通り、操作を送るところで 500
+    server.failNext(null, 500);
     expect(((await core.sync().catch((e: unknown) => e)) as ApiError).kind).toBe("server");
-    server.token = "sendo_rotated";
+    // 送っている途中でセッションが切れた
+    server.onRequest = async (path) => {
+      if (path.startsWith("PATCH /articles/")) server.expireSession();
+    };
     expect(((await core.sync().catch((e: unknown) => e)) as ApiError).kind).toBe("unauthorized");
     expect(await db.all("select attempts from pending_ops")).toEqual([{ attempts: 2 }]);
+    // 送る前に切れていれば（/me が 401）、送らない
+    server.onRequest = null;
+    expect(((await core.sync().catch((e: unknown) => e)) as ApiError).kind).toBe("unauthorized");
+    expect(await db.all("select attempts from pending_ops")).toEqual([{ attempts: 2 }]);
+    expect(core.isSignedIn()).toBe(true);
   });
 });
 
@@ -366,7 +371,7 @@ describe("受け付けられなかった操作の扱い", () => {
     await core.markAllRead({ all: true });
     expect((await core.getArticle(article.id))?.readAt).toEqual(expect.any(Number));
 
-    server.failNext(400);
+    server.failNext(null, 400);
     const result = await core.sync();
     expect(result.push.rejected.map((r) => r.error.kind)).toEqual(["invalid"]);
     expect(result.pull.pages).toBeGreaterThan(0);
@@ -380,7 +385,7 @@ describe("受け付けられなかった操作の扱い", () => {
     await core.deleteFolder(folder.id);
     await core.setStarred(article.id, true);
 
-    server.failNext(400);
+    server.failNext(null, 400);
     await core.sync();
     // フォルダの削除は断られたので戻り、スターは送られている
     expect((await core.listFolders()).map((f) => f.id)).toEqual([folder.id]);
@@ -402,7 +407,7 @@ describe("まとめて既読の境界（sendo のカーソルの決まり）", (
     const first = server.deliver(feed.id);
     const second = server.deliver(feed.id);
     // 1 ページめ（first）だけ届いて止まる
-    server.failNext(null, "network");
+    server.failNext(null, null, "network");
     await core.sync().catch(() => undefined);
     expect(await core.getArticle(first.id)).not.toBeNull();
     expect(await core.getArticle(second.id)).toBeNull();
@@ -465,7 +470,7 @@ describe("まとめて既読の境界（sendo のカーソルの決まり）", (
     const delivered = Array.from({ length: 100 }, () => server.deliver(feed.id));
     // 最初の同期の 1 ページめ（フィードと記事 99 件）だけ届いて止まる
     server.pageSize = 100;
-    server.failNext(null, "network");
+    server.failNext(null, null, "network");
     await core.sync().catch(() => undefined);
     expect((await core.countUnread()).total).toBe(99);
 
@@ -540,7 +545,7 @@ describe("送る途中で届かなくなったとき", () => {
     await core.moveFeed(feed.id, tech.id);
     await core.renameFolder(tech.id, "Technology");
     // 名前の変更（409）と読み直しは届き、フィードの移動で届かなくなる
-    server.failNext(null, null, "network");
+    server.failNext(null, null, null, "network");
     const error = await core.sync().catch((e: unknown) => e);
     expect((error as ApiError).kind).toBe("network");
     expect((await core.listFolders()).find((f) => f.id === tech.id)?.name).toBe("Technology");
@@ -557,7 +562,7 @@ describe("送る途中で届かなくなったとき", () => {
     core.onChange((tables) => changes.push([...tables].sort()));
 
     // フォルダの作成（409）と探し直しは届き、スターで届かなくなる
-    server.failNext(null, null, "network");
+    server.failNext(null, null, null, "network");
     await core.sync().catch(() => undefined);
     expect(changes).toContainEqual(["feeds", "folders"]);
     expect((await core.listFolders()).map((f) => f.id)).toEqual([existing.id]);
@@ -573,7 +578,7 @@ describe("同じ名前のフォルダに付け替えたあと", () => {
     await core.renameFolder(tempId, "Technology");
 
     // フォルダの作成（409）と探し直しは届き、名前の変更で届かなくなる
-    server.failNext(null, null, "network");
+    server.failNext(null, null, null, "network");
     await core.sync().catch(() => undefined);
     expect(await core.listFolders()).toMatchObject([{ id: existing.id, name: "Technology" }]);
     expect(await core.countPending()).toBe(1);
@@ -589,7 +594,7 @@ describe("最初から取り直すあいだも、手元を空にしない", () =
     await core.setStarred(article.id, true);
 
     // フォルダの削除は断られ（400）、スターで届かなくなる
-    server.failNext(400, "network");
+    server.failNext(null, 400, "network");
     await core.sync().catch(() => undefined);
     expect(await core.listFeeds()).toMatchObject([{ id: feed.id }]);
     expect((await core.getArticle(article.id))?.starredAt).toEqual(expect.any(Number));
@@ -610,7 +615,7 @@ describe("最初から取り直すあいだも、手元を空にしない", () =
     server.purgeTombstones();
     server.pageSize = 1;
     // カーソルが読めないと言われたあと、取り直しの 2 ページめで届かなくなる
-    server.failNext(null, null, "network");
+    server.failNext(null, null, null, "network");
     await core.sync().catch(() => undefined);
     expect((await core.getArticle(article.id))?.id).toBe(article.id);
   });
@@ -641,13 +646,15 @@ describe("取り直しとログインのし直しが、操作と重なったと�
     expect(kept?.starredAt).toEqual(expect.any(Number));
   });
 
-  test("ログインし直している途中に呼んだ書き込みは、新しいアカウントの操作キューに積まない", async () => {
+  test("別のユーザーに替えている途中に呼んだ書き込みは、新しいユーザーの操作キューに積まない", async () => {
     const { server, core, db } = await withArticle();
-    server.otherTokens.add("sendo_b");
+    server.signInAs({ id: "user-b", email: "b@example.com" });
+    expect(USER.id).not.toBe("user-b");
 
-    // ログインし直すトランザクションを、中で止められるようにする
+    // ユーザーを替えるトランザクションを、中で止められるようにする
     const original = db.transaction.bind(db);
     let pauseNext = false;
+    let paused = false;
     let release = () => {};
     const held = new Promise<void>((resolve) => {
       release = resolve;
@@ -655,20 +662,21 @@ describe("取り直しとログインのし直しが、操作と重なったと�
     db.transaction = (<T>(fn: (tx: Executor) => Promise<T>) => {
       if (!pauseNext) return original(fn);
       pauseNext = false;
+      paused = true;
       return original(async (tx) => {
         await held;
         return fn(tx);
       });
     }) as typeof db.transaction;
     server.onRequest = async (path) => {
-      if (path === "GET /folders") pauseNext = true;
+      if (path === "GET /me") pauseNext = true;
     };
 
-    const signingIn = core.signIn("sendo_b");
-    await vi.waitFor(() => expect(pauseNext).toBe(false));
+    const syncing = core.sync();
+    await vi.waitFor(() => expect(paused).toBe(true));
     const writing = core.createFolder("X").catch((e: unknown) => e);
     release();
-    await signingIn;
+    await syncing;
     expect(((await writing) as ApiError).kind).toBe("unauthorized");
     expect(await db.all("select id from pending_ops")).toEqual([]);
     expect(await core.listFolders()).toEqual([]);
@@ -687,7 +695,7 @@ describe("消えたフォルダの名前の変更を戻すとき", () => {
     server.deleteFolder(folder.id);
 
     // 名前の変更（404）と読み直しは届き、スターで届かなくなる
-    server.failNext(null, null, "network");
+    server.failNext(null, null, null, "network");
     await core.sync().catch(() => undefined);
     expect(await core.listFolders()).toEqual([]);
     expect(await core.listFeeds()).toMatchObject([{ id: feed.id, folderId: null }]);
@@ -707,7 +715,7 @@ describe("消えたフィードへの移動を戻すとき", () => {
     server.unsubscribe(feed.id);
 
     // 移動（404）と読み直しは届き、スターで届かなくなる
-    server.failNext(null, null, "network");
+    server.failNext(null, null, null, "network");
     await core.sync().catch(() => undefined);
     expect((await core.listFeeds()).map((f) => f.id)).toEqual([other.id]);
     // ほかの表の変化（購読がない）からは、記事を消さない（docs/decisions/local-first.md）

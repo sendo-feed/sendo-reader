@@ -83,8 +83,7 @@ describe("差分の同期", () => {
     server.requests.length = 0;
 
     await core.sync();
-    expect(server.requests).toHaveLength(1);
-    expect(server.requests[0]).toMatch(/^GET \/sync\?cursor=/);
+    expect(server.requests).toEqual(["GET /me", expect.stringMatching(/^GET \/sync\?cursor=/)]);
     expect(await core.listArticles()).toHaveLength(1);
   });
 
@@ -127,7 +126,7 @@ describe("差分の同期", () => {
     server.unsubscribe(feed.id);
     // 1 ページめ（購読をやめた印）だけ届いて止まる
     server.pageSize = 1;
-    server.failNext(null, "network");
+    server.failNext(null, null, "network");
     await core.sync().catch(() => undefined);
     expect(await core.listFeeds()).toEqual([]);
     expect(await core.getArticle(article.id)).not.toBeNull();
@@ -187,7 +186,7 @@ describe("差分の同期", () => {
     const articles = [1, 2, 3, 4, 5].map((i) => server.deliver(feed.id, { title: `a${i}` }));
 
     // 1 ページめ（フィード 1 ＋ 記事 1）は届き、2 ページめで届かなくなる
-    server.failNext(null, "network");
+    server.failNext(null, null, "network");
     const error = await core.sync().catch((e: unknown) => e);
     expect((error as ApiError).kind).toBe("network");
     expect(await core.listArticles()).toHaveLength(1);
@@ -196,23 +195,24 @@ describe("差分の同期", () => {
     expect(ids(await core.listArticles())).toEqual(ids(articles));
   });
 
-  test("トークンが取り消されていたら unauthorized で失敗し、手元は変えない", async () => {
+  test("セッションが切れていたら unauthorized で失敗し、手元は変えない", async () => {
     const { server, core } = await setup();
     const feed = server.subscribe({ url: "https://example.com/feed.xml" });
     server.deliver(feed.id);
     await core.sync();
 
-    server.token = "sendo_rotated";
+    server.expireSession();
     server.deliver(feed.id);
     const error = await core.sync().catch((e: unknown) => e);
     expect(error).toBeInstanceOf(ApiError);
     expect((error as ApiError).kind).toBe("unauthorized");
     expect(await core.listArticles()).toHaveLength(1);
+    expect(core.isSignedIn()).toBe(true);
   });
 
   test("サーバーの不具合（5xx）は server として失敗する", async () => {
     const { server, core } = await setup();
-    server.failNext(503);
+    server.failNext(null, 503);
     const error = await core.sync().catch((e: unknown) => e);
     expect((error as ApiError).kind).toBe("server");
   });
@@ -285,7 +285,7 @@ describe("フォルダの削除の通知と、応答の形", () => {
     // sendo はフィードの行より先に、フォルダを消した印を返すことがある（別のページ）
     server.pageSize = 1;
     server.deleteFolder(folder.id);
-    server.failNext(null, "network");
+    server.failNext(null, null, "network");
     const changes: string[][] = [];
     core.onChange((tables) => changes.push([...tables].sort()));
     await core.sync().catch(() => undefined);
@@ -313,9 +313,17 @@ async function setupWithResponse(body: unknown) {
     baseUrl: "https://sendo.test/api/v1",
     fetch: async (input) => {
       const url = new URL((input as Request).url);
-      return new Response(JSON.stringify(url.pathname.endsWith("/sync") ? body : { items: [] }));
+      return new Response(
+        JSON.stringify(
+          url.pathname.endsWith("/sync")
+            ? body
+            : url.pathname.endsWith("/me")
+              ? { user: { id: "u1", email: "a@example.com" } }
+              : { items: [] },
+        ),
+      );
     },
   });
-  await core.signIn("sendo_x");
+  await core.restoreSession();
   return core;
 }

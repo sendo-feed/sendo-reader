@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test";
-import { FakeSendo, routeFakeSendo, signIn } from "./fake-sendo";
+import { FakeSendo, routeFakeSendo, signIn, USER } from "./fake-sendo";
 
-test("トークンを貼ってログインし、記事を読んで、スターを付ける", async ({ page, context }) => {
+test("Google でログインし、記事を読んで、スターを付ける", async ({ page, context }) => {
   const server = new FakeSendo();
   const folder = server.createFolder("Tech");
   const feed = server.subscribe({
@@ -17,8 +17,12 @@ test("トークンを貼ってログインし、記事を読んで、スター�
   await routeFakeSendo(context, server);
 
   await page.goto("/");
-  await signIn(page, "sendo_wrong");
-  await expect(page.getByRole("alert")).toContainText("このトークンは使えません");
+  // 許可していないメールなら、sendo は理由を付けて戻す。理由は分かる言葉で出し、URL から消す
+  server.loginUser = null;
+  await signIn(page);
+  await expect(page.getByRole("alert")).toContainText("このメールアドレスでは使えません");
+  await expect(page).not.toHaveURL(/login_error/);
+  server.loginUser = USER;
   await signIn(page);
 
   const list = page.locator(".article-list");
@@ -64,4 +68,43 @@ test("フィードを探して購読し、フォルダに入れる", async ({ pa
   await expect.poll(() => [...server.folders.values()].map((f) => f.name)).toEqual(["Tech"]);
   const [created] = [...server.folders.values()];
   await expect.poll(() => [...server.feeds.values()].map((f) => f.folderId)).toEqual([created?.id]);
+});
+
+test("セッションが切れたらログインし直しを促し、ログインし直したら続きから送る。ログアウトで sendo のセッションも消す", async ({
+  page,
+  context,
+}) => {
+  const server = new FakeSendo();
+  const feed = server.subscribe({ url: "https://blog.example/feed.xml", title: "Blog" });
+  const article = server.deliver(feed.id, { title: "記事" });
+  await routeFakeSendo(context, server);
+
+  await page.goto("/");
+  await signIn(page);
+  await expect(page.locator("nav")).toContainText(USER.email);
+  await page.locator(".article-list").getByText("記事").click();
+
+  // セッションが切れた（期限切れ、取り消し）。手元では読み書きでき、ログインし直しを促す
+  server.sessions.clear();
+  await page.getByRole("button", { name: "☆ スターを付ける" }).click();
+  await expect(page.getByRole("button", { name: "ログインし直す" })).toBeVisible();
+  await expect(page.getByText("ログインが切れました")).toBeVisible();
+  await expect(page.getByRole("button", { name: "★ スターを外す" })).toBeVisible();
+
+  // ログインし直すと、開いていた記事に戻り、まだ送っていなかったスターを送る。Service Worker が
+  // ページを受け持っていても、ログインの入口（/api/v1/auth/...）へのページの移動は横取りしない
+  await expect
+    .poll(() => page.evaluate(() => navigator.serviceWorker.controller !== null))
+    .toBe(true);
+  await page.getByRole("button", { name: "ログインし直す" }).click();
+  await expect(page).toHaveURL(new RegExp(`article=${article.id}`));
+  await expect.poll(() => server.inbox.get(article.id)?.starredAt ?? null).not.toBeNull();
+  await expect(page.getByRole("button", { name: "今すぐ同期" })).toBeVisible();
+
+  await page.getByRole("button", { name: "ログアウト" }).click();
+  await expect(page.getByRole("button", { name: "Google でログイン" })).toBeVisible();
+  await expect.poll(() => server.sessions.size).toBe(0);
+  // 手元のデータも消えている（開き直しても、ログインの画面のまま）
+  await page.reload();
+  await expect(page.getByRole("button", { name: "Google でログイン" })).toBeVisible();
 });

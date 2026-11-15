@@ -39,10 +39,9 @@ pnpm --filter @sendo-reader/core exec playwright install chromium   # ブラウ�
 pnpm dev
 ```
 
-`http://localhost:5173` で画面が開きます。`/api` へのリクエストは、Vite の dev サーバーが `http://localhost:8787` の Sendo に中継します。最初の画面で、Sendo で `pnpm token:create --email <メール>` を実行して発行したアクセストークンを貼ってログインします。
+`http://localhost:5173` で画面が開きます。`/api` へのリクエストは、Vite の dev サーバーが `http://localhost:8787` の Sendo に中継します。最初の画面で「Google でログイン」を押すと、Sendo の Google のログインを通って戻ってきます。
 
-> [!NOTE]
-> 差分同期の API（`GET /api/v1/sync`）は Sendo でまだ作っている途中です。それまでは、ログインはできても記事は同期されません。
+ログインするには、手元の Sendo に Google の OAuth クライアントと、ログインできるメールを設定しておきます（[Sendo の README](https://github.com/sendo-feed/sendo#ブラウザでログインするgoogle)）。「承認済みのリダイレクト URI」には `http://localhost:5173/api/v1/auth/google/callback` を登録します。
 
 ## コマンド
 

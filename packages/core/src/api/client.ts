@@ -1,4 +1,5 @@
 import createClient from "openapi-fetch";
+import type { User } from "../models";
 import type { SyncPage } from "../sync/page";
 import { ApiError, errorFromBody, toApiError } from "./errors";
 import type { paths } from "./schema.gen";
@@ -12,8 +13,6 @@ export const REQUEST_TIMEOUT_MS = 30_000;
 export interface SendoApiOptions {
   /** API の入口。画面では同じオリジンの "/api/v1"（reader Worker が sendo に中継する） */
   baseUrl: string;
-  /** アクセストークン。ないときは null */
-  token: () => string | null;
   fetch?: typeof fetch;
   timeoutMs?: number;
 }
@@ -26,8 +25,11 @@ export function createSendoApi(options: SendoApiOptions) {
   const timeoutMs = options.timeoutMs ?? REQUEST_TIMEOUT_MS;
 
   /**
-   * トークンを付けて送る（リクエストにすでに付いていれば、それを使う）。届かない、時間切れ、
-   * 中断は ApiError("network") にする。トークンはエラーの文言に入れない。
+   * 送る。届かない、時間切れ、中断は ApiError("network") にする。
+   *
+   * 認証は sendo のセッションのクッキーで行う（docs/decisions/local-first.md の 6）。クッキーは
+   * ブラウザが同じオリジンへのリクエストに付ける（credentials の既定の same-origin）。
+   * Authorization は付けない（付けると、sendo はクッキーを見ない）。
    *
    * 中断の合図（ログアウトしたら、そのログインで始めたリクエストを止める）は、Request には
    * 入れずに別に受け取り、自分の AbortController に直接つないで、終わるまで持っておく。
@@ -38,11 +40,6 @@ export function createSendoApi(options: SendoApiOptions) {
    * 終わるようにするため（呼ぶ側は、どれも本文をすべて読むので、流れのまま渡す利点はない）。
    */
   async function send(request: Request, signal: AbortSignal | undefined): Promise<Response> {
-    const token = options.token();
-    const headers = new Headers(request.headers);
-    if (token !== null && !headers.has("authorization")) {
-      headers.set("authorization", `Bearer ${token}`);
-    }
     const controller = new AbortController();
     const onAbort = () => controller.abort(signal?.reason);
     if (signal?.aborted === true) onAbort();
@@ -53,9 +50,7 @@ export function createSendoApi(options: SendoApiOptions) {
       controller.abort(new DOMException(`${timeoutMs}ms`, "TimeoutError"));
     }, timeoutMs);
     try {
-      const response = await doFetch(new Request(request, { headers }), {
-        signal: controller.signal,
-      });
+      const response = await doFetch(request, { signal: controller.signal });
       const body = await readBody(response, controller.signal);
       return new Response(body, {
         status: response.status,
@@ -102,14 +97,31 @@ export function createSendoApi(options: SendoApiOptions) {
       return toSyncPage(body);
     },
 
-    /** トークンが使えるかを確かめる。使えなければ ApiError("unauthorized") */
-    async verifyToken(token: string, signal?: AbortSignal): Promise<void> {
-      const { error, response } = await client(signal).GET("/folders", {
-        headers: { authorization: `Bearer ${token}` },
-      });
-      if (error !== undefined || !response.ok) throw errorFromBody(response.status, error);
+    /** セッションのユーザー（GET /me）。ログインしていなければ ApiError("unauthorized") */
+    async me(signal?: AbortSignal): Promise<User> {
+      const { data, error, response } = await client(signal).GET("/me");
+      if (data === undefined) throw errorFromBody(response.status, error);
+      return toUser(data);
+    },
+
+    /** sendo のセッションを消す（POST /auth/logout）。セッションがなくても成功する */
+    async logout(signal?: AbortSignal): Promise<void> {
+      const { error, response } = await client(signal).POST("/auth/logout");
+      if (!response.ok) throw errorFromBody(response.status, error);
     },
   };
+}
+
+/**
+ * /me の応答を確かめてからユーザーにする。手元のユーザーと比べて、手元の行を消すかを決めるので、
+ * 形が違えば使わない
+ */
+function toUser(body: unknown): User {
+  const user = (body as { user?: { id?: unknown; email?: unknown } } | null)?.user;
+  if (typeof user?.id !== "string" || user.id === "" || typeof user.email !== "string") {
+    throw new ApiError("server", "sendo の /me の応答の形が違う");
+  }
+  return { id: user.id, email: user.email };
 }
 
 /**

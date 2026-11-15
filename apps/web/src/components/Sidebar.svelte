@@ -15,9 +15,8 @@
     return viewHref(view) === viewHref(router.view);
   }
 
-  async function signOut() {
-    await reader.client.signOut();
-    reader.signedIn = false;
+  function signOut() {
+    void reader.signOut();
   }
 </script>
 
@@ -84,6 +83,9 @@
   <footer>
     {@render item({ kind: "manage" }, "購読の管理", 0)}
     <SyncStatus />
+    {#if reader.user !== null}
+      <span class="user" title={reader.user.email}>{reader.user.email}</span>
+    {/if}
     <button type="button" class="link" onclick={signOut}>ログアウト</button>
   </footer>
 </nav>
@@ -145,5 +147,14 @@
     display: grid;
     gap: 0.5rem;
     justify-items: start;
+  }
+
+  .user {
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--muted);
+    font-size: 0.8rem;
   }
 </style>

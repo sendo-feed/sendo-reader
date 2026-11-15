@@ -145,7 +145,7 @@ describe("購読の応答を待っている間の操作", () => {
     const folderId = await core.createFolder("Tech");
     await core.moveFeed(existing.id, null);
     // フォルダの作成は届き、次の移動で届かなくなる
-    server.failNext(null, "network");
+    server.failNext(null, null, "network");
     await core.sync().catch(() => undefined);
     const [created] = [...server.folders.values()];
     expect(created?.name).toBe("Tech");

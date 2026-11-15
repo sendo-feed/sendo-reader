@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
 import type { ApiError, SyncStatus, Table } from "../../src";
 import { connectReader, type ReaderClient } from "../../src/web/client";
-import { FakeSendo, TOKEN } from "../fake-sendo";
+import { FakeSendo } from "../fake-sendo";
 import { serveFakeSendo } from "./fake-bridge";
 
 /** 1 つのタブ（ワーカーと、それにつないだ窓口） */
@@ -42,7 +42,12 @@ function world() {
     client.onStatus((status) => tab.statuses.push(status));
     return tab;
   };
-  return { server, open };
+  /** 偽の sendo でログインしてから（Google から戻ったことにして）、タブで使い始める */
+  const signIn = async (tab: Tab) => {
+    server.signInAs();
+    expect(await tab.client.restoreSession()).toBe(true);
+  };
+  return { server, open, signIn };
 }
 
 describe("1 つのタブ", () => {
@@ -53,7 +58,10 @@ describe("1 つのタブ", () => {
     const { client } = open();
 
     expect(await client.isSignedIn()).toBe(false);
-    await client.signIn(TOKEN);
+    expect(await client.restoreSession()).toBe(false);
+    server.signInAs();
+    expect(await client.restoreSession()).toBe(true);
+    expect(await client.currentUser()).toEqual({ id: "user-1", email: "you@example.com" });
     const status = await client.syncNow();
     expect(status).toMatchObject({ signedIn: true, error: null, pending: 0 });
 
@@ -67,21 +75,24 @@ describe("1 つのタブ", () => {
   });
 
   test("失敗は、種類（kind）と理由（code）の付いた ApiError として届く", async () => {
-    const { open } = world();
+    const { server, open } = world();
     const { client } = open();
-    const error = (await client.signIn("sendo_wrong").catch((e: unknown) => e)) as ApiError;
+    server.signInAs();
+    server.failNext(500);
+    const error = (await client.restoreSession().catch((e: unknown) => e)) as ApiError;
     expect(error.name).toBe("ApiError");
-    expect(error.kind).toBe("unauthorized");
+    expect(error.kind).toBe("server");
+    expect(error.code).toBe("injected");
     const empty = await client.createFolder("   ").catch((e: unknown) => e);
     expect(empty).toBeInstanceOf(Error);
   });
 
   test("ワーカーを作り直しても（タブを開き直しても）、手元のデータとログインが残る", async () => {
-    const { server, open } = world();
+    const { server, open, signIn } = world();
     const feed = server.subscribe({ url: "https://example.com/feed.xml" });
     const article = server.deliver(feed.id);
     const first = open();
-    await first.client.signIn(TOKEN);
+    await signIn(first);
     await first.client.syncNow();
     // 送る前に閉じる（書き込んでから送るまで少し待つので、まだ送っていない操作が残る）
     await first.client.setStarred(article.id, true);
@@ -100,11 +111,11 @@ describe("1 つのタブ", () => {
 
 describe("複数のタブ", () => {
   test("2 つめのタブは代表に頼んで読み書きし、変更はどちらのタブにも届く", async () => {
-    const { server, open } = world();
+    const { server, open, signIn } = world();
     const feed = server.subscribe({ url: "https://example.com/feed.xml" });
     const article = server.deliver(feed.id);
     const first = open();
-    await first.client.signIn(TOKEN);
+    await signIn(first);
     await first.client.syncNow();
 
     const second = open();
@@ -118,9 +129,9 @@ describe("複数のタブ", () => {
   });
 
   test("あとから開いたタブにも、今の同期の様子が届く", async () => {
-    const { open } = world();
+    const { open, signIn } = world();
     const first = open();
-    await first.client.signIn(TOKEN);
+    await signIn(first);
     await first.client.syncNow();
 
     const second = open();
@@ -130,11 +141,11 @@ describe("複数のタブ", () => {
   });
 
   test("代表のタブが閉じたら、ほかのタブが引き継ぎ、手元のデータも使い続けられる", async () => {
-    const { server, open } = world();
+    const { server, open, signIn } = world();
     const feed = server.subscribe({ url: "https://example.com/feed.xml" });
     const article = server.deliver(feed.id);
     const first = open();
-    await first.client.signIn(TOKEN);
+    await signIn(first);
     await first.client.syncNow();
     const second = open();
     expect(await second.client.isSignedIn()).toBe(true);
@@ -148,11 +159,11 @@ describe("複数のタブ", () => {
   });
 
   test("3 つのタブで代表が 2 回入れ替わっても、どのタブからも使える", async () => {
-    const { server, open } = world();
+    const { server, open, signIn } = world();
     const feed = server.subscribe({ url: "https://example.com/feed.xml" });
     server.deliver(feed.id);
     const tabs = [open(), open(), open()];
-    await tabs[0]?.client.signIn(TOKEN);
+    await signIn(tabs[0] as Tab);
     await tabs[0]?.client.syncNow();
 
     tabs[0]?.worker.terminate();
@@ -166,6 +177,25 @@ describe("複数のタブ", () => {
   });
 });
 
+describe("セッションが切れたとき", () => {
+  test("ほかのタブでログインし直して戻ってきたら、代表のタブの止まっていた同期を再開する", async () => {
+    const { server, open, signIn } = world();
+    const first = open();
+    await signIn(first);
+    await first.client.syncNow();
+    server.expireSession();
+    expect(await first.client.syncNow()).toMatchObject({ signedIn: true, error: "unauthorized" });
+
+    // 2 つめのタブで Google のログインを通り、戻ってきた
+    server.signInAs();
+    const second = open();
+    expect(await second.client.restoreSession()).toBe(true);
+    await vi.waitFor(() => {
+      expect(first.statuses.at(-1)).toMatchObject({ signedIn: true, error: null });
+    });
+  });
+});
+
 describe("代表が名乗り直したときと、代表が替わったとき", () => {
   test("タブを開き足しても、ほかのタブが頼んで答えを待っている呼び出しを二重に動かさない", async () => {
     const { server, open } = world();
@@ -174,18 +204,24 @@ describe("代表が名乗り直したときと、代表が替わったとき", (
     const second = open();
     expect(await second.client.isSignedIn()).toBe(false);
 
+    let released = false;
     let release = () => {};
     const held = new Promise<void>((resolve) => {
-      release = resolve;
+      release = () => {
+        released = true;
+        resolve();
+      };
     });
     let verifications = 0;
     server.onRequest = async (path) => {
-      if (path === "GET /folders") {
+      // 確かめている間に届いた /me だけを数える（終わったあとの同期の /me は数えない）
+      if (path === "GET /me" && !released) {
         verifications += 1;
         await held;
       }
     };
-    const signingIn = second.client.signIn(TOKEN);
+    server.signInAs();
+    const signingIn = second.client.restoreSession();
     await vi.waitFor(() => expect(verifications).toBe(1));
     // 3 つめのタブを開くと、代表が名乗り直す
     const third = open();
@@ -197,9 +233,9 @@ describe("代表が名乗り直したときと、代表が替わったとき", (
   });
 
   test("代表が替わっても、画面が持っている仮のフォルダの ID で操作できる", async () => {
-    const { server, open } = world();
+    const { server, open, signIn } = world();
     const first = open();
-    await first.client.signIn(TOKEN);
+    await signIn(first);
     await first.client.syncNow();
     const second = open();
     const tempId = await second.client.createFolder("Tech");
@@ -228,12 +264,12 @@ describe("DB を開けなかったとき", () => {
   });
 
   test("ロックを放すので、ほかのタブが代表になれ、開けなかったタブもその代表に頼んで使える", async () => {
-    const { open } = world();
+    const { open, signIn } = world();
     const failing = open("failing");
     await expect(failing.client.isSignedIn()).rejects.toThrow("OPFS を開けない");
 
     const ok = open();
-    await ok.client.signIn(TOKEN);
+    await signIn(ok);
     expect(await failing.client.isSignedIn()).toBe(true);
   });
 });

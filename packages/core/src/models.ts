@@ -5,6 +5,12 @@
  * 出さず、URL は toSafeHttpUrl を通してからリンクにする。
  */
 
+/** sendo にログインしているユーザー（GET /me） */
+export interface User {
+  id: string;
+  email: string;
+}
+
 export interface Folder {
   id: string;
   name: string;

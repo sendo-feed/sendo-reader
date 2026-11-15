@@ -1,15 +1,20 @@
 import { describe, expect, test, vi } from "vitest";
-import { ApiError, ReaderCore } from "../src";
-import { FakeSendo, TOKEN } from "./fake-sendo";
+import { type ApiError, ReaderCore } from "../src";
+import { migrate } from "../src/db/schema";
+import { FakeSendo, USER } from "./fake-sendo";
 import { openMemoryDb, setup } from "./helpers";
 
-describe("ログイン", () => {
-  test("使えるトークンなら手元に置き、開き直してもログインしたまま", async () => {
+const USER_B = { id: "user-b", email: "b@example.com" };
+
+describe("ログイン（sendo のセッション）", () => {
+  test("sendo でログインしていれば、そのユーザーで使い始め、開き直したらネットワークを待たない", async () => {
     const { db, server, core } = await setup({ signIn: false });
     expect(core.isSignedIn()).toBe(false);
-    await core.signIn(`  ${TOKEN}\n`);
+    server.signInAs();
+    expect(await core.restoreSession()).toBe(true);
     expect(core.isSignedIn()).toBe(true);
-    expect(server.requests).toEqual(["GET /folders"]);
+    expect(core.currentUser()).toEqual(USER);
+    expect(server.requests).toEqual(["GET /me"]);
 
     const reopened = await ReaderCore.open({
       db,
@@ -17,31 +22,29 @@ describe("ログイン", () => {
       fetch: server.fetch,
     });
     expect(reopened.isSignedIn()).toBe(true);
-  });
-
-  test("使えないトークンなら unauthorized で失敗し、何も置かない", async () => {
-    const { core } = await setup({ signIn: false });
-    const error = await core.signIn("sendo_wrong").catch((e: unknown) => e);
-    expect(error).toBeInstanceOf(ApiError);
-    expect((error as ApiError).kind).toBe("unauthorized");
-    expect(core.isSignedIn()).toBe(false);
-  });
-
-  test("空のトークンは送らずに失敗する", async () => {
-    const { server, core } = await setup({ signIn: false });
-    await expect(core.signIn("   ")).rejects.toBeInstanceOf(ApiError);
+    expect(reopened.currentUser()).toEqual(USER);
+    server.requests.length = 0;
+    expect(await reopened.restoreSession()).toBe(true);
     expect(server.requests).toEqual([]);
+  });
+
+  test("sendo でログインしていなければ false で、何も置かない", async () => {
+    const { core, db } = await setup({ signIn: false });
+    expect(await core.restoreSession()).toBe(false);
+    expect(core.isSignedIn()).toBe(false);
+    expect(await db.all("select key from settings")).toEqual([]);
   });
 
   test("sendo に届かなければ network で失敗する", async () => {
     const { server, core } = await setup({ signIn: false });
+    server.signInAs();
     server.failNext("network");
-    const error = await core.signIn(TOKEN).catch((e: unknown) => e);
+    const error = await core.restoreSession().catch((e: unknown) => e);
     expect((error as ApiError).kind).toBe("network");
     expect(core.isSignedIn()).toBe(false);
   });
 
-  test("ログアウトすると、トークンと同期したデータを消す", async () => {
+  test("ログアウトすると、sendo のセッションと、同期したデータとユーザーを消す", async () => {
     const { server, core, db } = await setup();
     const feed = server.subscribe({ url: "https://example.com/feed.xml" });
     server.deliver(feed.id);
@@ -50,12 +53,49 @@ describe("ログイン", () => {
 
     const changes: string[][] = [];
     core.onChange((tables) => changes.push([...tables].sort()));
-    await core.signOut();
+    expect(await core.signOut()).toBe(true);
     expect(core.isSignedIn()).toBe(false);
+    expect(core.currentUser()).toBeNull();
     expect(await core.listArticles()).toEqual([]);
     expect(await core.listFeeds()).toEqual([]);
     expect(await db.all("select key from settings")).toEqual([]);
+    expect(server.sessions.size).toBe(0);
     expect(changes).toEqual([["articles", "feeds", "folders"]]);
+  });
+
+  test("ログアウトが sendo に届かなくても手元は消し、残ったクッキーでは自動でログインしない", async () => {
+    const { server, core, db } = await setup();
+    server.failNext("network");
+    expect(await core.signOut()).toBe(false);
+    expect(core.isSignedIn()).toBe(false);
+    expect(await db.all("select key from settings")).toEqual([{ key: "auth.logoutPending" }]);
+
+    // 開き直しても、sendo に聞かずにログインしていないことにする
+    server.requests.length = 0;
+    expect(await core.restoreSession()).toBe(false);
+    expect(server.requests).toEqual([]);
+
+    // ログインの操作をしたら、先にログアウトを送る
+    await core.prepareSignIn();
+    expect(server.sessions.size).toBe(0);
+    expect(await db.all("select key from settings")).toEqual([]);
+    server.signInAs();
+    expect(await core.restoreSession()).toBe(true);
+  });
+
+  test("ログアウトを送れないうちは、ログインに進ませない", async () => {
+    const { server, core, db } = await setup();
+    server.failNext("network", "network");
+    await core.signOut();
+    const error = await core.prepareSignIn().catch((e: unknown) => e);
+    expect((error as ApiError).kind).toBe("network");
+    expect(await db.all("select key from settings")).toEqual([{ key: "auth.logoutPending" }]);
+  });
+
+  test("ログアウトを送れていなければ、prepareSignIn は何も送らない", async () => {
+    const { server, core } = await setup({ signIn: false });
+    await core.prepareSignIn();
+    expect(server.requests).toEqual([]);
   });
 
   test("ログインしていなければ同期しない", async () => {
@@ -64,37 +104,113 @@ describe("ログイン", () => {
     const error = await core.sync().catch((e: unknown) => e);
     expect((error as ApiError).kind).toBe("unauthorized");
   });
+
+  test("前の版のトークンは消し、手元の行は次にログインしたときに消す", async () => {
+    const server = new FakeSendo();
+    const db = await openMemoryDb();
+    await migrate(db, 3);
+    await db.run("insert into settings (key, value) values ('auth.token', 'sendo_old')");
+    await db.run(`insert into folders (id, name, created_at) values ('old-folder', 'Old', 0)`);
+    const core = await ReaderCore.open({
+      db,
+      baseUrl: "https://sendo.test/api/v1",
+      fetch: server.fetch,
+    });
+    expect(await db.all("select key from settings")).toEqual([]);
+    expect(core.isSignedIn()).toBe(false);
+
+    server.signInAs();
+    await core.restoreSession();
+    expect(await core.listFolders()).toEqual([]);
+  });
 });
 
-describe("ログインのし直しと中断", () => {
-  test("別のトークンでログインし直すと、前の手元のデータとカーソルを消して最初から同期する", async () => {
+describe("送る前に、セッションのユーザーを確かめる", () => {
+  test("セッションが切れたら unauthorized で失敗し、手元のデータと操作を残す。ログインし直したら続きから送る", async () => {
     const { server, core } = await setup();
+    const feed = server.subscribe({ url: "https://example.com/feed.xml" });
+    const article = server.deliver(feed.id);
+    await core.sync();
+    await core.setStarred(article.id, true);
+
+    server.expireSession();
+    const error = await core.sync().catch((e: unknown) => e);
+    expect((error as ApiError).kind).toBe("unauthorized");
+    expect(core.isSignedIn()).toBe(true);
+    expect(await core.listArticles()).toHaveLength(1);
+    expect(await core.countPending()).toBe(1);
+
+    server.signInAs();
+    server.requests.length = 0;
+    await core.sync();
+    expect(server.inbox.get(article.id)?.starredAt).toEqual(expect.any(Number));
+    expect(server.requests[0]).toBe("GET /me");
+    expect(server.requests.at(-1)).toMatch(/^GET \/sync\?cursor=/);
+  });
+
+  test("別のユーザーでログインしていたら、前のユーザーの操作は送らず、手元を消して最初から同期する", async () => {
+    const { server, core } = await setup();
+    const feed = server.subscribe({ url: "https://example.com/feed.xml" });
+    const article = server.deliver(feed.id);
+    await core.sync();
+    await core.setStarred(article.id, true);
+    // 別のユーザーの受信箱には、この記事がない（偽の sendo は行を分けないので、消した記録を
+    // 残さずに消して見立てる）
+    server.inbox.delete(article.id);
+
+    server.signInAs(USER_B);
+    const changes: string[][] = [];
+    core.onChange((tables) => changes.push([...tables].sort()));
+    server.requests.length = 0;
+    await core.sync();
+    expect(core.currentUser()).toEqual(USER_B);
+    expect(server.requests).toEqual(["GET /me", "GET /sync"]);
+    expect(await core.listArticles()).toEqual([]);
+    expect(await core.listFeeds()).toMatchObject([{ id: feed.id }]);
+    expect(await core.countPending()).toBe(0);
+    expect(changes[0]).toEqual(["articles", "feeds", "folders"]);
+  });
+
+  test("別のユーザーでログインしていたら、前のユーザーのために頼まれた購読は送らない", async () => {
+    const { server, core } = await setup();
+    server.fetchable.set("https://example.com/feed.xml", "Feed");
+    server.signInAs(USER_B);
+    const error = await core.subscribe("https://example.com/feed.xml").catch((e: unknown) => e);
+    expect((error as ApiError).kind).toBe("unauthorized");
+    expect(server.feeds.size).toBe(0);
+    expect(core.currentUser()).toEqual(USER_B);
+  });
+
+  test("同じユーザーでメールが変わっていたら、手元を残してメールだけ置き直す", async () => {
+    const { server, core, db } = await setup();
     const feed = server.subscribe({ url: "https://example.com/feed.xml" });
     server.deliver(feed.id);
     await core.sync();
-    expect(await core.listArticles()).toHaveLength(1);
 
-    server.token = "sendo_other_account";
-    await core.signIn("sendo_other_account");
-    expect(await core.listArticles()).toEqual([]);
-    expect(await core.listFeeds()).toEqual([]);
-
-    server.requests.length = 0;
+    const session = server.sessions.get(server.cookie ?? "");
+    if (session === undefined) throw new Error("セッションがない");
+    session.email = "renamed@example.com";
     await core.sync();
-    expect(server.requests).toEqual(["GET /sync"]);
+    expect(core.currentUser()).toEqual({ id: USER.id, email: "renamed@example.com" });
+    expect(await core.listArticles()).toHaveLength(1);
+    const reopened = await ReaderCore.open({ db, baseUrl: "https://sendo.test/api/v1" });
+    expect(reopened.currentUser()?.email).toBe("renamed@example.com");
   });
+});
 
+describe("ログアウトと中断", () => {
   test("通信が止まっていても、ログアウトはすぐ終わり、止まっていた同期は手元に書き戻さない", async () => {
     const { server, core, db } = await setup();
     const feed = server.subscribe({ url: "https://example.com/feed.xml" });
     server.deliver(feed.id);
-    server.failNext("hang");
+    // /me は通り、差分の取り込みで止まる
+    server.failNext(null, "hang");
     const syncing = core.sync();
+    await vi.waitFor(() => expect(server.requests.at(-1)).toBe("GET /sync"));
 
     await core.signOut();
     const error = await syncing.catch((e: unknown) => e);
-    // 送っている途中なら中断（network）、始まる前ならログインしていない（unauthorized）
-    expect(["network", "unauthorized"]).toContain((error as ApiError).kind);
+    expect((error as ApiError).kind).toBe("network");
     expect(core.isSignedIn()).toBe(false);
     expect(await core.listFeeds()).toEqual([]);
     expect(await db.all("select key from settings")).toEqual([]);
@@ -105,8 +221,9 @@ describe("ログインのし直しと中断", () => {
     server.pageSize = 1;
     const feed = server.subscribe({ url: "https://example.com/feed.xml" });
     server.deliver(feed.id);
-    // 2 ページめで止める。1 ページめ（フィード）は書き込まれる
-    server.failNext(null, "hang");
+    // /me と 1 ページめ（フィード）は通り、2 ページめで止める
+    server.requests.length = 0;
+    server.failNext(null, null, "hang");
     const syncing = core.sync();
     await vi.waitFor(() => expect(server.requests).toHaveLength(3));
 
@@ -124,7 +241,8 @@ describe("ログインのし直しと中断", () => {
       fetch: server.fetch,
       requestTimeoutMs: 20,
     });
-    await core.signIn(TOKEN);
+    server.signInAs();
+    await core.restoreSession();
     server.failNext("hang");
     const error = await core.sync().catch((e: unknown) => e);
     expect((error as ApiError).kind).toBe("network");
@@ -139,7 +257,8 @@ describe("ログインのし直しと中断", () => {
       fetch: server.fetch,
       requestTimeoutMs: 20,
     });
-    await core.signIn(TOKEN);
+    server.signInAs();
+    await core.restoreSession();
     server.failNext("hang-body");
     const error = await core.sync().catch((e: unknown) => e);
     expect((error as ApiError).kind).toBe("network");
@@ -155,16 +274,17 @@ describe("ログインのし直しと中断", () => {
 
   test("本文が止まっていても、ログアウトで終わり、ログインし直せば同期できる", async () => {
     const { server, core } = await setup();
-    server.failNext("hang-body");
+    server.failNext(null, "hang-body");
     const syncing = core.sync();
     await vi.waitFor(() => expect(server.requests).toContain("GET /sync"));
 
     await core.signOut();
     const error = await syncing.catch((e: unknown) => e);
-    expect(["network", "unauthorized"]).toContain((error as ApiError).kind);
+    expect((error as ApiError).kind).toBe("network");
     expect(server.cancelledBodies).toBe(1);
 
-    await core.signIn(TOKEN);
+    server.signInAs();
+    expect(await core.restoreSession()).toBe(true);
     const feed = server.subscribe({ url: "https://example.com/feed.xml" });
     server.deliver(feed.id);
     await core.sync();
@@ -173,77 +293,62 @@ describe("ログインのし直しと中断", () => {
 });
 
 describe("ログインとログアウトが重なったとき", () => {
-  test("トークンを確かめている間にログアウトしたら、ログインは中断され、トークンを置かない", async () => {
+  test("ユーザーを確かめている間にログアウトしたら、ログインは中断され、ユーザーを置かずに false を返す", async () => {
     const { server, core, db } = await setup({ signIn: false });
+    server.signInAs();
     server.onRequest = async (path) => {
-      if (path === "GET /folders") await core.signOut();
+      if (path === "GET /me") await core.signOut();
     };
-    const error = await core.signIn(TOKEN).catch((e: unknown) => e);
-    expect(error).toBeInstanceOf(Error);
+    expect(await core.restoreSession()).toBe(false);
     expect(core.isSignedIn()).toBe(false);
     expect(await db.all("select key from settings")).toEqual([]);
   });
 
   test("確かめている間にログアウトして答えが止まっていても、ログインは中断される", async () => {
     const { server, core } = await setup({ signIn: false });
+    server.signInAs();
     server.failNext("hang");
-    const signingIn = core.signIn(TOKEN);
+    const restoring = core.restoreSession();
     await core.signOut();
-    const error = await signingIn.catch((e: unknown) => e);
-    expect((error as ApiError).kind).toBe("network");
+    expect(await restoring).toBe(false);
     expect(core.isSignedIn()).toBe(false);
   });
 
   test("確かめている間にログアウトして本文が止まっていても、ログインは中断される", async () => {
     const { server, core } = await setup({ signIn: false });
+    server.signInAs();
     server.failNext("hang-body");
-    const signingIn = core.signIn(TOKEN);
-    await vi.waitFor(() => expect(server.requests).toEqual(["GET /folders"]));
+    const restoring = core.restoreSession();
+    await vi.waitFor(() => expect(server.requests).toEqual(["GET /me"]));
     await core.signOut();
-    const error = await signingIn.catch((e: unknown) => e);
-    expect((error as ApiError).kind).toBe("network");
+    expect(await restoring).toBe(false);
     expect(core.isSignedIn()).toBe(false);
     expect(server.cancelledBodies).toBe(1);
   });
 
-  test("あとから始めたログインが勝つ", async () => {
-    const { server, core, db } = await setup({ signIn: false });
-    server.failNext("hang");
-    const first = core.signIn("sendo_first");
-    server.token = "sendo_second";
-    await core.signIn("sendo_second");
-    await first.catch(() => undefined);
-    expect(await db.all("select value from settings where key = 'auth.token'")).toEqual([
-      { value: "sendo_second" },
-    ]);
-  });
-});
-
-describe("トークンを確かめている間に始まった同期", () => {
-  test("前のトークンで始まった同期の応答は、ログインし直したあとの手元に書き戻さない", async () => {
-    const { server, core, db } = await setup();
-    const feed = server.subscribe({ url: "https://example.com/feed.xml" });
-    server.deliver(feed.id);
-    await core.sync();
-    server.otherTokens.add("sendo_b");
-    // 前のアカウントに新しい記事が届いている（止めた同期の応答に載る）
-    server.deliver(feed.id);
-
+  test("先に始めた確かめが遅れて返っても、あとから置いたユーザーを上書きしない", async () => {
+    const { server, core } = await setup({ signIn: false });
+    server.signInAs(USER_B);
     let release = () => {};
     const held = new Promise<void>((resolve) => {
       release = resolve;
     });
-    let syncing: Promise<unknown> | undefined;
     server.onRequest = async (path) => {
-      if (path === "GET /folders") syncing = core.sync().catch(() => undefined);
-      if (path.startsWith("GET /sync")) await held;
+      if (path === "GET /me") {
+        server.onRequest = null;
+        await held;
+      }
     };
-    await core.signIn("sendo_b");
-    release();
-    await syncing;
+    const first = core.restoreSession();
+    await vi.waitFor(() => expect(server.onRequest).toBeNull());
+    expect(await core.restoreSession()).toBe(true);
+    expect(core.currentUser()).toEqual(USER_B);
 
-    expect(await core.listArticles()).toEqual([]);
-    expect(await core.listFeeds()).toEqual([]);
-    expect(await db.all("select key from settings where key = 'sync.cursor'")).toEqual([]);
+    // 遅れた答えは、別のユーザーのものになっていた
+    server.signInAs();
+    release();
+    // 先に始めたほうは、そのときの様子（ログインしている）を返す
+    expect(await first).toBe(true);
+    expect(core.currentUser()).toEqual(USER_B);
   });
 });

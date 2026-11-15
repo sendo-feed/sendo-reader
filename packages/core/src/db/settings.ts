@@ -1,6 +1,6 @@
 import type { Executor } from "./database";
 
-/** 手元の設定（同期のカーソル、トークンなど）を読む */
+/** 手元の設定（同期のカーソル、ログインしたユーザーなど）を読む */
 export async function getSetting(db: Executor, key: string): Promise<string | null> {
   const [row] = await db.all<{ value: string }>("select value from settings where key = ?", [key]);
   return row?.value ?? null;

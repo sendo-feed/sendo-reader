@@ -12,6 +12,15 @@
  * - カーソルを境界にしたまとめて既読は、最後まで同期し終えたカーソルだけを受け付け
  *   （途中なら 400 の sync_incomplete）、既読・未読が最後に変わった番号（readSeq）が境界まで
  *   の未読の記事だけを既読にする
+ *
+ * 認証は sendo のセッションのクッキー（__Host-sendo_session）だけを受ける（sendo の
+ * src/api/auth.ts、login.ts と同じ形）。
+ * - リクエストの cookie ヘッダーにあればそれを使う（画面を通したテストでは、ブラウザが付ける）。
+ *   なければ、ブラウザの代わりに持っている cookie を使う（Node のテスト）
+ * - Authorization を付けたリクエストは 401（reader は付けない決まり。sendo はクッキーを見ない）
+ * - ブラウザから来た（cookie ヘッダーのある）状態を変えるリクエストは、Sec-Fetch-Site が
+ *   same-origin のものだけを受ける
+ * - 行はユーザーごとに分けない（どのユーザーでも同じ行を返す。手元を消すかの確かめに使う）
  */
 
 type TableName = "folders" | "feeds" | "articles";
@@ -64,17 +73,36 @@ interface Cursor {
 type Failure = "network" | number | "hang" | "hang-body" | null;
 
 const DAY = 24 * 60 * 60 * 1000;
-export const TOKEN = "sendo_test_token";
+
+/** セッションのクッキーの名前（sendo と同じ） */
+export const SESSION_COOKIE = "__Host-sendo_session";
+
+export interface FakeUser {
+  id: string;
+  email: string;
+}
+
+/** 既定でログインしているユーザー */
+export const USER: FakeUser = { id: "user-1", email: "you@example.com" };
+
+const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
 
 export class FakeSendo {
   /** サーバーの時計 */
   now = Date.parse("2026-11-01T00:00:00.000Z");
   /** 1 回の応答に載せる行の数の上限 */
   pageSize = 100;
-  /** 受け付けるトークン */
-  token = TOKEN;
-  /** ほかに受け付けるトークン（別のアカウントに見立てる） */
-  readonly otherTokens = new Set<string>();
+  /** セッション（クッキーの値から、そのユーザーへ） */
+  readonly sessions = new Map<string, FakeUser>();
+  /**
+   * ブラウザの代わりに持っている、セッションのクッキーの値（Node のテスト用）。リクエストの
+   * cookie ヘッダーにクッキーがなければ、これを使う
+   */
+  cookie: string | null = null;
+  /** GET /auth/google/login でログインさせるユーザー。null なら許可していないメール（not_allowed） */
+  loginUser: FakeUser | null = USER;
+  /** POST /auth/logout を受けた数 */
+  logouts = 0;
 
   readonly folders = new Map<string, FolderRow>();
   readonly feeds = new Map<string, FeedRow>();
@@ -103,6 +131,28 @@ export class FakeSendo {
   #nextId = 1;
 
   // --- テストから状態を作る ---
+
+  /**
+   * user のセッションを作り、ブラウザの代わりに持つクッキーをそれにする（Google でログインした
+   * ことにする）。前に持っていたセッションは消す（sendo と同じ）。クッキーの値を返す
+   */
+  signInAs(user: FakeUser = USER): string {
+    if (this.cookie !== null) this.sessions.delete(this.cookie);
+    const value = this.#createSession(user);
+    this.cookie = value;
+    return value;
+  }
+
+  /** 今のセッションを切る（期限切れ、取り消し）。クッキーは残る */
+  expireSession(): void {
+    if (this.cookie !== null) this.sessions.delete(this.cookie);
+  }
+
+  #createSession(user: FakeUser): string {
+    const value = `session-${this.#nextId++}`;
+    this.sessions.set(value, { ...user });
+    return value;
+  }
 
   createFolder(name: string, id = this.#id("folder")): FolderRow {
     const row: FolderRow = {
@@ -270,9 +320,38 @@ export class FakeSendo {
     }
     if (typeof failure === "number") return error(failure, "injected", "injected failure");
 
-    const auth = request.headers.get("authorization");
-    if (![this.token, ...this.otherTokens].some((token) => auth === `Bearer ${token}`)) {
-      return error(401, "unauthorized", "a valid access token is required");
+    // ログイン（ページの移動）とログアウトは、セッションがなくても受ける
+    const fromBrowser = readCookie(request.headers.get("cookie"), SESSION_COOKIE);
+    const sessionValue = fromBrowser ?? this.cookie;
+    if (request.method === "GET" && path === "/auth/google/login") {
+      return this.#login(url.searchParams.get("returnTo"), fromBrowser);
+    }
+    if (request.method === "POST" && path === "/auth/logout") {
+      this.logouts += 1;
+      if (sessionValue === null) return new Response(null, { status: 204 });
+      if (fromBrowser !== null && !isSameOrigin(request)) {
+        return error(403, "forbidden", "cross-site requests are not allowed");
+      }
+      this.sessions.delete(sessionValue);
+      if (this.cookie === sessionValue) this.cookie = null;
+      return new Response(null, {
+        status: 204,
+        headers: { "set-cookie": `${SESSION_COOKIE}=; Max-Age=0; Path=/; Secure` },
+      });
+    }
+
+    if (request.headers.has("authorization")) {
+      return error(401, "unauthorized", "access tokens are not accepted from the reader");
+    }
+    const user = sessionValue === null ? undefined : this.sessions.get(sessionValue);
+    if (user === undefined) {
+      return error(401, "unauthorized", "a valid access token or session is required");
+    }
+    if (fromBrowser !== null && !SAFE_METHODS.has(request.method) && !isSameOrigin(request)) {
+      return error(403, "forbidden", "cross-site requests are not allowed");
+    }
+    if (request.method === "GET" && path === "/me") {
+      return json(200, { user: { id: user.id, email: user.email } });
     }
     if (request.method === "GET" && path === "/sync") {
       return this.#sync(url.searchParams.get("cursor"));
@@ -419,6 +498,31 @@ export class FakeSendo {
 
   #folderByName(name: string): FolderRow | undefined {
     return [...this.folders.values()].find((row) => row.deletedAt === null && row.name === name);
+  }
+
+  /**
+   * Google でのログインを、すぐ終えたことにする（Google の画面は通さない）。loginUser の
+   * セッションを作ってクッキーを置き、returnTo に戻す。loginUser が null なら
+   * /?login_error=not_allowed に戻す
+   */
+  #login(returnTo: string | null, previous: string | null): Response {
+    if (this.loginUser === null) {
+      return new Response(null, {
+        status: 302,
+        headers: { location: "/?login_error=not_allowed" },
+      });
+    }
+    if (previous !== null) this.sessions.delete(previous);
+    const value = this.#createSession(this.loginUser);
+    const target =
+      returnTo?.startsWith("/") === true && !returnTo.startsWith("//") ? returnTo : "/";
+    return new Response(null, {
+      status: 302,
+      headers: {
+        location: target,
+        "set-cookie": `${SESSION_COOKIE}=${value}; Path=/; Secure; HttpOnly; SameSite=Lax`,
+      },
+    });
   }
 
   #sync(rawCursor: string | null): Response {
@@ -598,4 +702,20 @@ function decodeCursor(value: string): Cursor | null {
   } catch {
     return null;
   }
+}
+
+/** cookie ヘッダーから、name のクッキーの値を読む */
+function readCookie(header: string | null, name: string): string | null {
+  for (const part of header?.split(";") ?? []) {
+    const [key, ...value] = part.trim().split("=");
+    if (key === name) return value.join("=");
+  }
+  return null;
+}
+
+/** sendo の CSRF の対策と同じ。Sec-Fetch-Site を見て、なければ Origin を見る */
+function isSameOrigin(request: Request): boolean {
+  const site = request.headers.get("sec-fetch-site");
+  if (site !== null) return site === "same-origin";
+  return request.headers.get("origin") === new URL(request.url).origin;
 }

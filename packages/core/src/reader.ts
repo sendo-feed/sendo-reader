@@ -10,8 +10,8 @@ import {
   listFolders,
 } from "./db/queries";
 import { migrate } from "./db/schema";
-import { getSetting, setSetting } from "./db/settings";
-import type { Article, Feed, Folder, Table, UnreadCounts } from "./models";
+import { deleteSetting, getSetting, setSetting } from "./db/settings";
+import type { Article, Feed, Folder, Table, UnreadCounts, User } from "./models";
 import {
   discoverFeeds,
   type FeedCandidate,
@@ -29,7 +29,16 @@ import {
 import { getCompleteCursor, type PullResult, pull } from "./sync/pull";
 import { countPending, enqueue, lastPendingId, type PushResult, push } from "./sync/queue";
 
-const TOKEN_KEY = "auth.token";
+/** ログインしたユーザー（JSON）を置く設定の鍵 */
+const USER_KEY = "auth.user";
+
+/**
+ * ログアウトを sendo に送れていない印。送れるまでは、残ったセッションのクッキーで、自動では
+ * ログインし直さない（docs/decisions/local-first.md の 6）
+ */
+const LOGOUT_PENDING_KEY = "auth.logoutPending";
+
+const ALL_TABLES: ReadonlySet<Table> = new Set<Table>(["folders", "feeds", "articles"]);
 
 export interface ReaderCoreOptions {
   db: Database;
@@ -64,8 +73,8 @@ export class ReaderCore {
   readonly #api: SendoApi;
   readonly #now: () => number;
   readonly #listeners = new Set<ChangeListener>();
-  /** 手元にあるトークン。毎回 DB を読まずに済むように持っておく */
-  #token: string | null = null;
+  /** 手元に置いた、ログインしたユーザー。毎回 DB を読まずに済むように持っておく */
+  #user: User | null = null;
   /**
    * 今のログインの中断の合図。ログアウトやログインのし直しで中断し、送っている途中の
    * リクエストを止め、その同期が手元の DB に書き戻さないようにする
@@ -93,7 +102,6 @@ export class ReaderCore {
     this.#now = options.now ?? Date.now;
     this.#api = createSendoApi({
       baseUrl: options.baseUrl,
-      token: () => this.#token,
       ...(options.fetch === undefined ? {} : { fetch: options.fetch }),
       ...(options.requestTimeoutMs === undefined ? {} : { timeoutMs: options.requestTimeoutMs }),
     });
@@ -103,7 +111,7 @@ export class ReaderCore {
   static async open(options: ReaderCoreOptions): Promise<ReaderCore> {
     await migrate(options.db);
     const core = new ReaderCore(options);
-    core.#token = await getSetting(options.db, TOKEN_KEY);
+    core.#user = parseUser(await getSetting(options.db, USER_KEY));
     core.#lastOpId = await lastPendingId(options.db);
     for (const [from, to] of Object.entries(await getFolderIdRemaps(options.db))) {
       core.#folderIds.set(from, to);
@@ -111,53 +119,134 @@ export class ReaderCore {
     return core;
   }
 
-  // --- ログイン ---
+  // --- ログイン（docs/decisions/local-first.md の 6） ---
 
+  /** 手元にログインしたユーザーがいる（オフラインでも、手元で読み書きできる） */
   isSignedIn(): boolean {
-    return this.#token !== null;
+    return this.#user !== null;
+  }
+
+  /** 手元に置いた、ログインしたユーザー */
+  currentUser(): User | null {
+    return this.#user === null ? null : { ...this.#user };
   }
 
   /**
-   * sendo で発行したアクセストークンを確かめてから、手元に置く。使えないトークンなら
-   * ApiError（unauthorized）を投げ、何も変えない。
+   * 起動したときに呼ぶ。手元にユーザーがいれば、ネットワークを待たずに true を返す（sendo の
+   * セッションは、送る前に確かめる）。いなければ sendo のセッションを見て、ログインしていれば
+   * そのユーザーで使い始める（Google のログインから戻ってきたとき）。していなければ false。
    *
-   * 手元のデータは、どのアカウントのものか分からないので、いったん消して最初から同期し直す
-   * （別のアカウントのトークンに替えたときに、前のアカウントの記事を見せない）。
+   * ログアウトを sendo に送れていなければ、残ったクッキーでログインし直さず、false を返す。
+   * 確かめている間にログアウトしたり、ほかのタブが先に使い始めたりしたら、そのときの様子を返す。
+   * sendo に届かなければ ApiError（network）を投げる。
    */
-  async signIn(token: string): Promise<void> {
-    const trimmed = token.trim();
-    if (trimmed === "") throw new ApiError("unauthorized", "トークンが空");
-    // 新しいログインを始める（前のログインの同期は中断する）。確かめている間にログアウトや
-    // 別のログインが始まったら、このログインは中断され、トークンを置かない
-    const session = this.#beginSession();
-    await this.#api.verifyToken(trimmed, session);
-
-    await this.#db.transaction(async (tx) => {
-      session.throwIfAborted();
-      // 確かめている間に始まった同期は、前のトークンで動いている。ここで中断して、
-      // 前のアカウントの応答を、消したあとの手元に書き戻させない
-      this.#beginSession();
-      await clearAll(tx);
-      await setSetting(tx, TOKEN_KEY, trimmed);
-      // DB の呼び出しは 1 列に並ぶので、手元のトークンもトランザクションの中で替える
-      // （あとに並んだログアウトが、確実に消す）
-      this.#token = trimmed;
-    });
-    this.#emit(new Set<Table>(["folders", "feeds", "articles"]));
+  async restoreSession(): Promise<boolean> {
+    // 待つ前に、今のログインの合図を取る（待っている間に始まったログアウトで中断されるように）
+    const signal = this.#session.signal;
+    if (this.#user !== null) return true;
+    if ((await getSetting(this.#db, LOGOUT_PENDING_KEY)) !== null) return false;
+    try {
+      await this.#adopt(await this.#api.me(signal), signal);
+      return true;
+    } catch (error) {
+      if (signal.aborted) return this.#user !== null;
+      if (error instanceof ApiError && error.kind === "unauthorized") return false;
+      throw error;
+    }
   }
 
   /**
-   * トークンと、同期で届いた手元のデータをまとめて消す。送っている途中の同期や、確かめている
-   * 途中のログインは待たずに中断する（通信が止まっていても、すぐに終わる）。
+   * ログインの画面（sendo の /auth/google/login）へ移る前に呼ぶ。ログアウトを sendo に送れて
+   * いなければ、ここで送る。送れなければ ApiError を投げ、ログインに進ませない（ログインし終える
+   * 前に、残った前のセッションで使い始めないように）。
    */
-  async signOut(): Promise<void> {
+  async prepareSignIn(): Promise<void> {
+    const signal = this.#session.signal;
+    if ((await getSetting(this.#db, LOGOUT_PENDING_KEY)) === null) return;
+    await this.#sendLogout(signal);
+  }
+
+  /**
+   * 手元のデータ（同期で届いた行、まだ送っていない操作、ログインしたユーザー）をまとめて消し、
+   * sendo にログアウトを送る。送っている途中の同期は待たずに中断する（通信が止まっていても、
+   * 手元はすぐに消える）。sendo に届かなくても手元は消し、届くようになったら送り直す
+   * （sendPendingSignOut）。sendo のセッションを消せたら true。
+   */
+  async signOut(): Promise<boolean> {
     this.#beginSession();
-    this.#token = null;
+    this.#user = null;
     await this.#db.transaction(async (tx) => {
       await clearAll(tx);
-      this.#token = null;
+      await setSetting(tx, LOGOUT_PENDING_KEY, "1");
+      this.#user = null;
     });
-    this.#emit(new Set<Table>(["folders", "feeds", "articles"]));
+    this.#emit(ALL_TABLES);
+    return this.sendPendingSignOut();
+  }
+
+  /**
+   * 送れていないログアウトがあれば、sendo に送る（オンラインに戻ったときなど）。送れたか、
+   * 送るものがなければ true。届かなければ false（印は残し、あとで送り直す）。
+   */
+  async sendPendingSignOut(): Promise<boolean> {
+    const signal = this.#session.signal;
+    if ((await getSetting(this.#db, LOGOUT_PENDING_KEY)) === null) return true;
+    try {
+      await this.#sendLogout(signal);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  async #sendLogout(signal: AbortSignal): Promise<void> {
+    await this.#api.logout(signal);
+    await this.#db.transaction(async (tx) => {
+      // 送っている間にログインし直していたら（ログアウトの印は、もう消えている）、何もしない
+      signal.throwIfAborted();
+      await deleteSetting(tx, LOGOUT_PENDING_KEY);
+    });
+  }
+
+  /**
+   * sendo に送る前に、セッションのユーザーが手元のユーザーと同じかを確かめる。ログインして
+   * いなければ ApiError（unauthorized）を投げる（手元のデータと操作は残す）。違うユーザーなら、
+   * 手元を消してそのユーザーに替える。続けて使う、今のログインの中断の合図を返す。
+   */
+  async #confirmUser(signal: AbortSignal): Promise<AbortSignal> {
+    return this.#adopt(await this.#api.me(signal), signal);
+  }
+
+  /**
+   * sendo のセッションのユーザーを、手元のユーザーにする。同じユーザーなら（メールが変わって
+   * いれば置き直すだけで）手元を残し、signal をそのまま返す。違えば（手元にいなかったときも）、
+   * 前のユーザーの手元のデータと操作を消して最初から同期し直すようにし、新しいログインの中断の
+   * 合図を返す。その前にログアウトやログインのし直しがあれば、何もせずに投げる。
+   */
+  async #adopt(user: User, signal: AbortSignal): Promise<AbortSignal> {
+    let current = signal;
+    let switched = false;
+    await this.#db.transaction(async (tx) => {
+      throwIfSessionEnded(signal);
+      if (this.#user?.id === user.id) {
+        if (this.#user.email !== user.email) {
+          await setSetting(tx, USER_KEY, JSON.stringify(user));
+          this.#user = { ...user };
+        }
+        return;
+      }
+      // 前のユーザーのために走っている処理（同期、通信が要る操作、書き込み）を中断し、
+      // 応答を、消したあとの手元に書き戻させない
+      current = this.#beginSession();
+      await clearAll(tx);
+      await setSetting(tx, USER_KEY, JSON.stringify(user));
+      // DB の呼び出しは 1 列に並ぶので、手元のユーザーもトランザクションの中で替える
+      // （あとに並んだログアウトが、確実に消す）
+      this.#user = { ...user };
+      switched = true;
+    });
+    if (switched) this.#emit(ALL_TABLES);
+    return current;
   }
 
   /** 今のログインで動いている処理を中断し、新しいログインの中断の合図を返す */
@@ -175,7 +264,10 @@ export class ReaderCore {
   /**
    * 手元の操作を sendo に送り（操作キュー）、そのあと差分を取り込む。すでに同期中なら、
    * その結果を待つ（同時に 2 つは走らせない）。ログインしていなければ ApiError（unauthorized）。
-   * 操作を送れなかったら（届かない、など）、取り込まずに ApiError を投げる。操作は残る。
+   * 送る前に、sendo のセッションのユーザーを確かめる。セッションが切れていれば ApiError
+   * （unauthorized）を投げ、手元のデータと操作は残す。別のユーザーなら、手元を消してそのユーザーで
+   * 最初から同期する。操作を送れなかったら（届かない、など）、取り込まずに ApiError を投げる。
+   * 操作は残る。
    */
   sync(): Promise<SyncResult> {
     if (this.#syncing !== null) return this.#syncing;
@@ -200,8 +292,10 @@ export class ReaderCore {
     return run;
   }
 
-  async #runSync(signal: AbortSignal): Promise<SyncResult> {
-    if (this.#token === null) throw new ApiError("unauthorized", "ログインしていない");
+  async #runSync(started: AbortSignal): Promise<SyncResult> {
+    this.#requireSignedIn();
+    // 別のユーザーでログインしていたら、手元を消して、そのユーザーで最初から同期する
+    const signal = await this.#confirmUser(started);
     const pushed = await this.#push(signal, (id) => {
       const limit = this.#pushLimit();
       return limit === null || id <= limit || this.#onlineOps.has(id);
@@ -413,6 +507,10 @@ export class ReaderCore {
     try {
       return await this.#exclusive(async () => {
         await ready;
+        // 別のユーザーでログインしていたら、頼まれた操作（前のユーザーのためのもの）は送らない
+        if ((await this.#confirmUser(signal)) !== signal) {
+          throw new ApiError("unauthorized", "別のユーザーでログインしていたので、送らなかった");
+        }
         // 呼んだ時点までの操作と、先に呼んだ通信が要る操作が積んだ操作を、先に送る
         await this.#push(signal, (id) => id <= barrier.id || this.#onlineOps.has(id));
         return fn(signal);
@@ -423,7 +521,7 @@ export class ReaderCore {
   }
 
   #requireSignedIn(): void {
-    if (this.#token === null) throw new ApiError("unauthorized", "ログインしていない");
+    if (this.#user === null) throw new ApiError("unauthorized", "ログインしていない");
   }
 
   async #write(op: Operation, tables: Table[]): Promise<void> {
@@ -484,7 +582,7 @@ export class ReaderCore {
 }
 
 /**
- * 手元のデータ（同期で届いた行、まだ送っていない操作、カーソル、トークンなどの設定）を
+ * 手元のデータ（同期で届いた行、まだ送っていない操作、カーソル、ログインしたユーザーなどの設定）を
  * すべて消す
  */
 async function clearAll(tx: Executor): Promise<void> {
@@ -513,4 +611,17 @@ export function normalizeFolderName(value: string): string {
 /** 書き込みを始めたときのログインが、もう終わっていたら投げる */
 function throwIfSessionEnded(session: AbortSignal): void {
   if (session.aborted) throw new ApiError("unauthorized", "ログインし直したので書き込まなかった");
+}
+
+/** 手元に置いたユーザーを読む。形が違えば（壊れていれば）、ログインしていないことにする */
+function parseUser(value: string | null): User | null {
+  if (value === null) return null;
+  try {
+    const parsed = JSON.parse(value) as { id?: unknown; email?: unknown } | null;
+    return typeof parsed?.id === "string" && parsed.id !== "" && typeof parsed.email === "string"
+      ? { id: parsed.id, email: parsed.email }
+      : null;
+  } catch {
+    return null;
+  }
 }

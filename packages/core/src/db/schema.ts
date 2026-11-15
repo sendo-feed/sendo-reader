@@ -77,6 +77,11 @@ const migrations: readonly (readonly string[])[] = [
      set payload = json_set(payload, '$.extraIds', json(json_extract(payload, '$.articleIds')))
      where kind = 'markRead' and json_type(payload, '$.extraIds') is null`,
   ],
+  [
+    // ログインを sendo のセッション（クッキー）に替えた。前の版が置いたアクセストークンを消す
+    // （手元の行は、次にログインしたときに、どのユーザーのものか分からないので消す。reader.ts）
+    "delete from settings where key = 'auth.token'",
+  ],
 ];
 
 export const SCHEMA_VERSION = migrations.length;

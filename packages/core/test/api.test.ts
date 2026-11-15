@@ -11,11 +11,7 @@ function respond(status: number, body?: unknown): typeof fetch {
 }
 
 async function syncError(fetcher: typeof fetch): Promise<ApiError> {
-  const api = createSendoApi({
-    baseUrl: "https://sendo.test/api/v1",
-    token: () => "t",
-    fetch: fetcher,
-  });
+  const api = createSendoApi({ baseUrl: "https://sendo.test/api/v1", fetch: fetcher });
   const error = await api.sync(null).catch((e: unknown) => e);
   if (!(error instanceof ApiError)) throw new Error("ApiError が投げられなかった");
   return error;
@@ -39,17 +35,26 @@ describe("sendo の API の失敗の分け方", () => {
     expect(error.status).toBe(status);
   });
 
-  test("届かなければ network。トークンはエラーの文言に入れない", async () => {
+  test("届かなければ network", async () => {
     const api = createSendoApi({
       baseUrl: "https://sendo.test/api/v1",
-      token: () => "sendo_secret",
       fetch: async () => {
         throw new TypeError("fetch failed");
       },
     });
     const error = await api.sync(null).catch((e: unknown) => e);
     expect((error as ApiError).kind).toBe("network");
-    expect(String((error as ApiError).message)).not.toContain("sendo_secret");
+  });
+
+  test.each([
+    [{ user: { id: "", email: "a@example.com" } }],
+    [{ user: { id: "u1" } }],
+    [{ id: "u1", email: "a@example.com" }],
+    [null],
+  ])("/me の応答の形が違えば server（%j）", async (body) => {
+    const api = createSendoApi({ baseUrl: "https://sendo.test/api/v1", fetch: respond(200, body) });
+    const error = await api.me().catch((e: unknown) => e);
+    expect((error as ApiError).kind).toBe("server");
   });
 });
 
@@ -58,11 +63,10 @@ describe("リクエストの組み立て", () => {
     vi.unstubAllGlobals();
   });
 
-  test("トークンを Bearer で付け、カーソルはそのまま送る", async () => {
+  test("Authorization は付けず、カーソルはそのまま送る", async () => {
     const seen: Request[] = [];
     const api = createSendoApi({
       baseUrl: "https://sendo.test/api/v1/",
-      token: () => "sendo_abc",
       fetch: async (input) => {
         seen.push(input as Request);
         return new Response(
@@ -72,7 +76,7 @@ describe("リクエストの組み立て", () => {
     });
     await api.sync("c1+/=");
     expect(seen[0]?.url).toBe("https://sendo.test/api/v1/sync?cursor=c1%2B%2F%3D");
-    expect(seen[0]?.headers.get("authorization")).toBe("Bearer sendo_abc");
+    expect(seen[0]?.headers.has("authorization")).toBe(false);
   });
 
   test("ブラウザでは、同じオリジンのパス（/api/v1）を今の場所から解決する", async () => {
@@ -80,27 +84,26 @@ describe("リクエストの組み立て", () => {
     const seen: string[] = [];
     const api = createSendoApi({
       baseUrl: "/api/v1",
-      token: () => null,
       fetch: async (input) => {
         seen.push((input as Request).url);
-        return new Response(JSON.stringify({ items: [] }));
+        return new Response(JSON.stringify({ user: { id: "u1", email: "a@example.com" } }));
       },
     });
-    await api.verifyToken("sendo_x");
-    expect(seen).toEqual(["https://reader.example/api/v1/folders"]);
+    expect(await api.me()).toEqual({ id: "u1", email: "a@example.com" });
+    expect(seen).toEqual(["https://reader.example/api/v1/me"]);
   });
 
-  test("トークンを確かめるときは、渡したトークンを使う", async () => {
-    const seen: (string | null)[] = [];
+  test("ログアウトは POST /auth/logout。204 なら成功", async () => {
+    const seen: string[] = [];
     const api = createSendoApi({
       baseUrl: "https://sendo.test/api/v1",
-      token: () => "sendo_old",
       fetch: async (input) => {
-        seen.push((input as Request).headers.get("authorization"));
-        return new Response(JSON.stringify({ items: [] }));
+        const request = input as Request;
+        seen.push(`${request.method} ${request.url}`);
+        return new Response(null, { status: 204 });
       },
     });
-    await api.verifyToken("sendo_new");
-    expect(seen).toEqual(["Bearer sendo_new"]);
+    await api.logout();
+    expect(seen).toEqual(["POST https://sendo.test/api/v1/auth/logout"]);
   });
 });

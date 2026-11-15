@@ -21,7 +21,7 @@ export function describeError(error: unknown): string {
       case "network":
         return "sendo に届きません。通信を確かめてください。";
       case "unauthorized":
-        return "トークンが使えなくなりました。ログインし直してください。";
+        return "ログインが切れました。ログインし直してください。";
       case "server":
         return "sendo でうまくいきませんでした。少し待ってからやり直してください。";
       default:

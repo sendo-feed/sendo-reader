@@ -86,7 +86,7 @@ Conventional Commits を土台にする。全文は https://github.com/sendo-fee
   - `{@html}` を使わない（Biome の `noSvelteAtHtmlTags` で検査している）。本文の HTML を出すときは、サニタイズしてから専用の部品で出す
   - URL は `toSafeHttpUrl`（`packages/core`）を通し、http ／ https のものだけを `href` に入れる
 - CSP を緩めない（`apps/web/security-headers.ts`）。インラインのスクリプト、`eval`、テンプレートの `style` 属性（本番の CSP で止まる。`style:` ディレクティブか CSS のクラスを使う）、ほかのオリジンへの通信を使わない。緩める必要が出たら、`docs/decisions/local-first.md` を直してから変える
-- アクセストークンを、ログ、エラーの表示、URL、Service Worker のキャッシュに入れない
+- ログインは sendo のセッションのクッキーで行う（`docs/decisions/local-first.md` の 6）。リクエストに `Authorization` を付けない。アクセストークンなど sendo が返す秘密は、画面に一度出すだけにし、手元の DB、ログ、エラーの表示、URL、Service Worker のキャッシュに入れない
 - 速さの予算（`docs/decisions/performance.md`）を超える依存を足さない。足す前に `pnpm build && pnpm size` で確かめる
 - Svelte の `generics="…"` の中に `{` を書かない（Biome が解析に失敗する）。型に名前を付けてから使う
 
@@ -114,7 +114,7 @@ Conventional Commits を土台にする。全文は https://github.com/sendo-fee
 2. **core と画面の境界**：`packages/core` が UI のフレームワークや `apps/` に依存していないか。同期やデータのロジックが `apps/` に漏れていないか
 3. **ローカルファースト**：画面の操作がネットワークの応答を待っていないか。オフラインで操作したときに、操作キューと楽観的更新で正しく戻せるか
 4. **速さの予算**：JS が gzip 後 100KB を超えそうな依存の追加や、操作の反応が 100ms を超えそうな処理がないか
-5. **セキュリティ**：記事のデータの HTML の出し方（XSS）、URL のスキームの確かめ漏れ、CSP や Trusted Types を緩める変更、トークンの保存場所、ログへの秘密情報の出力
+5. **セキュリティ**：記事のデータの HTML の出し方（XSS）、URL のスキームの確かめ漏れ、CSP や Trusted Types を緩める変更、秘密（発行したトークンなど）の置き場所、ログへの秘密情報の出力、状態を変えるリクエストを同じオリジンから送っているか
 6. **生成物**：OpenAPI から生成したファイルを手で直していないか
 7. **テスト**：振る舞いを変える変更に、それを確かめるテストがあるか
 8. **PR の書き方**：タイトルがコミットメッセージの形式か。説明に「なぜ」が書かれているか
