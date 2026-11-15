@@ -57,18 +57,19 @@ export class ReaderState {
    */
   async init(): Promise<void> {
     this.loginError = takeLoginError();
+    let signedIn: boolean;
     try {
-      this.signedIn = await this.client.restoreSession();
+      signedIn = await this.client.restoreSession();
     } catch (error) {
       // 手元にユーザーがいれば restoreSession は待たずに答えるので、ここに来るのは、手元に
       // いなくて sendo に聞けなかったとき
       this.offline = error instanceof ApiError && error.kind === "network";
-      this.signedIn = await this.client.isSignedIn();
+      signedIn = await this.client.isSignedIn();
     }
-    if (this.signedIn) {
-      this.user = await this.client.currentUser();
-      await this.#loadAll();
-    }
+    // 画面は、どのユーザーかが分かってから出す（設定の画面は、手元のユーザーと照らして sendo に聞く）
+    if (signedIn) this.user = await this.client.currentUser();
+    this.signedIn = signedIn;
+    if (signedIn) await this.#loadAll();
   }
 
   /** ログアウトする。この端末のデータをすぐ消し、sendo へは裏で送る（ネットワークを待たない） */

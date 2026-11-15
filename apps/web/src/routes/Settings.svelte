@@ -25,9 +25,9 @@
   {#key reader.user?.id}
     {#if reader.user !== null}
       <p class="account">ログインしているアカウント：{reader.user.email}</p>
+      <Tokens {confirm} />
+      <Grants {confirm} />
     {/if}
-    <Tokens {confirm} />
-    <Grants {confirm} />
   {/key}
 </main>
 

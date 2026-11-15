@@ -162,7 +162,12 @@ export class SyncScheduler {
       await this.#refreshPending();
       return;
     }
-    this.#update({ signedIn: true, syncing: true, logoutPending: false });
+    this.#update({
+      signedIn: true,
+      user: this.#core.currentUser(),
+      syncing: true,
+      logoutPending: false,
+    });
     try {
       await this.#core.sync();
       this.#failures = 0;

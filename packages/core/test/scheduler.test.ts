@@ -6,6 +6,7 @@ import {
   type SyncStatus,
   WRITE_DEBOUNCE_MS,
 } from "../src/sync/scheduler";
+import { USER } from "./fake-sendo";
 import { setup } from "./helpers";
 
 const syncCalls = (requests: string[]) => requests.filter((r) => r.startsWith("GET /sync")).length;
@@ -184,6 +185,21 @@ describe("同期の予定", () => {
     scheduler.requestNow();
     await vi.advanceTimersByTimeAsync(0);
     expect(statuses.at(-1)?.user).toEqual({ id: "user-1", email: "you@example.com" });
+  });
+
+  test("ログインして同期を始めるときに、ユーザーも一緒に知らせる（ログインしているのにユーザーがない様子を出さない）", async () => {
+    const { server, core } = await setup({ signIn: false });
+    const statuses: SyncStatus[] = [];
+    const scheduler = new SyncScheduler(core, { onStatus: (status) => statuses.push(status) });
+    scheduler.requestNow();
+    await vi.advanceTimersByTimeAsync(0);
+    server.signInAs();
+    await core.restoreSession();
+    scheduler.requestNow();
+    await vi.advanceTimersByTimeAsync(0);
+    const signedIn = statuses.filter((status) => status.signedIn);
+    expect(signedIn.length).toBeGreaterThan(0);
+    for (const status of signedIn) expect(status.user).toEqual(USER);
   });
 
   test("止めたら、予定していた同期もしない", async () => {
