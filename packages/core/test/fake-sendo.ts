@@ -277,7 +277,14 @@ export class FakeSendo {
   /** 記事を受信箱に配る（受信の時刻はサーバーの今） */
   deliver(
     feedId: string,
-    input: { title?: string; publishedAt?: number; url?: string | null; id?: string } = {},
+    input: {
+      title?: string;
+      summary?: string;
+      author?: string;
+      publishedAt?: number;
+      url?: string | null;
+      id?: string;
+    } = {},
   ): InboxRow {
     const seq = this.#bump("articles");
     const row: InboxRow = {
@@ -285,8 +292,8 @@ export class FakeSendo {
       feedId,
       url: input.url === undefined ? "https://example.com/post" : input.url,
       title: input.title ?? null,
-      summary: null,
-      author: null,
+      summary: input.summary ?? null,
+      author: input.author ?? null,
       publishedAt: input.publishedAt ?? this.now,
       receivedAt: this.now,
       readAt: null,

@@ -47,6 +47,10 @@ Sendo の公式リーダー。`packages/core`（同期エンジン）と `apps/w
     - `e2e/`：画面を通したテスト（Playwright）
     - `lib/state.svelte.ts`：画面の状態（フォルダ、フィード、未読の数、同期の様子）。手元の表が変わったら読み直す
     - `lib/router.svelte.ts`：小さな自前のルーター（History API）
+    - `lib/list.svelte.ts`：開いている記事の一覧（読み出し、続き、楽観的な更新、前後の記事）。一覧・記事・キーボードの操作が同じものを見る
+    - `lib/prefs.svelte.ts`：表示の好み（テーマ、文字の大きさ、一覧の形など）。この端末の localStorage に置き、sendo には送らない
+    - キーボードの操作は `routes/Reader.svelte` に割り当て、一覧を `components/ShortcutHelp.svelte` に出す（足したら両方を直す）
+    - 色・余白・文字の大きさは `app.css` の変数を使う。アイコンは `components/Icon.svelte`（画像を足さない）
     - `routes/`：画面（ログイン、読む画面、購読の管理）、`components/`：部品（`components/manage/` は購読の管理の部品）
     - `lib/errors.ts`：失敗（`ApiError` の `code` ／ `kind`）を、画面に出す文にする
     - 画面は `@sendo-reader/core/web` の窓口だけを使い、DB や sendo の API に直接触れない

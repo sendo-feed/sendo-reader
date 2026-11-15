@@ -58,6 +58,31 @@ describe("記事の一覧", () => {
     expect(rest.map((article) => article.title)).toEqual(["b1", "a1"]);
   });
 
+  test("古い順にも並べられ、続きから読める", async () => {
+    const { core } = await seeded();
+    const first = await core.listArticles({ order: "oldest", limit: 2 });
+    expect(first.map((article) => article.title)).toEqual(["a1", "b1"]);
+    const last = first.at(-1);
+    if (last === undefined) throw new Error("unreachable");
+    const rest = await core.listArticles({
+      order: "oldest",
+      after: { publishedAt: last.publishedAt, id: last.id },
+    });
+    expect(rest.map((article) => article.title)).toEqual(["a2", "c1"]);
+  });
+
+  test("ある時刻からあとに既読にした記事を数える", async () => {
+    const { core, server, articles } = await seeded();
+    // a1 は、いま（server.now）既読にしてある
+    expect(await core.countReadSince(server.now)).toBe(1);
+    expect(await core.countReadSince(server.now + 1)).toBe(0);
+    await core.setRead(articles.a2.id, true);
+    await core.setRead(articles.c1.id, true);
+    expect(await core.countReadSince(server.now)).toBe(3);
+    await core.setRead(articles.c1.id, false);
+    expect(await core.countReadSince(server.now)).toBe(2);
+  });
+
   test("数は 1〜200 に収める", async () => {
     const { core } = await seeded();
     expect(await core.listArticles({ limit: 0 })).toHaveLength(1);

@@ -52,12 +52,27 @@ class Router {
     this.url = next;
   }
 
-  /** 開いている一覧のまま、記事を開く（null なら閉じる） */
+  /**
+   * 開いている一覧のまま、記事を開く（null なら閉じる）。
+   * 一覧から開いたときだけ履歴を足し、記事から記事へ移るときは置き換える（「戻る」で、読んだ記事を
+   * 1 つずつ戻らずに一覧に戻る）。閉じるときは、一覧から開いていたなら履歴を戻る
+   */
   openArticle(id: string | null): void {
     const next = new URL(this.url);
     if (id === null) next.searchParams.delete("article");
     else next.searchParams.set("article", id);
-    this.navigate(next.href);
+    const opened = (history.state as { opened?: unknown } | null)?.opened === true;
+    if (id === null) {
+      if (this.articleId === null) return;
+      if (opened) history.back();
+      else this.navigate(next.href);
+    } else if (this.articleId !== null) {
+      history.replaceState(history.state, "", next);
+      this.url = next;
+    } else {
+      history.pushState({ opened: true }, "", next);
+      this.url = next;
+    }
   }
 }
 
@@ -84,8 +99,12 @@ export function viewHref(view: View): string {
 
 /** ふつうのクリックだけをルーターで扱う（新しいタブで開くなどはブラウザに任せる） */
 export function handleLink(event: MouseEvent, href: string): void {
-  if (event.defaultPrevented || event.button !== 0) return;
-  if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+  if (!isPlainClick(event)) return;
   event.preventDefault();
   router.navigate(href);
+}
+
+export function isPlainClick(event: MouseEvent): boolean {
+  if (event.defaultPrevented || event.button !== 0) return false;
+  return !(event.metaKey || event.ctrlKey || event.shiftKey || event.altKey);
 }

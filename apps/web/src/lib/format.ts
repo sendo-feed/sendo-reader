@@ -12,6 +12,29 @@ export function fromNow(ms: number, now = Date.now()): string {
   return dateTime.format(ms);
 }
 
+const shortDate = new Intl.DateTimeFormat("ja", { month: "numeric", day: "numeric" });
+const longDate = new Intl.DateTimeFormat("ja", { dateStyle: "medium" });
+
+/** 一覧に出す短い時刻。この 1 週間は「3 時間前」、それより前は日付（今年でなければ年も） */
+export function shortTime(ms: number, now = Date.now()): string {
+  if (Math.abs(now - ms) < 7 * 86_400_000) return fromNow(ms, now);
+  const sameYear = new Date(ms).getFullYear() === new Date(now).getFullYear();
+  return (sameYear ? shortDate : longDate).format(ms);
+}
+
+const weekday = new Intl.DateTimeFormat("ja", { month: "long", day: "numeric", weekday: "short" });
+const month = new Intl.DateTimeFormat("ja", { year: "numeric", month: "long" });
+
+/** 一覧を日付で区切るときの見出し。今日、昨日、この 1 週間は日付、それより前は月 */
+export function dayLabel(ms: number, now = Date.now()): string {
+  const startOfDay = (time: number) => new Date(time).setHours(0, 0, 0, 0);
+  const days = Math.round((startOfDay(now) - startOfDay(ms)) / 86_400_000);
+  if (days <= 0) return "今日";
+  if (days === 1) return "昨日";
+  if (days < 7) return weekday.format(ms);
+  return month.format(ms);
+}
+
 export function formatDateTime(ms: number): string {
   return dateTime.format(ms);
 }

@@ -7,6 +7,8 @@ import { ReaderState } from "./lib/state.svelte";
 import { trustedScriptUrl } from "./lib/trusted";
 import Authorize from "./routes/Authorize.svelte";
 import "./app.css";
+// 表示の好み（テーマ、文字の大きさ）を、画面を出す前に当てる
+import "./lib/prefs.svelte";
 
 const target = document.getElementById("app");
 if (!target) throw new Error("#app が見つからない");

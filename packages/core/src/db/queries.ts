@@ -10,9 +10,11 @@ export interface ArticleQuery {
   folderId?: string;
   /** unread なら未読だけ、starred ならスター付きだけ */
   state?: "all" | "unread" | "starred";
+  /** 並べる順。newest（既定）は新しい順、oldest は古い順 */
+  order?: "newest" | "oldest";
   /** 1 回に読む数（1〜200、既定は 50） */
   limit?: number;
-  /** 前のページの最後の記事。これより古いものを読む */
+  /** 前のページの最後の記事。その続き（新しい順ならこれより古いもの、古い順なら新しいもの）を読む */
   after?: { publishedAt: number; id: string };
 }
 
@@ -35,7 +37,7 @@ type ArticleRow = {
 const ARTICLE_COLUMNS =
   "a.id, a.feed_id, a.url, a.title, a.summary, a.author, a.published_at, a.received_at, a.read_at, a.starred_at";
 
-/** 記事を新しい順に読む（公開日時、同じなら id の大きい順） */
+/** 記事を新しい順（公開日時、同じなら id の大きい順）か、その逆の古い順に読む */
 export async function listArticles(db: Executor, query: ArticleQuery = {}): Promise<Article[]> {
   const where: string[] = [];
   const params: SqlValue[] = [];
@@ -49,8 +51,10 @@ export async function listArticles(db: Executor, query: ArticleQuery = {}): Prom
   }
   if (query.state === "unread") where.push("a.read_at is null");
   if (query.state === "starred") where.push("a.starred_at is not null");
+  const oldest = query.order === "oldest";
   if (query.after !== undefined) {
-    where.push("(a.published_at < ? or (a.published_at = ? and a.id < ?))");
+    const than = oldest ? ">" : "<";
+    where.push(`(a.published_at ${than} ? or (a.published_at = ? and a.id ${than} ?))`);
     params.push(query.after.publishedAt, query.after.publishedAt, query.after.id);
   }
   const limit = Math.min(Math.max(Math.trunc(query.limit ?? DEFAULT_LIMIT), 1), MAX_LIMIT);
@@ -59,7 +63,7 @@ export async function listArticles(db: Executor, query: ArticleQuery = {}): Prom
   const rows = await db.all<ArticleRow>(
     `select ${ARTICLE_COLUMNS} from articles a
      ${where.length > 0 ? `where ${where.join(" and ")}` : ""}
-     order by a.published_at desc, a.id desc
+     order by a.published_at ${oldest ? "asc" : "desc"}, a.id ${oldest ? "asc" : "desc"}
      limit ?`,
     params,
   );
@@ -132,6 +136,15 @@ export async function countUnread(db: Executor): Promise<UnreadCounts> {
     }
   }
   return counts;
+}
+
+/** since（ミリ秒）からあとに既読にした記事の数。今日読んだ数を出すのに使う */
+export async function countReadSince(db: Executor, since: number): Promise<number> {
+  const [row] = await db.all<{ n: number }>(
+    "select count(*) as n from articles where read_at >= ?",
+    [since],
+  );
+  return row?.n ?? 0;
 }
 
 function toArticle(row: ArticleRow): Article {

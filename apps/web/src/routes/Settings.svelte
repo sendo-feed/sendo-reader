@@ -1,4 +1,5 @@
 <script lang="ts">
+  import Appearance from "../components/settings/Appearance.svelte";
   import Grants from "../components/settings/Grants.svelte";
   import Tokens from "../components/settings/Tokens.svelte";
   import { confirmAccount } from "../lib/account";
@@ -22,6 +23,7 @@
 
 <main class="settings">
   <h1>設定</h1>
+  <Appearance />
   {#key reader.user?.id}
     {#if reader.user !== null}
       <p class="account">ログインしているアカウント：{reader.user.email}</p>

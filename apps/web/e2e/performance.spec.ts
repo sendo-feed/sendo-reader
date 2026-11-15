@@ -52,19 +52,22 @@ test.describe("速さの予算", () => {
 
   test("操作への反応は 100ms 以内（スターと既読）", async ({ page, context }) => {
     await page.locator(".article-list .item").first().click();
-    await expect(page.getByRole("button", { name: "☆ スターを付ける" })).toBeVisible();
+    const view = page.locator(".article-view");
+    await expect(view.getByRole("button", { name: "スターを付ける" })).toBeVisible();
     const cdp = await context.newCDPSession(page);
     await cdp.send("Emulation.setCPUThrottlingRate", { rate: CPU_SLOWDOWN });
 
     for (const [press, expected] of [
-      ["☆ スターを付ける", "★ スターを外す"],
+      ["スターを付ける", "スターを外す"],
       ["未読に戻す", "既読にする"],
     ] as const) {
       const elapsed = await page.evaluate(
         ({ press, expected }) =>
           new Promise<number>((resolve) => {
             const find = (label: string) =>
-              [...document.querySelectorAll("button")].find((b) => b.textContent?.trim() === label);
+              [...document.querySelectorAll(".article-view button")].find(
+                (b) => b.getAttribute("aria-label") === label,
+              ) as HTMLButtonElement | undefined;
             const start = performance.now();
             find(press)?.click();
             const check = () => {

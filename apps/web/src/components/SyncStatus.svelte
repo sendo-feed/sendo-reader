@@ -3,6 +3,7 @@
   import { describeError } from "../lib/errors";
   import { fromNow } from "../lib/format";
   import { startSignIn } from "../lib/login";
+  import Icon from "./Icon.svelte";
 
   const reader = useReader();
   let syncing = $state(false);
@@ -19,6 +20,8 @@
     if (status.lastSyncedAt === null) return "";
     return `${fromNow(status.lastSyncedAt)}に同期`;
   });
+
+  const busy = $derived(syncing || reader.status?.syncing === true);
 
   async function syncNow() {
     syncing = true;
@@ -49,14 +52,27 @@
 <svelte:window onpageshow={onPageShow} />
 
 <div class="sync" aria-live="polite">
-  <span class="label">{label}</span>
+  {#if reader.status?.error === "unauthorized"}
+    <span class="label warn">{label}</span>
+    <button type="button" class="primary" onclick={signInAgain} disabled={signingIn}>
+      ログインし直す
+    </button>
+  {:else}
+    <button
+      type="button"
+      class="icon-button"
+      class:spinning={busy}
+      aria-label="今すぐ同期"
+      title="今すぐ同期（r）"
+      onclick={syncNow}
+      disabled={syncing}
+    >
+      <Icon name="refresh" />
+    </button>
+    <span class="label" class:warn={reader.status?.error != null}>{label}</span>
+  {/if}
   {#if (reader.status?.pending ?? 0) > 0}
     <span class="pending">未送信 {reader.status?.pending} 件</span>
-  {/if}
-  {#if reader.status?.error === "unauthorized"}
-    <button type="button" onclick={signInAgain} disabled={signingIn}>ログインし直す</button>
-  {:else}
-    <button type="button" onclick={syncNow} disabled={syncing}>今すぐ同期</button>
   {/if}
   {#if signInError !== null || reader.loginError !== null}
     <p class="error" role="alert">{signInError ?? reader.loginError}</p>
@@ -69,8 +85,28 @@
     flex-wrap: wrap;
     gap: 0.25rem 0.5rem;
     align-items: center;
-    font-size: 0.8rem;
+    font-size: 0.8125rem;
     color: var(--muted);
+  }
+
+  .label.warn {
+    padding-left: 0.5rem;
+    color: var(--text);
+    font-weight: 600;
+  }
+
+  .icon-button + .label.warn {
+    padding-left: 0;
+  }
+
+  .spinning :global(.icon) {
+    animation: spin 1s linear infinite;
+  }
+
+  @keyframes spin {
+    to {
+      transform: rotate(360deg);
+    }
   }
 
   .pending {
@@ -78,7 +114,9 @@
   }
 
   .error {
+    flex-basis: 100%;
     margin: 0;
+    padding-left: 0.5rem;
     color: var(--danger);
   }
 </style>

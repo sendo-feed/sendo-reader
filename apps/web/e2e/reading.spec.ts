@@ -26,14 +26,15 @@ test("Google でログインし、記事を読んで、スターを付ける", a
   await signIn(page);
 
   const list = page.locator(".article-list");
+  const view = page.locator(".article-view");
   await expect(list.getByText("最初の記事")).toBeVisible();
   await expect(page.locator("nav")).toContainText("Tech");
   await expect(page.locator("nav")).toContainText("Blog");
 
   await list.getByText("最初の記事").click();
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("最初の記事");
-  await page.getByRole("button", { name: "☆ スターを付ける" }).click();
-  await expect(page.getByRole("button", { name: "★ スターを外す" })).toBeVisible();
+  await view.getByRole("button", { name: "スターを付ける" }).click();
+  await expect(view.getByRole("button", { name: "スターを外す" })).toBeVisible();
   await page.getByRole("button", { name: "今すぐ同期" }).click();
   await expect
     .poll(() => [...server.inbox.values()].filter((a) => a.starredAt !== null).length)
@@ -44,6 +45,7 @@ test("Google でログインし、記事を読んで、スターを付ける", a
   await expect(page.getByRole("heading", { level: 1 })).toHaveText(evil.title ?? "");
   await expect(page.locator("img")).toHaveCount(0);
   await expect(page.getByRole("link", { name: "元の記事を開く" })).toHaveCount(0);
+  await expect(page.getByRole("link", { name: "元の記事を読む" })).toHaveCount(0);
 });
 
 test("フィードを探して購読し、フォルダに入れる", async ({ page, context }) => {
@@ -86,10 +88,11 @@ test("セッションが切れたらログインし直しを促し、ログイ�
 
   // セッションが切れた（期限切れ、取り消し）。手元では読み書きでき、ログインし直しを促す
   server.sessions.clear();
-  await page.getByRole("button", { name: "☆ スターを付ける" }).click();
+  const view = page.locator(".article-view");
+  await view.getByRole("button", { name: "スターを付ける" }).click();
   await expect(page.getByRole("button", { name: "ログインし直す" })).toBeVisible();
   await expect(page.getByText("ログインが切れました")).toBeVisible();
-  await expect(page.getByRole("button", { name: "★ スターを外す" })).toBeVisible();
+  await expect(view.getByRole("button", { name: "スターを外す" })).toBeVisible();
 
   // ログインし直すと、開いていた記事に戻り、まだ送っていなかったスターを送る。Service Worker が
   // ページを受け持っていても、ログインの入口（/api/v1/auth/...）へのページの移動は横取りしない

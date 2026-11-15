@@ -2,6 +2,7 @@ import { ApiError, createSendoApi, type SendoApi } from "./api/client";
 import type { Database, Executor } from "./db/database";
 import {
   type ArticleQuery,
+  countReadSince,
   countUnread,
   getArticle,
   getArticles,
@@ -568,6 +569,11 @@ export class ReaderCore {
   /** 記事をまとめて読む（見つからない ID は飛ばす） */
   getArticles(ids: readonly string[]): Promise<Article[]> {
     return getArticles(this.#db, ids);
+  }
+
+  /** since（ミリ秒）からあとに既読にした記事の数 */
+  countReadSince(since: number): Promise<number> {
+    return countReadSince(this.#db, since);
   }
 
   countUnread(): Promise<UnreadCounts> {
