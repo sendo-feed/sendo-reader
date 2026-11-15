@@ -16,6 +16,8 @@
     onmarkall,
     progress,
     onprogress,
+    onmenu,
+    next,
     leading,
   }: {
     list: ArticleListState;
@@ -28,6 +30,10 @@
     /** この一覧の進み具合（出さない一覧は null） */
     progress: ListProgress | null;
     onprogress: () => void;
+    /** 行を長く押した（右クリックした）とき。その記事の操作を出す */
+    onmenu: (article: Article) => void;
+    /** 一覧の終わりに出す、次へ進むボタン（出さないなら null） */
+    next: { label: string; go: () => void } | null;
     /** 見出しの左に置くもの（狭い画面のメニューのボタン） */
     leading?: Snippet;
   } = $props();
@@ -147,10 +153,13 @@
 
   /** これだけ横に動かして離したら、操作する（px） */
   const SWIPE = 72;
+  /** これだけ押し続けたら、その記事の操作を出す（ミリ秒） */
+  const LONG_PRESS = 500;
 
   /**
    * 指で行を横にはじく。右へはじくと既読・未読、左へはじくとスターを切り替える。
-   * 縦に動かし始めたら、一覧を動かすだけにする（行は touch-action: pan-y）
+   * 縦に動かし始めたら、一覧を動かすだけにする（行は touch-action: pan-y）。
+   * 動かさずに長く押す（マウスなら右クリック）と、その記事の操作を出す
    */
   function swipe(node: HTMLElement, article: Article) {
     let current = article;
@@ -160,7 +169,33 @@
     let tracking = false;
     let sideways = false;
 
+    /** 長く押したら、その記事の操作を出す。そのあとの指を離したときのクリックでは、開かない */
+    let pressTimer: ReturnType<typeof setTimeout> | undefined;
+    let pressed = false;
+
+    function openMenu() {
+      if (pressed) return;
+      pressed = true;
+      reset();
+      onmenu(current);
+    }
+
+    function onContextMenu(event: MouseEvent) {
+      event.preventDefault();
+      openMenu();
+      // マウスの右クリックでは、あとにクリックは来ない
+      if (event.button === 2) pressed = false;
+    }
+
+    function onClickCapture(event: MouseEvent) {
+      if (!pressed) return;
+      pressed = false;
+      event.preventDefault();
+      event.stopPropagation();
+    }
+
     function reset() {
+      clearTimeout(pressTimer);
       tracking = false;
       sideways = false;
       // class は Svelte が書き直すので、data 属性で持つ
@@ -177,6 +212,8 @@
       dx = 0;
       tracking = true;
       sideways = false;
+      pressed = false;
+      pressTimer = setTimeout(openMenu, LONG_PRESS);
     }
 
     function onMove(event: TouchEvent) {
@@ -186,6 +223,7 @@
       const y = touch.clientY - startY;
       if (!sideways) {
         if (Math.abs(x) < 10 && Math.abs(y) < 10) return;
+        clearTimeout(pressTimer);
         if (Math.abs(y) >= Math.abs(x)) return reset();
         sideways = true;
         node.dataset.swiping = "";
@@ -215,6 +253,8 @@
     node.addEventListener("touchmove", onMove, { passive: true });
     node.addEventListener("touchend", onEnd);
     node.addEventListener("touchcancel", reset);
+    node.addEventListener("contextmenu", onContextMenu);
+    node.addEventListener("click", onClickCapture, { capture: true });
     return {
       update(next: Article) {
         current = next;
@@ -224,6 +264,9 @@
         node.removeEventListener("touchmove", onMove);
         node.removeEventListener("touchend", onEnd);
         node.removeEventListener("touchcancel", reset);
+        node.removeEventListener("contextmenu", onContextMenu);
+        node.removeEventListener("click", onClickCapture, { capture: true });
+        clearTimeout(pressTimer);
       },
     };
   }
@@ -411,7 +454,12 @@
         {list.loadingMore ? "読んでいます…" : "もっと読む"}
       </button>
     {:else}
-      <p class="end">ここまで</p>
+      <div class="end">
+        <p>ここまで</p>
+        {#if next !== null}
+          <button type="button" class="primary" onclick={next.go}>{next.label}</button>
+        {/if}
+      </div>
     {/if}
   {/if}
 </section>
@@ -564,6 +612,14 @@
     padding: 0.625rem 1rem 0.75rem 1.375rem;
     color: var(--muted);
     text-decoration: none;
+  }
+
+  /* 指で長く押したときに、文字の選択やリンクのプレビューを出さない（記事の操作を出す） */
+  @media (hover: none) {
+    .item {
+      -webkit-touch-callout: none;
+      user-select: none;
+    }
   }
 
   .item:focus-visible {
@@ -741,11 +797,24 @@
   }
 
   .end {
-    margin: 0;
-    padding: 1.5rem;
+    display: grid;
+    justify-items: center;
+    gap: 0.75rem;
+    padding: 1.5rem 1rem calc(2rem + env(safe-area-inset-bottom, 0px));
     color: var(--faint);
     font-size: 0.8125rem;
     text-align: center;
+  }
+
+  .end p {
+    margin: 0;
+  }
+
+  .end button {
+    max-width: 100%;
+    padding: 0.6rem 1rem;
+    font-size: 0.9375rem;
+    overflow-wrap: anywhere;
   }
 
   .skeleton div {

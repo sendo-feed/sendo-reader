@@ -1,5 +1,10 @@
 <script lang="ts">
-  import { type ArticleQuery, type MarkReadScope, toSafeHttpUrl } from "@sendo-reader/core";
+  import {
+    type Article,
+    type ArticleQuery,
+    type MarkReadScope,
+    toSafeHttpUrl,
+  } from "@sendo-reader/core";
   import { untrack } from "svelte";
   import ArticleList from "../components/ArticleList.svelte";
   import ArticleView from "../components/ArticleView.svelte";
@@ -189,13 +194,15 @@
     toastTimer = setTimeout(() => (toast = null), undo === null ? 4000 : 10_000);
   }
 
-  /** まとめて既読にする。olderThan（ミリ秒）を渡すと、それより前に公開された記事だけ */
-  async function markAll(olderThan?: number) {
+  type Range = NonNullable<Parameters<typeof reader.client.markAllRead>[1]>;
+
+  /** 開いている一覧の範囲を、まとめて既読にする。range を渡すと、その一部だけ */
+  async function markAll(range: Range = {}) {
     confirmOpen = false;
+    menuArticle = null;
     if (listing?.scope == null) return;
-    const options = olderThan === undefined ? {} : { publishedBefore: Date.now() - olderThan };
     try {
-      const ids = await reader.client.markAllRead(listing.scope, options);
+      const ids = await reader.client.markAllRead(listing.scope, range);
       if (ids.length === 0) showToast("既読にする記事はありませんでした。");
       else {
         showToast(`${ids.length} 件を既読にしました。`, ids.length <= UNDO_LIMIT ? ids : null);
@@ -204,6 +211,80 @@
       showToast("既読にできませんでした。");
     }
   }
+
+  /** 行を長く押して（右クリックして）操作を出している記事 */
+  let menuArticle = $state<Article | null>(null);
+  let menuOpenFor = $state(false);
+
+  function openArticleMenu(article: Article) {
+    menuArticle = article;
+    menuOpenFor = true;
+  }
+
+  // 窓を閉じたら、記事も外す
+  $effect(() => {
+    if (!menuOpenFor) menuArticle = null;
+  });
+
+  function menuToggle(field: "readAt" | "starredAt") {
+    const article = list.find(menuArticle?.id ?? null);
+    menuOpenFor = false;
+    if (article !== null) list.toggle(article, field).catch(() => {});
+  }
+
+  /** 画面の並びで、その記事より上（above）か下の記事を、まとめて既読にする */
+  function markBeside(above: boolean) {
+    const article = menuArticle;
+    menuOpenFor = false;
+    if (article === null) return;
+    const edge = { publishedAt: article.publishedAt, id: article.id };
+    // 新しい順なら、上にあるのは新しい記事。古い順なら逆
+    const newer = above !== prefs.value.oldestFirst;
+    void markAll(newer ? { newerThan: edge } : { olderThan: edge });
+  }
+
+  const menuLink = $derived(toSafeHttpUrl(menuArticle?.url ?? null));
+
+  /** 左のメニューに並ぶ順のフィード（フォルダごと、そのあとにフォルダなし） */
+  const feedOrder = $derived([
+    ...reader.folders.flatMap((folder) => reader.feeds.filter((f) => f.folderId === folder.id)),
+    ...reader.feeds.filter((feed) => feed.folderId === null),
+  ]);
+
+  /** 開いているフィードから見て、次（1）・前（-1）の、未読のあるフィード */
+  function besideFeed(delta: 1 | -1) {
+    const view = router.view;
+    const from = view.kind === "feed" ? feedOrder.findIndex((feed) => feed.id === view.id) : -1;
+    if (from === -1 && delta === -1) return null;
+    for (let i = from + delta; i >= 0 && i < feedOrder.length; i += delta) {
+      const feed = feedOrder[i];
+      if (feed !== undefined && (reader.unread.feeds.get(feed.id) ?? 0) > 0) return feed;
+    }
+    return null;
+  }
+
+  function stepFeed(delta: 1 | -1) {
+    const feed = besideFeed(delta);
+    if (feed !== null) go({ kind: "feed", id: feed.id });
+  }
+
+  /** 一覧の終わりに出す、次へ進むボタン。未読が残っていれば既読にしてから、次のフィードへ移る */
+  const next = $derived.by(() => {
+    if (listing === null || listing.scope === null) return null;
+    const unread = listing.unread ?? 0;
+    const feed = listing.kind === "feed" ? besideFeed(1) : null;
+    if (feed === null) {
+      return unread === 0 ? null : { label: "すべて既読にする", go: () => void markAll() };
+    }
+    const title = feed.title ?? feed.url;
+    return {
+      label: unread === 0 ? `次のフィード「${title}」へ` : `既読にして、次のフィード「${title}」へ`,
+      go: () => {
+        if (unread > 0) void markAll();
+        go({ kind: "feed", id: feed.id });
+      },
+    };
+  });
 
   async function undoMarkAll() {
     if (toast?.undo == null) return;
@@ -278,6 +359,8 @@
         s: () => toggleCurrent("starredAt"),
         v: openOriginal,
         A: askMarkAll,
+        J: () => stepFeed(1),
+        K: () => stepFeed(-1),
       });
     }
     const action = actions[event.key];
@@ -334,6 +417,8 @@
       kind={listing.kind}
       unread={listing.scope === null ? null : listing.unread}
       onmarkall={askMarkAll}
+      onmenu={openArticleMenu}
+      {next}
       {progress}
       onprogress={() => (progressOpen = true)}
       leading={menuButton}
@@ -381,10 +466,42 @@
     <button type="button" class="primary" autofocus onclick={() => markAll()}>
       すべて既読にする
     </button>
-    <button type="button" onclick={() => markAll(DAY)}>1 日より古い記事だけ</button>
-    <button type="button" onclick={() => markAll(7 * DAY)}>1 週間より古い記事だけ</button>
+    <button type="button" onclick={() => markAll({ publishedBefore: Date.now() - DAY })}>
+      1 日より古い記事だけ
+    </button>
+    <button type="button" onclick={() => markAll({ publishedBefore: Date.now() - 7 * DAY })}>
+      1 週間より古い記事だけ
+    </button>
     <button type="button" class="link" onclick={() => (confirmOpen = false)}>やめる</button>
   </div>
+</Dialog>
+
+<Dialog bind:open={menuOpenFor} title={menuArticle?.title ?? "（タイトルなし）"}>
+  {#if menuArticle !== null}
+    <div class="choices">
+      <button type="button" onclick={() => menuToggle("readAt")}>
+        {menuArticle.readAt === null ? "既読にする" : "未読に戻す"}
+      </button>
+      <button type="button" onclick={() => menuToggle("starredAt")}>
+        {menuArticle.starredAt === null ? "スターを付ける" : "スターを外す"}
+      </button>
+      {#if listing?.scope != null}
+        <button type="button" onclick={() => markBeside(true)}>これより上を既読にする</button>
+        <button type="button" onclick={() => markBeside(false)}>これより下を既読にする</button>
+      {/if}
+      {#if menuLink !== null}
+        <a
+          class="choice"
+          href={menuLink}
+          target="_blank"
+          rel="noopener noreferrer"
+          onclick={() => (menuOpenFor = false)}
+        >
+          元の記事を開く
+        </a>
+      {/if}
+    </div>
+  {/if}
 </Dialog>
 
 {#if toast !== null}
@@ -462,6 +579,19 @@
 
   .choices button {
     padding-block: 0.6rem;
+  }
+
+  .choice {
+    padding: 0.6rem 0.8rem;
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-small);
+    color: inherit;
+    text-align: center;
+    text-decoration: none;
+  }
+
+  .choice:hover {
+    background: var(--hover);
   }
 
   .choices .link {

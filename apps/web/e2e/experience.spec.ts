@@ -82,7 +82,7 @@ test("キーボードで、記事を移り、既読とスターを切り替え�
   await expect(page.getByRole("status")).toContainText("既読にする記事はありませんでした。");
   await expect(page).toHaveTitle("(2) 未読 - Sendo");
   await page.keyboard.press("Shift+A");
-  await page.getByRole("button", { name: "すべて既読にする" }).click();
+  await page.getByRole("dialog").getByRole("button", { name: "すべて既読にする" }).click();
   await expect(page.getByRole("status")).toContainText("2 件を既読にしました。");
   await expect(unread).not.toContainText("2");
   await expect(page).toHaveTitle("未読 - Sendo");
@@ -375,4 +375,76 @@ test("一覧を動かしたあとに別の一覧へ替えたら、先頭に戻�
   await page.waitForTimeout(600);
   await expect(nav.getByRole("link", { name: "Beta" })).toContainText("40");
   await expect(list.locator(".row.unread")).toHaveCount(40);
+});
+
+test("行を長く押す（右クリックする）と記事の操作が出て、上・下をまとめて既読にできる。一覧の終わりから次のフィードへ進める", async ({
+  page,
+  context,
+}) => {
+  const server = new FakeSendo();
+  const alpha = server.subscribe({ url: "https://a.example/feed.xml", title: "Alpha" });
+  const beta = server.subscribe({ url: "https://b.example/feed.xml", title: "Beta" });
+  const t = Date.now();
+  for (let i = 1; i <= 5; i++) {
+    server.deliver(alpha.id, { title: `A ${i}`, publishedAt: t - i * 60_000 });
+  }
+  server.deliver(beta.id, { title: "B 1", publishedAt: t - 600_000 });
+  await routeFakeSendo(context, server);
+  await page.goto("/");
+  await signIn(page);
+  const list = page.locator(".article-list");
+  const nav = page.locator("nav");
+  const row = (title: string) => list.locator(".row", { hasText: title });
+  const unreadTitles = () => list.locator(".row.unread .title").allTextContents();
+  await nav.getByRole("link", { name: "Alpha" }).click();
+  await expect(list.locator(".item")).toHaveCount(5);
+
+  // 右クリックで操作を出し、これより下をまとめて既読にする。取り消せる
+  await row("A 3").click({ button: "right" });
+  await expect(page.getByRole("dialog")).toContainText("A 3");
+  await page.getByRole("button", { name: "これより下を既読にする" }).click();
+  await expect(page.getByRole("status")).toContainText("2 件を既読にしました。");
+  await expect.poll(unreadTitles).toEqual(["A 1", "A 2", "A 3"]);
+  await page.getByRole("status").getByRole("button", { name: "取り消す" }).click();
+  await expect.poll(unreadTitles).toEqual(["A 1", "A 2", "A 3", "A 4", "A 5"]);
+
+  // これより上
+  await row("A 3").click({ button: "right" });
+  await page.getByRole("button", { name: "これより上を既読にする" }).click();
+  await expect.poll(unreadTitles).toEqual(["A 3", "A 4", "A 5"]);
+
+  // 指で長く押しても、同じ操作が出る。指を離しても、記事は開かない
+  await row("A 4").evaluate(async (element) => {
+    const box = element.getBoundingClientRect();
+    const touch = new Touch({
+      identifier: 1,
+      target: element,
+      clientX: box.left + 40,
+      clientY: box.top + 20,
+    });
+    element.dispatchEvent(
+      new TouchEvent("touchstart", { bubbles: true, touches: [touch], changedTouches: [touch] }),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 700));
+    element.dispatchEvent(
+      new TouchEvent("touchend", { bubbles: true, touches: [], changedTouches: [touch] }),
+    );
+    element.querySelector<HTMLElement>(".item")?.click();
+  });
+  await expect(page.getByRole("dialog")).toContainText("A 4");
+  await expect(page).not.toHaveURL(/article=/);
+  await page.getByRole("dialog").getByRole("button", { name: "既読にする", exact: true }).click();
+  await expect.poll(unreadTitles).toEqual(["A 3", "A 5"]);
+
+  // 一覧の終わりから、残りを既読にして次のフィードへ進む
+  await list.getByRole("button", { name: "既読にして、次のフィード「Beta」へ" }).click();
+  await expect(page).toHaveURL(new RegExp(`/feeds/${beta.id}$`));
+  await expect(list.locator(".title")).toHaveText(["B 1"]);
+  await expect(nav.getByRole("link", { name: "Alpha" })).not.toContainText("2");
+  await expect(list.getByRole("button", { name: "すべて既読にする" })).toBeVisible();
+
+  // Shift + J で、次の未読のあるフィードへ
+  await nav.getByRole("link", { name: "未読" }).click();
+  await page.keyboard.press("Shift+J");
+  await expect(page).toHaveURL(new RegExp(`/feeds/${beta.id}$`));
 });
