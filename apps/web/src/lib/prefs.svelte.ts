@@ -8,6 +8,22 @@ export type TextSize = "small" | "medium" | "large";
 /** compact はタイトルだけ、comfortable は要約も出す */
 export type ListLayout = "compact" | "comfortable";
 
+/** 一覧の行を、横にスワイプしたときにすること */
+export type ListSwipe = "none" | "read" | "star";
+/** 記事を、横にスワイプしたときにすること */
+export type ArticleSwipe = "none" | "back" | "next" | "previous";
+
+export const LIST_SWIPES: readonly ListSwipe[] = ["none", "read", "star"];
+export const ARTICLE_SWIPES: readonly ArticleSwipe[] = ["none", "back", "next", "previous"];
+
+/** 指でのスワイプの割り当て（left は左へ、right は右へ動かしたとき） */
+export interface Swipes {
+  listLeft: ListSwipe;
+  listRight: ListSwipe;
+  articleLeft: ArticleSwipe;
+  articleRight: ArticleSwipe;
+}
+
 /** 一覧ごとに変えられるもの */
 export interface ViewOptions {
   layout: ListLayout;
@@ -34,6 +50,8 @@ export interface PrefsValue {
   hideReadFeeds: boolean;
   /** 左のメニューで、畳んでいるフォルダの ID */
   collapsed: string[];
+  /** 指でのスワイプの割り当て */
+  swipes: Swipes;
   /**
    * 一覧ごとに変えた設定（鍵は一覧のパス。/feeds/<id> など）。変えていないものは、上の
    * layout ／ unreadOnly ／ oldestFirst を既定として使う
@@ -53,6 +71,8 @@ const DEFAULTS: PrefsValue = {
   hideReadFeeds: false,
   collapsed: [],
   views: {},
+  // 記事を右へスワイプすると、一覧に戻る。一覧の行は、左でスター、右で既読・未読
+  swipes: { listLeft: "star", listRight: "read", articleLeft: "none", articleRight: "back" },
 };
 
 function oneOf<T extends string>(value: unknown, allowed: readonly T[], fallback: T): T {
@@ -82,6 +102,18 @@ export function parsePrefs(text: string | null): PrefsValue {
       ? raw.collapsed.filter((id): id is string => typeof id === "string").slice(0, 500)
       : [],
     views: parseViews(raw.views),
+    swipes: parseSwipes(raw.swipes),
+  };
+}
+
+function parseSwipes(raw: unknown): Swipes {
+  const entry = typeof raw === "object" && raw !== null ? (raw as Record<string, unknown>) : {};
+  const fallback = DEFAULTS.swipes;
+  return {
+    listLeft: oneOf(entry.listLeft, LIST_SWIPES, fallback.listLeft),
+    listRight: oneOf(entry.listRight, LIST_SWIPES, fallback.listRight),
+    articleLeft: oneOf(entry.articleLeft, ARTICLE_SWIPES, fallback.articleLeft),
+    articleRight: oneOf(entry.articleRight, ARTICLE_SWIPES, fallback.articleRight),
   };
 }
 

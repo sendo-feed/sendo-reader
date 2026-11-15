@@ -1,6 +1,7 @@
 <script lang="ts">
   import Appearance from "../components/settings/Appearance.svelte";
   import Grants from "../components/settings/Grants.svelte";
+  import Swipes from "../components/settings/Swipes.svelte";
   import Tokens from "../components/settings/Tokens.svelte";
   import { confirmAccount } from "../lib/account";
   import { useReader } from "../lib/context";
@@ -24,6 +25,7 @@
 <main class="settings">
   <h1>設定</h1>
   <Appearance />
+  <Swipes />
   {#key reader.user?.id}
     {#if reader.user !== null}
       <p class="account">ログインしているアカウント：{reader.user.email}</p>

@@ -4,6 +4,7 @@
   import { useReader } from "../lib/context";
   import { formatDateTime } from "../lib/format";
   import type { ArticleListState } from "../lib/list.svelte";
+  import { prefs } from "../lib/prefs.svelte";
   import { handleLink, router, viewHref } from "../lib/router.svelte";
   import Dialog from "./Dialog.svelte";
   import Icon from "./Icon.svelte";
@@ -104,8 +105,9 @@
   }
 
   /**
-   * 指で記事を横にはじくと、次（左へ）・前（右へ）の記事に移る。縦に読み進める動きや、
-   * 文字を選ぶ動きと取り違えないように、はっきり横に動かしたときだけにする
+   * 指で記事を横にスワイプする。割り当ては設定で変えられる（既定は、右へスワイプすると一覧に
+   * 戻る。左は何もしない）。縦に読み進める動きや、文字を選ぶ動きと取り違えないように、
+   * はっきり横に動かしたときだけにする
    */
   let touchStart: { x: number; y: number } | null = null;
 
@@ -125,7 +127,11 @@
     if (getSelection()?.isCollapsed === false) return;
     const dx = touch.clientX - start.x;
     const dy = touch.clientY - start.y;
-    if (Math.abs(dx) >= 80 && Math.abs(dx) > Math.abs(dy) * 2) onstep(dx < 0 ? 1 : -1);
+    if (Math.abs(dx) < 80 || Math.abs(dx) <= Math.abs(dy) * 2) return;
+    const action = dx < 0 ? prefs.value.swipes.articleLeft : prefs.value.swipes.articleRight;
+    if (action === "back") router.openArticle(null);
+    else if (action === "next") onstep(1);
+    else if (action === "previous") onstep(-1);
   }
 
   /** 共有したときなどの、少しの間出す知らせ */

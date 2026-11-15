@@ -232,7 +232,8 @@ test("狭い画面では、メニューを左から開き、一覧と記事を�
   await expect(page.getByRole("button", { name: "一覧に戻る" })).toBeVisible();
   await page.getByRole("button", { name: "次の記事" }).click();
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("3 番目");
-  // 記事を右へはじくと前の記事、左へはじくと次の記事（縦に読み進める動きでは移らない）
+  // 記事を右へスワイプすると、一覧に戻る。左には何も割り当てていない（縦に読み進める動きでも、
+  // 何も起きない）。割り当ては、設定で変えられる
   const flickArticle = (dx: number, dy: number) =>
     page.locator(".article-view").evaluate(
       (view, { dx, dy }) => {
@@ -248,15 +249,35 @@ test("狭い画面では、メニューを左から開き、一覧と記事を�
       { dx, dy },
     );
   await flickArticle(60, -200);
+  await flickArticle(-140, 10);
+  await page.waitForTimeout(200);
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("3 番目");
   await flickArticle(140, 10);
-  await expect(page.getByRole("heading", { level: 1 })).toHaveText("2 番目");
-  await flickArticle(-140, 10);
-  await expect(page.getByRole("heading", { level: 1 })).toHaveText("3 番目");
-  await page.goBack();
   await expect(list).toBeVisible();
   await expect(page).toHaveURL(/\/all$/);
   await expect(tabs).toBeVisible();
+
+  // 設定で、記事を左へスワイプしたら次の記事、一覧の行を左へスワイプしても何もしない、に変える
+  await page.getByRole("button", { name: "メニュー", exact: true }).click();
+  await nav.getByRole("link", { name: "設定" }).click();
+  await page.getByLabel("記事を左へ").selectOption({ label: "次の記事" });
+  await page.getByLabel("一覧の行を左へ").selectOption({ label: "何もしない" });
+  await page.reload();
+  await expect(page.getByLabel("記事を左へ")).toHaveValue("next");
+  await tabs.getByRole("link", { name: "スター" }).click();
+  await expect(list.locator(".title")).toHaveText(["1 番目"]);
+  await flick("1 番目", -120, 5);
+  await page.waitForTimeout(300);
+  await expect(list.locator(".title")).toHaveText(["1 番目"]);
+  await expect(row.getByRole("button", { name: "スターを外す" })).toBeAttached();
+  await page.getByRole("button", { name: "メニュー", exact: true }).click();
+  await nav.getByRole("link", { name: "すべて" }).click();
+  await list.getByText("2 番目").click();
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText("2 番目");
+  await flickArticle(-140, 10);
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText("3 番目");
+  await flickArticle(140, 10);
+  await expect(list).toBeVisible();
 
   // 広い画面では、左のメニューを出したままにして、下のバーは出さない
   await page.setViewportSize({ width: 1100, height: 780 });
