@@ -1,4 +1,4 @@
-import { createSendoApi, errorFromBody, type SendoApiOptions } from "./api/client";
+import { ApiError, createSendoApi, errorFromBody, type SendoApiOptions } from "./api/client";
 import type { User } from "./models";
 
 /**
@@ -52,6 +52,39 @@ export interface OAuthGrant {
   createdAt: number;
   /** 最後にトークンを出した時刻。まだなら null */
   lastUsedAt: number | null;
+}
+
+/** OAuth の許可の画面に出す、認可のリクエスト（sendo が確かめたもの） */
+export interface AuthorizationRequest {
+  client: {
+    id: string;
+    /** registered なら、クライアントが名乗っただけで確かめていない */
+    name: string | null;
+    kind: "metadata_document" | "registered";
+    /** クライアントの ID の URL のホスト（metadata_document のとき） */
+    host: string | null;
+  };
+  redirectUri: string;
+  /** 戻る先のホスト。画面に必ず出す */
+  redirectHost: string;
+  /** 戻る先が手元（localhost など）。ほかのアプリでも受けられる */
+  loopbackRedirect: boolean;
+  scopes: Scope[];
+}
+
+/**
+ * 認可のリクエストが正しくない（sendo の 400）。redirectTo があれば、誤りをクライアントに返す
+ * ために、そこへ移る。なければ画面に誤りを出し、どこへも移らない
+ */
+export class AuthorizationError extends Error {
+  constructor(
+    readonly code: string,
+    message: string,
+    readonly redirectTo: string | null,
+  ) {
+    super(message);
+    this.name = "AuthorizationError";
+  }
 }
 
 /** トークンの名前の長さの上限（sendo と同じ。前後の空白を除いて数える） */
@@ -109,6 +142,41 @@ export function createAccountApi(options: SendoApiOptions) {
       }));
     },
 
+    /**
+     * OAuth の許可の画面を出す前に、認可のリクエスト（location.search をそのまま）を確かめる。
+     * 正しくなければ AuthorizationError、ログインしていなければ ApiError（unauthorized）、
+     * sendo で OAuth を使う設定がなければ ApiError（not_found、code が oauth_disabled）
+     */
+    async checkAuthorization(query: string, signal?: AbortSignal): Promise<AuthorizationRequest> {
+      const { data, error, response } = await api
+        .client(signal)
+        .POST("/oauth/authorize/check", { body: { query } });
+      if (data === undefined) throw toAuthorizationError(response.status, error);
+      return {
+        client: { ...data.client },
+        redirectUri: data.redirectUri,
+        redirectHost: data.redirectHost,
+        loopbackRedirect: data.loopbackRedirect,
+        scopes: [...data.scopes],
+      };
+    },
+
+    /**
+     * 利用者が選んだ結果（許可なら true）を送り、ブラウザを移す先を返す（許可なら認可コード、
+     * 拒否なら access_denied を付けた、クライアントの戻る先）。失敗は checkAuthorization と同じ
+     */
+    async decideAuthorization(
+      query: string,
+      approved: boolean,
+      signal?: AbortSignal,
+    ): Promise<string> {
+      const { data, error, response } = await api
+        .client(signal)
+        .POST("/oauth/authorize/decide", { body: { query, approved } });
+      if (data === undefined) throw toAuthorizationError(response.status, error);
+      return toRedirect(data.redirectTo);
+    },
+
     /** OAuth で出した許可を取り消す。そのクライアントのトークンは、すぐに使えなくなる */
     async revokeGrant(id: string, signal?: AbortSignal): Promise<void> {
       const { error, response } = await api.client(signal).DELETE("/oauth/grants/{id}", {
@@ -135,4 +203,31 @@ function toAccessToken(token: {
     createdAt: Date.parse(token.createdAt),
     lastUsedAt: token.lastUsedAt === null ? null : Date.parse(token.lastUsedAt),
   };
+}
+
+/** 400 なら AuthorizationError、そのほかは ApiError にする */
+function toAuthorizationError(status: number, body: unknown): Error {
+  if (status !== 400) return errorFromBody(status, body);
+  const parsed = body as { error?: { code?: unknown; message?: unknown }; redirectTo?: unknown };
+  const code = typeof parsed?.error?.code === "string" ? parsed.error.code : "invalid_request";
+  const message = typeof parsed?.error?.message === "string" ? parsed.error.message : "HTTP 400";
+  const redirectTo =
+    typeof parsed?.redirectTo === "string" ? safeRedirect(parsed.redirectTo) : null;
+  return new AuthorizationError(code, message, redirectTo);
+}
+
+/** 移る先は http ／ https の URL だけにする（sendo の決まりでも、戻る先はこの 2 つだけ） */
+function safeRedirect(value: string): string | null {
+  try {
+    const url = new URL(value);
+    return url.protocol === "https:" || url.protocol === "http:" ? url.href : null;
+  } catch {
+    return null;
+  }
+}
+
+function toRedirect(value: string): string {
+  const url = safeRedirect(value);
+  if (url === null) throw new ApiError("server", "sendo が返した戻る先が http ／ https でない");
+  return url;
 }

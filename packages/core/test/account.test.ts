@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { type ApiError, createAccountApi } from "../src";
+import { type ApiError, AuthorizationError, createAccountApi } from "../src";
 import { FakeSendo, USER } from "./fake-sendo";
 
 function setup() {
@@ -116,5 +116,112 @@ describe("セッション", () => {
     const listing = account.listTokens(controller.signal);
     controller.abort();
     expect(((await listing.catch((e: unknown) => e)) as ApiError).kind).toBe("network");
+  });
+});
+
+describe("OAuth の許可の画面", () => {
+  const CLIENT = "https://agent.example/oauth/client.json";
+  const query = (extra: Record<string, string> = {}) =>
+    `?${new URLSearchParams({
+      response_type: "code",
+      client_id: CLIENT,
+      redirect_uri: "https://agent.example/callback",
+      scope: "read write",
+      state: "xyz",
+      ...extra,
+    })}`;
+
+  function withClient() {
+    const context = setup();
+    context.server.oauthClients.set(CLIENT, {
+      name: "Agent",
+      kind: "metadata_document",
+      redirectUris: ["https://agent.example/callback"],
+    });
+    return context;
+  }
+
+  test("確かめると、画面に出すものを返す", async () => {
+    const { account } = withClient();
+    expect(await account.checkAuthorization(query())).toEqual({
+      client: { id: CLIENT, name: "Agent", kind: "metadata_document", host: "agent.example" },
+      redirectUri: "https://agent.example/callback",
+      redirectHost: "agent.example",
+      loopbackRedirect: false,
+      scopes: ["read", "write"],
+    });
+  });
+
+  test("許可すると認可コードの、拒否すると access_denied の戻る先を返す", async () => {
+    const { server, account } = withClient();
+    const approved = new URL(await account.decideAuthorization(query(), true));
+    expect(approved.origin + approved.pathname).toBe("https://agent.example/callback");
+    expect(approved.searchParams.get("code")).toMatch(/^code-/);
+    expect(approved.searchParams.get("state")).toBe("xyz");
+    expect(server.grants.size).toBe(1);
+
+    const denied = new URL(await account.decideAuthorization(query(), false));
+    expect(denied.searchParams.get("error")).toBe("access_denied");
+    expect(server.grants.size).toBe(1);
+  });
+
+  test("クライアントか戻る先を確かめられなければ、戻る先のない AuthorizationError", async () => {
+    const { account } = withClient();
+    const unknown = await account
+      .checkAuthorization(query({ client_id: "https://evil.example/client.json" }))
+      .catch((e: unknown) => e);
+    expect(unknown).toBeInstanceOf(AuthorizationError);
+    expect(unknown).toMatchObject({ code: "invalid_client", redirectTo: null });
+    const redirect = await account
+      .checkAuthorization(query({ redirect_uri: "https://evil.example/callback" }))
+      .catch((e: unknown) => e);
+    expect(redirect).toMatchObject({ code: "invalid_redirect_uri", redirectTo: null });
+  });
+
+  test("クライアントに返す誤りなら、戻る先の付いた AuthorizationError", async () => {
+    const { account } = withClient();
+    const error = await account
+      .checkAuthorization(query({ response_type: "token" }))
+      .catch((e: unknown) => e);
+    expect(error).toMatchObject({ code: "unsupported_response_type" });
+    const back = new URL((error as AuthorizationError).redirectTo ?? "");
+    expect(back.searchParams.get("error")).toBe("unsupported_response_type");
+  });
+
+  test("ログインしていなければ unauthorized、OAuth の設定がなければ oauth_disabled", async () => {
+    const { server, account } = withClient();
+    server.oauthEnabled = false;
+    expect(await account.checkAuthorization(query()).catch((e: unknown) => e)).toMatchObject({
+      kind: "not_found",
+      code: "oauth_disabled",
+    });
+    server.expireSession();
+    expect(await account.checkAuthorization(query()).catch((e: unknown) => e)).toMatchObject({
+      kind: "unauthorized",
+    });
+  });
+
+  test("sendo が返した戻る先が http ／ https でなければ、移らない", async () => {
+    const account = createAccountApi({
+      baseUrl: "https://sendo.test/api/v1",
+      fetch: async (input) => {
+        const url = new URL((input as Request).url);
+        return url.pathname.endsWith("/decide")
+          ? new Response(JSON.stringify({ redirectTo: "javascript:alert(1)" }))
+          : new Response(
+              JSON.stringify({
+                error: { code: "invalid_request", message: "x" },
+                redirectTo: "javascript:alert(1)",
+              }),
+              { status: 400 },
+            );
+      },
+    });
+    expect(await account.decideAuthorization("?", true).catch((e: unknown) => e)).toMatchObject({
+      kind: "server",
+    });
+    expect(await account.checkAuthorization("?").catch((e: unknown) => e)).toMatchObject({
+      redirectTo: null,
+    });
   });
 });

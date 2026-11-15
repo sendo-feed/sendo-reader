@@ -27,6 +27,14 @@ export async function startSignIn(
   returnTo = currentReturnTo(),
 ): Promise<void> {
   await client.prepareSignIn();
+  goToSignIn(returnTo);
+}
+
+/**
+ * sendo のログインの入口へ移る。手元のデータを使わない画面（OAuth の許可の画面）から使う。
+ * reader の画面からは、送れていないログアウトを先に送る startSignIn を使う
+ */
+export function goToSignIn(returnTo: string): void {
   location.assign(`${LOGIN_PATH}?${new URLSearchParams({ returnTo })}`);
 }
 

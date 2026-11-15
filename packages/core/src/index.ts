@@ -1,6 +1,8 @@
 export {
   type AccessToken,
   type AccountApi,
+  AuthorizationError,
+  type AuthorizationRequest,
   createAccountApi,
   type IssuedAccessToken,
   MAX_TOKEN_NAME_LENGTH,

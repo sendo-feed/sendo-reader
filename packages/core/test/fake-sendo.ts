@@ -23,7 +23,8 @@
  * - 行はユーザーごとに分けない（どのユーザーでも同じ行を返す。手元を消すかの確かめに使う）
  *
  * アカウントの画面のための、アクセストークン（発行・一覧・取り消し）と OAuth の許可（一覧・
- * 取り消し）にも、sendo と同じ形で答える。
+ * 取り消し、許可の画面の確かめと決定）にも、sendo と同じ形で答える。認可のリクエストは、
+ * client_id、redirect_uri、response_type、scope、state だけを見る（PKCE などは見ない）。
  */
 
 type TableName = "folders" | "feeds" | "articles";
@@ -95,6 +96,12 @@ export interface FakeToken {
   secret: string;
 }
 
+export interface FakeOAuthClient {
+  name: string | null;
+  kind: "metadata_document" | "registered";
+  redirectUris: string[];
+}
+
 export interface FakeGrant {
   id: string;
   clientId: string;
@@ -130,6 +137,10 @@ export class FakeSendo {
   readonly tokens = new Map<string, FakeToken>();
   /** OAuth で出した許可 */
   readonly grants = new Map<string, FakeGrant>();
+  /** OAuth のクライアント（client_id から） */
+  readonly oauthClients = new Map<string, FakeOAuthClient>();
+  /** sendo で OAuth を使う設定があるか。なければ許可の画面の API は 404（oauth_disabled） */
+  oauthEnabled = true;
 
   readonly folders = new Map<string, FolderRow>();
   readonly feeds = new Map<string, FeedRow>();
@@ -400,6 +411,12 @@ export class FakeSendo {
     if (path === "/oauth/grants" || path.startsWith("/oauth/grants/")) {
       return this.#grants(request, path);
     }
+    if (
+      request.method === "POST" &&
+      (path === "/oauth/authorize/check" || path === "/oauth/authorize/decide")
+    ) {
+      return this.#authorize(request, path);
+    }
     if (request.method === "GET" && path === "/sync") {
       return this.#sync(url.searchParams.get("cursor"));
     }
@@ -591,6 +608,62 @@ export class FakeSendo {
     if (request.method === "DELETE" && this.tokens.delete(id))
       return new Response(null, { status: 204 });
     return error(404, "not_found", "token not found");
+  }
+
+  /** OAuth の許可の画面の確かめ（check）と決定（decide）。sendo の src/api/oauth.ts と同じ形 */
+  async #authorize(request: Request, path: string): Promise<Response> {
+    if (!this.oauthEnabled) return error(404, "oauth_disabled", "OAuth is not configured");
+    const body = (await request.json()) as { query?: unknown; approved?: unknown };
+    const params = new URLSearchParams(typeof body.query === "string" ? body.query : "");
+    const clientId = params.get("client_id") ?? "";
+    const client = this.oauthClients.get(clientId);
+    if (client === undefined) return error(400, "invalid_client", "unknown client");
+    const redirectUri = params.get("redirect_uri") ?? "";
+    if (!client.redirectUris.includes(redirectUri)) {
+      return error(400, "invalid_redirect_uri", "redirect_uri is not registered");
+    }
+    const state = params.get("state");
+    const back = (values: Record<string, string>) => {
+      const url = new URL(redirectUri);
+      for (const [key, value] of Object.entries(values)) url.searchParams.set(key, value);
+      if (state !== null) url.searchParams.set("state", state);
+      url.searchParams.set("iss", "https://sendo.test");
+      return url.href;
+    };
+    if (params.get("response_type") !== "code") {
+      return json(400, {
+        error: { code: "unsupported_response_type", message: "response_type must be code" },
+        redirectTo: back({ error: "unsupported_response_type" }),
+      });
+    }
+    const scopes: FakeGrant["scopes"] = (params.get("scope") ?? "read").split(" ").includes("write")
+      ? ["read", "write"]
+      : ["read"];
+    if (path === "/oauth/authorize/check") {
+      const url = new URL(redirectUri);
+      return json(200, {
+        client: {
+          id: clientId,
+          name: client.name,
+          kind: client.kind,
+          host: client.kind === "metadata_document" ? new URL(clientId).host : null,
+        },
+        redirectUri,
+        redirectHost: url.host,
+        loopbackRedirect: ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname),
+        scopes,
+      });
+    }
+    if (body.approved !== true) {
+      return json(200, { redirectTo: back({ error: "access_denied" }) });
+    }
+    const grant = this.addGrant({
+      clientId,
+      clientName: client.name,
+      clientKind: client.kind,
+      scopes,
+    });
+    return json(200, { redirectTo: back({ code: `code-${grant.id}` }) });
   }
 
   /** OAuth で出した許可の一覧・取り消し */
