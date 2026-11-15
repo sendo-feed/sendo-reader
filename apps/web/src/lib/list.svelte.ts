@@ -31,6 +31,8 @@ export class ArticleListState {
    * 残っている未読の数と合わせて、一覧の進み具合を出す
    */
   done = $state(0);
+  /** 条件を替えて開き直すたびに増える。一覧の部品は、これを見て先頭に戻す */
+  opened = $state(0);
   /** キーボードで選んでいる記事（開いてはいない） */
   cursorId = $state<string | null>(null);
 
@@ -67,6 +69,7 @@ export class ArticleListState {
   /** 条件を替えて、最初から読む */
   show(query: ArticleQuery): Promise<void> {
     this.#query = query;
+    this.opened += 1;
     this.cursorId = null;
     this.#seenUnread.clear();
     this.#readHere.clear();

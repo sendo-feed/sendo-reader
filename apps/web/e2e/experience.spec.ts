@@ -332,3 +332,35 @@ test("一覧を動かして通り過ぎた記事は既読になる。設定で�
     .poll(() => [...server.inbox.values()].filter((a) => a.readAt === null).length)
     .toBe(before);
 });
+
+test("一覧を動かしたあとに別の一覧へ替えたら、先頭に戻り、見ていない記事を既読にしない", async ({
+  page,
+  context,
+}) => {
+  const server = new FakeSendo();
+  const first = server.subscribe({ url: "https://a.example/feed.xml", title: "Alpha" });
+  const second = server.subscribe({ url: "https://b.example/feed.xml", title: "Beta" });
+  for (let i = 0; i < 40; i++) {
+    server.deliver(first.id, { title: `A ${i}`, publishedAt: server.now - i * 60_000 });
+    server.deliver(second.id, { title: `B ${i}`, publishedAt: server.now - (i + 40) * 60_000 });
+  }
+  await routeFakeSendo(context, server);
+  await page.setViewportSize({ width: 1200, height: 700 });
+  await page.goto("/");
+  await signIn(page);
+  const list = page.locator(".article-list");
+  const nav = page.locator("nav");
+  await expect(nav.getByRole("link", { name: "Beta" })).toContainText("40");
+  await nav.getByRole("link", { name: "Alpha" }).click();
+  await expect(list.locator(".item")).toHaveCount(40);
+
+  await list.evaluate((el) => el.scrollBy({ top: 600 }));
+  await expect(nav.getByRole("link", { name: "Alpha" })).not.toContainText("40");
+
+  await nav.getByRole("link", { name: "Beta" }).click();
+  await expect(list.locator(".title").first()).toHaveText("B 0");
+  await expect.poll(() => list.evaluate((el) => el.scrollTop)).toBe(0);
+  await page.waitForTimeout(600);
+  await expect(nav.getByRole("link", { name: "Beta" })).toContainText("40");
+  await expect(list.locator(".row.unread")).toHaveCount(40);
+});

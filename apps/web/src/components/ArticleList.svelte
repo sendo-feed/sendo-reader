@@ -81,6 +81,8 @@
    * 少しためてから、まとめて書く
    */
   let observer: IntersectionObserver | undefined;
+  /** 一度でも画面に出た行。出ていない行（別の一覧に替えた直後に上にある行など）は数えない */
+  const seen = new WeakSet<Element>();
   const passed = new Set<string>();
   let flushTimer: ReturnType<typeof setTimeout> | undefined;
 
@@ -92,18 +94,21 @@
   }
 
   function onPass(entries: IntersectionObserverEntry[]) {
-    if (!prefs.value.markReadOnScroll) return;
     for (const entry of entries) {
       const bounds = entry.rootBounds;
       const rect = entry.boundingClientRect;
-      // 一覧を出していないとき（狭い画面で記事を開いている）は、位置が分からないので何もしない
-      if (entry.isIntersecting || bounds === null || bounds.height === 0 || rect.height === 0) {
+      if (entry.isIntersecting) {
+        seen.add(entry.target);
         continue;
       }
+      // 一覧を出していないとき（狭い画面で記事を開いている）は、位置が分からないので何もしない
+      if (bounds === null || bounds.height === 0 || rect.height === 0) continue;
+      // 監視を始めたときの知らせなど、画面に出たことのない行は、通り過ぎたのではない
+      if (!seen.has(entry.target)) continue;
       // 下にあって見えていない行は、まだ通り過ぎていない
       if (rect.bottom > bounds.top) continue;
       const id = (entry.target as HTMLElement).dataset.article;
-      if (id !== undefined) passed.add(id);
+      if (id !== undefined && prefs.value.markReadOnScroll) passed.add(id);
     }
     if (passed.size === 0) return;
     clearTimeout(flushTimer);
@@ -120,6 +125,13 @@
     observer.observe(node);
     return { destroy: () => observer?.unobserve(node) };
   }
+
+  // 別の一覧に替えたら、先頭に戻す（前の一覧の位置のまま、新しい一覧の途中を出さない）
+  $effect(() => {
+    void list.opened;
+    passed.clear();
+    scroller?.scrollTo({ top: 0 });
+  });
 
   /** 一覧の終わりが近づいたら、続きを読む */
   function autoload(node: HTMLElement) {
