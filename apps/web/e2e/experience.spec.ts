@@ -499,4 +499,13 @@ test("記事の画面から、リンクを共有し、文字の大きさを変�
   await page.getByRole("dialog").getByText("大", { exact: true }).click();
   await expect(page.locator("html")).toHaveAttribute("data-text-size", "large");
   await expect(page.getByRole("dialog")).not.toContainText("記事の一覧");
+  await page.keyboard.press("Escape");
+
+  // 文字を大きくしても、狭い画面の下のバーから、ボタンがはみ出さない
+  await page.setViewportSize({ width: 360, height: 640 });
+  for (const name of ["一覧に戻る", "文字の大きさとテーマ"]) {
+    const box = await view.getByRole("button", { name }).boundingBox();
+    expect(box?.x).toBeGreaterThanOrEqual(0);
+    expect((box?.x ?? 0) + (box?.width ?? 0)).toBeLessThanOrEqual(360);
+  }
 });

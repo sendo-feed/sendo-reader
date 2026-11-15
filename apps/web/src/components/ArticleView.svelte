@@ -505,6 +505,18 @@
       display: none;
     }
 
+    /* ボタンは幅を分け合う。文字を大きくしても、狭い画面からはみ出さない */
+    .toolbar {
+      gap: 0;
+    }
+
+    .toolbar > :global(.icon-button) {
+      flex: 1 1 0;
+      width: auto;
+      min-width: 0;
+      max-width: 3.5rem;
+    }
+
     /* 元の記事へは、本文の下のボタンから開く（下のバーには、押しやすい数だけ並べる） */
     .open,
     .close,
