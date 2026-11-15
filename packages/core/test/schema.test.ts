@@ -48,6 +48,83 @@ describe("手元の DB のスキーマ", () => {
     ]);
   });
 
+  test("前の版が手元で作ったフォルダの仮の ID（local- ＋ UUID）から、local- を外す", async () => {
+    const db = await openMemoryDb();
+    await migrate(db, 4);
+    const uuid = crypto.randomUUID();
+    const local = `local-${uuid}`;
+    await db.run(
+      "insert into folders (id, name, created_at) values (?, 'Tech', 1), ('f1', 'News', 1)",
+      [local],
+    );
+    await db.run(
+      `insert into feeds (id, url, folder_id, created_at)
+       values ('feed-1', 'https://a.example/', ?, 1), ('feed-2', 'https://b.example/', 'f1', 1)`,
+      [local],
+    );
+    const ops = [
+      {
+        kind: "createFolder",
+        key: local,
+        payload: { kind: "createFolder", folderId: local, name: "Tech", at: 1 },
+      },
+      {
+        kind: "renameFolder",
+        key: local,
+        payload: { kind: "renameFolder", folderId: local, name: "Tech 2" },
+      },
+      {
+        kind: "moveFeed",
+        key: "feed-1",
+        payload: { kind: "moveFeed", feedId: "feed-1", folderId: local },
+      },
+      {
+        kind: "markRead",
+        key: local,
+        payload: {
+          kind: "markRead",
+          scope: { folderId: local },
+          articleIds: ["a1"],
+          cursor: null,
+          extraIds: ["a1"],
+          at: 1,
+        },
+      },
+      {
+        kind: "moveFeed",
+        key: "feed-2",
+        payload: { kind: "moveFeed", feedId: "feed-2", folderId: "f1" },
+      },
+    ];
+    for (const op of ops) {
+      await db.run("insert into pending_ops (kind, key, payload, created_at) values (?, ?, ?, 1)", [
+        op.kind,
+        op.key,
+        JSON.stringify(op.payload),
+      ]);
+    }
+
+    await migrate(db);
+    expect(await db.all("select id from folders order by name")).toEqual([
+      { id: "f1" },
+      { id: uuid },
+    ]);
+    expect(await db.all("select id, folder_id from feeds order by id")).toEqual([
+      { id: "feed-1", folder_id: uuid },
+      { id: "feed-2", folder_id: "f1" },
+    ]);
+    const rows = await db.all<{ key: string; payload: string }>(
+      "select key, payload from pending_ops order by id",
+    );
+    expect(rows.map((row) => ({ key: row.key, payload: JSON.parse(row.payload) }))).toEqual([
+      { key: uuid, payload: { ...ops[0]?.payload, folderId: uuid } },
+      { key: uuid, payload: { ...ops[1]?.payload, folderId: uuid } },
+      { key: "feed-1", payload: { ...ops[2]?.payload, folderId: uuid } },
+      { key: uuid, payload: { ...ops[3]?.payload, scope: { folderId: uuid } } },
+      { key: "feed-2", payload: ops[4]?.payload },
+    ]);
+  });
+
   test("2 回当てても何も変わらない", async () => {
     const db = await openMemoryDb();
     await migrate(db);

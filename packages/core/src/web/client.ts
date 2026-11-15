@@ -1,6 +1,5 @@
 import type { Table } from "../models";
 import type { ReaderCore } from "../reader";
-import { LOCAL_ID_PREFIX } from "../sync/ops";
 import type { SyncStatus } from "../sync/scheduler";
 import {
   deserializeError,
@@ -74,9 +73,8 @@ export function connectReader(worker: Worker): ReaderClient {
   for (const method of READER_METHODS) {
     client[method] = (...args: unknown[]) => call(method, args);
   }
-  // 代表が入れ替わると呼び出しを送り直すので、二重に作らないよう、仮の ID はこちらで決める
-  client.createFolder = (name: string) =>
-    call("createFolder", [name, `${LOCAL_ID_PREFIX}${crypto.randomUUID()}`]);
+  // 代表が入れ替わると呼び出しを送り直すので、二重に作らないよう、フォルダの ID はこちらで決める
+  client.createFolder = (name: string) => call("createFolder", [name, crypto.randomUUID()]);
   client.syncNow = () => call("syncNow", []);
   client.status = () => call("status", []);
   client.onChange = (listener: (tables: ReadonlySet<Table>) => void) => {

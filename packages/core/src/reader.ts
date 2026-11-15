@@ -20,8 +20,8 @@ import {
   subscribe,
 } from "./online";
 import {
+  FOLDER_ID_PATTERN,
   getFolderIdRemaps,
-  LOCAL_ID_PREFIX,
   type MarkReadScope,
   type Operation,
   scopeCondition,
@@ -94,7 +94,10 @@ export class ReaderCore {
    * その操作の位置にあるので、あとから呼んだ通信が要る操作より前に送ってよい
    */
   readonly #onlineOps = new Set<number>();
-  /** 手元で作ったフォルダの仮の ID から、sendo が付けた ID へ（画面が仮の ID を持ったままでも使えるように） */
+  /**
+   * 手元で作ったフォルダの ID から、まとめた先（sendo にあった、同じ名前のフォルダ）の ID へ
+   * （画面がまとめる前の ID を持ったままでも使えるように）
+   */
   readonly #folderIds = new Map<string, string>();
 
   private constructor(options: ReaderCoreOptions) {
@@ -392,15 +395,13 @@ export class ReaderCore {
   }
 
   /**
-   * フォルダを作る。sendo が ID を付けるまでは仮の ID（local- で始まる）で使え、その ID を返す。
-   * 仮の ID は呼ぶ側で決めてもよい（送り直しても二重に作らないように）。
+   * フォルダを作り、その ID を返す。ID は小文字の UUID で、sendo にもこの ID で作る（送る前も
+   * 送ったあとも同じ ID で使える）。ID は呼ぶ側で決めてもよい（送り直しても二重に作らないように）。
+   * sendo に同じ名前の別のフォルダがあれば、送ったときにそれにまとめる。
    */
-  async createFolder(
-    name: string,
-    folderId = `${LOCAL_ID_PREFIX}${crypto.randomUUID()}`,
-  ): Promise<string> {
-    if (!folderId.startsWith(LOCAL_ID_PREFIX)) {
-      throw new RangeError(`仮の ID は ${LOCAL_ID_PREFIX} で始める`);
+  async createFolder(name: string, folderId: string = crypto.randomUUID()): Promise<string> {
+    if (!FOLDER_ID_PATTERN.test(folderId)) {
+      throw new RangeError("フォルダの ID は小文字の UUID にする");
     }
     await this.#write(
       { kind: "createFolder", folderId, name: normalizeFolderName(name), at: this.#now() },
@@ -443,8 +444,8 @@ export class ReaderCore {
 
   /**
    * フィードを購読し、手元にもすぐ入れる（記事は次の同期で届く）。folderId には、手元で作った
-   * ばかりのフォルダ（仮の ID）も渡せる。そのときは、フォルダなしで購読してから、操作キューで
-   * そのフォルダに移す（sendo がフォルダに ID を付けたら、付け替わる）。
+   * ばかりのフォルダも渡せる。まだ sendo に作っていなければ、フォルダなしで購読してから、
+   * 操作キューでそのフォルダに移す（フォルダを作る操作のあとに送る）。
    *
    * 返すのは手元の状態（応答を待っている間にした操作を重ねたもの）。待っている間に購読を
    * やめていれば null。
@@ -453,11 +454,13 @@ export class ReaderCore {
     this.#requireSignedIn();
     const feed = await this.#online(async (signal) => {
       const wanted = folderId === null ? null : (this.#folderIds.get(folderId) ?? folderId);
-      const isLocalFolder = wanted?.startsWith(LOCAL_ID_PREFIX) === true;
+      // 呼ぶ前に積んだフォルダの作成は、ここまでに送ってある。sendo にあるフォルダにだけ、
+      // そのまま購読する（あとから作った、断られて消えたフォルダには、購読してから移す）
+      const ready = wanted !== null && (await this.#isFolderOnSendo(wanted));
       return subscribe(
         this.#db,
         this.#api,
-        { url, folderId: isLocalFolder ? null : wanted },
+        { url, folderId: ready ? wanted : null },
         signal,
         async (tx, feed) => {
           // sendo はすでに購読していたフィードのフォルダを変えずに返すので、ここで移す。
@@ -480,6 +483,17 @@ export class ReaderCore {
     });
     this.#emit(new Set<Table>(["feeds"]));
     return feed;
+  }
+
+  /** 手元にあり、作る操作をもう送り終えたフォルダか（sendo にもある） */
+  async #isFolderOnSendo(folderId: string): Promise<boolean> {
+    const rows = await this.#db.all(
+      `select 1 from folders where id = ?1 and not exists (
+         select 1 from pending_ops where kind = 'createFolder' and key = ?1
+       )`,
+      [folderId],
+    );
+    return rows.length > 0;
   }
 
   /** OPML を取り込む。sendo が順に登録し、フィードと記事は次からの同期で届く */

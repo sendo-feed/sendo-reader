@@ -705,10 +705,21 @@ export interface paths {
             };
             requestBody: {
                 content: {
-                    "application/json": components["schemas"]["FolderRequest"];
+                    "application/json": components["schemas"]["CreateFolderRequest"];
                 };
             };
             responses: {
+                /** @description 同じ ID のフォルダがもうある（送り直し）。作らずに、今のフォルダを返す */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            folder: components["schemas"]["Folder"];
+                        };
+                    };
+                };
                 /** @description 作った */
                 201: {
                     headers: {
@@ -720,7 +731,7 @@ export interface paths {
                         };
                     };
                 };
-                /** @description 名前が空 */
+                /** @description 名前が空か、ID が小文字の UUID でない */
                 400: {
                     headers: {
                         [name: string]: unknown;
@@ -729,7 +740,7 @@ export interface paths {
                         "application/json": components["schemas"]["Error"];
                     };
                 };
-                /** @description 同じ名前のフォルダがある */
+                /** @description 同じ名前の別のフォルダがある（folder_exists）か、その ID は使えない（folder_id_taken：消したフォルダか、ほかの人のフォルダが使っている） */
                 409: {
                     headers: {
                         [name: string]: unknown;
@@ -969,7 +980,7 @@ export interface paths {
                         "application/json": components["schemas"]["SyncChanges"];
                     };
                 };
-                /** @description カーソルが読めない（最初から同期し直す） */
+                /** @description カーソルが読めないか、古すぎて消した記録を送れない（最初から同期し直す） */
                 400: {
                     headers: {
                         [name: string]: unknown;
@@ -1513,6 +1524,12 @@ export interface components {
             name: string;
             /** Format: date-time */
             createdAt: string;
+        };
+        CreateFolderRequest: {
+            /** @description 前後の空白を除き、200 文字までに切り詰める */
+            name: string;
+            /** @description クライアントが決めた ID（小文字の UUID）。省けば Sendo が決める。同じ ID で送り直すと、作らずに今のフォルダを返す（オフラインで作ったフォルダを、ID を付け替えずに送れる） */
+            id?: string;
         };
         FolderRequest: {
             /** @description 前後の空白を除き、200 文字までに切り詰める */

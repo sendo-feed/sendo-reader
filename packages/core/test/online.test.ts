@@ -53,7 +53,7 @@ describe("購読", () => {
     expect(await core.listFeeds()).toEqual([]);
   });
 
-  test("手元で作ったばかりのフォルダにも入れられる（あとで sendo の ID に付け替わる）", async () => {
+  test("手元で作ったばかりのフォルダにも入れられる（購読する前に、フォルダを sendo に作る）", async () => {
     const { server, core } = await setup();
     server.fetchable.set("https://blog.example/feed.xml", null);
     const folderId = await core.createFolder("Tech");
@@ -62,12 +62,25 @@ describe("購読", () => {
     await core.sync().catch(() => undefined);
 
     const feed = must(await core.subscribe("https://blog.example/feed.xml", folderId));
-    const [folder] = [...server.folders.values()];
-    expect(folder?.name).toBe("Tech");
-    expect(feed.folderId).toBe(folder?.id);
+    expect(server.folders.get(folderId)?.name).toBe("Tech");
+    expect(feed.folderId).toBe(folderId);
+    expect(server.feeds.get(feed.id)?.folderId).toBe(folderId);
     await core.sync();
-    expect(server.feeds.get(feed.id)?.folderId).toBe(folder?.id);
-    expect(await core.listFeeds()).toMatchObject([{ folderId: folder?.id }]);
+    expect(await core.listFeeds()).toMatchObject([{ folderId }]);
+  });
+
+  test("作れなかったフォルダ（その ID が使えない）には入れず、フォルダなしで購読する", async () => {
+    const { server, core } = await setup();
+    server.fetchable.set("https://blog.example/feed.xml", null);
+    await core.sync();
+    const folderId = await core.createFolder("Tech");
+    server.foreignFolderIds.add(folderId);
+
+    const feed = must(await core.subscribe("https://blog.example/feed.xml", folderId));
+    expect(feed.folderId).toBeNull();
+    expect(server.feeds.get(feed.id)?.folderId).toBeNull();
+    expect(await core.listFolders()).toEqual([]);
+    expect(await core.countPending()).toBe(0);
   });
 
   test("すでに購読していれば、それを返し、指定したフォルダに移す", async () => {
@@ -137,7 +150,7 @@ describe("購読の応答を待っている間の操作", () => {
     expect(await core.listFeeds()).toEqual([]);
   });
 
-  test("フォルダを作ったあとの操作が届かなくても、仮の ID の付け替えは覚えている", async () => {
+  test("フォルダを作ったあとの操作が届かなくても、作ったフォルダに購読できる", async () => {
     const { server, core } = await setup();
     server.fetchable.set("https://blog.example/feed.xml", null);
     const existing = server.subscribe({ url: "https://other.example/feed.xml" });
@@ -147,13 +160,12 @@ describe("購読の応答を待っている間の操作", () => {
     // フォルダの作成は届き、次の移動で届かなくなる
     server.failNext(null, null, "network");
     await core.sync().catch(() => undefined);
-    const [created] = [...server.folders.values()];
-    expect(created?.name).toBe("Tech");
+    expect(server.folders.get(folderId)?.name).toBe("Tech");
 
     const feed = await core.subscribe("https://blog.example/feed.xml", folderId);
     await core.sync();
-    expect(feed?.folderId).toBe(created?.id);
-    expect(server.feeds.get(feed?.id ?? "")?.folderId).toBe(created?.id);
+    expect(feed?.folderId).toBe(folderId);
+    expect(server.feeds.get(feed?.id ?? "")?.folderId).toBe(folderId);
   });
 });
 

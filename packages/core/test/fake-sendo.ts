@@ -143,6 +143,10 @@ export class FakeSendo {
   oauthEnabled = true;
 
   readonly folders = new Map<string, FolderRow>();
+  /** ほかの人のフォルダが使っている ID（POST /folders で、その ID では作れない） */
+  readonly foreignFolderIds = new Set<string>();
+  /** 受けた POST /folders の本文 */
+  readonly folderRequests: Record<string, unknown>[] = [];
   readonly feeds = new Map<string, FeedRow>();
   readonly inbox = new Map<string, InboxRow>();
   /** 受信箱から消えた記事の記録（記事の ID と、受信箱の続きの番号） */
@@ -469,12 +473,29 @@ export class FakeSendo {
       return this.#markRead(body);
     }
     if (request.method === "POST" && path === "/folders") {
+      // sendo の #48 と同じく、クライアントが決めた ID（小文字の UUID）を受ける
+      this.folderRequests.push(body);
       const name = String(body.name ?? "").trim();
       if (name === "") return error(400, "invalid_request", "name: empty");
+      const id = body.id as string | undefined;
+      if (id !== undefined && !UUID.test(id)) {
+        return error(400, "invalid_request", "id: not a lowercase UUID");
+      }
+      if (id !== undefined) {
+        const same = this.folders.get(id);
+        // 送り直し。作らずに、今のフォルダを返す
+        if (same !== undefined && same.deletedAt === null) {
+          return json(200, { folder: folderJson(same) });
+        }
+        // 消したフォルダか、ほかの人のフォルダの ID
+        if (same !== undefined || this.foreignFolderIds.has(id)) {
+          return error(409, "folder_id_taken", "this folder id is taken");
+        }
+      }
       if (this.#folderByName(name) !== undefined) {
         return error(409, "folder_exists", "a folder with this name exists");
       }
-      return json(201, { folder: folderJson(this.createFolder(name)) });
+      return json(201, { folder: folderJson(this.createFolder(name, id)) });
     }
     match = /^\/folders\/([^/]+)$/.exec(path);
     if (match !== null) {
@@ -831,6 +852,8 @@ export class FakeSendo {
     return row;
   }
 }
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
 function folderJson(row: FolderRow) {
   return { id: row.id, name: row.name, createdAt: iso(row.createdAt) };

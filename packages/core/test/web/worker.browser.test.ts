@@ -171,7 +171,7 @@ describe("複数のタブ", () => {
     tabs[1]?.worker.terminate();
     expect(await tabs[2]?.client.countUnread()).toMatchObject({ total: 1 });
     const folderId = await tabs[2]?.client.createFolder("Tech");
-    expect(folderId?.startsWith("local-")).toBe(true);
+    expect(folderId).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
     await tabs[2]?.client.syncNow();
     expect([...server.folders.values()].map((f) => f.name)).toEqual(["Tech"]);
   });
@@ -232,21 +232,22 @@ describe("代表が名乗り直したときと、代表が替わったとき", (
     expect(await first.client.isSignedIn()).toBe(true);
   });
 
-  test("代表が替わっても、画面が持っている仮のフォルダの ID で操作できる", async () => {
+  test("同じ名前のフォルダにまとめたあと代表が替わっても、画面が持っている前の ID で操作できる", async () => {
     const { server, open, signIn } = world();
     const first = open();
     await signIn(first);
     await first.client.syncNow();
+    // 別の端末で、同じ名前のフォルダを作っていた（この端末にはまだ届いていない）
+    const existing = server.createFolder("Tech");
     const second = open();
-    const tempId = await second.client.createFolder("Tech");
+    const folderId = await second.client.createFolder("Tech");
     await second.client.syncNow();
-    const [created] = [...server.folders.values()];
-    expect(created?.name).toBe("Tech");
+    expect(server.folders.size).toBe(1);
 
     first.worker.terminate();
-    await second.client.renameFolder(tempId, "Technology");
+    await second.client.renameFolder(folderId, "Technology");
     await second.client.syncNow();
-    expect(server.folders.get(created?.id ?? "")?.name).toBe("Technology");
+    expect(server.folders.get(existing.id)?.name).toBe("Technology");
     expect(await second.client.countPending()).toBe(0);
   });
 });

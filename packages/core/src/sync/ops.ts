@@ -43,12 +43,18 @@ export type MarkReadScope = { all: true } | { feedId: string } | { folderId: str
 /** まとめて既読で、1 回に ID で頼める記事の数（sendo の MarkReadRequest の ids の上限） */
 export const MAX_MARK_READ_IDS = 90;
 
-/** 手元で作ったフォルダの仮の ID。sendo が ID を返したら、それに付け替える */
-export const LOCAL_ID_PREFIX = "local-";
+/**
+ * フォルダの ID の形（小文字の UUID）。手元で作るフォルダの ID は reader が決め、そのまま sendo に
+ * 送る（sendo の POST /folders は、クライアントが決めた ID を受ける）。オフラインで作っても、
+ * sendo に届いたあとも、同じ ID で使える
+ */
+export const FOLDER_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
 const FOLDER_ID_REMAPS_KEY = "local.folderIdRemaps";
 
-/** 仮の ID から、sendo が付けた ID への対応 */
+/**
+ * 手元で作ったフォルダの ID から、まとめた先（sendo にあった、同じ名前のフォルダ）の ID への対応
+ */
 export async function getFolderIdRemaps(db: Executor): Promise<Record<string, string>> {
   const raw = await getSetting(db, FOLDER_ID_REMAPS_KEY);
   return raw === null ? {} : (JSON.parse(raw) as Record<string, string>);
@@ -152,7 +158,7 @@ export function scopeCondition(scope: MarkReadScope): [string, string[]] {
   return ["1 = 1", []];
 }
 
-/** 送った結果。手元で作ったフォルダに、sendo が ID を付けたら remap を返す */
+/** 送った結果。手元で作ったフォルダを、sendo にあった同じ名前のフォルダにまとめたら remap を返す */
 export type SendResult = { remap?: { from: string; to: string } };
 
 /** 操作を sendo に送る。失敗したら ApiError を投げる。signal で中断する（ログアウトなど） */
@@ -196,15 +202,22 @@ export async function send(api: SendoApi, op: Operation, signal: AbortSignal): P
       return {};
     }
     case "createFolder": {
-      const created = await client.POST("/folders", { body: { name: op.name } });
-      if (created.response.status === 409) {
-        // 同じ名前のフォルダがすでにある（前に送って応答だけ失った、または別の端末で作った）。
-        // それに付け替える
+      // 手元で決めた ID で作る。201 は作った、200 は同じ ID のフォルダがもうある（前に送って
+      // 応答だけ失った）。どちらも手元の ID のまま使える（名前がほかの端末で変わっていれば、
+      // その変更は同期で届く）
+      const { error, response } = await client.POST("/folders", {
+        body: { id: op.folderId, name: op.name },
+      });
+      if (response.ok) return {};
+      const failure = errorFromBody(response.status, error);
+      if (failure.code === "folder_exists") {
+        // 同じ名前の別のフォルダがある（別の端末で作った）。それにまとめる
         const existing = await findFolderByName(api, op.name, signal);
         if (existing !== null) return { remap: { from: op.folderId, to: existing } };
       }
-      const folder = check(created).folder;
-      return { remap: { from: op.folderId, to: folder.id } };
+      // その ID は使えない（folder_id_taken：消したフォルダか、ほかの人のフォルダが使っている）
+      // など。受け付けられなかった操作として、手元からも消す（undo）
+      throw failure;
     }
     case "renameFolder":
       check(
@@ -308,16 +321,16 @@ export async function undo(
 }
 
 /**
- * 手元で作ったフォルダの仮の ID を、sendo が付けた ID に付け替える。
+ * 手元で作ったフォルダを、sendo にあった同じ名前のフォルダにまとめる（ID を付け替える）。
  * フォルダ、そこに入れたフィード、まだ送っていない操作のすべてを付け替える。
  */
 export async function remapFolderId(tx: Executor, from: string, to: string): Promise<void> {
   if (from === to) return;
-  // 画面が仮の ID を持ったままでも使えるよう、付け替えを覚えておく（代表のタブが替わっても残る）
+  // 画面がまとめる前の ID を持ったままでも使えるよう、付け替えを覚えておく（代表のタブが替わっても残る）
   const remaps = await getFolderIdRemaps(tx);
   remaps[from] = to;
   await setSetting(tx, FOLDER_ID_REMAPS_KEY, JSON.stringify(remaps));
-  // 同期ですでに届いていれば、仮のほうを消す
+  // 同期ですでに届いていれば、まとめる前のほうを消す
   await tx.run("delete from folders where id = ? and exists (select 1 from folders where id = ?)", [
     from,
     to,

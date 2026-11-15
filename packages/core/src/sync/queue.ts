@@ -125,7 +125,7 @@ export interface PushResult {
   sent: number;
   /** sendo が受け付けなかった（やり直しても変わらない）ので捨てた操作 */
   rejected: { op: Operation; error: ApiError }[];
-  /** 手元で作ったフォルダの仮の ID と、sendo が付けた ID */
+  /** 手元で作ったフォルダの ID と、まとめた先（sendo にあった、同じ名前のフォルダ）の ID */
   remapped: { from: string; to: string }[];
 }
 
@@ -139,7 +139,7 @@ export interface PushOptions {
    * あとの操作が届かずに push が投げても、確定した変更は知らせる
    */
   onChange?: (tables: ReadonlySet<Table>) => void;
-  /** フォルダの仮の ID を付け替えたら、確定したその時点で呼ぶ（あとの操作が失敗しても失わない） */
+  /** フォルダをまとめて ID を付け替えたら、確定したその時点で呼ぶ（あとの操作が失敗しても失わない） */
   onRemap?: (remap: { from: string; to: string }) => void;
   /**
    * この操作を送ってよいか（積んだ順に見て、送ってはいけない操作に来たらそこで止める）。
@@ -172,7 +172,7 @@ export async function push(
         await complete(tx, next.id, next.rev);
         if (sent.remap !== undefined) {
           await remapFolderId(tx, sent.remap.from, sent.remap.to);
-          // 同じ名前のフォルダに付け替えると仮のフォルダの行が消え、そこに重ねていた操作（名前の
+          // 同じ名前のフォルダに付け替えると手元で作ったフォルダの行が消え、そこに重ねていた操作（名前の
           // 変更など）も消える。付け替えた ID で残りの操作を重ね直す
           await reapplyPending(tx);
         }

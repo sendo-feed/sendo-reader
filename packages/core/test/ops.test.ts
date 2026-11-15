@@ -2,6 +2,7 @@ import { describe, expect, test, vi } from "vitest";
 import type { ApiError, Executor } from "../src";
 import { createSendoApi } from "../src/api/client";
 import { normalizeFolderName } from "../src/reader";
+import { FOLDER_ID_PATTERN } from "../src/sync/ops";
 import { pull } from "../src/sync/pull";
 import { listPending } from "../src/sync/queue";
 import { USER } from "./fake-sendo";
@@ -213,30 +214,71 @@ describe("すべて既読", () => {
 });
 
 describe("フォルダ", () => {
-  test("手元で作ったフォルダは仮の ID で使え、sendo が付けた ID に付け替える", async () => {
+  test("手元で作ったフォルダは、手元で決めた ID（小文字の UUID）のまま sendo にも作る", async () => {
     const { server, core, feed } = await withArticle();
-    const tempId = await core.createFolder("  Tech   news ");
-    await core.moveFeed(feed.id, tempId);
-    expect(await core.listFolders()).toMatchObject([{ id: tempId, name: "Tech news" }]);
-    expect(await core.listFeeds()).toMatchObject([{ folderId: tempId }]);
+    const folderId = await core.createFolder("  Tech   news ");
+    expect(folderId).toMatch(FOLDER_ID_PATTERN);
+    await core.moveFeed(feed.id, folderId);
+    expect(await core.listFolders()).toMatchObject([{ id: folderId, name: "Tech news" }]);
+    expect(await core.listFeeds()).toMatchObject([{ folderId }]);
 
-    await core.sync();
-    const [created] = [...server.folders.values()];
-    expect(created?.name).toBe("Tech news");
-    expect(server.feeds.get(feed.id)?.folderId).toBe(created?.id);
-    expect(await core.listFolders()).toMatchObject([{ id: created?.id, name: "Tech news" }]);
-    expect(await core.listFeeds()).toMatchObject([{ folderId: created?.id }]);
+    const result = await core.sync();
+    expect(server.folderRequests).toEqual([{ id: folderId, name: "Tech news" }]);
+    expect(server.folders.get(folderId)?.name).toBe("Tech news");
+    expect(server.feeds.get(feed.id)?.folderId).toBe(folderId);
+    expect(result.push.remapped).toEqual([]);
+    expect(await core.listFolders()).toMatchObject([{ id: folderId, name: "Tech news" }]);
+    expect(await core.listFeeds()).toMatchObject([{ folderId }]);
     expect(await core.countPending()).toBe(0);
   });
 
-  test("同じ名前のフォルダが sendo にあれば、それに付け替える", async () => {
+  test("前に送って応答だけ失っていても、送り直して二重に作らない（名前はほかの端末の変更を採る）", async () => {
     const { server, core } = await withArticle();
-    const existing = server.createFolder("Tech");
-    const tempId = await core.createFolder("Tech");
+    const folderId = await core.createFolder("Tech");
+    // 前に送ったときに sendo では作れていて、そのあとほかの端末で名前を変えた
+    server.createFolder("Technology", folderId);
+
     await core.sync();
     expect(server.folders.size).toBe(1);
+    expect(await core.listFolders()).toEqual([
+      { id: folderId, name: "Technology", createdAt: expect.any(Number) },
+    ]);
+    expect(await core.countPending()).toBe(0);
+  });
+
+  test("同じ名前のフォルダが sendo にあれば、それにまとめる", async () => {
+    const { server, core } = await withArticle();
+    const existing = server.createFolder("Tech");
+    const folderId = await core.createFolder("Tech");
+    const result = await core.sync();
+    expect(server.folders.size).toBe(1);
     expect((await core.listFolders()).map((f) => f.id)).toEqual([existing.id]);
-    expect(tempId).not.toBe(existing.id);
+    expect(result.push.remapped).toEqual([{ from: folderId, to: existing.id }]);
+  });
+
+  test("その ID が使えなければ（消したフォルダ、ほかの人のフォルダ）、手元からも消す", async () => {
+    const { server, core, feed } = await withArticle();
+    const folderId = await core.createFolder("Tech");
+    await core.moveFeed(feed.id, folderId);
+    server.foreignFolderIds.add(folderId);
+
+    const result = await core.sync();
+    expect(result.push.rejected.map((r) => r.error.code)).toEqual([
+      "folder_id_taken",
+      "folder_not_found",
+    ]);
+    expect(server.folders.size).toBe(0);
+    expect(await core.listFolders()).toEqual([]);
+    expect(await core.listFeeds()).toMatchObject([{ id: feed.id, folderId: null }]);
+    expect(await core.countPending()).toBe(0);
+  });
+
+  test("フォルダの ID は小文字の UUID だけを受ける", async () => {
+    const { core } = await withArticle();
+    for (const id of ["local-x", crypto.randomUUID().toUpperCase(), `${crypto.randomUUID()}x`]) {
+      await expect(core.createFolder("Tech", id)).rejects.toThrow(RangeError);
+    }
+    expect(await core.listFolders()).toEqual([]);
   });
 
   test("名前の変更を受け付けられなかったら、sendo の名前に戻す", async () => {
@@ -319,13 +361,12 @@ describe("ログインとの関係", () => {
 
   test("送っている途中にログアウトしたら、操作の結果を手元に書かない", async () => {
     const { server, core, article, db } = await withArticle();
-    const tempId = await core.createFolder("Tech");
+    await core.createFolder("Tech");
     server.onRequest = async (path) => {
       if (path === "POST /folders") await core.signOut();
     };
     await core.sync().catch(() => undefined);
     expect(await db.all("select id from folders")).toEqual([]);
-    expect(tempId.startsWith("local-")).toBe(true);
     expect(await core.getArticle(article.id)).toBeNull();
   });
 
@@ -500,8 +541,8 @@ describe("付け替えの通知と、取り直したあとのまとめて既読"
     const { server, core, feed } = await withArticle();
     const existing = server.createFolder("Tech");
     await core.sync();
-    const tempId = await core.createFolder("Tech");
-    await core.moveFeed(feed.id, tempId);
+    const folderId = await core.createFolder("Tech");
+    await core.moveFeed(feed.id, folderId);
     // フィードの移動は送ったあと、差分には何も載らないようにする
     const changes: string[][] = [];
     core.onChange((tables) => changes.push([...tables].sort()));
@@ -570,12 +611,12 @@ describe("送る途中で届かなくなったとき", () => {
 });
 
 describe("同じ名前のフォルダに付け替えたあと", () => {
-  test("仮のフォルダに重ねていた名前の変更を、付け替えた ID で重ね直す（このあと届かなくても）", async () => {
+  test("手元で作ったフォルダに重ねていた名前の変更を、付け替えた ID で重ね直す（このあと届かなくても）", async () => {
     const { server, core } = await withArticle();
     const existing = server.createFolder("Tech");
     await core.sync();
-    const tempId = await core.createFolder("Tech");
-    await core.renameFolder(tempId, "Technology");
+    const folderId = await core.createFolder("Tech");
+    await core.renameFolder(folderId, "Technology");
 
     // フォルダの作成（409）と探し直しは届き、名前の変更で届かなくなる
     server.failNext(null, null, null, "network");

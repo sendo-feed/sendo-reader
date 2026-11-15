@@ -82,6 +82,24 @@ const migrations: readonly (readonly string[])[] = [
     // （手元の行は、次にログインしたときに、どのユーザーのものか分からないので消す。reader.ts）
     "delete from settings where key = 'auth.token'",
   ],
+  [
+    // 手元で作ったフォルダの ID を、仮の ID（local- ＋ 小文字の UUID）から UUID だけにした。sendo に
+    // その ID のまま作る（sendo の POST /folders は、クライアントが決めた小文字の UUID を受ける）。
+    // まだ送っていないフォルダの ID から、local- を外す（フォルダ、フィード、まだ送っていない操作）
+    "update folders set id = substr(id, 7) where substr(id, 1, 6) = 'local-'",
+    "update feeds set folder_id = substr(folder_id, 7) where substr(folder_id, 1, 6) = 'local-'",
+    `update pending_ops set key = substr(key, 7)
+     where substr(key, 1, 6) = 'local-'
+       and (json_extract(payload, '$.folderId') = key
+         or json_extract(payload, '$.scope.folderId') = key)`,
+    `update pending_ops
+     set payload = json_set(payload, '$.folderId', substr(json_extract(payload, '$.folderId'), 7))
+     where substr(json_extract(payload, '$.folderId'), 1, 6) = 'local-'`,
+    `update pending_ops
+     set payload = json_set(payload, '$.scope.folderId',
+       substr(json_extract(payload, '$.scope.folderId'), 7))
+     where substr(json_extract(payload, '$.scope.folderId'), 1, 6) = 'local-'`,
+  ],
 ];
 
 export const SCHEMA_VERSION = migrations.length;
