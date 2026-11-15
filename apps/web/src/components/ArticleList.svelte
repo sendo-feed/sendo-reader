@@ -3,7 +3,7 @@
   import type { Snippet } from "svelte";
   import { useReader } from "../lib/context";
   import { dayLabel, shortTime } from "../lib/format";
-  import type { ArticleListState } from "../lib/list.svelte";
+  import type { ArticleListState, ListProgress } from "../lib/list.svelte";
   import { prefs } from "../lib/prefs.svelte";
   import { handleLink, isPlainClick, router } from "../lib/router.svelte";
   import Icon from "./Icon.svelte";
@@ -14,6 +14,8 @@
     kind,
     unread,
     onmarkall,
+    progress,
+    onprogress,
     leading,
   }: {
     list: ArticleListState;
@@ -23,6 +25,9 @@
     /** この一覧の範囲にある未読の数（まとめて既読にできないなら null） */
     unread: number | null;
     onmarkall: () => void;
+    /** この一覧の進み具合（出さない一覧は null） */
+    progress: ListProgress | null;
+    onprogress: () => void;
     /** 見出しの左に置くもの（狭い画面のメニューのボタン） */
     leading?: Snippet;
   } = $props();
@@ -179,23 +184,28 @@
 <section class="article-list" aria-label={title} bind:this={scroller}>
   <header>
     {@render leading?.()}
-    <svg
-      class="gauge"
-      viewBox="0 0 36 36"
-      role="img"
-      aria-label={`今日の進み具合 ${reader.progress}%`}
-    >
-      <circle class="track" cx="18" cy="18" r="15.9155" />
-      {#if reader.progress > 0}
-        <circle
-          class="bar"
-          cx="18"
-          cy="18"
-          r="15.9155"
-          stroke-dasharray={`${reader.progress} 100`}
-        />
-      {/if}
-    </svg>
+    {#if progress !== null}
+      <button
+        type="button"
+        class="gauge"
+        aria-label={`この一覧の進み具合 ${progress.percent}%`}
+        title="進み具合の内訳"
+        onclick={onprogress}
+      >
+        <svg viewBox="0 0 36 36" aria-hidden="true">
+          <circle class="track" cx="18" cy="18" r="15.9155" />
+          {#if progress.percent > 0}
+            <circle
+              class="bar"
+              cx="18"
+              cy="18"
+              r="15.9155"
+              stroke-dasharray={`${progress.percent} 100`}
+            />
+          {/if}
+        </svg>
+      </button>
+    {/if}
     <h2>
       <span class="name">{title}</span>
       {#if unread !== null && unread > 0}
@@ -370,13 +380,21 @@
     background: var(--background);
   }
 
-  /* 今日の進み具合の輪。広い画面では左のメニューに出すので、狭い画面でだけ出す */
+  /* この一覧の進み具合の輪。広い画面では左のメニューに出すので、狭い画面でだけ出す */
   .gauge {
     display: none;
     flex: none;
-    width: 1.5rem;
-    height: 1.5rem;
-    margin-right: 0.5rem;
+    width: 2.25rem;
+    height: 2.25rem;
+    margin-right: 0.25rem;
+    padding: 0.3rem;
+    border: 0;
+    border-radius: 50%;
+    background: none;
+  }
+
+  .gauge svg {
+    display: block;
     transform: rotate(-90deg);
     fill: none;
     stroke-width: 5;

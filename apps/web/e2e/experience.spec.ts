@@ -41,10 +41,11 @@ test("キーボードで、記事を移り、既読とスターを切り替え�
   await expect(unread).toContainText("1");
   await page.keyboard.press("k");
   await expect(view.getByRole("heading", { level: 1 })).toHaveText("1 番目");
-  // 左上に、未読の数と今日の進み具合（2 件読んで 1 件残っている）を出す
-  await expect(
-    page.getByRole("img", { name: "未読 1 件。今日は 2 件読みました（67%）" }),
-  ).toBeVisible();
+  // 左上に、未読の数と、この一覧の進み具合（2 件読んで 1 件残っている）を出す。押すと内訳が出る
+  await page.getByRole("button", { name: "未読 1 件。この一覧の進み具合 67%" }).click();
+  await expect(page.getByRole("dialog")).toContainText("「未読」で読んだ記事 2 件");
+  await expect(page.getByRole("dialog")).toContainText("「未読」に残っている未読 1 件");
+  await page.keyboard.press("Escape");
 
   // s でスター、m で未読に戻す
   await page.keyboard.press("s");
@@ -147,6 +148,7 @@ test("狭い画面では、メニューを左から開き、一覧と記事を�
   const nav = page.locator("nav");
   await expect(list.locator(".item")).toHaveCount(3);
   await expect(nav).toBeHidden();
+  await expect(page.getByRole("button", { name: "この一覧の進み具合 0%" })).toBeVisible();
 
   await page.getByRole("button", { name: "メニュー", exact: true }).click();
   await expect(nav).toBeVisible();
@@ -216,4 +218,22 @@ test("狭い画面では、メニューを左から開き、一覧と記事を�
   await page.goBack();
   await expect(list).toBeVisible();
   await expect(page).toHaveURL(/\/all$/);
+});
+
+test("j を続けて押して通り過ぎた記事も、既読になる", async ({ page, context }) => {
+  const { server } = seed();
+  await routeFakeSendo(context, server);
+  await page.goto("/");
+  await signIn(page);
+  await expect(page.locator(".article-list .item")).toHaveCount(3);
+
+  // 表示を待たずに、3 回続けて押す
+  await page.keyboard.press("j");
+  await page.keyboard.press("j");
+  await page.keyboard.press("j");
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText("3 番目");
+  await expect(page).toHaveTitle("未読 - Sendo");
+  await expect(
+    page.getByRole("button", { name: "未読 0 件。この一覧の進み具合 100%" }),
+  ).toBeVisible();
 });

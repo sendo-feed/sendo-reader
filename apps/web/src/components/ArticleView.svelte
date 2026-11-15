@@ -21,8 +21,6 @@
   const reader = useReader();
   let article = $state<Article | null>(null);
   let missing = $state(false);
-  /** 開いたときに一度だけ既読にする（「未読に戻す」を押したあとに、また既読にしない） */
-  let markedFor: string | null = null;
   let scroller = $state<HTMLElement>();
 
   async function load(id: string) {
@@ -30,22 +28,25 @@
     if (id !== articleId) return;
     article = found;
     missing = found === null;
-    // 開いて初めて読み出したときだけ、未読なら既読にする（既読の記事を開いたときも、
-    // 済んだことを覚える。表示している間に「未読に戻す」を押したら、そのままにする）
-    if (found !== null && markedFor !== id) {
-      markedFor = id;
-      if (found.readAt === null) {
-        list.patch(id, { readAt: Date.now() });
-        await reader.client.setRead(id, true);
-      }
-    }
+  }
+
+  /**
+   * 開いたときに一度だけ、未読なら既読にする。表示が間に合わないうちに次の記事へ移っても
+   * （j を続けて押したとき）、通り過ぎた記事を既読にする。開いている間に「未読に戻す」を
+   * 押したら、そのままにする（記事が替わるまで、もう呼ばない）
+   */
+  async function markOnOpen(id: string) {
+    const found = list.find(id) ?? (await reader.client.getArticle(id));
+    if (found === null || found.readAt !== null) return;
+    const readAt = Date.now();
+    list.patch(id, { readAt });
+    if (article?.id === id) article = { ...article, readAt };
+    await reader.client.setRead(id, true);
   }
 
   $effect(() => {
     const id = articleId;
     untrack(() => {
-      // 開く記事が替わったら（閉じたときも）、次に開いたときにまた既読にする
-      if (markedFor !== id) markedFor = null;
       saveError = null;
       if (id === null) {
         article = null;
@@ -58,6 +59,8 @@
           missing = false;
         }
         scroller?.scrollTo({ top: 0 });
+        // 書けなかったら、次に手元が変わったときの読み直しで、手元の DB の状態に戻る
+        markOnOpen(id).catch(() => void list.refresh());
         void load(id);
       }
     });

@@ -1,12 +1,22 @@
 <script lang="ts">
   import type { Feed } from "@sendo-reader/core";
   import { useReader } from "../lib/context";
+  import type { ListProgress } from "../lib/list.svelte";
   import { prefs } from "../lib/prefs.svelte";
   import { handleLink, router, type View, viewHref } from "../lib/router.svelte";
   import Icon, { type IconName } from "./Icon.svelte";
   import SyncStatus from "./SyncStatus.svelte";
 
-  let { onhelp }: { onhelp: () => void } = $props();
+  let {
+    onhelp,
+    progress,
+    onprogress,
+  }: {
+    onhelp: () => void;
+    /** 開いている一覧の進み具合（一覧を開いていなければ null） */
+    progress: ListProgress | null;
+    onprogress: () => void;
+  } = $props();
 
   const reader = useReader();
 
@@ -51,8 +61,6 @@
     const [first] = (feed.title ?? new URL(feed.url, location.href).hostname).trim();
     return (first ?? "?").toUpperCase();
   }
-
-  const progress = $derived(reader.progress);
 
   function signOut() {
     void reader.signOut();
@@ -111,28 +119,43 @@
     </a>
   </div>
 
-  <div
+  <button
+    type="button"
     class="today"
-    role="img"
-    aria-label={`未読 ${reader.unread.total} 件。今日は ${reader.readToday} 件読みました（${progress}%）`}
+    disabled={progress === null}
+    aria-label={progress === null
+      ? `未読 ${reader.unread.total} 件`
+      : `未読 ${reader.unread.total} 件。この一覧の進み具合 ${progress.percent}%`}
+    title="進み具合の内訳"
+    onclick={onprogress}
   >
-    <svg class="gauge" viewBox="0 0 36 36" aria-hidden="true">
-      <circle class="track" cx="18" cy="18" r="15.9155" />
-      {#if progress > 0}
-        <circle class="bar" cx="18" cy="18" r="15.9155" stroke-dasharray={`${progress} 100`} />
-      {/if}
-    </svg>
-    <span class="percent" aria-hidden="true">{progress}<small>%</small></span>
-    <span class="numbers" aria-hidden="true">
+    {#if progress !== null}
+      <svg class="gauge" viewBox="0 0 36 36" aria-hidden="true">
+        <circle class="track" cx="18" cy="18" r="15.9155" />
+        {#if progress.percent > 0}
+          <circle
+            class="bar"
+            cx="18"
+            cy="18"
+            r="15.9155"
+            stroke-dasharray={`${progress.percent} 100`}
+          />
+        {/if}
+      </svg>
+      <span class="percent">{progress.percent}<small>%</small></span>
+    {/if}
+    <span class="numbers">
       <strong>{reader.unread.total}</strong>
       <span>件の未読</span>
-      <span class="done">
-        {reader.unread.total === 0 && reader.feeds.length > 0
-          ? "すべて読み終えました"
-          : `今日 ${reader.readToday} 件読みました`}
-      </span>
+      {#if progress !== null}
+        <span class="done">
+          {progress.remaining === 0 && progress.done === 0
+            ? "この一覧に未読はありません"
+            : `この一覧で ${progress.done} 件読みました`}
+        </span>
+      {/if}
     </span>
-  </div>
+  </button>
 
   <div class="scroll">
     <div class="views">
@@ -274,6 +297,11 @@
     border: 1px solid var(--border);
     border-radius: var(--radius);
     background: var(--raised);
+    text-align: start;
+  }
+
+  .today:disabled {
+    opacity: 1;
   }
 
   .gauge {

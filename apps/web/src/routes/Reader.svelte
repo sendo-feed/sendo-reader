@@ -8,7 +8,7 @@
   import ShortcutHelp from "../components/ShortcutHelp.svelte";
   import Sidebar from "../components/Sidebar.svelte";
   import { useReader } from "../lib/context";
-  import { ArticleListState } from "../lib/list.svelte";
+  import { ArticleListState, type ListProgress } from "../lib/list.svelte";
   import { prefs } from "../lib/prefs.svelte";
   import { router, type View, viewHref } from "../lib/router.svelte";
   import Manage from "./Manage.svelte";
@@ -21,6 +21,7 @@
   let menuOpen = $state(false);
   let helpOpen = $state(false);
   let confirmOpen = $state(false);
+  let progressOpen = $state(false);
   let articleView = $state<ArticleView>();
 
   // 別の画面に移ったら、メニューを閉じる
@@ -90,6 +91,21 @@
           unread: reader.unread.total,
         };
     }
+  });
+
+  /**
+   * 開いている一覧の進み具合：この一覧を開いてから読んだ数 ÷（読んだ数 ＋ 残っている未読）。
+   * 未読を数えない一覧（スター）では出さない
+   */
+  const progress = $derived.by((): ListProgress | null => {
+    if (listing === null || listing.unread === null) return null;
+    const total = list.done + listing.unread;
+    return {
+      title: listing.title,
+      done: list.done,
+      remaining: listing.unread,
+      percent: total === 0 ? 100 : Math.round((list.done / total) * 100),
+    };
   });
 
   const pageTitle = $derived(
@@ -254,7 +270,7 @@
   class:reading={router.articleId !== null}
   class:menu-open={menuOpen}
 >
-  <Sidebar onhelp={() => (helpOpen = true)} />
+  <Sidebar onhelp={() => (helpOpen = true)} {progress} onprogress={() => (progressOpen = true)} />
   <button
     type="button"
     class="scrim"
@@ -281,6 +297,8 @@
       kind={listing.kind}
       unread={listing.scope === null ? null : listing.unread}
       onmarkall={askMarkAll}
+      {progress}
+      onprogress={() => (progressOpen = true)}
       leading={menuButton}
     />
     <ArticleView bind:this={articleView} articleId={router.articleId} {list} onstep={step} />
@@ -288,6 +306,29 @@
 </div>
 
 <ShortcutHelp bind:open={helpOpen} />
+
+<Dialog bind:open={progressOpen} title="進み具合">
+  {#if progress !== null}
+    <dl class="stats">
+      <div>
+        <dt>「{progress.title}」で読んだ記事</dt>
+        <dd>{progress.done} 件</dd>
+      </div>
+      <div>
+        <dt>「{progress.title}」に残っている未読</dt>
+        <dd>{progress.remaining} 件</dd>
+      </div>
+      <div>
+        <dt>今日読んだ記事</dt>
+        <dd>{reader.readToday} 件</dd>
+      </div>
+      <div>
+        <dt>未読の合計</dt>
+        <dd>{reader.unread.total} 件</dd>
+      </div>
+    </dl>
+  {/if}
+</Dialog>
 
 <Dialog bind:open={confirmOpen} title="すべて既読にする">
   <p class="confirm">「{listing?.title}」の未読 {listing?.unread ?? 0} 件を、既読にします。</p>
@@ -329,6 +370,29 @@
   .bar,
   .scrim {
     display: none;
+  }
+
+  .stats {
+    margin: 0;
+  }
+
+  .stats div {
+    display: flex;
+    justify-content: space-between;
+    gap: 1rem;
+    padding: 0.5rem 0;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .stats dt {
+    color: var(--muted);
+  }
+
+  .stats dd {
+    flex: none;
+    margin: 0;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
   }
 
   .confirm {

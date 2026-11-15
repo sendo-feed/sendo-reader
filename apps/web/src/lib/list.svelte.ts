@@ -3,6 +3,17 @@ import type { ReaderClient } from "@sendo-reader/core/web";
 
 const PAGE = 50;
 
+/** 開いている一覧の進み具合（一覧の見出しと左のメニューの輪に出す） */
+export interface ListProgress {
+  title: string;
+  /** この一覧を開いてから読んだ数 */
+  done: number;
+  /** この一覧の範囲に残っている未読の数 */
+  remaining: number;
+  /** done ÷（done ＋ remaining）。0〜100 */
+  percent: number;
+}
+
 /**
  * 開いている一覧（読む画面に 1 つ）。一覧の部品、記事の部品、キーボードの操作が同じものを見る。
  * 手元の DB だけを読むので、ネットワークは待たない。
@@ -15,6 +26,11 @@ export class ArticleListState {
   loadingMore = $state(false);
   /** 一覧を読んだあとに届いた、条件に合う記事の数 */
   fresh = $state(0);
+  /**
+   * この一覧を開いてから読んだ記事の数（未読で出ていた記事が既読になった数。未読に戻したら減る）。
+   * 残っている未読の数と合わせて、一覧の進み具合を出す
+   */
+  done = $state(0);
   /** キーボードで選んでいる記事（開いてはいない） */
   cursorId = $state<string | null>(null);
 
@@ -25,15 +41,36 @@ export class ArticleListState {
    * 一覧を元にした読み直しなど）の結果は当てない
    */
   #generation = 0;
+  /** この一覧で、未読として出たことのある記事 */
+  readonly #seenUnread = new Set<string>();
+  /** そのうち、いま既読の記事 */
+  readonly #readHere = new Set<string>();
 
   constructor(client: ReaderClient) {
     this.#client = client;
+  }
+
+  /** 一覧を差し替え、読んだ数を数え直す */
+  set #articles(articles: Article[]) {
+    for (const article of articles) {
+      if (article.readAt === null) {
+        this.#seenUnread.add(article.id);
+        this.#readHere.delete(article.id);
+      } else if (this.#seenUnread.has(article.id)) {
+        this.#readHere.add(article.id);
+      }
+    }
+    this.articles = articles;
+    this.done = this.#readHere.size;
   }
 
   /** 条件を替えて、最初から読む */
   show(query: ArticleQuery): Promise<void> {
     this.#query = query;
     this.cursorId = null;
+    this.#seenUnread.clear();
+    this.#readHere.clear();
+    this.done = 0;
     return this.load();
   }
 
@@ -42,7 +79,7 @@ export class ArticleListState {
     this.loading = true;
     const page = await this.#client.listArticles({ ...this.#query, limit: PAGE });
     if (current !== this.#generation) return;
-    this.articles = page;
+    this.#articles = page;
     this.hasMore = page.length === PAGE;
     this.fresh = 0;
     this.loading = false;
@@ -61,7 +98,7 @@ export class ArticleListState {
       });
       if (current !== this.#generation) return;
       const shown = new Set(this.articles.map((article) => article.id));
-      this.articles = [...this.articles, ...page.filter((article) => !shown.has(article.id))];
+      this.#articles = [...this.articles, ...page.filter((article) => !shown.has(article.id))];
       this.hasMore = page.length === PAGE;
     } finally {
       this.loadingMore = false;
@@ -95,7 +132,7 @@ export class ArticleListState {
     // 読み直した記事だけを差し替える（読み直している間に続きとして足した記事は残す。
     // 読み直して見つからなかった記事は、手元から消えたので外す）
     const byId = new Map(latest.map((article) => [article.id, article]));
-    this.articles = this.articles.flatMap((article) =>
+    this.#articles = this.articles.flatMap((article) =>
       shown.has(article.id) ? (byId.get(article.id) ?? []) : [article],
     );
     if (oldest) this.hasMore ||= edge.length > 0;
@@ -119,7 +156,7 @@ export class ArticleListState {
 
   /** 出している記事を、手元の DB への書き込みを待たずに書き換える（楽観的な更新） */
   patch(id: string, change: Partial<Article>): void {
-    this.articles = this.articles.map((article) =>
+    this.#articles = this.articles.map((article) =>
       article.id === id ? { ...article, ...change } : article,
     );
   }
