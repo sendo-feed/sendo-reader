@@ -5,7 +5,9 @@
   import { formatDateTime } from "../lib/format";
   import type { ArticleListState } from "../lib/list.svelte";
   import { handleLink, router, viewHref } from "../lib/router.svelte";
+  import Dialog from "./Dialog.svelte";
   import Icon from "./Icon.svelte";
+  import Appearance from "./settings/Appearance.svelte";
 
   let {
     articleId,
@@ -126,6 +128,39 @@
     if (Math.abs(dx) >= 80 && Math.abs(dx) > Math.abs(dy) * 2) onstep(dx < 0 ? 1 : -1);
   }
 
+  /** 共有したときなどの、少しの間出す知らせ */
+  let notice = $state<string | null>(null);
+  let noticeTimer: ReturnType<typeof setTimeout> | undefined;
+
+  function showNotice(text: string) {
+    clearTimeout(noticeTimer);
+    notice = text;
+    noticeTimer = setTimeout(() => (notice = null), 3000);
+  }
+
+  /**
+   * 記事のリンクを共有する。端末の共有の窓（Web Share API）を開き、なければリンクをコピーする。
+   * 渡すのは、記事のタイトルと、http ／ https だと確かめた URL だけ
+   */
+  export async function share() {
+    if (article === null || link === null) return;
+    try {
+      if (typeof navigator.share === "function") {
+        await navigator.share({ title: article.title ?? "", url: link });
+      } else {
+        await navigator.clipboard.writeText(link);
+        showNotice("リンクをコピーしました。");
+      }
+    } catch (error) {
+      // 共有の窓を閉じただけなら、何も出さない
+      if (error instanceof DOMException && error.name === "AbortError") return;
+      showNotice("共有できませんでした。");
+    }
+  }
+
+  /** 文字の大きさとテーマの窓を開いている */
+  let displayOpen = $state(false);
+
   /** 書き込みに失敗したときの知らせ */
   let saveError = $state<string | null>(null);
 
@@ -194,6 +229,8 @@
       <span class="spacer"
         >{#if saveError !== null}
           <span class="error" role="alert">{saveError}</span>
+        {:else if notice !== null}
+          <span class="notice" role="status">{notice}</span>
         {/if}</span
       >
       <button
@@ -214,6 +251,26 @@
         onclick={() => toggle("starredAt")}
       >
         <Icon name="star" filled={article.starredAt !== null} />
+      </button>
+      {#if link !== null}
+        <button
+          type="button"
+          class="icon-button"
+          aria-label="共有する"
+          title="共有する"
+          onclick={share}
+        >
+          <Icon name="share" />
+        </button>
+      {/if}
+      <button
+        type="button"
+        class="icon-button aa"
+        aria-label="文字の大きさとテーマ"
+        title="文字の大きさとテーマ"
+        onclick={() => (displayOpen = true)}
+      >
+        Aa
       </button>
       {#if link !== null}
         <a
@@ -269,6 +326,10 @@
   {/if}
 </article>
 
+<Dialog bind:open={displayOpen} title="文字の大きさとテーマ">
+  <Appearance reading />
+</Dialog>
+
 <style>
   .article-view {
     display: flex;
@@ -300,6 +361,17 @@
 
   .star[aria-pressed="true"] {
     color: var(--star);
+  }
+
+  .aa {
+    font-size: 1rem;
+    font-weight: 600;
+    letter-spacing: -0.02em;
+  }
+
+  .notice {
+    color: var(--muted);
+    font-size: 0.875rem;
   }
 
   .open {
@@ -433,14 +505,22 @@
       display: none;
     }
 
-    .open {
-      width: 2.75rem;
-      height: 2.75rem;
-    }
-
+    /* 元の記事へは、本文の下のボタンから開く（下のバーには、押しやすい数だけ並べる） */
+    .open,
     .close,
     .hint {
       display: none;
+    }
+
+    /* 知らせは、下のバーの上に浮かせる */
+    .spacer {
+      position: absolute;
+      right: 0;
+      bottom: 100%;
+      left: 0;
+      padding: 0.375rem 1rem;
+      background: var(--background);
+      text-align: center;
     }
 
     .content {

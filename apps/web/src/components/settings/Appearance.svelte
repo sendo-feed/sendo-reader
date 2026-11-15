@@ -12,15 +12,20 @@
     ["medium", "中"],
     ["large", "大"],
   ];
+  /** reading なら、読むときに変えたいもの（テーマと文字の大きさ）だけを出す。記事の画面から開く */
+  let { reading = false }: { reading?: boolean } = $props();
+
   const LAYOUTS: [ListLayout, string][] = [
     ["comfortable", "要約も出す"],
     ["compact", "タイトルだけ"],
   ];
 </script>
 
-<section aria-labelledby="appearance-heading">
-  <h2 id="appearance-heading">表示</h2>
-  <p class="note">この端末だけの設定です。</p>
+<section aria-label="表示">
+  {#if !reading}
+    <h2>表示</h2>
+    <p class="note">この端末だけの設定です。</p>
+  {/if}
 
   <fieldset>
     <legend>テーマ</legend>
@@ -54,33 +59,35 @@
     {/each}
   </fieldset>
 
-  <fieldset>
-    <legend>記事の一覧</legend>
-    {#each LAYOUTS as [value, label] (value)}
-      <label>
-        <input
-          type="radio"
-          name="layout"
-          {value}
-          checked={prefs.value.layout === value}
-          onchange={() => prefs.set({ layout: value })}
-        >
-        {label}
-      </label>
-    {/each}
-  </fieldset>
+  {#if !reading}
+    <fieldset>
+      <legend>記事の一覧</legend>
+      {#each LAYOUTS as [value, label] (value)}
+        <label>
+          <input
+            type="radio"
+            name="layout"
+            {value}
+            checked={prefs.value.layout === value}
+            onchange={() => prefs.set({ layout: value })}
+          >
+          {label}
+        </label>
+      {/each}
+    </fieldset>
 
-  <fieldset>
-    <legend>既読にするとき</legend>
-    <label class="check">
-      <input
-        type="checkbox"
-        checked={prefs.value.markReadOnScroll}
-        onchange={(e) => prefs.set({ markReadOnScroll: e.currentTarget.checked })}
-      >
-      一覧を動かして通り過ぎた記事を、既読にする
-    </label>
-  </fieldset>
+    <fieldset>
+      <legend>既読にするとき</legend>
+      <label class="check">
+        <input
+          type="checkbox"
+          checked={prefs.value.markReadOnScroll}
+          onchange={(e) => prefs.set({ markReadOnScroll: e.currentTarget.checked })}
+        >
+        一覧を動かして通り過ぎた記事を、既読にする
+      </label>
+    </fieldset>
+  {/if}
 </section>
 
 <style>
