@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { ApiError, LOCAL_RETENTION_MS, ReaderCore } from "../src";
+import { ApiError, ReaderCore } from "../src";
 import { DAY, openMemoryDb, setup } from "./helpers";
 
 const ids = (rows: { id: string }[]) => rows.map((row) => row.id).sort();
@@ -227,7 +227,7 @@ describe("差分の同期", () => {
 });
 
 describe("手元に置く範囲", () => {
-  test("受信箱に入って 30 日を過ぎた既読の記事は、スターがなければ手元から消す", async () => {
+  test("古くなっても手元では消さず、sendo の片付けの消した記録が届いたときに消す", async () => {
     const { server, core } = await setup();
     const feed = server.subscribe({ url: "https://example.com/feed.xml" });
     const read = server.deliver(feed.id);
@@ -238,9 +238,17 @@ describe("手元に置く範囲", () => {
     await core.sync();
     expect(await core.listArticles()).toHaveLength(3);
 
-    server.advance(LOCAL_RETENTION_MS + 1);
+    // 受信箱に入って 60 日たった（reader の前の版は、30 日で既読の記事を手元から消していた）
+    server.advance(60 * DAY);
     await core.sync();
-    expect(ids(await core.listArticles())).toEqual(ids([starred, unread]));
+    expect(ids(await core.listArticles())).toEqual(ids([read, starred, unread]));
+
+    // 90 日で、sendo がスターのない記事を受信箱から片付けた（未読でも）
+    server.advance(30 * DAY);
+    server.removeFromInbox(read.id);
+    server.removeFromInbox(unread.id);
+    await core.sync();
+    expect(ids(await core.listArticles())).toEqual(ids([starred]));
   });
 });
 

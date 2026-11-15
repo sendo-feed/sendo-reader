@@ -26,7 +26,7 @@ export {
   type SyncResult,
 } from "./reader";
 export type { MarkReadScope } from "./sync/ops";
-export { LOCAL_RETENTION_MS, type PullResult } from "./sync/pull";
+export type { PullResult } from "./sync/pull";
 export type { PushResult } from "./sync/queue";
 export {
   PERIODIC_SYNC_MS,

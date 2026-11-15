@@ -303,7 +303,6 @@ export class ReaderCore {
       return limit === null || id <= limit || this.#onlineOps.has(id);
     });
     const pulled = await pull(this.#db, this.#api, {
-      now: this.#now,
       signal,
       onPage: (changed) => this.#emit(changed),
     });

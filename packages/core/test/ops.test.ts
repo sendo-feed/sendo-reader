@@ -20,7 +20,7 @@ async function withArticle() {
 /** 送らずに、差分の取り込みだけをする（送り終えていない操作が残ったまま取り込む場面） */
 async function pullOnly(context: Awaited<ReturnType<typeof setup>>) {
   const api = createSendoApi({ baseUrl: "https://sendo.test/api/v1", fetch: context.server.fetch });
-  return pull(context.db, api, { now: () => context.server.now });
+  return pull(context.db, api, {});
 }
 
 describe("既読とスター", () => {

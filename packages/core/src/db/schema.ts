@@ -50,7 +50,7 @@ const migrations: readonly (readonly string[])[] = [
     // 未読の数はその都度数える。未読の行だけを載せる
     "create index articles_unread_idx on articles (feed_id) where read_at is null",
     "create index articles_starred_idx on articles (starred_at) where starred_at is not null",
-    // 手元から古い既読の記事を消すとき（sync/pull.ts）
+    // 手元から古い既読の記事を消すとき（今は消さないので、マイグレーション 6 で外した）
     "create index articles_received_idx on articles (received_at)",
   ],
   [
@@ -99,6 +99,15 @@ const migrations: readonly (readonly string[])[] = [
      set payload = json_set(payload, '$.scope.folderId',
        substr(json_extract(payload, '$.scope.folderId'), 7))
      where substr(json_extract(payload, '$.scope.folderId'), 1, 6) = 'local-'`,
+  ],
+  [
+    // 古くなっても手元では記事を消さなくなった（消すのは sendo の消した記録が届いたときだけ。
+    // docs/decisions/local-first.md の 3）。古い既読の記事を探して消すための索引は要らない
+    "drop index if exists articles_received_idx",
+    // 手元の記事が sendo の受信箱と同じだけ（既定 90 日分）たまるので、未読の一覧（新しい順）を
+    // 未読の行だけから読む。未読が少ないと、新しい順の索引をほぼすべてたどることになる
+    // （記事 81,000 件・未読 10 件で、1 回 13.7ms が 0.09ms になった）
+    "create index articles_unread_published_idx on articles (published_at, id) where read_at is null",
   ],
 ];
 

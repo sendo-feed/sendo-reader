@@ -125,6 +125,20 @@ describe("手元の DB のスキーマ", () => {
     ]);
   });
 
+  test("古い既読の記事を消すための索引を外し、未読の一覧を未読の行だけから読む", async () => {
+    const db = await openMemoryDb();
+    await migrate(db);
+    const indexes = await db.all<{ name: string }>(
+      "select name from sqlite_schema where type = 'index' and tbl_name = 'articles' order by name",
+    );
+    expect(indexes.map((index) => index.name)).not.toContain("articles_received_idx");
+    const plan = await db.all<{ detail: string }>(
+      `explain query plan select id from articles where read_at is null
+       order by published_at desc, id desc limit 50`,
+    );
+    expect(plan.map((row) => row.detail).join()).toContain("articles_unread_published_idx");
+  });
+
   test("2 回当てても何も変わらない", async () => {
     const db = await openMemoryDb();
     await migrate(db);

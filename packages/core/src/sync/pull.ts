@@ -12,9 +12,6 @@ import type { Article, Table } from "../models";
 import type { SyncPage } from "./page";
 import { reapplyPending, widenPendingMarkRead } from "./queue";
 
-/** 手元に置く既読の記事の期間。受信箱に入ってからこれより古い既読の記事は、手元から消す */
-export const LOCAL_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
-
 /** 1 回の同期で取るページの上限。サーバーが続きを返し続けても止まるようにする */
 const MAX_PAGES = 1000;
 
@@ -28,7 +25,6 @@ export interface PullResult {
 }
 
 export interface PullOptions {
-  now: () => number;
   /** 中断の合図（ログアウトなど）。中断したら、それ以降は DB に書かない */
   signal?: AbortSignal;
   /** ページを書き込むたびに呼ぶ（画面に変わった表を知らせる） */
@@ -43,13 +39,16 @@ export interface PullOptions {
  *
  * 届いた行は sendo の状態なので、手元でまだ送り終えていない操作は、同じトランザクションの中で
  * その上に重ね直す（楽観的な更新を保つ）。
+ *
+ * 古くなっても、手元では記事を消さない。sendo の片付けで受信箱から消えた記事は、消した記録が
+ * 届いたときに消す（docs/decisions/local-first.md の 3）。
  */
 export async function pull(db: Database, api: SendoApi, options: PullOptions): Promise<PullResult> {
   const result: PullResult = { pages: 0, reset: false, changed: new Set() };
   // 断られた操作を戻せなかったときなどに、最初から取り直すよう頼まれている
   if ((await getSetting(db, RESYNC_KEY)) !== null) {
     await resync(db, api, options, result);
-    return finish(db, options, result);
+    return result;
   }
 
   let cursor = await getSetting(db, CURSOR_KEY);
@@ -87,7 +86,7 @@ export async function pull(db: Database, api: SendoApi, options: PullOptions): P
     cursor = page.cursor;
     if (!page.hasMore) break;
   }
-  return finish(db, options, result);
+  return result;
 }
 
 /**
@@ -145,14 +144,6 @@ async function resync(
   const all = new Set<Table>(["folders", "feeds", "articles"]);
   for (const table of all) result.changed.add(table);
   options.onPage?.(all);
-}
-
-async function finish(db: Database, options: PullOptions, result: PullResult) {
-  if (await pruneOldArticles(db, options.now(), options.signal)) {
-    result.changed.add("articles");
-    options.onPage?.(new Set<Table>(["articles"]));
-  }
-  return result;
 }
 
 /** ページで届いた（受信箱にある）記事の ID */
@@ -249,27 +240,6 @@ async function writeArticle(tx: Executor, article: Article): Promise<void> {
       article.starredAt,
     ],
   );
-}
-
-/**
- * 受信箱に入ってから LOCAL_RETENTION_MS より古く、既読でスターのない記事を手元から消す。
- * 手元に置くのは、最初の同期で届く範囲（未読、スター、直近 30 日）に揃える（local-first.md）。
- */
-async function pruneOldArticles(
-  db: Database,
-  now: number,
-  signal: AbortSignal | undefined,
-): Promise<boolean> {
-  const removed = await db.transaction(async (tx) => {
-    signal?.throwIfAborted();
-    return tx.all<{ id: string }>(
-      `delete from articles
-       where received_at < ? and read_at is not null and starred_at is null
-       returning id`,
-      [now - LOCAL_RETENTION_MS],
-    );
-  });
-  return removed.length > 0;
 }
 
 /**
