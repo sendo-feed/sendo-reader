@@ -259,3 +259,25 @@ test("末尾まで出した一覧に、それより古い記事が加わった�
   await page.getByRole("button", { name: "今すぐ同期" }).click();
   await expect(list.locator(".title")).toHaveText(["1 番目", "3 番目"]);
 });
+
+test("古い順の一覧でも、出している記事より前に入る記事が加わったら、新しい記事として知らせる", async ({
+  page,
+  context,
+}) => {
+  const { server } = seed();
+  const [first, , third] = [...server.inbox.values()];
+  if (first === undefined || third === undefined) throw new Error("unreachable");
+  server.setArticleState(first.id, { starred: true });
+  await routeFakeSendo(context, server);
+  await page.goto("/");
+  await signIn(page);
+  await page.locator("nav").getByRole("link", { name: "スター" }).click();
+  const list = page.locator(".article-list");
+  await list.getByRole("button", { name: "古い順に並べる" }).click();
+  await expect(list.locator(".title")).toHaveText(["1 番目"]);
+
+  server.setArticleState(third.id, { starred: true });
+  await page.getByRole("button", { name: "今すぐ同期" }).click();
+  await list.getByRole("button", { name: "新しい記事 1 件を読む" }).click();
+  await expect(list.locator(".title")).toHaveText(["3 番目", "1 番目"]);
+});

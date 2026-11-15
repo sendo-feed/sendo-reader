@@ -122,8 +122,8 @@ export class ArticleListState {
     const after = last === undefined ? undefined : { publishedAt: last.publishedAt, id: last.id };
     const [latest, top, beyond] = await Promise.all([
       this.#client.getArticles(requested),
-      // 新しい順なら、新しく届いた記事は先頭のページに入る（古い順なら末尾に入るので、下の beyond で見る）
-      oldest ? [] : this.#client.listArticles({ ...this.#query, limit: PAGE }),
+      // 先頭のページ。出している記事の間や前に、条件に合う記事が加わっていないかを見る
+      this.#client.listArticles({ ...this.#query, limit: PAGE }),
       // 末尾まで出していたら、その先に条件に合う記事が加わっていないかを見る（新しく届いた、
       // 別のタブでスターを付けた・未読に戻した、公開日時の古い記事が届いた）
       this.hasMore || after === undefined
@@ -138,16 +138,17 @@ export class ArticleListState {
       shown.has(article.id) ? (byId.get(article.id) ?? []) : [article],
     );
     if (beyond.length > 0) this.hasMore = true;
-    // 出している最後の記事より前に入る記事だけを、新しい記事として数える。最後の記事より先の
-    // 記事は、続きとして読む（未読の一覧で記事を読むと、その分だけ先の記事が先頭のページに
-    // 繰り上がるが、それは新しく届いたのではない）
-    this.fresh = top.filter(
-      (article) =>
-        !shown.has(article.id) &&
-        (last === undefined ||
-          article.publishedAt > last.publishedAt ||
-          (article.publishedAt === last.publishedAt && article.id > last.id)),
-    ).length;
+    // 並び順で、出している最後の記事より前に入る記事だけを、新しい記事として数える。最後の
+    // 記事より先の記事は、続きとして読む（未読の一覧で記事を読むと、その分だけ先の記事が先頭の
+    // ページに繰り上がるが、それは新しく加わったのではない）
+    const direction = oldest ? -1 : 1;
+    this.fresh = top.filter((article) => {
+      if (shown.has(article.id)) return false;
+      if (last === undefined) return true;
+      const byTime = article.publishedAt - last.publishedAt;
+      const order = byTime !== 0 ? byTime : article.id > last.id ? 1 : -1;
+      return order * direction > 0;
+    }).length;
   }
 
   find(id: string | null): Article | null {
