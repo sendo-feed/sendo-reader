@@ -155,3 +155,20 @@ test("OAuth の設定がない、リクエストがないときは、その旨�
   await page.goto("/oauth/authorize");
   await expect(page.getByRole("alert")).toContainText("許可のリクエストがありません");
 });
+
+test("許可するアカウントが分からなければ、許可の操作を出さず、やり直せる", async ({
+  page,
+  context,
+}) => {
+  const server = await setup(context);
+  await signInBrowser(context, server);
+  // 確かめるのは届き、アカウント（/me）が届かない
+  server.failNext(null, "network");
+  await page.goto(authorizeUrl());
+  await expect(page.getByRole("alert")).toContainText("sendo に届きません");
+  await expect(page.getByRole("button", { name: "許可する" })).toHaveCount(0);
+
+  await page.getByRole("button", { name: "やり直す" }).click();
+  await expect(page.locator("main")).toContainText(USER.email);
+  await expect(page.getByRole("button", { name: "許可する" })).toBeVisible();
+});

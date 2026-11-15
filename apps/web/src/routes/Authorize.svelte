@@ -20,7 +20,7 @@
    */
   type View =
     | { kind: "loading" }
-    | { kind: "ready"; request: AuthorizationRequest; user: User | null }
+    | { kind: "ready"; request: AuthorizationRequest; user: User }
     /** ログインしていない */
     | { kind: "signIn" }
     /** 認可のリクエストが正しくなく、クライアントに返す先もない。どこへも移らない */
@@ -63,8 +63,8 @@
     view = { kind: "loading" };
     try {
       const request = await account.checkAuthorization(query);
-      // 許可するアカウントを出す（分からなくても、許可の画面は出す）
-      const user = await account.me().catch(() => null);
+      // 許可するアカウントが分かるまで、許可の操作は出さない（分からなければ、やり直してもらう）
+      const user = await account.me();
       view = { kind: "ready", request, user };
     } catch (error) {
       handle(error);
@@ -147,10 +147,8 @@
           {/each}
         </ul>
       </dd>
-      {#if view.user !== null}
-        <dt>許可するアカウント</dt>
-        <dd>{view.user.email}</dd>
-      {/if}
+      <dt>許可するアカウント</dt>
+      <dd>{view.user.email}</dd>
     </dl>
     {#if view.request.loopbackRedirect}
       <p class="warn">
