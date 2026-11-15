@@ -47,3 +47,8 @@ export function truncate(text: string, max = 80): string {
   const chars = [...text];
   return chars.length <= max ? text : `${chars.slice(0, max).join("")}…`;
 }
+
+/** 狭いところに出す数。1,000 以上は「1K+」のように丸める */
+export function compactCount(count: number): string {
+  return count < 1000 ? String(count) : `${Math.floor(count / 1000)}K+`;
+}

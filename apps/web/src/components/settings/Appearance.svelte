@@ -69,6 +69,18 @@
       </label>
     {/each}
   </fieldset>
+
+  <fieldset>
+    <legend>既読にするとき</legend>
+    <label class="check">
+      <input
+        type="checkbox"
+        checked={prefs.value.markReadOnScroll}
+        onchange={(e) => prefs.set({ markReadOnScroll: e.currentTarget.checked })}
+      >
+      一覧を動かして通り過ぎた記事を、既読にする
+    </label>
+  </fieldset>
 </section>
 
 <style>
@@ -119,12 +131,17 @@
     font-weight: 600;
   }
 
+  label.check {
+    gap: 0.5rem;
+    border-radius: var(--radius-small);
+  }
+
   label:has(input:focus-visible) {
     outline: 2px solid var(--accent);
     outline-offset: 2px;
   }
 
-  input {
+  input[type="radio"] {
     position: absolute;
     opacity: 0;
     pointer-events: none;

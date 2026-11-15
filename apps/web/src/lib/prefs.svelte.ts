@@ -14,6 +14,8 @@ export interface PrefsValue {
   layout: ListLayout;
   /** フィードとフォルダの一覧で、未読だけを出す */
   unreadOnly: boolean;
+  /** 一覧を動かして、上へ通り過ぎた未読の記事を既読にする */
+  markReadOnScroll: boolean;
   /** 一覧を古い順に並べる */
   oldestFirst: boolean;
   /** 左のメニューで、未読のないフィードを隠す */
@@ -29,6 +31,7 @@ const DEFAULTS: PrefsValue = {
   textSize: "medium",
   layout: "comfortable",
   unreadOnly: false,
+  markReadOnScroll: true,
   oldestFirst: false,
   hideReadFeeds: false,
   collapsed: [],
@@ -54,6 +57,7 @@ export function parsePrefs(text: string | null): PrefsValue {
     textSize: oneOf(raw.textSize, ["small", "medium", "large"], DEFAULTS.textSize),
     layout: oneOf(raw.layout, ["compact", "comfortable"], DEFAULTS.layout),
     unreadOnly: flag("unreadOnly"),
+    markReadOnScroll: flag("markReadOnScroll"),
     oldestFirst: flag("oldestFirst"),
     hideReadFeeds: flag("hideReadFeeds"),
     collapsed: Array.isArray(raw.collapsed)

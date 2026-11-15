@@ -281,3 +281,54 @@ test("古い順の一覧でも、出している記事より前に入る記事�
   await list.getByRole("button", { name: "新しい記事 1 件を読む" }).click();
   await expect(list.locator(".title")).toHaveText(["3 番目", "1 番目"]);
 });
+
+test("一覧を動かして通り過ぎた記事は既読になる。設定で切れる", async ({ page, context }) => {
+  const server = new FakeSendo();
+  const feed = server.subscribe({ url: "https://blog.example/feed.xml", title: "Blog" });
+  for (let i = 0; i < 40; i++) {
+    server.deliver(feed.id, { title: `記事 ${i}`, publishedAt: server.now - i * 60_000 });
+  }
+  await routeFakeSendo(context, server);
+  await page.setViewportSize({ width: 390, height: 780 });
+  await page.goto("/");
+  await signIn(page);
+  const list = page.locator(".article-list");
+  const unreadRows = list.locator(".row.unread");
+  await expect(list.locator(".item")).toHaveCount(40);
+  await expect(unreadRows).toHaveCount(40);
+  const scrollBy = (top: number) => list.evaluate((el, top) => el.scrollBy({ top }), top);
+
+  // 先頭の何件かが見出しの下を通り過ぎるまで動かす。通り過ぎた記事だけが既読になり、一覧には残る
+  await scrollBy(400);
+  await expect(unreadRows).not.toHaveCount(40);
+  const afterScroll = await unreadRows.count();
+  expect(afterScroll).toBeGreaterThan(30);
+  await expect(list.locator(".row").first()).not.toHaveClass(/unread/);
+  await expect(list.locator(".item")).toHaveCount(40);
+  await expect(page.getByRole("button", { name: /この一覧の進み具合 [1-9]/ })).toContainText(
+    String(afterScroll),
+  );
+
+  // 記事を開いて一覧が隠れても、開いた記事のほかは既読にしない
+  await list.locator(".row.unread .item").first().click();
+  await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
+  await page.goBack();
+  await expect(unreadRows).toHaveCount(afterScroll - 1);
+
+  // 切ると、動かしても既読にしない
+  await page.getByRole("button", { name: "メニュー", exact: true }).click();
+  await page.locator("nav").getByRole("link", { name: "設定" }).click();
+  await page.getByLabel("一覧を動かして通り過ぎた記事を、既読にする").uncheck();
+  await page.goBack();
+  await expect(list.locator(".item").first()).toBeVisible();
+  const before = await unreadRows.count();
+  await scrollBy(600);
+  await page.waitForTimeout(600);
+  await expect(unreadRows).toHaveCount(before);
+
+  await page.getByRole("button", { name: "メニュー", exact: true }).click();
+  await page.getByRole("button", { name: "今すぐ同期" }).click();
+  await expect
+    .poll(() => [...server.inbox.values()].filter((a) => a.readAt === null).length)
+    .toBe(before);
+});

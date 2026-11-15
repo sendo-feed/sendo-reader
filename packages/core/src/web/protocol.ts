@@ -27,6 +27,7 @@ export const READER_METHODS = [
   "countUnread",
   "countReadSince",
   "setRead",
+  "setReadMany",
   "setStarred",
   "markAllRead",
   "createFolder",
@@ -55,6 +56,7 @@ export function isMethod(value: unknown): value is Method {
 /** 手元にすぐ反映する書き込み。あとで送るので、少し待ってから同期する */
 export const WRITE_METHODS = new Set<Method>([
   "setRead",
+  "setReadMany",
   "setStarred",
   "markAllRead",
   "createFolder",

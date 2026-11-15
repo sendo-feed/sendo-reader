@@ -45,6 +45,25 @@ describe("既読とスター", () => {
     });
   });
 
+  test("いくつかの記事をまとめて既読にし、変わったことは 1 回だけ知らせる", async () => {
+    const { server, core, article, feed } = await withArticle();
+    const second = server.deliver(feed.id, { title: "second" });
+    await core.sync();
+    let changes = 0;
+    core.onChange(() => changes++);
+
+    await core.setReadMany([article.id, second.id, article.id], true);
+    expect(changes).toBe(1);
+    expect((await core.countUnread()).total).toBe(0);
+    await core.setReadMany([], true);
+    expect(changes).toBe(1);
+
+    await core.sync();
+    expect(await core.countPending()).toBe(0);
+    expect(server.inbox.get(article.id)?.readAt).not.toBeNull();
+    expect(server.inbox.get(second.id)?.readAt).not.toBeNull();
+  });
+
   test("届かなければ操作は残り、手元の変更も保ったまま、次の同期で送る", async () => {
     const { server, core, article } = await withArticle();
     await core.setRead(article.id, true);

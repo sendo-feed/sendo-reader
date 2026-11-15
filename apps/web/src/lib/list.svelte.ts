@@ -179,6 +179,27 @@ export class ArticleListState {
     }
   }
 
+  /**
+   * いくつかの記事をまとめて既読にする（一覧を動かして通り過ぎた記事）。すでに既読のものは
+   * 飛ばす。押したときと同じく、画面にはすぐ出し、書けなかったら手元の DB の状態に戻す
+   */
+  async markRead(ids: readonly string[]): Promise<void> {
+    const wanted = new Set(ids);
+    const unread = this.articles.filter((a) => wanted.has(a.id) && a.readAt === null);
+    if (unread.length === 0) return;
+    const targets = new Set(unread.map((article) => article.id));
+    const readAt = Date.now();
+    this.#articles = this.articles.map((article) =>
+      targets.has(article.id) ? { ...article, readAt } : article,
+    );
+    try {
+      await this.#client.setReadMany([...targets], true);
+    } catch (error) {
+      await this.refresh();
+      throw error;
+    }
+  }
+
   /** from の隣の記事（delta が 1 なら次、-1 なら前）。末尾まで来たら、続きを読んでから答える */
   async step(from: string | null, delta: 1 | -1): Promise<Article | null> {
     const index = from === null ? -1 : this.articles.findIndex((article) => article.id === from);

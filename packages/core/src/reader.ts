@@ -352,6 +352,24 @@ export class ReaderCore {
     return this.#write({ kind: "setArticleState", articleId, read, at: this.#now() }, ["articles"]);
   }
 
+  /**
+   * いくつかの記事を、まとめて既読（true）／未読（false）にする（一覧を動かして通り過ぎた記事
+   * など）。1 つのトランザクションで積み、変わったことは 1 回だけ知らせる。sendo へは記事ごとに送る
+   */
+  async setReadMany(articleIds: readonly string[], read: boolean): Promise<void> {
+    if (articleIds.length === 0) return;
+    this.#requireSignedIn();
+    const session = this.#session.signal;
+    await this.#db.transaction(async (tx) => {
+      // 書き込みが DB の列で待っている間にログインし直したら、前のアカウントの操作を積まない
+      throwIfSessionEnded(session);
+      for (const articleId of new Set(articleIds)) {
+        await this.#enqueue(tx, { kind: "setArticleState", articleId, read, at: this.#now() });
+      }
+    });
+    this.#emit(new Set<Table>(["articles"]));
+  }
+
   /** 記事にスターを付ける（true）／外す（false） */
   setStarred(articleId: string, starred: boolean): Promise<void> {
     return this.#write({ kind: "setArticleState", articleId, starred, at: this.#now() }, [
