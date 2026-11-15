@@ -10,6 +10,11 @@ export interface ArticleQuery {
   folderId?: string;
   /** unread なら未読だけ、starred ならスター付きだけ */
   state?: "all" | "unread" | "starred";
+  /**
+   * 探す言葉。空白で区切ったすべての言葉が、タイトル・要約・著者のどれかに入っている記事だけ
+   * （大文字と小文字は、ASCII の範囲で区別しない）。空なら絞らない
+   */
+  search?: string;
   /** 並べる順。newest（既定）は新しい順、oldest は古い順 */
   order?: "newest" | "oldest";
   /** 1 回に読む数（1〜200、既定は 50） */
@@ -51,6 +56,14 @@ export async function listArticles(db: Executor, query: ArticleQuery = {}): Prom
   }
   if (query.state === "unread") where.push("a.read_at is null");
   if (query.state === "starred") where.push("a.starred_at is not null");
+  for (const term of searchTerms(query.search)) {
+    // % と _ は、そのままの文字として探す
+    const pattern = `%${term.replace(/[\\%_]/g, "\\$&")}%`;
+    where.push(
+      "(a.title like ? escape '\\' or a.summary like ? escape '\\' or a.author like ? escape '\\')",
+    );
+    params.push(pattern, pattern, pattern);
+  }
   const oldest = query.order === "oldest";
   if (query.after !== undefined) {
     const than = oldest ? ">" : "<";
@@ -68,6 +81,19 @@ export async function listArticles(db: Executor, query: ArticleQuery = {}): Prom
     params,
   );
   return rows.map(toArticle);
+}
+
+/** 探す言葉の数と長さの上限（長い入力で、手元の DB を重くしない） */
+const MAX_SEARCH_TERMS = 8;
+const MAX_SEARCH_TERM_LENGTH = 100;
+
+/** 探す言葉を、空白（全角を含む）で分ける */
+export function searchTerms(search: string | undefined): string[] {
+  return (search ?? "")
+    .split(/\s+/u)
+    .filter((term) => term !== "")
+    .slice(0, MAX_SEARCH_TERMS)
+    .map((term) => term.slice(0, MAX_SEARCH_TERM_LENGTH));
 }
 
 /** 記事をまとめて読む（見つからない ID は飛ばす）。画面が出している記事の状態を読み直すのに使う */

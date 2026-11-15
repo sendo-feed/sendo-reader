@@ -4,6 +4,7 @@
  * - /                未読
  * - /all             すべて
  * - /starred         スター
+ * - /search?q=<言葉> 検索（手元の記事を探す）
  * - /feeds/:id       フィード
  * - /folders/:id     フォルダ
  * - /manage          購読の管理（追加、フォルダ、OPML の取り込み）
@@ -14,6 +15,7 @@ export type View =
   | { kind: "unread" }
   | { kind: "all" }
   | { kind: "starred" }
+  | { kind: "search" }
   | { kind: "feed"; id: string }
   | { kind: "folder"; id: string }
   | { kind: "manage" }
@@ -32,6 +34,7 @@ class Router {
     const path = this.url.pathname;
     if (path === "/all") return { kind: "all" };
     if (path === "/starred") return { kind: "starred" };
+    if (path === "/search") return { kind: "search" };
     if (path === "/manage") return { kind: "manage" };
     if (path === "/settings") return { kind: "settings" };
     const feed = /^\/feeds\/([^/]+)$/.exec(path);
@@ -39,6 +42,19 @@ class Router {
     const folder = /^\/folders\/([^/]+)$/.exec(path);
     if (folder?.[1] !== undefined) return { kind: "folder", id: decodeURIComponent(folder[1]) };
     return { kind: "unread" };
+  }
+
+  /** 検索の画面で探している言葉 */
+  get searchQuery(): string {
+    return this.url.searchParams.get("q") ?? "";
+  }
+
+  /** 探す言葉を替える。打つたびに履歴を足さないように、置き換える（開いていた記事は閉じる） */
+  setSearchQuery(query: string): void {
+    const next = new URL("/search", location.href);
+    if (query !== "") next.searchParams.set("q", query);
+    history.replaceState(null, "", next);
+    this.url = next;
   }
 
   get articleId(): string | null {
@@ -86,6 +102,8 @@ export function viewHref(view: View): string {
       return "/all";
     case "starred":
       return "/starred";
+    case "search":
+      return "/search";
     case "feed":
       return `/feeds/${encodeURIComponent(view.id)}`;
     case "folder":

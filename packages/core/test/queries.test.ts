@@ -83,6 +83,39 @@ describe("記事の一覧", () => {
     expect(await core.countReadSince(server.now)).toBe(2);
   });
 
+  test("タイトル・要約・著者から、すべての言葉が入っている記事を探す", async () => {
+    const { server, core } = await setup();
+    const feed = server.subscribe({ url: "https://a.example/feed" });
+    const t = server.now;
+    server.deliver(feed.id, { title: "SQLite を OPFS で使う", publishedAt: t - 1000 });
+    server.deliver(feed.id, {
+      title: "同期の設計",
+      summary: "カーソルと sqlite の話",
+      publishedAt: t - 2000,
+    });
+    server.deliver(feed.id, { title: "100% 完了", author: "山田 太郎", publishedAt: t - 3000 });
+    server.deliver(feed.id, { title: "under_score", publishedAt: t - 4000 });
+    await core.sync();
+    const titles = async (search: string) =>
+      (await core.listArticles({ search })).map((article) => article.title);
+
+    // 大文字と小文字は区別しない。要約と著者も探す
+    expect(await titles("sqlite")).toEqual(["SQLite を OPFS で使う", "同期の設計"]);
+    expect(await titles("山田")).toEqual(["100% 完了"]);
+    // 空白（全角も）で区切った言葉は、すべて入っているものだけ
+    expect(await titles("sqlite　カーソル")).toEqual(["同期の設計"]);
+    expect(await titles("sqlite 山田")).toEqual([]);
+    // % と _ は、そのままの文字として探す
+    expect(await titles("100%")).toEqual(["100% 完了"]);
+    expect(await titles("%")).toEqual(["100% 完了"]);
+    expect(await titles("_")).toEqual(["under_score"]);
+    // 空なら絞らない。ほかの条件とも組み合わせられる
+    expect(await titles("  ")).toHaveLength(4);
+    expect(
+      (await core.listArticles({ search: "sqlite", order: "oldest" })).map((a) => a.title),
+    ).toEqual(["同期の設計", "SQLite を OPFS で使う"]);
+  });
+
   test("数は 1〜200 に収める", async () => {
     const { core } = await seeded();
     expect(await core.listArticles({ limit: 0 })).toHaveLength(1);

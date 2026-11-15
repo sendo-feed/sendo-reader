@@ -16,6 +16,7 @@
     inbox: "M3 13l3-8h12l3 8v6H3zM3 13h5l1.5 3h5l1.5-3h5",
     layers: "M12 3l9 5-9 5-9-5zM3 13l9 5 9-5",
     folder: "M3 6h6l2 2.5h10V19H3z",
+    search: "M11 4a7 7 0 1 0 0 14a7 7 0 1 0 0-14zM16.5 16.5L21 21",
     share: "M12 15V4M8 8l4-4 4 4M5 12v7h14v-7",
     external: "M14 4h6v6M20 4l-9 9M18 14v6H4V6h6",
     refresh: "M20 11A8 8 0 0 0 5.5 7M4 4v4h4M4 13a8 8 0 0 0 14.5 4M20 20v-4h-4",

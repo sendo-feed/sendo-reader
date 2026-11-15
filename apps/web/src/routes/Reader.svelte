@@ -35,7 +35,7 @@
     menuOpen = false;
   });
 
-  type ListKind = "unread" | "all" | "starred" | "feed" | "folder";
+  type ListKind = "unread" | "all" | "starred" | "feed" | "folder" | "search";
   interface Listing {
     kind: ListKind;
     query: ArticleQuery;
@@ -66,6 +66,14 @@
           title: "すべて",
           scope: { all: true },
           unread: reader.unread.total,
+        };
+      case "search":
+        return {
+          kind: "search",
+          query: { search: router.searchQuery, ...order },
+          title: "検索",
+          scope: null,
+          unread: null,
         };
       case "starred":
         return {
@@ -345,6 +353,7 @@
         chord = true;
         chordTimer = setTimeout(() => (chord = false), 1500);
       },
+      "/": () => go({ kind: "search" }),
       r: () => void reader.client.syncNow(),
       Escape: () => {
         if (menuOpen) menuOpen = false;
@@ -421,6 +430,8 @@
       kind={listing.kind}
       unread={listing.scope === null ? null : listing.unread}
       onmarkall={askMarkAll}
+      search={listing.kind === "search" ? router.searchQuery : null}
+      onsearch={(query) => router.setSearchQuery(query)}
       {options}
       onoption={(patch) => prefs.setViewOptions(viewKey, patch)}
       onmenu={openArticleMenu}

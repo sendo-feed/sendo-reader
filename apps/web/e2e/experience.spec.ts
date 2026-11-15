@@ -525,3 +525,58 @@ test("記事の画面から、リンクを共有し、文字の大きさを変�
     }
   }
 });
+
+test("手元の記事を探せる（オフラインでも）。探した結果は、通り過ぎても既読にしない", async ({
+  page,
+  context,
+}) => {
+  const server = new FakeSendo();
+  const feed = server.subscribe({ url: "https://blog.example/feed.xml", title: "Blog" });
+  const t = Date.now();
+  server.deliver(feed.id, { title: "SQLite を OPFS で使う", publishedAt: t - 1000 });
+  server.deliver(feed.id, {
+    title: "同期の設計",
+    summary: "カーソルと sqlite の話",
+    publishedAt: t - 2000,
+  });
+  server.deliver(feed.id, { title: "週末のまとめ", author: "山田 太郎", publishedAt: t - 3000 });
+  await routeFakeSendo(context, server);
+  await page.goto("/");
+  await signIn(page);
+  const list = page.locator(".article-list");
+  await expect(list.locator(".item")).toHaveCount(3);
+  await context.setOffline(true);
+
+  // / で検索の画面を開く。すぐ打てる
+  await page.keyboard.press("/");
+  await expect(page).toHaveURL(/\/search$/);
+  const input = list.getByRole("searchbox", { name: "記事を探す" });
+  await expect(input).toBeFocused();
+  await expect(list.getByText("手元の記事を探します。")).toBeVisible();
+
+  // タイトル・要約・著者から探す。空白で区切ると、すべての言葉が入っているものだけ
+  await input.fill("sqlite");
+  await expect(list.locator(".title")).toHaveText(["SQLite を OPFS で使う", "同期の設計"]);
+  await expect(page).toHaveURL(/\/search\?q=sqlite$/);
+  await input.fill("sqlite カーソル");
+  await expect(list.locator(".title")).toHaveText(["同期の設計"]);
+  await input.fill("山田");
+  await expect(list.locator(".title")).toHaveText(["週末のまとめ"]);
+  await input.fill("どこにもない言葉");
+  await expect(list.getByText("見つかりませんでした。")).toBeVisible();
+
+  // Enter で入力から抜けると、j で結果を開ける。開き直しても、探した言葉が残る
+  await input.fill("sqlite");
+  await expect(list.locator(".title")).toHaveCount(2);
+  await input.press("Enter");
+  await page.keyboard.press("j");
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText("SQLite を OPFS で使う");
+  await page.reload();
+  await expect(list.getByRole("searchbox", { name: "記事を探す" })).toHaveValue("sqlite");
+  await expect(list.locator(".title")).toHaveText(["SQLite を OPFS で使う", "同期の設計"]);
+
+  // 左のメニューからも開ける
+  await page.locator("nav").getByRole("link", { name: "未読" }).click();
+  await page.locator("nav").getByRole("link", { name: "検索" }).click();
+  await expect(list.getByRole("searchbox", { name: "記事を探す" })).toHaveValue("");
+});

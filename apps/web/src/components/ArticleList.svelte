@@ -16,6 +16,8 @@
     onmarkall,
     progress,
     onprogress,
+    search,
+    onsearch,
     options,
     onoption,
     onmenu,
@@ -25,7 +27,10 @@
     list: ArticleListState;
     title: string;
     /** 開いている一覧の種類。空のときの文と、出す操作を決める */
-    kind: "unread" | "all" | "starred" | "feed" | "folder";
+    kind: "unread" | "all" | "starred" | "feed" | "folder" | "search";
+    /** 検索の画面で探している言葉（検索でなければ null） */
+    search: string | null;
+    onsearch: (query: string) => void;
     /** この一覧の範囲にある未読の数（まとめて既読にできないなら null） */
     unread: number | null;
     onmarkall: () => void;
@@ -119,7 +124,8 @@
       // 下にあって見えていない行は、まだ通り過ぎていない
       if (rect.bottom > bounds.top) continue;
       const id = (entry.target as HTMLElement).dataset.article;
-      if (id !== undefined && prefs.value.markReadOnScroll) passed.add(id);
+      // 探した結果は、読み進める一覧ではないので、通り過ぎても既読にしない
+      if (id !== undefined && prefs.value.markReadOnScroll && kind !== "search") passed.add(id);
     }
     if (passed.size === 0) return;
     clearTimeout(flushTimer);
@@ -143,6 +149,27 @@
     passed.clear();
     scroller?.scrollTo({ top: 0 });
   });
+
+  /** 探す言葉を打つたびに探す。打っている途中で何度も探さないように、少し待つ */
+  let searchTimer: ReturnType<typeof setTimeout> | undefined;
+
+  function onSearchInput(event: Event & { currentTarget: HTMLInputElement }) {
+    const value = event.currentTarget.value;
+    clearTimeout(searchTimer);
+    searchTimer = setTimeout(() => onsearch(value), 200);
+  }
+
+  /** Enter か Esc で、入力から抜ける（そのあと j / k で結果を移れる。スマホではキーボードを閉じる） */
+  function onSearchKeydown(event: KeyboardEvent & { currentTarget: HTMLInputElement }) {
+    if (event.isComposing || (event.key !== "Enter" && event.key !== "Escape")) return;
+    event.preventDefault();
+    event.currentTarget.blur();
+  }
+
+  /** 検索の画面を開いたら、すぐ打てるようにする */
+  function focusOnOpen(node: HTMLInputElement) {
+    node.focus();
+  }
 
   /** 一覧の終わりが近づいたら、続きを読む */
   function autoload(node: HTMLElement) {
@@ -313,12 +340,27 @@
         <span class="gauge-count" aria-hidden="true">{compactCount(progress.remaining)}</span>
       </button>
     {/if}
-    <h2>
-      <span class="name">{title}</span>
-      {#if unread !== null && unread > 0}
-        <span class="count">{unread}</span>
-      {/if}
-    </h2>
+    {#if search !== null}
+      <input
+        class="search"
+        type="search"
+        enterkeyhint="search"
+        autocomplete="off"
+        placeholder="記事を探す"
+        aria-label="記事を探す"
+        value={search}
+        oninput={onSearchInput}
+        onkeydown={onSearchKeydown}
+        use:focusOnOpen
+      >
+    {:else}
+      <h2>
+        <span class="name">{title}</span>
+        {#if unread !== null && unread > 0}
+          <span class="count">{unread}</span>
+        {/if}
+      </h2>
+    {/if}
     {#if kind === "feed" || kind === "folder"}
       <button
         type="button"
@@ -370,7 +412,13 @@
     <button type="button" class="fresh" onclick={reload}>新しい記事 {list.fresh} 件を読む</button>
   {/if}
 
-  {#if list.loading && list.articles.length === 0}
+  {#if search !== null && search.trim() === ""}
+    <div class="empty">
+      <Icon name="search" />
+      <p>タイトル・要約・著者から、手元の記事を探します。</p>
+      <p class="hint">空白で区切ると、すべての言葉が入っている記事だけを出します。</p>
+    </div>
+  {:else if list.loading && list.articles.length === 0}
     <div class="skeleton" aria-hidden="true">
       {#each [0, 1, 2, 3, 4, 5] as n (n)}
         <div></div>
@@ -386,6 +434,9 @@
       {:else if kind === "unread" || ((kind === "feed" || kind === "folder") && options.unreadOnly)}
         <Icon name="check" />
         <p>すべて読み終えました。</p>
+      {:else if kind === "search"}
+        <Icon name="search" />
+        <p>見つかりませんでした。</p>
       {:else if kind === "starred"}
         <Icon name="star" />
         <p>スターを付けた記事が、ここに並びます。</p>
@@ -545,6 +596,20 @@
     h2 .count {
       display: none;
     }
+  }
+
+  .search {
+    flex: 1;
+    min-width: 0;
+    margin-right: 0.25rem;
+    padding: 0.4rem 0.75rem;
+    border-radius: 999px;
+    background: var(--surface);
+  }
+
+  .empty .hint {
+    font-size: 0.8125rem;
+    color: var(--faint);
   }
 
   h2 {
