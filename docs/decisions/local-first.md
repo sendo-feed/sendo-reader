@@ -1,7 +1,7 @@
 # ローカルファースト
 
 - 状態：提案中
-- 関連：[UI とツール](ui.md)、[アカウントの画面](account.md)、sendo の[差分同期](https://github.com/sendo-feed/sendo/blob/main/docs/decisions/sync.md)・[ユーザーと認証](https://github.com/sendo-feed/sendo/blob/main/docs/decisions/accounts.md)・[古い記事の片付け](https://github.com/sendo-feed/sendo/blob/main/docs/decisions/retention.md)、[技術構成](https://github.com/sendo-feed/sendo/blob/main/docs/tech-deck.md)（方針 03・06）
+- 関連：[UI とツール](ui.md)、[アカウントの画面](account.md)、[画像](images.md)、sendo の[差分同期](https://github.com/sendo-feed/sendo/blob/main/docs/decisions/sync.md)・[ユーザーと認証](https://github.com/sendo-feed/sendo/blob/main/docs/decisions/accounts.md)・[古い記事の片付け](https://github.com/sendo-feed/sendo/blob/main/docs/decisions/retention.md)、[技術構成](https://github.com/sendo-feed/sendo/blob/main/docs/tech-deck.md)（方針 03・06）
 
 ## 決定
 
@@ -39,12 +39,13 @@
 - **CSP を厳しくする。** 本番（Workers Static Assets）と、手元の Vite の dev サーバー・preview で、画面のすべての応答に付ける。
   - `default-src 'none'`、`script-src 'self' 'wasm-unsafe-eval'`（wasm のため）、`worker-src 'self'`、`connect-src 'self'`、`img-src 'self' data:`、`style-src 'self'`、`manifest-src 'self'`、`base-uri 'none'`、`form-action 'none'`、`frame-ancestors 'none'`、`object-src 'none'`
   - インラインのスクリプトと `eval` を許さない。ほかのオリジンへの通信を許さないので、手元のデータを `fetch` で外に送れない
-  - 記事の画像を出すときなど、緩める必要が出たら、そのときに範囲を決めてこのファイルを直す
+  - 記事のサムネイルやフィードのアイコンのために、`img-src` は緩めない。画像は sendo が中継し、同じオリジン（`/api/v1/images`）から読む（[画像](images.md)）
+  - ほかに緩める必要が出たら、そのときに範囲を決めてこのファイルを直す
   - 手元の dev サーバーだけは、2 つ緩める。Vite が開発中の CSS を `<style>` で差し込むので `style-src` に `'unsafe-inline'` を足し、Vite のエラーの表示が `innerHTML` を使うので Trusted Types を強制しない。それ以外（ほかのオリジンへの通信、インラインのスクリプト、`eval` を許さない）は本番と同じにする。本番と同じヘッダーは、本番のビルドを `vite preview` と Playwright で開いて確かめる
 - **Trusted Types を強制する**（`require-trusted-types-for 'script'`）。許すポリシーは、Svelte が作るもの（`svelte-trusted-html`）と、ワーカーの URL を自分のオリジンに限るものだけにする。対応していないブラウザでは効かないので、ほかの対策と重ねる。
 - **記事のデータを HTML として出さない。** `{@html}` を使わず、URL は http ／ https を確かめてから `href` に入れる（[UI とツール](ui.md)の守る規約）。
-- **秘密を外に出さない。** sendo が返す秘密（発行したアクセストークンなど）は、画面に一度出すだけにし、手元の DB、ログ、エラーの表示、URL、Service Worker のキャッシュに入れない。
-- **ログアウトで消す。** ログアウトしたら、手元の DB をまとめて消す（決定の 6）。
+- **秘密を外に出さない。** sendo が返す秘密（発行したアクセストークンなど）は、画面に一度出すだけにし、手元の DB、ログ、エラーの表示、URL、Service Worker のキャッシュに入れない。画像の URL に付く署名は、秘密ではない（ログインしていないと画像は取れず、sendo がフィードの中で見た URL かを示すだけ）。
+- **ログアウトで消す。** ログアウトしたら、手元の DB と、画像のキャッシュ（[画像](images.md)の 4）をまとめて消す（決定の 6）。ユーザーが替わって手元の DB を消すときも、同じく消す。
 
 ## 理由
 
