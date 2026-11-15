@@ -126,14 +126,23 @@ describe("同期の予定", () => {
     expect(syncCalls(server.requests)).toBe(2);
   });
 
-  test("ログインしていなければ同期せず、その様子を知らせる", async () => {
+  test("ログインしていなければ同期せず（ログアウトだけを送り）、その様子を知らせる", async () => {
     const { core, server, scheduler, statuses } = await scheduled();
     await core.signOut();
     server.requests.length = 0;
     scheduler.requestNow();
     await vi.advanceTimersByTimeAsync(0);
-    expect(server.requests).toEqual([]);
-    expect(statuses.at(-1)).toMatchObject({ signedIn: false, syncing: false });
+    expect(server.requests).toEqual(["POST /auth/logout"]);
+    expect(statuses.at(-1)).toMatchObject({
+      signedIn: false,
+      syncing: false,
+      logoutPending: false,
+    });
+
+    // 送り終えたら、もう何も送らない
+    scheduler.requestNow();
+    await vi.advanceTimersByTimeAsync(PERIODIC_SYNC_MS * 2);
+    expect(server.requests).toEqual(["POST /auth/logout"]);
   });
 
   test("送っていない操作を残してログアウトしたら、その数も 0 に戻す", async () => {
@@ -153,17 +162,21 @@ describe("同期の予定", () => {
     expect(scheduler.status.pending).toBe(0);
   });
 
-  test("ログアウトを sendo に送れなかったら、次に同期を頼まれたときに送り直す", async () => {
+  test("ログアウトを sendo に送れなかったら、間隔を延ばしながら送り直す", async () => {
     const { server, core, scheduler, statuses } = await scheduled();
-    server.failNext("network");
-    expect(await core.signOut()).toBe(false);
-    expect(server.sessions.size).toBe(1);
-
-    // オンラインに戻った
+    await core.signOut();
+    // sendo が少しの間、答えない（ブラウザはオンラインのまま）
+    server.failNext(503, 503);
     scheduler.requestNow();
     await vi.advanceTimersByTimeAsync(0);
+    expect(statuses.at(-1)).toMatchObject({ signedIn: false, user: null, logoutPending: true });
+    expect(server.sessions.size).toBe(1);
+
+    await vi.advanceTimersByTimeAsync(RETRY_DELAYS_MS[0]);
+    expect(server.sessions.size).toBe(1);
+    await vi.advanceTimersByTimeAsync(RETRY_DELAYS_MS[1]);
     expect(server.sessions.size).toBe(0);
-    expect(statuses.at(-1)).toMatchObject({ signedIn: false, user: null });
+    expect(statuses.at(-1)).toMatchObject({ logoutPending: false });
   });
 
   test("ユーザーも知らせる", async () => {

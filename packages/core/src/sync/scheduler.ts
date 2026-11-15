@@ -14,6 +14,8 @@ export interface SyncStatus {
   error: ApiErrorKind | null;
   /** まだ sendo に送り終えていない操作の数 */
   pending: number;
+  /** ログアウトを sendo に送れていない（送り直している） */
+  logoutPending: boolean;
 }
 
 export interface SchedulerOptions {
@@ -38,7 +40,8 @@ export const RETRY_DELAYS_MS = [5_000, 15_000, 60_000, PERIODIC_SYNC_MS] as cons
  * - 何もなくても、一定の間隔で同期する
  * - 届かなかったら、間隔を延ばしながらやり直す。オンラインに戻ったら、すぐ試す
  * - セッションが切れたら止め、ログインし直すまで待つ
- * - ログインしていなければ、送れていないログアウトだけを送る
+ * - ログインしていなければ、送れていないログアウトだけを送る。届かなければ、間隔を延ばしながら
+ *   送り直す
  */
 export class SyncScheduler {
   readonly #core: ReaderCore;
@@ -70,6 +73,7 @@ export class SyncScheduler {
       lastSyncedAt: null,
       error: null,
       pending: 0,
+      logoutPending: false,
     };
   }
 
@@ -145,13 +149,20 @@ export class SyncScheduler {
   async #runOnce(): Promise<void> {
     if (!this.#core.isSignedIn()) {
       this.#update({ signedIn: false, user: null, syncing: false, error: null });
-      // ログアウトを sendo に送れていなければ、送り直す（オンラインに戻ったときなど）
-      await this.#core.sendPendingSignOut();
+      // ログアウトを sendo に送れていなければ送る。届かなければ、間隔を延ばしながら送り直す
+      // （docs/decisions/local-first.md の 6。オンラインに戻ったときは、すぐ試す）
+      const sent = await this.#core.sendPendingSignOut();
+      this.#update({ logoutPending: !sent });
+      if (sent) {
+        this.#failures = 0;
+      } else {
+        this.#retryLater();
+      }
       // ログアウトで消えた操作の数も、画面から消す
       await this.#refreshPending();
       return;
     }
-    this.#update({ signedIn: true, syncing: true });
+    this.#update({ signedIn: true, syncing: true, logoutPending: false });
     try {
       await this.#core.sync();
       this.#failures = 0;
@@ -165,13 +176,18 @@ export class SyncScheduler {
         this.#cancelTimer();
       } else {
         if (kind === null) console.error("同期で予期しない失敗", error);
-        const delay = RETRY_DELAYS_MS[Math.min(this.#failures, RETRY_DELAYS_MS.length - 1)];
-        this.#failures += 1;
-        this.#schedule(delay ?? PERIODIC_SYNC_MS);
+        this.#retryLater();
       }
     } finally {
       await this.#refreshPending();
     }
+  }
+
+  /** 失敗が続くほど間隔を延ばして、やり直しを予定する */
+  #retryLater(): void {
+    const delay = RETRY_DELAYS_MS[Math.min(this.#failures, RETRY_DELAYS_MS.length - 1)];
+    this.#failures += 1;
+    this.#schedule(delay ?? PERIODIC_SYNC_MS);
   }
 
   async #refreshPending(): Promise<void> {

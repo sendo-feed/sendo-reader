@@ -38,10 +38,10 @@
       sendo に届きません。オンラインになってから、ログインしてください。
     </p>
   {/if}
-  {#if reader.signOutPending}
+  {#if reader.status?.logoutPending === true}
     <p class="note" role="status">
-      sendo に届かなかったので、この端末のデータだけを消しました。sendo
-      のログアウトは、次につながったときに送ります。
+      この端末のデータは消しました。sendo に届かないので、sendo
+      のログアウトは、つながったときに送ります。
     </p>
   {/if}
   {#if message !== null || reader.loginError !== null}

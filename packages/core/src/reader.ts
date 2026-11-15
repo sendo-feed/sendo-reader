@@ -168,11 +168,11 @@ export class ReaderCore {
 
   /**
    * 手元のデータ（同期で届いた行、まだ送っていない操作、ログインしたユーザー）をまとめて消し、
-   * sendo にログアウトを送る。送っている途中の同期は待たずに中断する（通信が止まっていても、
-   * 手元はすぐに消える）。sendo に届かなくても手元は消し、届くようになったら送り直す
-   * （sendPendingSignOut）。sendo のセッションを消せたら true。
+   * sendo にログアウトを送る印を置く。ネットワークを待たない（送っている途中の同期も、待たずに
+   * 中断する）。sendo へは sendPendingSignOut で送る（Web では、スケジューラーがすぐに送り、
+   * 届かなければ送り直す）。送り終えるまでは、残ったクッキーで自動ではログインしない。
    */
-  async signOut(): Promise<boolean> {
+  async signOut(): Promise<void> {
     this.#beginSession();
     this.#user = null;
     await this.#db.transaction(async (tx) => {
@@ -181,12 +181,11 @@ export class ReaderCore {
       this.#user = null;
     });
     this.#emit(ALL_TABLES);
-    return this.sendPendingSignOut();
   }
 
   /**
-   * 送れていないログアウトがあれば、sendo に送る（オンラインに戻ったときなど）。送れたか、
-   * 送るものがなければ true。届かなければ false（印は残し、あとで送り直す）。
+   * 送れていないログアウトがあれば、sendo に送る。送れたか、送るものがなければ true。
+   * 届かなければ false（印は残し、あとで送り直す）。
    */
   async sendPendingSignOut(): Promise<boolean> {
     const signal = this.#session.signal;

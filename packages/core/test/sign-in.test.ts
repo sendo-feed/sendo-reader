@@ -53,20 +53,38 @@ describe("ログイン（sendo のセッション）", () => {
 
     const changes: string[][] = [];
     core.onChange((tables) => changes.push([...tables].sort()));
-    expect(await core.signOut()).toBe(true);
+    server.requests.length = 0;
+    await core.signOut();
+    // 手元はネットワークを待たずに消え、sendo へ送る印だけが残る
+    expect(server.requests).toEqual([]);
     expect(core.isSignedIn()).toBe(false);
     expect(core.currentUser()).toBeNull();
     expect(await core.listArticles()).toEqual([]);
     expect(await core.listFeeds()).toEqual([]);
-    expect(await db.all("select key from settings")).toEqual([]);
-    expect(server.sessions.size).toBe(0);
+    expect(await db.all("select key from settings")).toEqual([{ key: "auth.logoutPending" }]);
     expect(changes).toEqual([["articles", "feeds", "folders"]]);
+
+    expect(await core.sendPendingSignOut()).toBe(true);
+    expect(server.requests).toEqual(["POST /auth/logout"]);
+    expect(server.sessions.size).toBe(0);
+    expect(await db.all("select key from settings")).toEqual([]);
+    // 送るものがなければ、何も送らない
+    expect(await core.sendPendingSignOut()).toBe(true);
+    expect(server.requests).toEqual(["POST /auth/logout"]);
+  });
+
+  test("ログアウトは、sendo からの答えが止まっていても待たない", async () => {
+    const { server, core } = await setup();
+    server.failNext("hang");
+    await core.signOut();
+    expect(core.isSignedIn()).toBe(false);
   });
 
   test("ログアウトが sendo に届かなくても手元は消し、残ったクッキーでは自動でログインしない", async () => {
     const { server, core, db } = await setup();
+    await core.signOut();
     server.failNext("network");
-    expect(await core.signOut()).toBe(false);
+    expect(await core.sendPendingSignOut()).toBe(false);
     expect(core.isSignedIn()).toBe(false);
     expect(await db.all("select key from settings")).toEqual([{ key: "auth.logoutPending" }]);
 
@@ -85,14 +103,14 @@ describe("ログイン（sendo のセッション）", () => {
 
   test("ログアウトを送れないうちは、ログインに進ませない", async () => {
     const { server, core, db } = await setup();
-    server.failNext("network", "network");
     await core.signOut();
+    server.failNext("network");
     const error = await core.prepareSignIn().catch((e: unknown) => e);
     expect((error as ApiError).kind).toBe("network");
     expect(await db.all("select key from settings")).toEqual([{ key: "auth.logoutPending" }]);
   });
 
-  test("ログアウトを送れていなければ、prepareSignIn は何も送らない", async () => {
+  test("送れていないログアウトがなければ、prepareSignIn は何も送らない", async () => {
     const { server, core } = await setup({ signIn: false });
     await core.prepareSignIn();
     expect(server.requests).toEqual([]);
@@ -213,7 +231,7 @@ describe("ログアウトと中断", () => {
     expect((error as ApiError).kind).toBe("network");
     expect(core.isSignedIn()).toBe(false);
     expect(await core.listFeeds()).toEqual([]);
-    expect(await db.all("select key from settings")).toEqual([]);
+    expect(await db.all("select key from settings")).toEqual([{ key: "auth.logoutPending" }]);
   });
 
   test("ログアウトの前に届いていたページも、ログアウトのあとには書き戻さない", async () => {
@@ -283,6 +301,8 @@ describe("ログアウトと中断", () => {
     expect((error as ApiError).kind).toBe("network");
     expect(server.cancelledBodies).toBe(1);
 
+    // ログインの操作をして（先にログアウトを送る）、Google から戻ってきた
+    await core.prepareSignIn();
     server.signInAs();
     expect(await core.restoreSession()).toBe(true);
     const feed = server.subscribe({ url: "https://example.com/feed.xml" });
@@ -301,7 +321,7 @@ describe("ログインとログアウトが重なったとき", () => {
     };
     expect(await core.restoreSession()).toBe(false);
     expect(core.isSignedIn()).toBe(false);
-    expect(await db.all("select key from settings")).toEqual([]);
+    expect(await db.all("select key from settings")).toEqual([{ key: "auth.logoutPending" }]);
   });
 
   test("確かめている間にログアウトして答えが止まっていても、ログインは中断される", async () => {

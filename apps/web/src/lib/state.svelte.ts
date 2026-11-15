@@ -22,8 +22,6 @@ export class ReaderState {
   offline = $state(false);
   /** sendo がログインに失敗して戻した理由（画面に出す文） */
   loginError = $state<string | null>(null);
-  /** ログアウトを sendo に送れず、この端末のデータだけを消した */
-  signOutPending = $state(false);
   status = $state<SyncStatus | null>(null);
   folders = $state<Folder[]>([]);
   feeds = $state<Feed[]>([]);
@@ -73,9 +71,9 @@ export class ReaderState {
     }
   }
 
-  /** ログアウトする。sendo に届かなくても、この端末のデータは消える */
+  /** ログアウトする。この端末のデータをすぐ消し、sendo へは裏で送る（ネットワークを待たない） */
   async signOut(): Promise<void> {
-    this.signOutPending = !(await this.client.signOut());
+    await this.client.signOut();
     this.signedIn = false;
     this.user = null;
     this.loginError = null;
