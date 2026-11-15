@@ -137,11 +137,16 @@
 
   // 条件が変わったときだけ読み直す（記事を開いたり閉じたりしただけでは読み直さない。
   // query は URL が変わるたびに作り直されるので、中身を文字列にして比べる）
-  const queryKey = $derived(listing === null ? null : JSON.stringify(listing.query));
+  // 探す言葉が空の検索では、何も読まない（"null" を鍵にして、何も出さない一覧にする）
+  const queryKey = $derived.by(() => {
+    if (listing === null) return null;
+    const blank = listing.kind === "search" && router.searchQuery.trim() === "";
+    return JSON.stringify(blank ? null : listing.query);
+  });
   $effect(() => {
     const key = queryKey;
     untrack(() => {
-      if (key !== null) void list.show(JSON.parse(key) as ArticleQuery);
+      if (key !== null) void list.show(JSON.parse(key) as ArticleQuery | null);
     });
   });
 

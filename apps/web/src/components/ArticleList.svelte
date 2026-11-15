@@ -159,6 +159,13 @@
     searchTimer = setTimeout(() => onsearch(value), 200);
   }
 
+  // 検索の画面を離れたら（別の一覧に替えた、購読の管理へ移った）、待っている検索を捨てる。
+  // 残しておくと、移った先から検索の画面に引き戻してしまう
+  $effect(() => {
+    if (search === null) clearTimeout(searchTimer);
+    return () => clearTimeout(searchTimer);
+  });
+
   /** Enter か Esc で、入力から抜ける（そのあと j / k で結果を移れる。スマホではキーボードを閉じる） */
   function onSearchKeydown(event: KeyboardEvent & { currentTarget: HTMLInputElement }) {
     if (event.isComposing || (event.key !== "Enter" && event.key !== "Escape")) return;

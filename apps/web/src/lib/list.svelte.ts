@@ -38,6 +38,8 @@ export class ArticleListState {
 
   readonly #client: ReaderClient;
   #query: ArticleQuery = {};
+  /** 何も出さない一覧にしている（show に null を渡した） */
+  #empty = false;
   /**
    * 読み出しの世代。条件を変えて読み直すたびに増やし、それより前に始めた読み出し（前の条件の
    * 一覧を元にした読み直しなど）の結果は当てない
@@ -66,9 +68,13 @@ export class ArticleListState {
     this.done = this.#readHere.size;
   }
 
-  /** 条件を替えて、最初から読む */
-  show(query: ArticleQuery): Promise<void> {
-    this.#query = query;
+  /**
+   * 条件を替えて、最初から読む。null なら、何も出さない一覧にする（探す言葉が空の検索）。
+   * 画面に出していない記事を、キーボードの操作の相手にしない
+   */
+  show(query: ArticleQuery | null): Promise<void> {
+    this.#empty = query === null;
+    this.#query = query ?? {};
     this.opened += 1;
     this.cursorId = null;
     this.#seenUnread.clear();
@@ -79,6 +85,13 @@ export class ArticleListState {
 
   async load(): Promise<void> {
     const current = ++this.#generation;
+    if (this.#empty) {
+      this.#articles = [];
+      this.hasMore = false;
+      this.fresh = 0;
+      this.loading = false;
+      return;
+    }
     this.loading = true;
     const page = await this.#client.listArticles({ ...this.#query, limit: PAGE });
     if (current !== this.#generation) return;
@@ -113,6 +126,7 @@ export class ArticleListState {
    * 未読の一覧から消さない）。新しく届いた記事は数だけ出し、押したら読み直す。
    */
   async refresh(): Promise<void> {
+    if (this.#empty) return;
     if (this.articles.length === 0) {
       await this.load();
       return;
