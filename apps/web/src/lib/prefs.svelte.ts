@@ -71,8 +71,8 @@ const DEFAULTS: PrefsValue = {
   hideReadFeeds: false,
   collapsed: [],
   views: {},
-  // 記事を右へスワイプすると、一覧に戻る。一覧の行は、左でスター、右で既読・未読
-  swipes: { listLeft: "star", listRight: "read", articleLeft: "none", articleRight: "back" },
+  // 記事を右へスワイプすると、一覧に戻る。一覧の行は、右でスター、左で既読・未読（Feedly と同じ）
+  swipes: { listLeft: "read", listRight: "star", articleLeft: "none", articleRight: "back" },
 };
 
 function oneOf<T extends string>(value: unknown, allowed: readonly T[], fallback: T): T {

@@ -175,7 +175,7 @@ test("狭い画面では、メニューを左から開き、一覧と記事を�
   await expect(nav).toBeHidden();
   await expect(page).toHaveURL(/\/all$/);
 
-  // 行を左へはじくとスター、右へはじくと既読（縦に動かしたときは、何もしない）
+  // 行を右へスワイプするとスター、左へスワイプすると既読・未読（縦に動かしたときは、何もしない）
   const flick = (title: string, dx: number, dy: number) =>
     list.locator(".row", { hasText: title }).evaluate(
       (row, { dx, dy }) => {
@@ -200,10 +200,10 @@ test("狭い画面では、メニューを左から開き、一覧と記事を�
   const row = list.locator(".row", { hasText: "1 番目" });
   await flick("1 番目", -20, -120);
   await expect(row).toHaveClass(/unread/);
-  await flick("1 番目", -120, 5);
+  await flick("1 番目", 120, 5);
   await expect(row.getByRole("button", { name: "スターを外す" })).toBeAttached();
   await expect(row).toHaveClass(/unread/);
-  await flick("1 番目", 120, 5);
+  await flick("1 番目", -120, 5);
   await expect(row).not.toHaveClass(/unread/);
   await expect(page).not.toHaveURL(/article=/);
 
@@ -258,6 +258,7 @@ test("狭い画面では、メニューを左から開き、一覧と記事を�
   await expect(tabs).toBeVisible();
 
   // 設定で、記事を左へスワイプしたら次の記事、一覧の行を左へスワイプしても何もしない、に変える
+  // （既定では、一覧の行を左へスワイプすると既読・未読が替わる）
   await page.getByRole("button", { name: "メニュー", exact: true }).click();
   await nav.getByRole("link", { name: "設定" }).click();
   await page.getByLabel("記事を左へ").selectOption({ label: "次の記事" });
@@ -268,7 +269,7 @@ test("狭い画面では、メニューを左から開き、一覧と記事を�
   await expect(list.locator(".title")).toHaveText(["1 番目"]);
   await flick("1 番目", -120, 5);
   await page.waitForTimeout(300);
-  await expect(list.locator(".title")).toHaveText(["1 番目"]);
+  await expect(row).not.toHaveClass(/unread/);
   await expect(row.getByRole("button", { name: "スターを外す" })).toBeAttached();
   await page.getByRole("button", { name: "メニュー", exact: true }).click();
   await nav.getByRole("link", { name: "すべて" }).click();
