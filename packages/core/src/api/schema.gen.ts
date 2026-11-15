@@ -4,6 +4,187 @@
  */
 
 export interface paths {
+    "/auth/{provider}/login": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 提供元でログインする（ブラウザで開く）
+         * @description ブラウザをこの URL に移すと、提供元のログインの画面へ送る。ログインできたら、セッションのクッキーを置いて returnTo に戻る。
+         */
+        get: {
+            parameters: {
+                query?: {
+                    /** @description ログインのあとに戻るパス（同じオリジンの / で始まるもの）。既定は / */
+                    returnTo?: string;
+                };
+                header?: never;
+                path: {
+                    provider: "google";
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description 提供元のログインの画面へ */
+                302: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description その提供元のログインを設定していない */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/auth/{provider}/callback": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 提供元から戻る先（提供元に登録するリダイレクト先）
+         * @description ログインできたら、セッションのクッキーを置いて、始めたときの returnTo に戻る。できなければ /?login_error=<理由> に戻る。理由：invalid_request（始めたブラウザと違う、時間がたったなど）、access_denied（提供元の画面でやめた）、provider_error（提供元とのやり取りに失敗した）、invalid_id_token（提供元の ID トークンが正しくない）、email_not_verified（提供元がメールを確認済みとしていない）、not_allowed（許可したメールではない）
+         */
+        get: {
+            parameters: {
+                query?: {
+                    code?: string;
+                    state?: string;
+                    error?: string;
+                };
+                header?: never;
+                path: {
+                    provider: "google";
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description returnTo か、/?login_error=<理由> へ */
+                302: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/auth/logout": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * ログアウトする（セッションを消す）
+         * @description セッションがなくても 204 を返す。
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description ログアウトした */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description ほかのオリジンから送られた */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/me": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 認証しているユーザー
+         * @description ブラウザでは、ログインしているかを確かめるのに使う（していなければ 401）。
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description ユーザー */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            user: components["schemas"]["User"];
+                        };
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/feeds": {
         parameters: {
             query?: never;
@@ -807,10 +988,438 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/tokens": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * アクセストークンの一覧
+         * @description 中身（sendo_ で始まる文字列）は、発行したときにしか返さない。
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description トークン（新しい順） */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            items: components["schemas"]["AccessToken"][];
+                        };
+                    };
+                };
+                /** @description ブラウザのセッションではない（アクセストークンでは使えない） */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        /**
+         * アクセストークンを発行する
+         * @description リーダーアプリ（Reeder、NetNewsWire など）のパスワード欄や、エージェント・スクリプトの Authorization: Bearer に使う。
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["AccessTokenRequest"];
+                };
+            };
+            responses: {
+                /** @description 発行した */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /**
+                             * @description トークンの中身。この応答でしか返さないので、利用者に控えてもらう
+                             * @example sendo_...
+                             */
+                            token: string;
+                            accessToken: components["schemas"]["AccessToken"];
+                        };
+                    };
+                };
+                /** @description 名前が空か長すぎる、reader に範囲を付けた */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description ブラウザのセッションではない（アクセストークンでは使えない） */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/tokens/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** アクセストークンを取り消す */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description 取り消した（そのトークンはすぐに使えなくなる） */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description ブラウザのセッションではない（アクセストークンでは使えない） */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description トークンがない */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/oauth/authorize/check": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 認可のリクエストを確かめる
+         * @description 許可の画面を出す前に呼ぶ。クライアントの名前、戻る先、求められた範囲を返す。誤りなら、redirectTo があればそこへ移り、なければ画面に誤りを出す。
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        /**
+                         * @description 許可の画面の URL のクエリ文字列（location.search をそのまま。client_id、redirect_uri、state など）
+                         * @example ?response_type=code&client_id=https%3A%2F%2Fclient.example.com%2Fclient.json&...
+                         */
+                        query: string;
+                    };
+                };
+            };
+            responses: {
+                /** @description 正しいリクエスト。許可の画面を出す */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["OAuthAuthorizationRequest"];
+                    };
+                };
+                /** @description 認可のリクエストが正しくない */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["OAuthAuthorizationError"];
+                    };
+                };
+                /** @description ブラウザのセッションではない（アクセストークンでは使えない） */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description OAuth を使う設定（PUBLIC_URL と READER_URL）がない */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/oauth/authorize/decide": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 許可か拒否を送る
+         * @description 利用者が選んだ結果を送る。返した redirectTo（許可なら認可コード、拒否なら access_denied と、state と iss を付けたもの）へブラウザを移す。
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        /**
+                         * @description 許可の画面の URL のクエリ文字列（location.search をそのまま。client_id、redirect_uri、state など）
+                         * @example ?response_type=code&client_id=https%3A%2F%2Fclient.example.com%2Fclient.json&...
+                         */
+                        query: string;
+                        /** @description 許可なら true、拒否なら false */
+                        approved: boolean;
+                    };
+                };
+            };
+            responses: {
+                /** @description クライアントへ戻る先 */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            redirectTo: string;
+                        };
+                    };
+                };
+                /** @description 認可のリクエストが正しくない */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["OAuthAuthorizationError"];
+                    };
+                };
+                /** @description ブラウザのセッションではない（アクセストークンでは使えない） */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description OAuth を使う設定（PUBLIC_URL と READER_URL）がない */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/oauth/grants": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * OAuth で出した許可の一覧
+         * @description まだ使える許可（新しい順）。
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description 許可 */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            items: components["schemas"]["OAuthGrant"][];
+                        };
+                    };
+                };
+                /** @description ブラウザのセッションではない（アクセストークンでは使えない） */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/oauth/grants/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** OAuth で出した許可を取り消す */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description 取り消した（その許可のトークンは、すぐに使えなくなる） */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description ブラウザのセッションではない（アクセストークンでは使えない） */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description 許可がない */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        Error: {
+            error: {
+                /** @example invalid_request */
+                code: string;
+                message: string;
+            };
+        };
+        User: {
+            id: string;
+            /** @example you@example.com */
+            email: string;
+        };
         Feed: {
             id: string;
             /** @example https://example.com/feed.xml */
@@ -829,13 +1438,6 @@ export interface components {
              * @description 購読した時刻
              */
             createdAt: string;
-        };
-        Error: {
-            error: {
-                /** @example invalid_request */
-                code: string;
-                message: string;
-            };
         };
         SubscribeRequest: {
             /**
@@ -973,6 +1575,91 @@ export interface components {
              * @enum {boolean}
              */
             deleted: true;
+        };
+        AccessToken: {
+            id: string;
+            /** @example Reeder */
+            name: string;
+            /** Format: date-time */
+            createdAt: string;
+            /**
+             * Format: date-time
+             * @description 最後に使った時刻（1 時間ごとにしか更新しない）。使っていなければ null
+             */
+            lastUsedAt: string | null;
+            /**
+             * @description 用途。reader はリーダーアプリ（Google Reader API）と REST API 用、mcp は /mcp（MCP サーバー）用。用途の違う入口では使えない
+             * @enum {string}
+             */
+            purpose: "reader" | "mcp";
+            /** @description mcp の範囲。read は読むだけ、write は購読や既読などの変更も。reader は空 */
+            scopes: ("read" | "write")[];
+        };
+        AccessTokenRequest: {
+            /**
+             * @description 用途の名前（前後の空白を除いて 1〜100 文字）
+             * @example Reeder
+             */
+            name: string;
+            /**
+             * @description 用途。既定は reader（リーダーアプリと REST API 用）。mcp なら /mcp でだけ使える
+             * @enum {string}
+             */
+            purpose?: "reader" | "mcp";
+            /** @description mcp の範囲。既定は read（読むだけ）。write を含めると、購読や既読などの変更もできる（read も付く）。reader には付けられない */
+            scopes?: ("read" | "write")[];
+        };
+        OAuthAuthorizationRequest: {
+            client: {
+                /** @description client_id */
+                id: string;
+                /** @description クライアントの名前。kind が registered なら、クライアントが名乗っただけで確かめていない */
+                name: string | null;
+                /**
+                 * @description metadata_document は、client_id の URL（host）から情報を取ったもの。registered は動的登録したもの
+                 * @enum {string}
+                 */
+                kind: "metadata_document" | "registered";
+                /** @description client_id の URL のホスト（metadata_document のとき）。なりすましを見分けられるよう、画面に出す */
+                host: string | null;
+            };
+            /** @description 許可したあとに戻る先 */
+            redirectUri: string;
+            /** @description 戻る先のホスト。画面に必ず出す */
+            redirectHost: string;
+            /** @description 戻る先が手元（localhost など）か。ほかのアプリでも受けられるので、画面で注意を出す */
+            loopbackRedirect: boolean;
+            /** @description 範囲。read は読むだけ、write は購読や既読などの変更も */
+            scopes: ("read" | "write")[];
+        };
+        OAuthAuthorizationError: {
+            error: {
+                /** @example invalid_client */
+                code: string;
+                message: string;
+            };
+            /** @description あれば、誤りをクライアントに返すリダイレクト先。そこへブラウザを移す。なければ、画面に誤りを出す */
+            redirectTo?: string;
+        };
+        OAuthGrant: {
+            id: string;
+            clientId: string;
+            /** @description 許可したときのクライアントの名前 */
+            clientName: string | null;
+            /** @enum {string} */
+            clientKind: "metadata_document" | "registered";
+            /** @description 範囲。read は読むだけ、write は購読や既読などの変更も */
+            scopes: ("read" | "write")[];
+            /**
+             * Format: date-time
+             * @description 許可した時刻
+             */
+            createdAt: string;
+            /**
+             * Format: date-time
+             * @description 最後にトークンを出した時刻。アクセストークンは 1 時間なので、使っていてもおよそ 1 時間ごとにしか変わらない。まだなら null
+             */
+            lastUsedAt: string | null;
         };
     };
     responses: never;

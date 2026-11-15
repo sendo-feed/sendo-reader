@@ -12,16 +12,66 @@
   "security": [
     {
       "bearerAuth": []
+    },
+    {
+      "sessionCookie": []
     }
   ],
   "components": {
     "securitySchemes": {
       "bearerAuth": {
         "type": "http",
-        "scheme": "bearer"
+        "scheme": "bearer",
+        "description": "アクセストークン（sendo_ で始まる）"
+      },
+      "sessionCookie": {
+        "type": "apiKey",
+        "in": "cookie",
+        "name": "__Host-sendo_session",
+        "description": "ブラウザのセッション（/auth/{provider}/login でログインすると置かれる）。状態を変えるリクエストは、同じオリジンのページからだけ受ける"
       }
     },
     "schemas": {
+      "Error": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string",
+                "example": "invalid_request"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "code",
+              "message"
+            ]
+          }
+        },
+        "required": [
+          "error"
+        ]
+      },
+      "User": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "email": {
+            "type": "string",
+            "example": "you@example.com"
+          }
+        },
+        "required": [
+          "id",
+          "email"
+        ]
+      },
       "Feed": {
         "type": "object",
         "properties": {
@@ -88,30 +138,6 @@
           "errorCount",
           "lastError",
           "createdAt"
-        ]
-      },
-      "Error": {
-        "type": "object",
-        "properties": {
-          "error": {
-            "type": "object",
-            "properties": {
-              "code": {
-                "type": "string",
-                "example": "invalid_request"
-              },
-              "message": {
-                "type": "string"
-              }
-            },
-            "required": [
-              "code",
-              "message"
-            ]
-          }
-        },
-        "required": [
-          "error"
         ]
       },
       "SubscribeRequest": {
@@ -569,11 +595,401 @@
           "id",
           "deleted"
         ]
+      },
+      "AccessToken": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string",
+            "example": "Reeder"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "lastUsedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "最後に使った時刻（1 時間ごとにしか更新しない）。使っていなければ null"
+          },
+          "purpose": {
+            "type": "string",
+            "enum": [
+              "reader",
+              "mcp"
+            ],
+            "description": "用途。reader はリーダーアプリ（Google Reader API）と REST API 用、mcp は /mcp（MCP サーバー）用。用途の違う入口では使えない"
+          },
+          "scopes": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "read",
+                "write"
+              ]
+            },
+            "description": "mcp の範囲。read は読むだけ、write は購読や既読などの変更も。reader は空"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "createdAt",
+          "lastUsedAt",
+          "purpose",
+          "scopes"
+        ]
+      },
+      "AccessTokenRequest": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 200,
+            "description": "用途の名前（前後の空白を除いて 1〜100 文字）",
+            "example": "Reeder"
+          },
+          "purpose": {
+            "type": "string",
+            "enum": [
+              "reader",
+              "mcp"
+            ],
+            "description": "用途。既定は reader（リーダーアプリと REST API 用）。mcp なら /mcp でだけ使える"
+          },
+          "scopes": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "read",
+                "write"
+              ]
+            },
+            "minItems": 1,
+            "maxItems": 2,
+            "description": "mcp の範囲。既定は read（読むだけ）。write を含めると、購読や既読などの変更もできる（read も付く）。reader には付けられない"
+          }
+        },
+        "required": [
+          "name"
+        ]
+      },
+      "OAuthAuthorizationRequest": {
+        "type": "object",
+        "properties": {
+          "client": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "description": "client_id"
+              },
+              "name": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "クライアントの名前。kind が registered なら、クライアントが名乗っただけで確かめていない"
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "metadata_document",
+                  "registered"
+                ],
+                "description": "metadata_document は、client_id の URL（host）から情報を取ったもの。registered は動的登録したもの"
+              },
+              "host": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "client_id の URL のホスト（metadata_document のとき）。なりすましを見分けられるよう、画面に出す"
+              }
+            },
+            "required": [
+              "id",
+              "name",
+              "kind",
+              "host"
+            ]
+          },
+          "redirectUri": {
+            "type": "string",
+            "description": "許可したあとに戻る先"
+          },
+          "redirectHost": {
+            "type": "string",
+            "description": "戻る先のホスト。画面に必ず出す"
+          },
+          "loopbackRedirect": {
+            "type": "boolean",
+            "description": "戻る先が手元（localhost など）か。ほかのアプリでも受けられるので、画面で注意を出す"
+          },
+          "scopes": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "read",
+                "write"
+              ]
+            },
+            "description": "範囲。read は読むだけ、write は購読や既読などの変更も"
+          }
+        },
+        "required": [
+          "client",
+          "redirectUri",
+          "redirectHost",
+          "loopbackRedirect",
+          "scopes"
+        ]
+      },
+      "OAuthAuthorizationError": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string",
+                "example": "invalid_client"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "code",
+              "message"
+            ]
+          },
+          "redirectTo": {
+            "type": "string",
+            "description": "あれば、誤りをクライアントに返すリダイレクト先。そこへブラウザを移す。なければ、画面に誤りを出す"
+          }
+        },
+        "required": [
+          "error"
+        ]
+      },
+      "OAuthGrant": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "clientId": {
+            "type": "string"
+          },
+          "clientName": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "許可したときのクライアントの名前"
+          },
+          "clientKind": {
+            "type": "string",
+            "enum": [
+              "metadata_document",
+              "registered"
+            ]
+          },
+          "scopes": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "read",
+                "write"
+              ]
+            },
+            "description": "範囲。read は読むだけ、write は購読や既読などの変更も"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "許可した時刻"
+          },
+          "lastUsedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "最後にトークンを出した時刻。アクセストークンは 1 時間なので、使っていてもおよそ 1 時間ごとにしか変わらない。まだなら null"
+          }
+        },
+        "required": [
+          "id",
+          "clientId",
+          "clientName",
+          "clientKind",
+          "scopes",
+          "createdAt",
+          "lastUsedAt"
+        ]
       }
     },
     "parameters": {}
   },
   "paths": {
+    "/auth/{provider}/login": {
+      "get": {
+        "summary": "提供元でログインする（ブラウザで開く）",
+        "description": "ブラウザをこの URL に移すと、提供元のログインの画面へ送る。ログインできたら、セッションのクッキーを置いて returnTo に戻る。",
+        "security": [],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "google"
+              ]
+            },
+            "required": true,
+            "name": "provider",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "ログインのあとに戻るパス（同じオリジンの / で始まるもの）。既定は /",
+              "example": "/"
+            },
+            "required": false,
+            "description": "ログインのあとに戻るパス（同じオリジンの / で始まるもの）。既定は /",
+            "name": "returnTo",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "302": {
+            "description": "提供元のログインの画面へ"
+          },
+          "404": {
+            "description": "その提供元のログインを設定していない",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/{provider}/callback": {
+      "get": {
+        "summary": "提供元から戻る先（提供元に登録するリダイレクト先）",
+        "description": "ログインできたら、セッションのクッキーを置いて、始めたときの returnTo に戻る。できなければ /?login_error=<理由> に戻る。理由：invalid_request（始めたブラウザと違う、時間がたったなど）、access_denied（提供元の画面でやめた）、provider_error（提供元とのやり取りに失敗した）、invalid_id_token（提供元の ID トークンが正しくない）、email_not_verified（提供元がメールを確認済みとしていない）、not_allowed（許可したメールではない）",
+        "security": [],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "google"
+              ]
+            },
+            "required": true,
+            "name": "provider",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "maxLength": 2048
+            },
+            "required": false,
+            "name": "code",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "maxLength": 256
+            },
+            "required": false,
+            "name": "state",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "maxLength": 256
+            },
+            "required": false,
+            "name": "error",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "302": {
+            "description": "returnTo か、/?login_error=<理由> へ"
+          }
+        }
+      }
+    },
+    "/auth/logout": {
+      "post": {
+        "summary": "ログアウトする（セッションを消す）",
+        "description": "セッションがなくても 204 を返す。",
+        "security": [],
+        "responses": {
+          "204": {
+            "description": "ログアウトした"
+          },
+          "403": {
+            "description": "ほかのオリジンから送られた",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/me": {
+      "get": {
+        "summary": "認証しているユーザー",
+        "description": "ブラウザでは、ログインしているかを確かめるのに使う（していなければ 401）。",
+        "responses": {
+          "200": {
+            "description": "ユーザー",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "user": {
+                      "$ref": "#/components/schemas/User"
+                    }
+                  },
+                  "required": [
+                    "user"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/feeds": {
       "post": {
         "summary": "フィードを購読する",
@@ -1381,6 +1797,414 @@
           },
           "400": {
             "description": "カーソルが読めない（最初から同期し直す）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/tokens": {
+      "get": {
+        "summary": "アクセストークンの一覧",
+        "description": "中身（sendo_ で始まる文字列）は、発行したときにしか返さない。",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "トークン（新しい順）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/AccessToken"
+                      }
+                    }
+                  },
+                  "required": [
+                    "items"
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "ブラウザのセッションではない（アクセストークンでは使えない）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "アクセストークンを発行する",
+        "description": "リーダーアプリ（Reeder、NetNewsWire など）のパスワード欄や、エージェント・スクリプトの Authorization: Bearer に使う。",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AccessTokenRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "発行した",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "token": {
+                      "type": "string",
+                      "description": "トークンの中身。この応答でしか返さないので、利用者に控えてもらう",
+                      "example": "sendo_..."
+                    },
+                    "accessToken": {
+                      "$ref": "#/components/schemas/AccessToken"
+                    }
+                  },
+                  "required": [
+                    "token",
+                    "accessToken"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "名前が空か長すぎる、reader に範囲を付けた",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "ブラウザのセッションではない（アクセストークンでは使えない）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/tokens/{id}": {
+      "delete": {
+        "summary": "アクセストークンを取り消す",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "取り消した（そのトークンはすぐに使えなくなる）"
+          },
+          "403": {
+            "description": "ブラウザのセッションではない（アクセストークンでは使えない）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "トークンがない",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/oauth/authorize/check": {
+      "post": {
+        "summary": "認可のリクエストを確かめる",
+        "description": "許可の画面を出す前に呼ぶ。クライアントの名前、戻る先、求められた範囲を返す。誤りなら、redirectTo があればそこへ移り、なければ画面に誤りを出す。",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "query": {
+                    "type": "string",
+                    "maxLength": 8192,
+                    "description": "許可の画面の URL のクエリ文字列（location.search をそのまま。client_id、redirect_uri、state など）",
+                    "example": "?response_type=code&client_id=https%3A%2F%2Fclient.example.com%2Fclient.json&..."
+                  }
+                },
+                "required": [
+                  "query"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "正しいリクエスト。許可の画面を出す",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OAuthAuthorizationRequest"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "認可のリクエストが正しくない",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OAuthAuthorizationError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "ブラウザのセッションではない（アクセストークンでは使えない）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "OAuth を使う設定（PUBLIC_URL と READER_URL）がない",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/oauth/authorize/decide": {
+      "post": {
+        "summary": "許可か拒否を送る",
+        "description": "利用者が選んだ結果を送る。返した redirectTo（許可なら認可コード、拒否なら access_denied と、state と iss を付けたもの）へブラウザを移す。",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "query": {
+                    "type": "string",
+                    "maxLength": 8192,
+                    "description": "許可の画面の URL のクエリ文字列（location.search をそのまま。client_id、redirect_uri、state など）",
+                    "example": "?response_type=code&client_id=https%3A%2F%2Fclient.example.com%2Fclient.json&..."
+                  },
+                  "approved": {
+                    "type": "boolean",
+                    "description": "許可なら true、拒否なら false"
+                  }
+                },
+                "required": [
+                  "query",
+                  "approved"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "クライアントへ戻る先",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "redirectTo": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "redirectTo"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "認可のリクエストが正しくない",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OAuthAuthorizationError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "ブラウザのセッションではない（アクセストークンでは使えない）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "OAuth を使う設定（PUBLIC_URL と READER_URL）がない",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/oauth/grants": {
+      "get": {
+        "summary": "OAuth で出した許可の一覧",
+        "description": "まだ使える許可（新しい順）。",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "許可",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/OAuthGrant"
+                      }
+                    }
+                  },
+                  "required": [
+                    "items"
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "ブラウザのセッションではない（アクセストークンでは使えない）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/oauth/grants/{id}": {
+      "delete": {
+        "summary": "OAuth で出した許可を取り消す",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "取り消した（その許可のトークンは、すぐに使えなくなる）"
+          },
+          "403": {
+            "description": "ブラウザのセッションではない（アクセストークンでは使えない）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "許可がない",
             "content": {
               "application/json": {
                 "schema": {
