@@ -12,7 +12,8 @@ function seed() {
     folderId: folder.id,
   });
   const news = server.subscribe({ url: "https://news.example/feed.xml", title: "News" });
-  const t = server.now;
+  // 公開日時は、ブラウザーの時計で「いま」にする（「1 日より古い記事」に入らないように）
+  const t = Date.now();
   server.deliver(blog.id, { title: "1 番目", summary: "1 番目の要約", publishedAt: t - 1000 });
   server.deliver(news.id, { title: "2 番目", publishedAt: t - 2000 });
   server.deliver(blog.id, { title: "3 番目", publishedAt: t - 3000 });
@@ -68,10 +69,21 @@ test("キーボードで、記事を移り、既読とスターを切り替え�
     list.locator(".row.current").getByRole("button", { name: "スターを外す" }),
   ).toBeVisible();
 
-  // Shift + A は、確かめてからまとめて既読にする
+  // Shift + A は、範囲を選んでからまとめて既読にする。少しの間、取り消せる
   await page.keyboard.press("Shift+A");
   await expect(page.getByRole("dialog")).toContainText("未読 2 件");
   await page.keyboard.press("Enter");
+  await expect(page).toHaveTitle("未読 - Sendo");
+  await page.getByRole("status").getByRole("button", { name: "取り消す" }).click();
+  await expect(page.getByRole("status")).toContainText("2 件を未読に戻しました。");
+  await expect(page).toHaveTitle("(2) 未読 - Sendo");
+  await page.keyboard.press("Shift+A");
+  await page.getByRole("button", { name: "1 日より古い記事だけ" }).click();
+  await expect(page.getByRole("status")).toContainText("既読にする記事はありませんでした。");
+  await expect(page).toHaveTitle("(2) 未読 - Sendo");
+  await page.keyboard.press("Shift+A");
+  await page.getByRole("button", { name: "すべて既読にする" }).click();
+  await expect(page.getByRole("status")).toContainText("2 件を既読にしました。");
   await expect(unread).not.toContainText("2");
   await expect(page).toHaveTitle("未読 - Sendo");
 

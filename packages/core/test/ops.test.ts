@@ -225,9 +225,45 @@ describe("すべて既読", () => {
     expect(server.inbox.get(inB.id)?.readAt).toBeNull();
   });
 
+  test("古い記事だけを既読にでき、既読にした記事を返す。取り消すと、sendo でも未読に戻る", async () => {
+    const { server, core } = await setup();
+    const feed = server.subscribe({ url: "https://a.example/feed" });
+    const old = server.deliver(feed.id, { publishedAt: server.now - 3 * 86_400_000 });
+    const recent = server.deliver(feed.id, { publishedAt: server.now - 3_600_000 });
+    await core.sync();
+
+    // 1 日より古いものだけ。カーソルでは範囲のすべてが既読になるので、ID で頼む
+    const marked = await core.markAllRead(
+      { all: true },
+      { publishedBefore: server.now - 86_400_000 },
+    );
+    expect(marked).toEqual([old.id]);
+    expect((await core.getArticle(recent.id))?.readAt).toBeNull();
+    await core.sync();
+    expect(server.markReadRequests.at(-1)).toEqual({ ids: [old.id] });
+    expect(server.inbox.get(old.id)?.readAt).toEqual(expect.any(Number));
+    expect(server.inbox.get(recent.id)?.readAt).toBeNull();
+
+    // 取り消す
+    await core.setReadMany(marked, false);
+    expect((await core.countUnread()).total).toBe(2);
+    await core.sync();
+    expect(server.inbox.get(old.id)?.readAt).toBeNull();
+    expect(await core.countPending()).toBe(0);
+
+    // 既読にしてすぐ、送る前に取り消しても、未読のまま揃う
+    const all = await core.markAllRead({ all: true });
+    expect(all.sort()).toEqual([old.id, recent.id].sort());
+    await core.setReadMany(all, false);
+    await core.sync();
+    expect((await core.countUnread()).total).toBe(2);
+    expect(server.inbox.get(old.id)?.readAt).toBeNull();
+    expect(server.inbox.get(recent.id)?.readAt).toBeNull();
+  });
+
   test("まだ一度も同期していなければ、何もしない", async () => {
     const { core } = await setup();
-    await core.markAllRead({ all: true });
+    expect(await core.markAllRead({ all: true })).toEqual([]);
     expect(await core.countPending()).toBe(0);
   });
 });

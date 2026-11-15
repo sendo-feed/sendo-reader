@@ -308,8 +308,8 @@
       <button
         type="button"
         class="icon-button"
-        aria-label="すべて既読にする"
-        title="すべて既読にする（Shift + A）"
+        aria-label="まとめて既読にする"
+        title="まとめて既読にする（Shift + A）"
         disabled={unread === 0}
         onclick={onmarkall}
       >

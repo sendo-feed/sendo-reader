@@ -175,9 +175,46 @@
     if (listing?.scope != null && (listing.unread ?? 0) > 0) confirmOpen = true;
   }
 
-  async function markAll() {
+  /** 取り消せる数の上限。sendo には記事ごとに送るので、多すぎるときは取り消しを出さない */
+  const UNDO_LIMIT = 300;
+  const DAY = 86_400_000;
+
+  /** 画面の下に少しの間出す知らせ。undo があれば「取り消す」を出す */
+  let toast = $state<{ message: string; undo: string[] | null } | null>(null);
+  let toastTimer: ReturnType<typeof setTimeout> | undefined;
+
+  function showToast(message: string, undo: string[] | null = null) {
+    clearTimeout(toastTimer);
+    toast = { message, undo };
+    toastTimer = setTimeout(() => (toast = null), undo === null ? 4000 : 10_000);
+  }
+
+  /** まとめて既読にする。olderThan（ミリ秒）を渡すと、それより前に公開された記事だけ */
+  async function markAll(olderThan?: number) {
     confirmOpen = false;
-    if (listing?.scope != null) await reader.client.markAllRead(listing.scope);
+    if (listing?.scope == null) return;
+    const options = olderThan === undefined ? {} : { publishedBefore: Date.now() - olderThan };
+    try {
+      const ids = await reader.client.markAllRead(listing.scope, options);
+      if (ids.length === 0) showToast("既読にする記事はありませんでした。");
+      else {
+        showToast(`${ids.length} 件を既読にしました。`, ids.length <= UNDO_LIMIT ? ids : null);
+      }
+    } catch {
+      showToast("既読にできませんでした。");
+    }
+  }
+
+  async function undoMarkAll() {
+    if (toast?.undo == null) return;
+    // 状態に入れた配列は、そのままではワーカーに渡せない（複製できない）。素の配列にする
+    const ids = [...toast.undo];
+    try {
+      await reader.client.setReadMany(ids, false);
+      showToast(`${ids.length} 件を未読に戻しました。`);
+    } catch {
+      showToast("未読に戻せませんでした。");
+    }
   }
 
   function go(view: View) {
@@ -330,15 +367,34 @@
   {/if}
 </Dialog>
 
-<Dialog bind:open={confirmOpen} title="すべて既読にする">
-  <p class="confirm">「{listing?.title}」の未読 {listing?.unread ?? 0} 件を、既読にします。</p>
-  <div class="buttons">
-    <button type="button" onclick={() => (confirmOpen = false)}>やめる</button>
+<Dialog bind:open={confirmOpen} title="既読にする">
+  <p class="confirm">
+    「{listing?.title}」の未読 {listing?.unread ?? 0} 件のうち、どれを既読にしますか。
+    {#if (listing?.unread ?? 0) > UNDO_LIMIT}
+      {UNDO_LIMIT}
+      件を超えると、取り消せません。
+    {/if}
+  </p>
+  <div class="choices">
     <!-- svelte-ignore a11y_autofocus -->
     <!-- biome-ignore lint/a11y/noAutofocus: 確かめの窓（dialog）の中で、Enter でそのまま進めるようにする -->
-    <button type="button" class="primary" autofocus onclick={markAll}>既読にする</button>
+    <button type="button" class="primary" autofocus onclick={() => markAll()}>
+      すべて既読にする
+    </button>
+    <button type="button" onclick={() => markAll(DAY)}>1 日より古い記事だけ</button>
+    <button type="button" onclick={() => markAll(7 * DAY)}>1 週間より古い記事だけ</button>
+    <button type="button" class="link" onclick={() => (confirmOpen = false)}>やめる</button>
   </div>
 </Dialog>
+
+{#if toast !== null}
+  <div class="toast" role="status">
+    <span>{toast.message}</span>
+    {#if toast.undo !== null}
+      <button type="button" onclick={undoMarkAll}>取り消す</button>
+    {/if}
+  </div>
+{/if}
 
 <style>
   .reader {
@@ -399,10 +455,53 @@
     margin: 0 0 1.25rem;
   }
 
-  .buttons {
-    display: flex;
-    justify-content: flex-end;
+  .choices {
+    display: grid;
     gap: 0.5rem;
+  }
+
+  .choices button {
+    padding-block: 0.6rem;
+  }
+
+  .choices .link {
+    justify-self: center;
+    padding-block: 0.25rem;
+  }
+
+  /* 画面の下に少しの間出す知らせ（取り消し） */
+  .toast {
+    position: fixed;
+    right: 1rem;
+    bottom: calc(1rem + env(safe-area-inset-bottom, 0px));
+    left: 1rem;
+    z-index: 4;
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    width: fit-content;
+    max-width: calc(100vw - 2rem);
+    margin-inline: auto;
+    padding: 0.625rem 0.75rem 0.625rem 1rem;
+    border-radius: var(--radius);
+    background: var(--text);
+    color: var(--background);
+    font-size: 0.9375rem;
+    box-shadow: var(--shadow);
+  }
+
+  .toast button {
+    flex: none;
+    border-color: transparent;
+    background: none;
+    color: inherit;
+    font-weight: 700;
+    text-decoration: underline;
+  }
+
+  .toast button:hover:not(:disabled) {
+    background: none;
+    opacity: 0.8;
   }
 
   /* 狭い画面では、一覧か記事のどちらかだけを出し、メニューは左から重ねて開く */

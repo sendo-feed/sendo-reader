@@ -69,6 +69,11 @@ export const MAX_FOLDER_NAME_LENGTH = 200;
  * 変わった表を onChange で知らせる。Web では代表のタブのワーカーの中で 1 つだけ作る
  * （docs/decisions/local-first.md）。
  */
+export interface MarkAllReadOptions {
+  /** この時刻（ミリ秒）より前に公開された記事だけを既読にする */
+  publishedBefore?: number;
+}
+
 export class ReaderCore {
   readonly #db: Database;
   readonly #api: SendoApi;
@@ -382,18 +387,26 @@ export class ReaderCore {
    * 範囲（最後まで同期し終えたカーソル）までだけを頼む（sync.md の 6）。カーソルの範囲に入らない
    * 記事（そのあとに届いた、そのあとに手元で既読・未読を変えた）は、ID で頼む。未読がなければ
    * 何もしない。
+   *
+   * 既読にした記事の ID を返す（取り消すときは、setReadMany で未読に戻す）。publishedBefore を
+   * 渡すと、それより前に公開された記事だけを既読にする（「1 日より古いもの」など）。
    */
-  async markAllRead(scope: MarkReadScope): Promise<void> {
+  async markAllRead(scope: MarkReadScope, options: MarkAllReadOptions = {}): Promise<string[]> {
     this.#requireSignedIn();
     const session = this.#session.signal;
+    const { publishedBefore } = options;
     const op = await this.#db.transaction(async (tx) => {
       // 書き込みが DB の列で待っている間にログインし直したら、前のアカウントの操作を積まない
       throwIfSessionEnded(session);
-      const cursor = await getCompleteCursor(tx);
+      // 範囲の一部だけ（古い記事だけ）のときは、カーソルでは頼めない（カーソルは範囲のすべてを
+      // 既読にする）。すべて ID で頼む
+      const cursor = publishedBefore === undefined ? await getCompleteCursor(tx) : null;
       const [condition, params] = scopeCondition(scope);
       const unread = await tx.all<{ id: string; read_synced: number }>(
-        `select id, read_synced from articles where read_at is null and ${condition}`,
-        params,
+        `select id, read_synced from articles
+         where read_at is null and ${condition}
+           ${publishedBefore === undefined ? "" : "and published_at < ?"}`,
+        publishedBefore === undefined ? params : [...params, publishedBefore],
       );
       if (unread.length === 0) return null;
       const op: Operation = {
@@ -409,7 +422,9 @@ export class ReaderCore {
       await this.#enqueue(tx, op);
       return op;
     });
-    if (op !== null) this.#emit(new Set<Table>(["articles"]));
+    if (op === null) return [];
+    this.#emit(new Set<Table>(["articles"]));
+    return op.articleIds;
   }
 
   /**
