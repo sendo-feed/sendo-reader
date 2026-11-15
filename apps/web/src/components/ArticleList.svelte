@@ -1,6 +1,5 @@
 <script lang="ts">
   import type { Article } from "@sendo-reader/core";
-  import type { Snippet } from "svelte";
   import { useReader } from "../lib/context";
   import { compactCount, dayLabel, shortTime } from "../lib/format";
   import type { ArticleListState, ListProgress } from "../lib/list.svelte";
@@ -22,7 +21,6 @@
     onoption,
     onmenu,
     next,
-    leading,
   }: {
     list: ArticleListState;
     title: string;
@@ -44,8 +42,6 @@
     onmenu: (article: Article) => void;
     /** 一覧の終わりに出す、次へ進むボタン（出さないなら null） */
     next: { label: string; go: () => void } | null;
-    /** 見出しの左に置くもの（狭い画面のメニューのボタン） */
-    leading?: Snippet;
   } = $props();
 
   const reader = useReader();
@@ -323,7 +319,6 @@
 
 <section class="article-list" aria-label={title} bind:this={scroller}>
   <header>
-    {@render leading?.()}
     {#if progress !== null}
       <button
         type="button"

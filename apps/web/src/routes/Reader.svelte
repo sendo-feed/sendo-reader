@@ -9,13 +9,13 @@
   import ArticleList from "../components/ArticleList.svelte";
   import ArticleView from "../components/ArticleView.svelte";
   import Dialog from "../components/Dialog.svelte";
-  import Icon from "../components/Icon.svelte";
+  import Icon, { type IconName } from "../components/Icon.svelte";
   import ShortcutHelp from "../components/ShortcutHelp.svelte";
   import Sidebar from "../components/Sidebar.svelte";
   import { useReader } from "../lib/context";
   import { ArticleListState, type ListProgress } from "../lib/list.svelte";
   import { prefs } from "../lib/prefs.svelte";
-  import { router, type View, viewHref } from "../lib/router.svelte";
+  import { handleLink, router, type View, viewHref } from "../lib/router.svelte";
   import Manage from "./Manage.svelte";
   import Settings from "./Settings.svelte";
 
@@ -45,6 +45,17 @@
     /** その範囲の未読の数 */
     unread: number | null;
   }
+
+  /** 狭い画面の下のバーに並べる行き先（メニューのボタンのあとに、この順で並べる） */
+  const TABS: { href: string; label: string; icon: IconName }[] = [
+    { href: "/starred", label: "スター", icon: "star" },
+    { href: "/", label: "未読", icon: "inbox" },
+    { href: "/manage", label: "追加", icon: "plus" },
+    { href: "/search", label: "検索", icon: "search" },
+  ];
+
+  /** 下のバーで、いまいる場所として示すもの（フィードやフォルダの一覧は、どれでもない） */
+  const currentTab = $derived(TABS.find((tab) => tab.href === viewHref(router.view))?.href ?? null);
 
   /** 開いている一覧の表示の設定（要約を出すか、並び順、未読だけ）。一覧ごとに覚える */
   const viewKey = $derived(viewHref(router.view));
@@ -390,18 +401,6 @@
 
 <svelte:window onkeydown={onKeydown} />
 
-{#snippet menuButton()}
-  <button
-    type="button"
-    class="icon-button menu"
-    aria-label="メニュー"
-    aria-expanded={menuOpen}
-    onclick={() => (menuOpen = !menuOpen)}
-  >
-    <Icon name="menu" />
-  </button>
-{/snippet}
-
 <div
   class="reader"
   class:managing={listing === null}
@@ -418,10 +417,7 @@
   ></button>
   {#if listing === null}
     <div class="page">
-      <div class="bar">
-        {@render menuButton()}
-        <span>{pageTitle}</span>
-      </div>
+      <div class="bar">{pageTitle}</div>
       {#if router.view.kind === "manage"}
         <Manage />
       {:else}
@@ -443,10 +439,37 @@
       {next}
       {progress}
       onprogress={() => (progressOpen = true)}
-      leading={menuButton}
     />
     <ArticleView bind:this={articleView} articleId={router.articleId} {list} onstep={step} />
   {/if}
+
+  <!--
+    狭い画面の下のバー。一覧の画面でだけ出す（記事の画面では、同じ場所に記事の操作が入る）。
+    広い画面では、左のメニューを出したままにするので出さない
+  -->
+  <nav class="tabs" aria-label="主な画面">
+    <button
+      type="button"
+      class="tab"
+      aria-label="メニュー"
+      aria-expanded={menuOpen}
+      onclick={() => (menuOpen = !menuOpen)}
+    >
+      <Icon name="menu" />
+      <span>メニュー</span>
+    </button>
+    {#each TABS as tab (tab.href)}
+      <a
+        class="tab"
+        href={tab.href}
+        aria-current={currentTab === tab.href ? "page" : undefined}
+        onclick={(e) => handleLink(e, tab.href)}
+      >
+        <Icon name={tab.icon} filled={tab.icon === "star" && currentTab === tab.href} />
+        <span>{tab.label}</span>
+      </a>
+    {/each}
+  </nav>
 </div>
 
 <ShortcutHelp bind:open={helpOpen} />
@@ -561,7 +584,7 @@
     min-height: 0;
   }
 
-  .menu,
+  .tabs,
   .bar,
   .scrim {
     display: none;
@@ -663,9 +686,56 @@
       grid-template-columns: minmax(0, 1fr);
     }
 
-    .menu {
-      display: inline-grid;
-      margin-left: -0.5rem;
+    /* 一覧（か、購読の管理・設定）の下に、バーの行を足す。記事の画面では出さない */
+    .reader {
+      grid-template-rows: minmax(0, 1fr) auto;
+    }
+
+    .reader:not(.reading) > .tabs {
+      display: flex;
+      padding-bottom: env(safe-area-inset-bottom, 0px);
+      border-top: 1px solid var(--border);
+      background: var(--background);
+    }
+
+    .tab {
+      display: grid;
+      flex: 1 1 0;
+      justify-items: center;
+      gap: 0.125rem;
+      min-width: 0;
+      padding: 0.5rem 0.125rem 0.375rem;
+      border: 0;
+      border-radius: 0;
+      background: none;
+      color: var(--muted);
+      font: inherit;
+      font-size: 0.6875rem;
+      line-height: 1.2;
+      text-decoration: none;
+    }
+
+    .tab :global(.icon) {
+      width: 1.5rem;
+      height: 1.5rem;
+    }
+
+    .tab span {
+      max-width: 100%;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .tab[aria-current="page"],
+    .tab[aria-expanded="true"] {
+      color: var(--accent);
+      font-weight: 600;
+    }
+
+    /* 知らせは、下のバー（記事の画面では、記事の操作）の上に出す */
+    .toast {
+      bottom: calc(4.5rem + env(safe-area-inset-bottom, 0px));
     }
 
     .bar {
@@ -678,7 +748,7 @@
       font-weight: 600;
     }
 
-    .reader > :global(nav) {
+    .reader > :global(.sidebar) {
       position: fixed;
       inset: 0 auto 0 0;
       z-index: 3;
@@ -691,7 +761,7 @@
         visibility 0.18s;
     }
 
-    .reader.menu-open > :global(nav) {
+    .reader.menu-open > :global(.sidebar) {
       visibility: visible;
       transform: none;
     }
@@ -708,7 +778,7 @@
     }
 
     @media (prefers-reduced-motion: reduce) {
-      .reader > :global(nav) {
+      .reader > :global(.sidebar) {
         transition: none;
       }
     }

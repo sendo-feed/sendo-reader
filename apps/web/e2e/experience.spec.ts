@@ -30,7 +30,7 @@ test("キーボードで、記事を移り、既読とスターを切り替え�
   await signIn(page);
   const list = page.locator(".article-list");
   const view = page.locator(".article-view");
-  const unread = page.locator("nav a", { hasText: "未読" });
+  const unread = page.locator("nav.sidebar a", { hasText: "未読" });
   await expect(list.locator(".item")).toHaveCount(3);
   await expect(page).toHaveTitle("(3) 未読 - Sendo");
 
@@ -125,14 +125,14 @@ test("一覧の形・並び順・絞り込みは一覧ごとに覚え、表示�
   // フィードの一覧は既読の記事も出す。未読だけに絞れる。表示の設定は一覧ごとに覚えるので、
   // 「未読」で変えた並び順と形は、ここには及ばない
   await list.getByText("3 番目").click();
-  await page.locator("nav").getByRole("link", { name: "Blog" }).click();
+  await page.locator("nav.sidebar").getByRole("link", { name: "Blog" }).click();
   await expect(list.locator(".title")).toHaveText(["1 番目", "3 番目"]);
   await expect(list.getByText("1 番目の要約")).toBeVisible();
   await list.getByRole("button", { name: "未読だけを出す" }).click();
   await expect(list.locator(".title")).toHaveText(["1 番目"]);
 
   // フォルダを畳み、未読のないフィードを隠す
-  const nav = page.locator("nav");
+  const nav = page.locator("nav.sidebar");
   await nav.getByRole("button", { name: "Tech を畳む" }).click();
   await expect(nav.getByRole("link", { name: "Blog" })).toHaveCount(0);
   await nav.getByRole("button", { name: "Tech を開く" }).click();
@@ -164,7 +164,7 @@ test("狭い画面では、メニューを左から開き、一覧と記事を�
   await page.goto("/");
   await signIn(page);
   const list = page.locator(".article-list");
-  const nav = page.locator("nav");
+  const nav = page.locator("nav.sidebar");
   await expect(list.locator(".item")).toHaveCount(3);
   await expect(nav).toBeHidden();
   await expect(page.getByRole("button", { name: "この一覧の進み具合 0%" })).toBeVisible();
@@ -207,10 +207,29 @@ test("狭い画面では、メニューを左から開き、一覧と記事を�
   await expect(row).not.toHaveClass(/unread/);
   await expect(page).not.toHaveURL(/article=/);
 
+  // 下のバーは、一覧の画面でだけ出す。スター、検索、追加、未読へ移れる
+  const tabs = page.getByRole("navigation", { name: "主な画面" });
+  await expect(tabs).toBeVisible();
+  await tabs.getByRole("link", { name: "スター" }).click();
+  await expect(page).toHaveURL(/\/starred$/);
+  await expect(tabs.getByRole("link", { name: "スター" })).toHaveAttribute("aria-current", "page");
+  await tabs.getByRole("link", { name: "検索" }).click();
+  await expect(page).toHaveURL(/\/search$/);
+  await tabs.getByRole("link", { name: "追加" }).click();
+  await expect(page.getByRole("heading", { name: "購読の管理" })).toBeVisible();
+  await expect(tabs).toBeVisible();
+  await tabs.getByRole("link", { name: "未読" }).click();
+  await expect(page).toHaveURL(/\/$/);
+  await page.getByRole("button", { name: "メニュー", exact: true }).click();
+  await nav.getByRole("link", { name: "すべて" }).click();
+
   // 記事を開くと記事だけになり、「戻る」で一覧に戻る
   await list.getByText("2 番目").click();
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("2 番目");
   await expect(list).toBeHidden();
+  // 記事の画面では、下のバーを出さない（同じ場所に、記事の操作が入る）
+  await expect(tabs).toBeHidden();
+  await expect(page.getByRole("button", { name: "一覧に戻る" })).toBeVisible();
   await page.getByRole("button", { name: "次の記事" }).click();
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("3 番目");
   // 記事を右へはじくと前の記事、左へはじくと次の記事（縦に読み進める動きでは移らない）
@@ -237,6 +256,12 @@ test("狭い画面では、メニューを左から開き、一覧と記事を�
   await page.goBack();
   await expect(list).toBeVisible();
   await expect(page).toHaveURL(/\/all$/);
+  await expect(tabs).toBeVisible();
+
+  // 広い画面では、左のメニューを出したままにして、下のバーは出さない
+  await page.setViewportSize({ width: 1100, height: 780 });
+  await expect(tabs).toBeHidden();
+  await expect(nav).toBeVisible();
 });
 
 test("j を続けて押して通り過ぎた記事も、既読になる", async ({ page, context }) => {
@@ -268,7 +293,7 @@ test("末尾まで出した一覧に、それより古い記事が加わった�
   await routeFakeSendo(context, server);
   await page.goto("/");
   await signIn(page);
-  await page.locator("nav").getByRole("link", { name: "スター" }).click();
+  await page.locator("nav.sidebar").getByRole("link", { name: "スター" }).click();
   const list = page.locator(".article-list");
   await expect(list.locator(".title")).toHaveText(["1 番目"]);
   await expect(list.getByText("ここまで")).toBeVisible();
@@ -290,7 +315,7 @@ test("古い順の一覧でも、出している記事より前に入る記事�
   await routeFakeSendo(context, server);
   await page.goto("/");
   await signIn(page);
-  await page.locator("nav").getByRole("link", { name: "スター" }).click();
+  await page.locator("nav.sidebar").getByRole("link", { name: "スター" }).click();
   const list = page.locator(".article-list");
   await list.getByRole("button", { name: "古い順に並べる" }).click();
   await expect(list.locator(".title")).toHaveText(["1 番目"]);
@@ -336,7 +361,7 @@ test("一覧を動かして通り過ぎた記事は既読になる。設定で�
 
   // 切ると、動かしても既読にしない
   await page.getByRole("button", { name: "メニュー", exact: true }).click();
-  await page.locator("nav").getByRole("link", { name: "設定" }).click();
+  await page.locator("nav.sidebar").getByRole("link", { name: "設定" }).click();
   await page.getByLabel("一覧を動かして通り過ぎた記事を、既読にする").uncheck();
   await page.goBack();
   await expect(list.locator(".item").first()).toBeVisible();
@@ -368,7 +393,7 @@ test("一覧を動かしたあとに別の一覧へ替えたら、先頭に戻�
   await page.goto("/");
   await signIn(page);
   const list = page.locator(".article-list");
-  const nav = page.locator("nav");
+  const nav = page.locator("nav.sidebar");
   await expect(nav.getByRole("link", { name: "Beta" })).toContainText("40");
   await nav.getByRole("link", { name: "Alpha" }).click();
   await expect(list.locator(".item")).toHaveCount(40);
@@ -400,7 +425,7 @@ test("行を長く押す（右クリックする）と記事の操作が出て�
   await page.goto("/");
   await signIn(page);
   const list = page.locator(".article-list");
-  const nav = page.locator("nav");
+  const nav = page.locator("nav.sidebar");
   const row = (title: string) => list.locator(".row", { hasText: title });
   const unreadTitles = () => list.locator(".row.unread .title").allTextContents();
   await nav.getByRole("link", { name: "Alpha" }).click();
@@ -588,19 +613,19 @@ test("手元の記事を探せる（オフラインでも）。探した結果�
   await list
     .getByRole("searchbox", { name: "記事を探す" })
     .pressSequentially("opfs", { delay: 10 });
-  await page.locator("nav").getByRole("link", { name: "購読の管理" }).click();
+  await page.locator("nav.sidebar").getByRole("link", { name: "購読の管理" }).click();
   await page.waitForTimeout(500);
   await expect(page).toHaveURL(/\/manage$/);
-  await page.locator("nav").getByRole("link", { name: "検索" }).click();
+  await page.locator("nav.sidebar").getByRole("link", { name: "検索" }).click();
   await list
     .getByRole("searchbox", { name: "記事を探す" })
     .pressSequentially("opfs", { delay: 10 });
-  await page.locator("nav").getByRole("link", { name: "スター" }).click();
+  await page.locator("nav.sidebar").getByRole("link", { name: "スター" }).click();
   await page.waitForTimeout(500);
   await expect(page).toHaveURL(/\/starred$/);
 
   // 左のメニューからも開ける
-  await page.locator("nav").getByRole("link", { name: "未読" }).click();
-  await page.locator("nav").getByRole("link", { name: "検索" }).click();
+  await page.locator("nav.sidebar").getByRole("link", { name: "未読" }).click();
+  await page.locator("nav.sidebar").getByRole("link", { name: "検索" }).click();
   await expect(list.getByRole("searchbox", { name: "記事を探す" })).toHaveValue("");
 });

@@ -105,7 +105,7 @@
   </li>
 {/snippet}
 
-<nav aria-label="フィード">
+<nav class="sidebar" aria-label="フィード">
   <div class="brand">
     <span class="logo">Sendo</span>
     <a
@@ -255,7 +255,7 @@
 </nav>
 
 <style>
-  nav {
+  .sidebar {
     display: flex;
     flex-direction: column;
     min-height: 0;

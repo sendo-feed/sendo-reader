@@ -28,8 +28,8 @@ test("Google でログインし、記事を読んで、スターを付ける", a
   const list = page.locator(".article-list");
   const view = page.locator(".article-view");
   await expect(list.getByText("最初の記事")).toBeVisible();
-  await expect(page.locator("nav")).toContainText("Tech");
-  await expect(page.locator("nav")).toContainText("Blog");
+  await expect(page.locator("nav.sidebar")).toContainText("Tech");
+  await expect(page.locator("nav.sidebar")).toContainText("Blog");
 
   await list.getByText("最初の記事").click();
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("最初の記事");
@@ -83,7 +83,7 @@ test("セッションが切れたらログインし直しを促し、ログイ�
 
   await page.goto("/");
   await signIn(page);
-  await expect(page.locator("nav")).toContainText(USER.email);
+  await expect(page.locator("nav.sidebar")).toContainText(USER.email);
   await page.locator(".article-list").getByText("記事").click();
 
   // セッションが切れた（期限切れ、取り消し）。手元では読み書きでき、ログインし直しを促す

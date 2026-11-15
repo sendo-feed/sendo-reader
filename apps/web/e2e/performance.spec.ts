@@ -19,9 +19,12 @@ test.describe("速さの予算", () => {
     await page.goto("/");
     await signIn(page);
     // すべての記事が手元に届き、Service Worker がページを受け持つまで待つ
-    await expect(page.locator("nav a", { hasText: "未読" })).toContainText(String(ARTICLES), {
-      timeout: 30_000,
-    });
+    await expect(page.locator("nav.sidebar a", { hasText: "未読" })).toContainText(
+      String(ARTICLES),
+      {
+        timeout: 30_000,
+      },
+    );
     await page.evaluate(() => navigator.serviceWorker.ready);
     await page.reload();
     await expect
