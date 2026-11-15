@@ -388,6 +388,9 @@
       {:else}
         <p>記事はありません。</p>
       {/if}
+      {#if next !== null}
+        <button type="button" class="primary" onclick={next.go}>{next.label}</button>
+      {/if}
     </div>
   {:else}
     <ol class:compact={prefs.value.layout === "compact"}>
@@ -771,6 +774,13 @@
 
   .empty p {
     margin: 0;
+  }
+
+  .empty button {
+    max-width: 100%;
+    margin-top: 0.5rem;
+    padding: 0.6rem 1rem;
+    overflow-wrap: anywhere;
   }
 
   .fresh {

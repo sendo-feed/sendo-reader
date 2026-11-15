@@ -443,6 +443,14 @@ test("行を長く押す（右クリックする）と記事の操作が出て�
   await expect(nav.getByRole("link", { name: "Alpha" })).not.toContainText("2");
   await expect(list.getByRole("button", { name: "すべて既読にする" })).toBeVisible();
 
+  // 未読だけを出していて記事がないフィードでも、次のフィードへ進める
+  await nav.getByRole("link", { name: "Alpha" }).click();
+  await list.getByRole("button", { name: "未読だけを出す" }).click();
+  await expect(list.getByText("すべて読み終えました。")).toBeVisible();
+  await list.getByRole("button", { name: "次のフィード「Beta」へ" }).click();
+  await expect(page).toHaveURL(new RegExp(`/feeds/${beta.id}$`));
+  await expect(list.locator(".title")).toHaveText(["B 1"]);
+
   // Shift + J で、次の未読のあるフィードへ
   await nav.getByRole("link", { name: "未読" }).click();
   await page.keyboard.press("Shift+J");
