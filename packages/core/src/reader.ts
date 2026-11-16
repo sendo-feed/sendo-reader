@@ -876,10 +876,14 @@ export class ReaderCore {
     const session = this.#session.signal;
     const running = (async () => {
       if (this.#user === null) return 0;
+      const ids = await listContentToPrefetch(this.#db, limit);
+      if (ids.length === 0) return 0;
+      // まとめて取る前に、一度だけユーザーを確かめる（記事ごとには確かめない）
+      await this.#confirmSameUser(session);
       let fetched = 0;
-      for (const id of await listContentToPrefetch(this.#db, limit)) {
+      for (const id of ids) {
         if (session.aborted) break;
-        if ((await this.#fetchContent(id, session)) !== null) fetched += 1;
+        if ((await this.#fetchContent(id, session, true)) !== null) fetched += 1;
       }
       return fetched;
     })().finally(() => {
@@ -889,14 +893,34 @@ export class ReaderCore {
     return running;
   }
 
-  /** sendo から本文を取り、手元に置く。sendo になければ、その記事を本文なしにして null */
-  #fetchContent(articleId: string, session: AbortSignal): Promise<StoredContent | null> {
+  /**
+   * sendo のセッションのユーザーが、手元のユーザーと同じかを確かめる（docs/decisions/local-first.md
+   * の 6）。違えば、手元を消してそのユーザーに替え、ApiError（unauthorized）を投げる（頼まれた
+   * 記事は、前のユーザーのもの）
+   */
+  async #confirmSameUser(session: AbortSignal): Promise<void> {
+    if ((await this.#confirmUser(session)) !== session) {
+      throw new ApiError("unauthorized", "別のユーザーでログインしていたので、取らなかった");
+    }
+  }
+
+  /**
+   * sendo から本文を取り、手元に置く。sendo になければ、その記事を本文なしにして null。
+   * 取る前に、セッションのユーザーを確かめる（confirmed なら、呼ぶ側が確かめてある）。別の
+   * ユーザーのセッションで聞くと、その人の受信箱にない記事は 404 になり、本文なしと取り違える
+   */
+  #fetchContent(
+    articleId: string,
+    session: AbortSignal,
+    confirmed = false,
+  ): Promise<StoredContent | null> {
     if (session.aborted) {
       return Promise.reject(new ApiError("unauthorized", "ログインし直したので取らなかった"));
     }
     const existing = this.#contentFetches.get(articleId);
     if (existing !== undefined) return existing;
     const running = (async () => {
+      if (!confirmed) await this.#confirmSameUser(session);
       const content = await this.#api.articleContent(articleId, session);
       const changed = await this.#db.transaction(async (tx) => {
         // 取っている間にログアウトしたり、ユーザーが替わったりしたら、置かない

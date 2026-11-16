@@ -167,6 +167,33 @@ describe("本文を取る", () => {
     expect(await contentRows(db)).toEqual([]);
   });
 
+  test("別のユーザーのセッションに替わっていたら、取りにいかず、そのユーザーに切り替える", async () => {
+    const { server, core, feed } = await seeded();
+    const article = server.deliver(feed.id, { content: "<p>本文</p>" });
+    await core.sync();
+    const other = { id: "user-b", email: "b@example.com" };
+    server.signInAs(other);
+
+    await expect(core.fetchArticleContent(article.id)).rejects.toMatchObject({
+      kind: "unauthorized",
+    });
+    // 前のユーザーの記事を、別のユーザーのセッションで聞かない（404 を本文なしと取り違えない）
+    expect(server.contentRequests).toEqual([]);
+    expect(core.currentUser()).toEqual(other);
+    expect(await core.listArticles()).toEqual([]);
+  });
+
+  test("セッションが切れていたら unauthorized で失敗し、手元は変えない", async () => {
+    const { server, core, feed } = await seeded();
+    const article = server.deliver(feed.id, { content: "<p>本文</p>" });
+    await core.sync();
+    server.expireSession();
+    await expect(core.fetchArticleContent(article.id)).rejects.toMatchObject({
+      kind: "unauthorized",
+    });
+    expect(await core.getArticleContent(article.id)).toEqual({ status: "missing" });
+  });
+
   test("ログインしていなければ unauthorized", async () => {
     const { core } = await setup({ signIn: false });
     await expect(core.fetchArticleContent("a")).rejects.toBeInstanceOf(ApiError);
@@ -261,8 +288,10 @@ describe("本文を先に取っておく", () => {
     // 未読の新しい 3 件（要約だけ、1、2）のうち、取るのは 1 だけ
     expect(await core.prefetchArticleContents(3)).toBe(1);
     expect(server.contentRequests).toEqual([newest.id]);
-    // もう一度呼んでも、取り直さない
+    // もう一度呼んでも、取り直さない（取るものがなければ、sendo に何も聞かない）
+    const before = server.requests.length;
     expect(await core.prefetchArticleContents(3)).toBe(0);
+    expect(server.requests).toHaveLength(before);
     expect(await core.prefetchArticleContents(4)).toBe(1);
     expect(await contentRows(db)).toEqual(
       [newest.id, second.id, third.id].sort().map((id) => ({ article_id: id })),
@@ -273,7 +302,8 @@ describe("本文を先に取っておく", () => {
     const { server, core, feed } = await seeded();
     for (let i = 0; i < 3; i++) server.deliver(feed.id, { content: "<p>本文</p>" });
     await core.sync();
-    server.failNext(null, "network");
+    // ユーザーの確認と 1 件めは届き、2 件めが届かない
+    server.failNext(null, null, "network");
     await expect(core.prefetchArticleContents(10)).rejects.toMatchObject({ kind: "network" });
     // 届いたのは 1 件め だけ。3 件めは、取りにいかない
     expect(server.contentRequests).toHaveLength(1);
