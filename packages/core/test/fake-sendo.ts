@@ -43,6 +43,7 @@ interface FeedRow {
   title: string | null;
   siteUrl: string | null;
   folderId: string | null;
+  iconUrl: string | null;
   createdAt: number;
   deletedAt: number | null;
   seq: number;
@@ -55,6 +56,7 @@ interface InboxRow {
   title: string | null;
   summary: string | null;
   author: string | null;
+  thumbnailUrl: string | null;
   publishedAt: number;
   receivedAt: number;
   readAt: number | null;
@@ -236,13 +238,20 @@ export class FakeSendo {
     folder.seq = this.#bump("folders");
   }
 
-  subscribe(input: { url: string; title?: string; folderId?: string | null; id?: string }) {
+  subscribe(input: {
+    url: string;
+    title?: string;
+    folderId?: string | null;
+    id?: string;
+    iconUrl?: string | null;
+  }) {
     const row: FeedRow = {
       id: input.id ?? this.#id("feed"),
       url: input.url,
       title: input.title ?? null,
       siteUrl: null,
       folderId: input.folderId ?? null,
+      iconUrl: input.iconUrl ?? null,
       createdAt: this.now,
       deletedAt: null,
       seq: this.#bump("feeds"),
@@ -284,6 +293,7 @@ export class FakeSendo {
       publishedAt?: number;
       url?: string | null;
       id?: string;
+      thumbnailUrl?: string | null;
     } = {},
   ): InboxRow {
     const seq = this.#bump("articles");
@@ -294,6 +304,7 @@ export class FakeSendo {
       title: input.title ?? null,
       summary: input.summary ?? null,
       author: input.author ?? null,
+      thumbnailUrl: input.thumbnailUrl ?? null,
       publishedAt: input.publishedAt ?? this.now,
       receivedAt: this.now,
       readAt: null,
@@ -304,6 +315,31 @@ export class FakeSendo {
     this.inbox.set(row.id, row);
     return row;
   }
+
+  /**
+   * フィードのアイコンが付いた ／ 変わったことにする（sendo は 30 日に 1 回探し直す）。名前が
+   * 変わったときと同じく、同期の feeds に、そのフィードの行がもう一度届く
+   */
+  setFeedIcon(id: string, iconUrl: string | null): void {
+    const row = this.#mustGet(this.feeds, id);
+    row.iconUrl = iconUrl;
+    row.seq = this.#bump("feeds");
+  }
+
+  /**
+   * sendo が配る形の、画像の中継の URL を作る（オリジンの付かないパス）。偽の署名は、もとの URL
+   * から決まる。クライアントは、この形を組み立てない ／ 読まない
+   */
+  imageUrl(original: string): string {
+    return `/api/v1/images?url=${encodeURIComponent(original)}&sig=${fakeSignature(original)}`;
+  }
+
+  /** 画像の中継が返す状態（200 なら 1×1 の PNG）。502 は配信元から取れない、など */
+  imageStatus = 200;
+  /** もとの URL ごとに、中継が返す状態（決めていない URL は imageStatus） */
+  readonly imageStatusFor = new Map<string, number>();
+  /** 画像の中継に来たリクエスト（もとの URL） */
+  readonly imageRequests: string[] = [];
 
   /** 別の端末で既読・スターを変えたことにする */
   setArticleState(id: string, state: { read?: boolean; starred?: boolean }): void {
@@ -407,6 +443,29 @@ export class FakeSendo {
 
     if (request.headers.has("authorization")) {
       return error(401, "unauthorized", "access tokens are not accepted from the reader");
+    }
+    if (request.method === "GET" && path === "/images") {
+      // 認証（クッキー）、署名、配信元の順に確かめる（sendo の docs/decisions/images.md）
+      const known = sessionValue === null ? undefined : this.sessions.get(sessionValue);
+      if (known === undefined) return imageError(401, "unauthorized");
+      const original = url.searchParams.get("url") ?? "";
+      if (url.searchParams.get("sig") !== fakeSignature(original)) {
+        return imageError(403, "invalid_signature");
+      }
+      this.imageRequests.push(original);
+      const status = this.imageStatusFor.get(original) ?? this.imageStatus;
+      if (status !== 200) return imageError(status, "image_unavailable");
+      return new Response(TINY_PNG.slice(), {
+        status: 200,
+        headers: {
+          "content-type": "image/png",
+          "content-length": String(TINY_PNG.byteLength),
+          "cache-control": "private, max-age=2592000",
+          "x-content-type-options": "nosniff",
+          "content-security-policy": "default-src 'none'; sandbox",
+          "cross-origin-resource-policy": "same-origin",
+        },
+      });
     }
     const user = sessionValue === null ? undefined : this.sessions.get(sessionValue);
     if (user === undefined) {
@@ -821,6 +880,7 @@ export class FakeSendo {
         title: row.title,
         siteUrl: row.siteUrl,
         folderId: row.folderId,
+        iconUrl: row.iconUrl,
         createdAt: iso(row.createdAt),
         deleted: row.deletedAt !== null,
       })),
@@ -834,6 +894,7 @@ export class FakeSendo {
               title: item.row.title,
               summary: item.row.summary,
               author: item.row.author,
+              thumbnailUrl: item.row.thumbnailUrl,
               publishedAt: iso(item.row.publishedAt),
               receivedAt: iso(item.row.receivedAt),
               readAt: item.row.readAt === null ? null : iso(item.row.readAt),
@@ -873,6 +934,7 @@ function feedJson(row: FeedRow) {
     title: row.title,
     siteUrl: row.siteUrl,
     folderId: row.folderId,
+    iconUrl: row.iconUrl,
     lastFetchedAt: null,
     nextFetchAt: iso(row.createdAt),
     errorCount: 0,
@@ -887,6 +949,30 @@ function bySeq(a: { seq: number }, b: { seq: number }): number {
 
 function iso(ms: number): string {
   return new Date(ms).toISOString();
+}
+
+/** 1×1 の透明な PNG */
+const TINY_PNG = Uint8Array.from(
+  atob(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==",
+  ),
+  (char) => char.charCodeAt(0),
+);
+
+/** 偽の署名。もとの URL から決まる 22 文字（本物は HMAC。ここでは、合う ／ 合わないだけを見分ける） */
+function fakeSignature(original: string): string {
+  let hash = 0;
+  for (let i = 0; i < original.length; i++)
+    hash = (Math.imul(hash, 31) + original.charCodeAt(i)) >>> 0;
+  return hash.toString(36).padStart(22, "0");
+}
+
+/** 画像の中継の失敗。JSON で、キャッシュさせない */
+function imageError(status: number, code: string): Response {
+  return new Response(JSON.stringify({ error: { code, message: code } }), {
+    status,
+    headers: { "content-type": "application/json", "cache-control": "no-store" },
+  });
 }
 
 function json(status: number, body: unknown): Response {

@@ -6,7 +6,7 @@ Sendo の公式リーダー。`packages/core`（同期エンジン）と `apps/w
 
 ## 最初に読むもの
 
-- `docs/decisions/`：このリポジトリの今の決定。ほかの文書と食い違ったら、こちらが正しい。特に `local-first.md`（同期とローカル DB）、`ui.md`（UI とツール）、`performance.md`（速さの予算）
+- `docs/decisions/`：このリポジトリの今の決定。ほかの文書と食い違ったら、こちらが正しい。特に `local-first.md`（同期とローカル DB）、`ui.md`（UI とツール）、`performance.md`（速さの予算）、`images.md`（サムネイルとアイコン）
 - サーバーとの約束ごと（認証、差分同期）は sendo の決定が正：`accounts.md`、`sync.md`
 - プロダクト全体の目的・進め方・技術構成は sendo リポジトリにある：
   - https://github.com/sendo-feed/sendo/tree/main/docs/decisions
@@ -36,6 +36,7 @@ Sendo の公式リーダー。`packages/core`（同期エンジン）と `apps/w
   - `src/sync/`：差分同期（`pull.ts`）と操作キュー（`ops.ts` が操作ごとの「手元への反映・送り方・戻し方」、`queue.ts` が積む・まとめる・送る）。操作は手元への反映と同じトランザクションで積み、同期で届いた行の上に重ね直す。どの操作も冪等にする
   - `src/sync/scheduler.ts`：いつ同期するか（起動時、書き込みのあと、一定の間隔、届かなければ間隔を延ばしてやり直す）
   - `src/web/`：Web の実装（UI には依存しない）。`worker.ts` はタブごとの Dedicated Worker で動き、Web Locks で決めた代表だけが DB（`database.ts`、opfs-sahpool）と同期を持ち、ほかのタブは BroadcastChannel で代表に頼む。`client.ts` は画面から使う窓口（`@sendo-reader/core/web`）。やり取りの形は `protocol.ts`
+  - `src/web/image-cache.ts`：画像のキャッシュ（Service Worker が入れる `sendo-images`）の名前と上限、消す・減らす処理。ログアウトとユーザーの切り替えで、手元の DB と一緒に消す
   - opfs-sahpool は、開くのに失敗すると既定でデータを消す。`preserveOnInitFailure` を外さない
   - `test/web/*.browser.test.ts`：Web の実装のテスト。Vitest のブラウザーモードで Chromium の中で動く（初回は `pnpm --filter @sendo-reader/core exec playwright install chromium`）。ワーカーからは、ページの偽の sendo に BroadcastChannel で話す（`test/web/fake-bridge.ts`）
   - `test/fake-sendo.ts`：sendo の差分同期の決定に沿った偽のサーバー。core のテストはこれを相手にし、外へは通信しない。手元の DB は、本番と同じ sqlite-wasm を Node のメモリーで開く（`test/helpers.ts`）
@@ -51,6 +52,7 @@ Sendo の公式リーダー。`packages/core`（同期エンジン）と `apps/w
     - `lib/prefs.svelte.ts`：表示の好み（テーマ、文字の大きさ、一覧の形など）。この端末の localStorage に置き、sendo には送らない
     - キーボードの操作は `routes/Reader.svelte` に割り当て、一覧を `components/ShortcutHelp.svelte` に出す（足したら両方を直す）
     - 色・余白・文字の大きさは `app.css` の変数を使う。アイコンは `components/Icon.svelte`（画像を足さない）
+    - sendo が中継した画像（サムネイル、フィードのアイコン）は、`components/RemoteImage.svelte` で出す（ほかの場所で `<img>` を書かない）
     - `routes/`：画面（ログイン、読む画面、購読の管理）、`components/`：部品（`components/manage/` は購読の管理の部品）
     - `lib/errors.ts`：失敗（`ApiError` の `code` ／ `kind`）を、画面に出す文にする
     - 画面は `@sendo-reader/core/web` の窓口だけを使い、DB や sendo の API に直接触れない
@@ -89,6 +91,7 @@ Conventional Commits を土台にする。全文は https://github.com/sendo-fee
 - 記事のデータ（タイトル、要約、本文）は信頼できないデータとして扱う
   - `{@html}` を使わない（Biome の `noSvelteAtHtmlTags` で検査している）。本文の HTML を出すときは、サニタイズしてから専用の部品で出す
   - URL は `toSafeHttpUrl`（`packages/core`）を通し、http ／ https のものだけを `href` に入れる
+  - 画像の URL（記事の `thumbnailUrl`、フィードの `iconUrl`）は、sendo から受け取ったものをそのまま使う。組み立てない、書き換えない、中身（`url=` や `sig=`）を読まない（`docs/decisions/images.md`）。同じオリジンを指すかは、同期で受けるときに `toSameOriginUrl` で確かめる
 - CSP を緩めない（`apps/web/security-headers.ts`）。インラインのスクリプト、`eval`、テンプレートの `style` 属性（本番の CSP で止まる。`style:` ディレクティブか CSS のクラスを使う）、ほかのオリジンへの通信を使わない。緩める必要が出たら、`docs/decisions/local-first.md` を直してから変える
 - ログインは sendo のセッションのクッキーで行う（`docs/decisions/local-first.md` の 6）。リクエストに `Authorization` を付けない。アクセストークンなど sendo が返す秘密は、画面に一度出すだけにし、手元の DB、ログ、エラーの表示、URL、Service Worker のキャッシュに入れない
 - 速さの予算（`docs/decisions/performance.md`）を超える依存を足さない。足す前に `pnpm build && pnpm size` で確かめる

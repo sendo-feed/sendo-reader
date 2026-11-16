@@ -860,6 +860,71 @@ export interface paths {
         };
         trace?: never;
     };
+    "/images": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 画像を中継する
+         * @description 記事の thumbnailUrl や、フィードの iconUrl として配った URL を、そのまま開くための入口。
+         *     中継するのは、sendo が署名した URL だけ。クライアントは、url と sig を自分で組み立てない。
+         *     応答は Cache-Control で 30 日のキャッシュを許す。URL が同じなら中身も同じとみなしてよい。
+         *     通す形式は JPEG、PNG、GIF、WebP、AVIF、ICO。SVG は通さない。
+         */
+        get: {
+            parameters: {
+                query: {
+                    /** @description もとの画像の URL */
+                    url: string;
+                    /** @description sendo が付けた署名 */
+                    sig: string;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description 画像 */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "image/*": string;
+                    };
+                };
+                /** @description 署名が合わない（sendo が配った URL ではない） */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description 配信元から取れない、画像でない、大きすぎる */
+                502: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/opml": {
         parameters: {
             query?: never;
@@ -1437,6 +1502,11 @@ export interface components {
             url: string;
             title: string | null;
             siteUrl: string | null;
+            /**
+             * @description フィードのアイコン。中継を通る画像の URL（/api/v1/images?url=…&sig=… の形のパス。オリジンは付かない）で、そのまま <img src> に入れる。クライアントは組み立てたり書き換えたりしない。なければ null
+             * @example /api/v1/images?url=https%3A%2F%2Fexample.com%2Fa.png&sig=0123456789abcdefghijkl
+             */
+            iconUrl: string | null;
             folderId: string | null;
             /** Format: date-time */
             lastFetchedAt: string | null;
@@ -1472,6 +1542,11 @@ export interface components {
             /** @description プレーンテキスト（最大 500 文字）。表示する側でエスケープすること */
             summary: string | null;
             author: string | null;
+            /**
+             * @description 記事のサムネイル。中継を通る画像の URL（/api/v1/images?url=…&sig=… の形のパス。オリジンは付かない）で、そのまま <img src> に入れる。クライアントは組み立てたり書き換えたりしない。なければ null
+             * @example /api/v1/images?url=https%3A%2F%2Fexample.com%2Fa.png&sig=0123456789abcdefghijkl
+             */
+            thumbnailUrl: string | null;
             /** Format: date-time */
             publishedAt: string;
             /**
@@ -1567,6 +1642,11 @@ export interface components {
             url: string;
             title: string | null;
             siteUrl: string | null;
+            /**
+             * @description フィードのアイコン。中継を通る画像の URL（/api/v1/images?url=…&sig=… の形のパス。オリジンは付かない）で、そのまま <img src> に入れる。クライアントは組み立てたり書き換えたりしない。なければ null
+             * @example /api/v1/images?url=https%3A%2F%2Fexample.com%2Fa.png&sig=0123456789abcdefghijkl
+             */
+            iconUrl: string | null;
             folderId: string | null;
             /**
              * Format: date-time

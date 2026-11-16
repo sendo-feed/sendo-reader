@@ -371,4 +371,39 @@ describe("ログインとログアウトが重なったとき", () => {
     expect(await first).toBe(true);
     expect(core.currentUser()).toEqual(USER_B);
   });
+
+  test("手元の DB を消すとき（ログアウト、ユーザーの切り替え）にだけ、DB の外のデータも消してもらう", async () => {
+    let cleared = 0;
+    const { server, core } = await setup({
+      onDataCleared: async () => {
+        cleared += 1;
+      },
+    });
+    // 初めて使い始めたときにも消す（前に使っていた人のものが残っていないように）
+    expect(cleared).toBe(1);
+    await core.sync();
+    expect(cleared).toBe(1);
+
+    // セッションが切れただけでは、手元のデータと同じく残す
+    server.expireSession();
+    await core.sync().catch(() => {});
+    expect(cleared).toBe(1);
+
+    // 別のユーザーに替わったら消す
+    server.signInAs(USER_B);
+    await core.sync();
+    expect(cleared).toBe(2);
+
+    // ログアウトで消す。消すのに失敗しても、ログアウトは終わる
+    await core.signOut();
+    expect(cleared).toBe(3);
+  });
+
+  test("DB の外のデータを消せなくても、ログアウトは終わる", async () => {
+    const { core } = await setup({
+      onDataCleared: () => Promise.reject(new Error("キャッシュを消せない")),
+    });
+    await core.signOut();
+    expect(core.isSignedIn()).toBe(false);
+  });
 });

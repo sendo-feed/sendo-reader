@@ -20,7 +20,8 @@ export async function routeFakeSendo(context: BrowserContext, server: FakeSendo)
       await route.fulfill({
         status: response.status,
         headers: Object.fromEntries(response.headers),
-        body: response.status === 204 ? "" : await response.text(),
+        // 画像の応答もあるので、文字にせず、バイトのまま渡す
+        body: response.status === 204 ? "" : Buffer.from(await response.arrayBuffer()),
       });
     } catch {
       await route.abort("failed");

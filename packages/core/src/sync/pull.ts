@@ -195,11 +195,13 @@ async function applyFeed(tx: Executor, feed: SyncPage["feeds"][number]): Promise
     return;
   }
   await tx.run(
-    `insert into feeds (id, url, title, site_url, folder_id, created_at) values (?, ?, ?, ?, ?, ?)
+    `insert into feeds (id, url, title, site_url, folder_id, icon_url, created_at)
+     values (?, ?, ?, ?, ?, ?, ?)
      on conflict (id) do update set
        url = excluded.url, title = excluded.title, site_url = excluded.site_url,
-       folder_id = excluded.folder_id, created_at = excluded.created_at`,
-    [feed.id, feed.url, feed.title, feed.siteUrl, feed.folderId, feed.createdAt],
+       folder_id = excluded.folder_id, icon_url = excluded.icon_url,
+       created_at = excluded.created_at`,
+    [feed.id, feed.url, feed.title, feed.siteUrl, feed.folderId, feed.iconUrl, feed.createdAt],
   );
 }
 
@@ -219,12 +221,13 @@ async function applyArticle(tx: Executor, article: SyncPage["articles"][number])
 async function writeArticle(tx: Executor, article: Article): Promise<void> {
   await tx.run(
     `insert into articles (
-       id, feed_id, url, title, summary, author, published_at, received_at, read_at, starred_at,
-       read_synced
-     ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
+       id, feed_id, url, title, summary, author, thumbnail_url, published_at, received_at,
+       read_at, starred_at, read_synced
+     ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
      on conflict (id) do update set
        feed_id = excluded.feed_id, url = excluded.url, title = excluded.title,
        summary = excluded.summary, author = excluded.author,
+       thumbnail_url = excluded.thumbnail_url,
        published_at = excluded.published_at, received_at = excluded.received_at,
        read_at = excluded.read_at, starred_at = excluded.starred_at, read_synced = 0`,
     [
@@ -234,6 +237,7 @@ async function writeArticle(tx: Executor, article: Article): Promise<void> {
       article.title,
       article.summary,
       article.author,
+      article.thumbnailUrl,
       article.publishedAt,
       article.receivedAt,
       article.readAt,

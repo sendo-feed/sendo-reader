@@ -87,6 +87,11 @@ export class ReaderState {
     return feed === undefined ? "（購読していないフィード）" : (feed.title ?? feed.url);
   }
 
+  /** フィードのアイコンの URL（sendo が中継する画像。なければ null） */
+  feedIcon(feedId: string): string | null {
+    return this.feeds.find((f) => f.id === feedId)?.iconUrl ?? null;
+  }
+
   async #loadAll(): Promise<void> {
     await Promise.all([this.#loadFolders(), this.#loadFeeds(), this.#loadUnread()]);
   }

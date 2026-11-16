@@ -23,6 +23,11 @@ export interface Feed {
   title: string | null;
   siteUrl: string | null;
   folderId: string | null;
+  /**
+   * アイコンの画像の URL。sendo が中継する、同じオリジンの URL（docs/decisions/images.md）。
+   * 受け取ったものをそのまま <img src> に入れる（組み立てない、書き換えない、中身を読まない）
+   */
+  iconUrl: string | null;
   createdAt: number;
 }
 
@@ -33,6 +38,8 @@ export interface Article {
   title: string | null;
   summary: string | null;
   author: string | null;
+  /** サムネイルの画像の URL。フィードの iconUrl と同じく、受け取ったものをそのまま使う */
+  thumbnailUrl: string | null;
   publishedAt: number;
   receivedAt: number;
   readAt: number | null;

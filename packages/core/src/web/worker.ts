@@ -3,6 +3,7 @@ import type { Table } from "../models";
 import { ReaderCore } from "../reader";
 import { SyncScheduler, type SyncStatus } from "../sync/scheduler";
 import { openWebDatabase } from "./database";
+import { clearImageCache } from "./image-cache";
 import {
   isMethod,
   type Method,
@@ -187,6 +188,8 @@ export function runReaderWorker(options: ReaderWorkerOptions = {}): void {
       db,
       baseUrl: options.baseUrl ?? "/api/v1",
       ...(options.fetch === undefined ? {} : { fetch: options.fetch }),
+      // 手元の DB を消すとき（ログアウト、ユーザーの切り替え）に、画像のキャッシュも消す
+      onDataCleared: clearImageCache,
     });
     const scheduler = new SyncScheduler(core, {
       onStatus: (status: SyncStatus) => {

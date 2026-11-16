@@ -1,6 +1,11 @@
 import { svelte } from "@sveltejs/vite-plugin-svelte";
 import { defineConfig, type Plugin } from "vite";
 import { VitePWA } from "vite-plugin-pwa";
+import {
+  IMAGE_CACHE_MAX_AGE_SECONDS,
+  IMAGE_CACHE_NAME,
+  IMAGE_CACHE_URL_PATTERN,
+} from "../../packages/core/src/web/image-cache.ts";
 import { renderHeadersFile, securityHeaders } from "./security-headers.ts";
 
 /** 手元のサーバーにはヘッダーを付け、本番のビルドには _headers を書き出す */
@@ -59,6 +64,22 @@ export default defineConfig({
         // 文字列を渡せない。Workbox の実行部分を sw.js に入れる
         inlineWorkboxRuntime: true,
         cleanupOutdatedCaches: true,
+        // sendo が中継した画像（サムネイル、フィードのアイコン）を、キャッシュを先に見て出す
+        // （docs/decisions/images.md の 3）。オフラインでも、一度出した画像を出す。入れるのは
+        // 成功（200）だけで、401 ／ 403 ／ 502 は入れない。画面のファイルとは別の名前にして、
+        // ログアウトでまとめて消せるようにする。容量の上限（100MB）は、画面の側で見る
+        runtimeCaching: [
+          {
+            urlPattern: IMAGE_CACHE_URL_PATTERN,
+            handler: "CacheFirst",
+            method: "GET",
+            options: {
+              cacheName: IMAGE_CACHE_NAME,
+              cacheableResponse: { statuses: [200] },
+              expiration: { maxAgeSeconds: IMAGE_CACHE_MAX_AGE_SECONDS, purgeOnQuotaError: true },
+            },
+          },
+        ],
       },
     }),
   ],

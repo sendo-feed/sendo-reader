@@ -3,6 +3,7 @@ import type { Database, Executor } from "./db/database";
 import { listFeeds } from "./db/queries";
 import type { Feed } from "./models";
 import { reapplyPending } from "./sync/queue";
+import { toSameOriginUrl } from "./url";
 
 /**
  * sendo に問い合わせないとできない操作（フィードの候補探し、購読、OPML の取り込み）。
@@ -55,21 +56,25 @@ export async function subscribe(
     title: feed.title,
     siteUrl: feed.siteUrl,
     folderId: feed.folderId,
+    // 購読したばかりのフィードには、まだアイコンがないことが多い（あとから、同期で届く）
+    iconUrl: toSameOriginUrl(feed.iconUrl),
     createdAt: Date.parse(feed.createdAt),
   };
   return db.transaction(async (tx) => {
     signal.throwIfAborted();
     await tx.run(
-      `insert into feeds (id, url, title, site_url, folder_id, created_at) values (?, ?, ?, ?, ?, ?)
+      `insert into feeds (id, url, title, site_url, folder_id, icon_url, created_at)
+       values (?, ?, ?, ?, ?, ?, ?)
        on conflict (id) do update set
          url = excluded.url, title = excluded.title, site_url = excluded.site_url,
-         folder_id = excluded.folder_id`,
+         folder_id = excluded.folder_id, icon_url = excluded.icon_url`,
       [
         received.id,
         received.url,
         received.title,
         received.siteUrl,
         received.folderId,
+        received.iconUrl,
         received.createdAt,
       ],
     );

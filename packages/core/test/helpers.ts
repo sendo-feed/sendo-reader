@@ -11,7 +11,9 @@ export async function openMemoryDb(): Promise<Database> {
 }
 
 /** 偽の sendo と、それにつないだ ReaderCore を用意する（既定では、既定のユーザーでログインしておく） */
-export async function setup(options: { signIn?: boolean } = {}) {
+export async function setup(
+  options: { signIn?: boolean; onDataCleared?: () => Promise<void> } = {},
+) {
   const server = new FakeSendo();
   const db = await openMemoryDb();
   const core = await ReaderCore.open({
@@ -19,6 +21,7 @@ export async function setup(options: { signIn?: boolean } = {}) {
     baseUrl: "https://sendo.test/api/v1",
     fetch: server.fetch,
     now: () => server.now,
+    ...(options.onDataCleared === undefined ? {} : { onDataCleared: options.onDataCleared }),
   });
   if (options.signIn ?? true) {
     server.signInAs();

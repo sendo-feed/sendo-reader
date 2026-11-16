@@ -1,3 +1,4 @@
+import { trimImageCache } from "@sendo-reader/core/web/image-cache";
 import { mount } from "svelte";
 import App from "./App.svelte";
 import { AUTHORIZE_PATH } from "./lib/authorize";
@@ -21,6 +22,12 @@ if (location.pathname === AUTHORIZE_PATH) {
   const state = new ReaderState(startReader());
   mount(App, { target, context: readerContext(state) });
   void state.init();
+
+  // 画像のキャッシュが上限（100MB）を超えていたら、古いものから捨てる（docs/decisions/images.md
+  // の 3）。起動してしばらくしてからと、そのあとは一定の間隔で見る（画面の表示は待たせない）
+  const trim = () => void trimImageCache().catch(() => {});
+  setTimeout(trim, 10_000);
+  setInterval(trim, 10 * 60_000);
 
   // タブが前に出たら、しばらく同期していなければ同期してもらう
   document.addEventListener("visibilitychange", () => {

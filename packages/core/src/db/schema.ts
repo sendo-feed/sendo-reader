@@ -109,6 +109,12 @@ const migrations: readonly (readonly string[])[] = [
     // （記事 81,000 件・未読 10 件で、1 回 13.7ms が 0.09ms になった）
     "create index articles_unread_published_idx on articles (published_at, id) where read_at is null",
   ],
+  [
+    // sendo が中継する画像の URL（docs/decisions/images.md）。すでに手元にある行は null のまま
+    // （sendo は、記事のサムネイルをさかのぼって付けない。フィードのアイコンは、付いたら同期で届く）
+    "alter table articles add column thumbnail_url text",
+    "alter table feeds add column icon_url text",
+  ],
 ];
 
 export const SCHEMA_VERSION = migrations.length;

@@ -6,6 +6,7 @@
   import { prefs, type ViewOptions } from "../lib/prefs.svelte";
   import { handleLink, isPlainClick, router } from "../lib/router.svelte";
   import Icon from "./Icon.svelte";
+  import RemoteImage from "./RemoteImage.svelte";
 
   let {
     list,
@@ -480,13 +481,21 @@
               aria-current={router.articleId === article.id ? "true" : undefined}
               onclick={(e) => open(e, article.id)}
             >
-              <span class="meta">
-                <span class="feed">{reader.feedTitle(article.feedId)}</span>
-                <span class="time">{shortTime(article.publishedAt)}</span>
+              <span class="text">
+                <span class="meta">
+                  <span class="feed-icon">
+                    <RemoteImage src={reader.feedIcon(article.feedId)} />
+                  </span>
+                  <span class="feed">{reader.feedTitle(article.feedId)}</span>
+                  <span class="time">{shortTime(article.publishedAt)}</span>
+                </span>
+                <span class="title">{article.title ?? "（タイトルなし）"}</span>
+                {#if options.layout === "comfortable" && article.summary}
+                  <span class="summary">{article.summary.slice(0, 240)}</span>
+                {/if}
               </span>
-              <span class="title">{article.title ?? "（タイトルなし）"}</span>
-              {#if options.layout === "comfortable" && article.summary}
-                <span class="summary">{article.summary.slice(0, 240)}</span>
+              {#if options.layout === "comfortable" && article.thumbnailUrl !== null}
+                <span class="thumb"><RemoteImage src={article.thumbnailUrl} /></span>
               {/if}
             </a>
             <span class="actions">
@@ -692,11 +701,50 @@
   }
 
   .item {
-    display: grid;
-    gap: 0.125rem;
+    display: flex;
+    gap: 0.75rem;
     padding: 0.625rem 1rem 0.75rem 1.375rem;
     color: var(--muted);
     text-decoration: none;
+  }
+
+  .text {
+    display: grid;
+    flex: 1;
+    align-content: start;
+    gap: 0.125rem;
+    min-width: 0;
+  }
+
+  /*
+   * サムネイル。決まった大きさの正方形で、はみ出す分は切る（縦横比の違う画像でも、行の高さは
+   * 変わらない）。場所は、画像が届く前に取っておく。読み込みに失敗したら、場所ごと出さない
+   */
+  .thumb {
+    flex: none;
+    width: 4.5rem;
+    height: 4.5rem;
+    overflow: hidden;
+    border-radius: var(--radius-small);
+    background: var(--surface);
+  }
+
+  .thumb:not(:has(:global(img))) {
+    display: none;
+  }
+
+  /* フィードのアイコン。ない・失敗したときは、場所ごと出さない */
+  .feed-icon {
+    flex: none;
+    align-self: center;
+    width: 1rem;
+    height: 1rem;
+    overflow: hidden;
+    border-radius: 0.2rem;
+  }
+
+  .feed-icon:not(:has(:global(img))) {
+    display: none;
   }
 
   /* 指で長く押したときに、文字の選択やリンクのプレビューを出さない（記事の操作を出す） */

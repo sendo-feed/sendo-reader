@@ -33,6 +33,7 @@ type ArticleRow = {
   title: string | null;
   summary: string | null;
   author: string | null;
+  thumbnail_url: string | null;
   published_at: number;
   received_at: number;
   read_at: number | null;
@@ -40,7 +41,7 @@ type ArticleRow = {
 };
 
 const ARTICLE_COLUMNS =
-  "a.id, a.feed_id, a.url, a.title, a.summary, a.author, a.published_at, a.received_at, a.read_at, a.starred_at";
+  "a.id, a.feed_id, a.url, a.title, a.summary, a.author, a.thumbnail_url, a.published_at, a.received_at, a.read_at, a.starred_at";
 
 /** 記事を新しい順（公開日時、同じなら id の大きい順）か、その逆の古い順に読む */
 export async function listArticles(db: Executor, query: ArticleQuery = {}): Promise<Article[]> {
@@ -130,9 +131,10 @@ export async function listFeeds(db: Executor): Promise<Feed[]> {
     title: string | null;
     site_url: string | null;
     folder_id: string | null;
+    icon_url: string | null;
     created_at: number;
   }>(
-    `select id, url, title, site_url, folder_id, created_at from feeds
+    `select id, url, title, site_url, folder_id, icon_url, created_at from feeds
      order by coalesce(title, url) collate nocase, id`,
   );
   return rows.map((row) => ({
@@ -141,6 +143,7 @@ export async function listFeeds(db: Executor): Promise<Feed[]> {
     title: row.title,
     siteUrl: row.site_url,
     folderId: row.folder_id,
+    iconUrl: row.icon_url,
     createdAt: row.created_at,
   }));
 }
@@ -181,6 +184,7 @@ function toArticle(row: ArticleRow): Article {
     title: row.title,
     summary: row.summary,
     author: row.author,
+    thumbnailUrl: row.thumbnail_url,
     publishedAt: row.published_at,
     receivedAt: row.received_at,
     readAt: row.read_at,

@@ -335,3 +335,48 @@ async function setupWithResponse(body: unknown) {
   await core.restoreSession();
   return core;
 }
+
+describe("画像の URL（サムネイル、フィードのアイコン）", () => {
+  test("同期で届いた URL を、そのまま手元に置く。フィードのアイコンは、あとから付く ／ 変わる ／ なくなる", async () => {
+    const { server, core } = await setup();
+    const icon = server.imageUrl("https://blog.example/favicon.ico");
+    const thumbnail = server.imageUrl("https://blog.example/a.png");
+    const feed = server.subscribe({ url: "https://blog.example/feed" });
+    const withImage = server.deliver(feed.id, { title: "with", thumbnailUrl: thumbnail });
+    const without = server.deliver(feed.id, { title: "without" });
+    await core.sync();
+
+    expect((await core.getArticle(withImage.id))?.thumbnailUrl).toBe(thumbnail);
+    expect((await core.getArticle(without.id))?.thumbnailUrl).toBeNull();
+    expect((await core.listFeeds())[0]?.iconUrl).toBeNull();
+
+    // アイコンが付くと、同期の feeds に、同じ id の行がもう一度届く
+    server.setFeedIcon(feed.id, icon);
+    await core.sync();
+    expect((await core.listFeeds())[0]?.iconUrl).toBe(icon);
+
+    const changed = server.imageUrl("https://blog.example/new.png");
+    server.setFeedIcon(feed.id, changed);
+    await core.sync();
+    expect((await core.listFeeds())[0]?.iconUrl).toBe(changed);
+
+    server.setFeedIcon(feed.id, null);
+    await core.sync();
+    expect((await core.listFeeds())[0]?.iconUrl).toBeNull();
+  });
+
+  test("同じオリジンを指さない URL は、置かない（null にする）", async () => {
+    const { server, core } = await setup();
+    const feed = server.subscribe({
+      url: "https://blog.example/feed",
+      iconUrl: "https://evil.example/icon.png",
+    });
+    const absolute = server.deliver(feed.id, { thumbnailUrl: "//evil.example/a.png" });
+    const backslash = server.deliver(feed.id, { thumbnailUrl: "/\\evil.example/a.png" });
+    await core.sync();
+
+    expect((await core.listFeeds())[0]?.iconUrl).toBeNull();
+    expect((await core.getArticle(absolute.id))?.thumbnailUrl).toBeNull();
+    expect((await core.getArticle(backslash.id))?.thumbnailUrl).toBeNull();
+  });
+});

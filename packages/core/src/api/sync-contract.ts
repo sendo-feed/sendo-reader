@@ -13,6 +13,7 @@
  */
 
 import type { SyncArticle, SyncPage } from "../sync/page";
+import { toSameOriginUrl } from "../url";
 import { ApiError } from "./errors";
 import type { components } from "./schema.gen";
 
@@ -37,6 +38,7 @@ export function toSyncPage(body: unknown): SyncPage {
       title: feed.title,
       siteUrl: feed.siteUrl,
       folderId: feed.folderId,
+      iconUrl: toSameOriginUrl(feed.iconUrl),
       createdAt: Date.parse(feed.createdAt),
       deleted: feed.deleted,
     })),
@@ -51,6 +53,7 @@ export function toSyncPage(body: unknown): SyncPage {
               title: article.title,
               summary: article.summary,
               author: article.author,
+              thumbnailUrl: toSameOriginUrl(article.thumbnailUrl),
               publishedAt: Date.parse(article.publishedAt),
               receivedAt: Date.parse(article.receivedAt),
               readAt: article.readAt === null ? null : Date.parse(article.readAt),
@@ -63,7 +66,8 @@ export function toSyncPage(body: unknown): SyncPage {
 
 /**
  * 応答の形を確かめる。記事のタイトルや要約は信頼できないデータだが、ここでは文字列であることだけを
- * 確かめる（画面では HTML として出さない）。時刻は読める形であることを確かめる。
+ * 確かめる（画面では HTML として出さない）。時刻は読める形であることを確かめる。画像の URL
+ * （thumbnailUrl、iconUrl）は、core の中の形にするときに、同じオリジンを指すものだけを残す。
  */
 function parseSyncChanges(body: unknown): SyncChanges {
   const root = record(body, "(root)");
@@ -89,6 +93,7 @@ function parseSyncChanges(body: unknown): SyncChanges {
         title: nullableString(row.title, at("title")),
         siteUrl: nullableString(row.siteUrl, at("siteUrl")),
         folderId: nullableString(row.folderId, at("folderId")),
+        iconUrl: optionalString(row.iconUrl, at("iconUrl")),
         createdAt: time(row.createdAt, at("createdAt")),
         deleted: boolean(row.deleted, at("deleted")),
       };
@@ -106,6 +111,7 @@ function parseSyncChanges(body: unknown): SyncChanges {
         title: nullableString(row.title, at("title")),
         summary: nullableString(row.summary, at("summary")),
         author: nullableString(row.author, at("author")),
+        thumbnailUrl: optionalString(row.thumbnailUrl, at("thumbnailUrl")),
         publishedAt: time(row.publishedAt, at("publishedAt")),
         receivedAt: time(row.receivedAt, at("receivedAt")),
         readAt: nullableTime(row.readAt, at("readAt")),
@@ -137,6 +143,11 @@ function string(value: unknown, field: string): string {
 
 function nullableString(value: unknown, field: string): string | null {
   return value === null ? null : string(value, field);
+}
+
+/** あとから足された項目。まだ配っていない版の sendo が相手でも、同期を止めない（ないものは null） */
+function optionalString(value: unknown, field: string): string | null {
+  return value === undefined ? null : nullableString(value, field);
 }
 
 function boolean(value: unknown, field: string): boolean {

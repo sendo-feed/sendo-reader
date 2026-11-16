@@ -34,4 +34,4 @@ export {
   SyncScheduler,
   type SyncStatus,
 } from "./sync/scheduler";
-export { toSafeHttpUrl } from "./url";
+export { toSafeHttpUrl, toSameOriginUrl } from "./url";

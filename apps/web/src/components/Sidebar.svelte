@@ -5,6 +5,7 @@
   import { prefs } from "../lib/prefs.svelte";
   import { handleLink, router, type View, viewHref } from "../lib/router.svelte";
   import Icon, { type IconName } from "./Icon.svelte";
+  import RemoteImage from "./RemoteImage.svelte";
   import SyncStatus from "./SyncStatus.svelte";
 
   let {
@@ -95,7 +96,11 @@
       onclick={(e) => handleLink(e, href)}
     >
       <span class="avatar" style:--hue={hueOf(feed.id)} aria-hidden="true">
-        {initialOf(feed)}
+        <RemoteImage src={feed.iconUrl}>
+          {#snippet fallback()}
+            {initialOf(feed)}
+          {/snippet}
+        </RemoteImage>
       </span>
       <span class="name">{feed.title ?? feed.url}</span>
       {#if count > 0}
@@ -451,6 +456,12 @@
     font-size: 0.6875rem;
     font-weight: 700;
     line-height: 1;
+    overflow: hidden;
+  }
+
+  /* アイコンの画像があるときは、頭文字の印の色を出さない */
+  .avatar:has(:global(img)) {
+    background: none;
   }
 
   .name {

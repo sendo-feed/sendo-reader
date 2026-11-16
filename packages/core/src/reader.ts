@@ -49,6 +49,12 @@ export interface ReaderCoreOptions {
   now?: () => number;
   /** 1 つのリクエストを待つ上限（ミリ秒） */
   requestTimeoutMs?: number;
+  /**
+   * 手元の DB をまとめて消したあと（ログアウトした、ユーザーが替わった）に呼ぶ。DB の外に置いた、
+   * その人のデータ（Web では、Service Worker の画像のキャッシュ。docs/decisions/images.md の 4）を
+   * 一緒に消す。失敗しても、ログアウトやユーザーの切り替えは止めない
+   */
+  onDataCleared?: () => Promise<void>;
 }
 
 export type ChangeListener = (tables: ReadonlySet<Table>) => void;
@@ -83,6 +89,7 @@ export class ReaderCore {
   readonly #db: Database;
   readonly #api: SendoApi;
   readonly #now: () => number;
+  readonly #onDataCleared: (() => Promise<void>) | undefined;
   readonly #listeners = new Set<ChangeListener>();
   /** 手元に置いた、ログインしたユーザー。毎回 DB を読まずに済むように持っておく */
   #user: User | null = null;
@@ -114,6 +121,7 @@ export class ReaderCore {
   private constructor(options: ReaderCoreOptions) {
     this.#db = options.db;
     this.#now = options.now ?? Date.now;
+    this.#onDataCleared = options.onDataCleared;
     this.#api = createSendoApi({
       baseUrl: options.baseUrl,
       ...(options.fetch === undefined ? {} : { fetch: options.fetch }),
@@ -194,6 +202,7 @@ export class ReaderCore {
       await setSetting(tx, LOGOUT_PENDING_KEY, "1");
       this.#user = null;
     });
+    await this.#afterDataCleared();
     this.#emit(ALL_TABLES);
   }
 
@@ -258,7 +267,10 @@ export class ReaderCore {
       this.#user = { ...user };
       switched = true;
     });
-    if (switched) this.#emit(ALL_TABLES);
+    if (switched) {
+      await this.#afterDataCleared();
+      this.#emit(ALL_TABLES);
+    }
     return current;
   }
 
@@ -348,6 +360,15 @@ export class ReaderCore {
     const id = await enqueue(tx, op, this.#now(), { mergeAbove: this.#mergeAbove() });
     this.#lastOpId = Math.max(this.#lastOpId, id);
     if (fromOnline) this.#onlineOps.add(id);
+  }
+
+  /** 手元の DB を消したあとに、DB の外に置いたその人のデータも消してもらう */
+  async #afterDataCleared(): Promise<void> {
+    try {
+      await this.#onDataCleared?.();
+    } catch {
+      // 消せなくても、ログアウトやユーザーの切り替えは進める（手元の DB は、もう消してある）
+    }
   }
 
   /** まだ sendo に送り終えていない操作の数 */

@@ -183,4 +183,23 @@ describe("手元の DB のスキーマ", () => {
     await Promise.all([inTx, read]);
     expect(order).toEqual(["tx: inserted", "tx: done", "read: 1"]);
   });
+
+  test("画像の URL の列を足しても、すでにある記事とフィードは残り、URL は null のまま", async () => {
+    const db = await openMemoryDb();
+    await migrate(db, 6);
+    await db.run(
+      "insert into feeds (id, url, created_at) values ('feed-1', 'https://a.example/', 1)",
+    );
+    await db.run(
+      `insert into articles (id, feed_id, title, published_at, received_at)
+       values ('a1', 'feed-1', 'old', 1, 1)`,
+    );
+    await migrate(db);
+    expect(await db.all("select id, icon_url from feeds")).toEqual([
+      { id: "feed-1", icon_url: null },
+    ]);
+    expect(await db.all("select id, title, thumbnail_url from articles")).toEqual([
+      { id: "a1", title: "old", thumbnail_url: null },
+    ]);
+  });
 });
