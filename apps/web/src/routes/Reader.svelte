@@ -16,7 +16,14 @@
   import { layout, reducedMotion } from "../lib/layout.svelte";
   import { ArticleListState, type ListProgress } from "../lib/list.svelte";
   import { prefs } from "../lib/prefs.svelte";
-  import { handleLink, isPlainClick, router, type View, viewHref } from "../lib/router.svelte";
+  import {
+    handleLink,
+    isPlainClick,
+    type Position,
+    router,
+    type View,
+    viewHref,
+  } from "../lib/router.svelte";
   import Manage from "./Manage.svelte";
   import Settings from "./Settings.svelte";
 
@@ -64,7 +71,7 @@
    * 狭い画面では、一覧も記事も同じページを動かす（docs/decisions/ui.md の 6）。記事を開く前の
    * 一覧の位置を覚えておき、記事から戻ったら、その位置に戻す（記事は、先頭から出す）
    */
-  let listScrollY = 0;
+  let listScrollY: number | null = null;
   let wasReading = router.articleId !== null;
 
   // 画面が替わる前（一覧がまだ出ている間）に、一覧の位置を覚える
@@ -84,11 +91,16 @@
     });
   });
 
-  // 記事から一覧に戻ったら、覚えていた位置に戻す
+  // 記事から一覧に戻ったら、覚えていた位置に戻す。記事を開いたまま読み込み直したなど、覚えて
+  // いなければ、戻った先の履歴の項目に残っていた位置に戻す
   $effect(() => {
     const reading = router.articleId !== null;
     untrack(() => {
-      if (!reading && wasReading && layout.pageScroll) window.scrollTo({ top: listScrollY });
+      if (!reading && wasReading && layout.pageScroll) {
+        const anchor = queryKey === null ? null : router.takeList(queryKey);
+        window.scrollTo({ top: listScrollY ?? 0 });
+        if (listScrollY === null && anchor !== null) void listView?.restore(anchor);
+      }
       // 戻るボタンや Esc で戻ったときは、一覧を左から入れる。スワイプで戻ったときは、後ろに
       // 見せていた一覧と同じ位置で、そのまま一覧に替わる（入れ直さない）
       returning = !reading && wasReading && !peeking;
@@ -111,7 +123,7 @@
     peeking = on;
     if (!on) return;
     await tick();
-    listView?.peekAt(listScrollY);
+    listView?.peekAt(listScrollY ?? 0);
   }
 
   /** 下のバーを押した。いまいる画面をもう一度押したら、一覧の先頭に戻る（移らない） */
@@ -214,11 +226,74 @@
     const blank = listing.kind === "search" && router.searchQuery.trim() === "";
     return JSON.stringify(blank ? null : listing.query);
   });
+  // 別の一覧に替えたら、前の一覧の位置は使わない
+  $effect.pre(() => {
+    void queryKey;
+    listScrollY = null;
+  });
+
+  // 読み込み直したときや、戻る・進むで来たときは、読んだあとに、前に見ていた一覧の位置に戻す。
+  // 狭い画面で記事を開いているときは、一覧が出ていないので、記事から戻るときに戻す
   $effect(() => {
     const key = queryKey;
     untrack(() => {
-      if (key !== null) void list.show(JSON.parse(key) as ArticleQuery | null);
+      if (key === null) return;
+      void list.show(JSON.parse(key) as ArticleQuery | null).then(() => {
+        if (key !== queryKey || (layout.pageScroll && router.articleId !== null)) return;
+        const anchor = router.takeList(key);
+        if (anchor !== null) void listView?.restore(anchor);
+      });
     });
+  });
+
+  /**
+   * 見ている位置を、いまの履歴の項目に書いておく（docs/decisions/ui.md の 1）。動かし終えたときと、
+   * 別の項目に移る直前と、画面が裏に回ったとき（そのまま閉じられたり、新しい版に替えるために
+   * 読み込み直したりする）に書く。狭い画面で記事を開いている間は、一覧の位置は書かない
+   */
+  function rememberPosition() {
+    const position = currentPosition();
+    if (position !== null) router.remember(position);
+  }
+
+  /** いま見ている位置（書くものがなければ null） */
+  function currentPosition(): Position | null {
+    clearTimeout(rememberTimer);
+    const articleId = router.articleId;
+    const position: Position = {};
+    if (queryKey !== null && listView !== undefined && !(layout.pageScroll && articleId !== null)) {
+      const anchor = listView.anchor();
+      position.list = anchor === null ? undefined : { key: queryKey, anchor };
+    }
+    if (articleId !== null && articleView !== undefined) {
+      position.article = { id: articleId, top: articleView.scrollTop() };
+    }
+    return Object.keys(position).length > 0 ? position : null;
+  }
+
+  let rememberTimer: ReturnType<typeof setTimeout> | undefined;
+
+  function onScroll() {
+    clearTimeout(rememberTimer);
+    rememberTimer = setTimeout(rememberPosition, 250);
+  }
+
+  $effect(() => {
+    router.beforeLeave = currentPosition;
+    const onHidden = () => {
+      if (document.visibilityState === "hidden") rememberPosition();
+    };
+    // 一覧と記事の欄（広い画面）の動きも拾う（scroll は親に伝わらないので、捕まえる側で聞く）
+    document.addEventListener("scroll", onScroll, { capture: true, passive: true });
+    document.addEventListener("visibilitychange", onHidden);
+    window.addEventListener("pagehide", rememberPosition);
+    return () => {
+      router.beforeLeave = null;
+      clearTimeout(rememberTimer);
+      document.removeEventListener("scroll", onScroll, { capture: true });
+      document.removeEventListener("visibilitychange", onHidden);
+      window.removeEventListener("pagehide", rememberPosition);
+    };
   });
 
   // 手元の記事が変わったら、出している記事の状態を読み直す

@@ -3,7 +3,7 @@
   import { tick, untrack } from "svelte";
   import { useReader } from "../lib/context";
   import { formatDateTime } from "../lib/format";
-  import { layout, reducedMotion, scrollToTop } from "../lib/layout.svelte";
+  import { layout, reducedMotion, scrollTopOf, scrollToTop } from "../lib/layout.svelte";
   import type { ArticleListState } from "../lib/list.svelte";
   import { type ArticleSwipe, prefs } from "../lib/prefs.svelte";
   import { handleLink, router, viewHref } from "../lib/router.svelte";
@@ -124,8 +124,10 @@
           article = listed;
           missing = false;
         }
-        // 記事は先頭から出す（狭い画面では、ページ全体を動かしている）
+        // 記事は先頭から出す（狭い画面では、ページ全体を動かしている）。読み込み直したときや、
+        // 戻る・進むで来たときは、本文が出てから、前に見ていた位置に戻す
         scrollToTop(scroller);
+        restoreTop = router.takeArticle(id);
         // 書けなかったら、次に手元が変わったときの読み直しで、手元の DB の状態に戻る
         markOnOpen(id).catch(() => void list.refresh());
         void load(id);
@@ -133,6 +135,30 @@
       }
     });
   });
+
+  /** 本文が出たら戻す、前に見ていた位置（px） */
+  let restoreTop: number | null = null;
+
+  $effect(() => {
+    // 本文を確かめている間・取っている間は、高さが決まらないので待つ（取れなかったら、要約で戻す）
+    if (article === null || contentState === "checking" || contentState === "loading") return;
+    untrack(() => {
+      const top = restoreTop;
+      restoreTop = null;
+      if (top === null) return;
+      const id = articleId;
+      void tick().then(() => {
+        // 待っている間に別の記事に替えた、読み始めた
+        if (articleId !== id || scrollTopOf(scroller) > 0) return;
+        scrollToTop(scroller, top);
+      });
+    });
+  });
+
+  /** いま見ている位置（px） */
+  export function scrollTop(): number {
+    return scrollTopOf(scroller);
+  }
 
   $effect(() => {
     void reader.articlesVersion;
