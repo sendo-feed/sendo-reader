@@ -92,6 +92,7 @@
    * 一覧を動かして、見出しの下へ入りはじめた未読の記事を、既読にする（設定で切れる）。
    * 行がすっかり消えるのを待たず、行の上の端が見出しの下に隠れたら既読にする（Feedly と同じ。
    * 動かすのをやめたときに、上に半分残っている行も、もう読み終えた行だから）。
+   * 見るのは記事の行（.row）で、その上に付く日付の見出しは数えない。
    * 行ごとに位置を測らず、IntersectionObserver の知らせで拾う。少しためてから、まとめて書く
    */
   let observer: IntersectionObserver | undefined;
@@ -470,7 +471,7 @@
   {:else}
     <ol class:compact={options.layout === "compact"}>
       {#each rows as { article, heading } (article.id)}
-        <li data-article={article.id} use:watchPass>
+        <li>
           {#if heading !== null}
             <h3>{heading}</h3>
           {/if}
@@ -479,6 +480,7 @@
             class:unread={article.readAt === null}
             class:current={currentId === article.id}
             data-article={article.id}
+            use:watchPass
             use:swipe={article}
           >
             <a

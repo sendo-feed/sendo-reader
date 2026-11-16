@@ -365,7 +365,18 @@ test("一覧を動かして通り過ぎた記事は既読になる。設定で�
   const scrollBy = (top: number) => list.evaluate((el, top) => el.scrollBy({ top }), top);
 
   // 行がすっかり消えるのを待たない。上の端が見出しの下に少し隠れたら、その行は既読になる
-  await scrollBy(24);
+  // 行の上に付く日付の見出しが隠れただけなら、まだ既読にしない
+  const firstRowTop = await list.evaluate((el) => {
+    const header = el.querySelector("header");
+    const row = el.querySelector(".row");
+    if (header === null || row === null) throw new Error("unreachable");
+    return row.getBoundingClientRect().top - header.getBoundingClientRect().bottom;
+  });
+  expect(firstRowTop).toBeGreaterThan(10);
+  await scrollBy(firstRowTop - 4);
+  await page.waitForTimeout(600);
+  await expect(unreadRows).toHaveCount(40);
+  await scrollBy(28);
   await expect(unreadRows).toHaveCount(39);
   await expect(list.locator(".row").first()).not.toHaveClass(/unread/);
   await expect(list.locator(".row").first()).toBeInViewport();
