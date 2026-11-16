@@ -50,6 +50,14 @@ export class ArticleListState {
   /** そのうち、いま既読の記事 */
   readonly #readHere = new Set<string>();
 
+  /**
+   * 一覧を最初から読み直す（別の一覧に替える、読み直す）たびに変わる番号。待っている間に、
+   * 一覧が読み直されたかを見分けるのに使う
+   */
+  get generation(): number {
+    return this.#generation;
+  }
+
   constructor(client: ReaderClient) {
     this.#client = client;
   }

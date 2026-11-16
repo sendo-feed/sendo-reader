@@ -708,21 +708,29 @@ test("見出しや下のバーを押すと一覧の先頭に戻る。先頭で�
   expect(readCount).toBeGreaterThan(0);
   server.deliver(feed.id, { title: "届いたばかり", publishedAt: Date.now() });
 
-  const drag = (dy: number) =>
-    list.evaluate((el, dy) => {
-      const at = (y: number) => new Touch({ identifier: 1, target: el, clientX: 200, clientY: y });
-      const fire = (type: string, touches: Touch[], changed: Touch[]) =>
-        el.dispatchEvent(new TouchEvent(type, { bubbles: true, touches, changedTouches: changed }));
-      fire("touchstart", [at(200)], [at(200)]);
-      for (const step of [0.3, 0.6, 1])
-        fire("touchmove", [at(200 + dy * step)], [at(200 + dy * step)]);
-      fire("touchend", [], [at(200 + dy)]);
-    }, dy);
+  const drag = (dy: number, end: "touchend" | "touchcancel" = "touchend") =>
+    list.evaluate(
+      (el, { dy, end }) => {
+        const at = (y: number) =>
+          new Touch({ identifier: 1, target: el, clientX: 200, clientY: y });
+        const fire = (type: string, touches: Touch[], changed: Touch[]) =>
+          el.dispatchEvent(
+            new TouchEvent(type, { bubbles: true, touches, changedTouches: changed }),
+          );
+        fire("touchstart", [at(200)], [at(200)]);
+        for (const step of [0.3, 0.6, 1])
+          fire("touchmove", [at(200 + dy * step)], [at(200 + dy * step)]);
+        fire(end, [], [at(200 + dy)]);
+      },
+      { dy, end },
+    );
 
-  // 少し引いただけでは、何もしない
+  // 少し引いただけ、引いている途中でタッチが取り消された、では何もしない
   await drag(60);
+  await drag(200, "touchcancel");
   await page.waitForTimeout(300);
   await expect(list.locator(".item")).toHaveCount(40);
+  await expect(list.locator(".pull")).toHaveCount(0);
 
   // 先頭で下に引いて離すと、既読の記事が消えて、届いた記事が先頭に入る
   await drag(200);
@@ -737,4 +745,56 @@ test("見出しや下のバーを押すと一覧の先頭に戻る。先頭で�
   await drag(200);
   await page.waitForTimeout(500);
   expect(server.requests.length).toBe(requests);
+});
+
+test("引いて更新の同期を待っている間に読み進めたら、同期が終わっても先頭に戻さない", async ({
+  page,
+  context,
+}) => {
+  const server = new FakeSendo();
+  const feed = server.subscribe({ url: "https://blog.example/feed.xml", title: "Blog" });
+  for (let i = 0; i < 40; i++) {
+    server.deliver(feed.id, { title: `記事 ${i}`, publishedAt: Date.now() - (i + 1) * 60_000 });
+  }
+  await routeFakeSendo(context, server);
+  await page.setViewportSize({ width: 390, height: 780 });
+  await page.goto("/");
+  await signIn(page);
+  const list = page.locator(".article-list");
+  await expect(list.locator(".item")).toHaveCount(40);
+  // 設定で、通り過ぎた記事を既読にしない（一覧の数を変えずに、位置だけを見る）
+  server.putSetting("mobile", "reader.markReadOnScroll", false);
+  server.putSetting("desktop", "reader.markReadOnScroll", false);
+  await page.getByRole("button", { name: "メニュー", exact: true }).click();
+  await page.getByRole("button", { name: "今すぐ同期" }).click();
+  await page.keyboard.press("Escape");
+
+  // 同期の応答を、こちらが通すまで止める
+  let release = () => {};
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  server.onRequest = (path) => (path === "GET /sync" ? held : Promise.resolve());
+  server.deliver(feed.id, { title: "届いたばかり", publishedAt: Date.now() });
+
+  await list.evaluate((el) => {
+    const at = (y: number) => new Touch({ identifier: 1, target: el, clientX: 200, clientY: y });
+    const fire = (type: string, touches: Touch[], changed: Touch[]) =>
+      el.dispatchEvent(new TouchEvent(type, { bubbles: true, touches, changedTouches: changed }));
+    fire("touchstart", [at(200)], [at(200)]);
+    fire("touchmove", [at(300)], [at(300)]);
+    fire("touchmove", [at(400)], [at(400)]);
+    fire("touchend", [], [at(400)]);
+  });
+  await expect(list.locator(".pull")).toBeVisible();
+
+  // 待っている間に、読み進める
+  await list.evaluate((el) => el.scrollTo({ top: 900 }));
+  server.onRequest = null;
+  release();
+  await expect(list.locator(".pull")).toHaveCount(0);
+  expect(await list.evaluate((el) => el.scrollTop)).toBeGreaterThan(800);
+  // 届いた記事は、一覧には割り込ませず、件数で知らせる
+  await expect(list.getByRole("button", { name: "新しい記事 1 件を読む" })).toBeVisible();
+  await expect(list.locator(".item")).toHaveCount(40);
 });

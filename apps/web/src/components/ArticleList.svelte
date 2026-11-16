@@ -359,12 +359,15 @@
     refreshing = true;
     try {
       await reload();
+      const loaded = list.generation;
       // 届かない、時間がかかる、のどちらでも、待つのはここまで
       await Promise.race([
         reader.client.syncNow().catch(() => {}),
         new Promise((resolve) => setTimeout(resolve, PULL_SYNC_TIMEOUT_MS)),
       ]);
-      await reload();
+      // 待っている間に、読み進めたり、別の一覧に移ったりしていたら、読み直さない（位置を先頭に
+      // 戻さない、移った先の一覧を巻き込まない）。届いた記事は「新しい記事 N 件」で知らせる
+      if (list.generation === loaded && (scroller?.scrollTop ?? 0) <= 0) await reload();
     } catch {
       // 読み直せなくても、一覧は前のまま使える
     } finally {
@@ -406,21 +409,26 @@
 
     function onEnd() {
       const reached = pulling === true && pull >= PULL_THRESHOLD;
+      onCancel();
+      if (reached) void refresh();
+    }
+
+    /** ブラウザや OS がタッチを取り消した。引いた分を戻すだけで、更新はしない */
+    function onCancel() {
       pulling = false;
       pull = 0;
-      if (reached) void refresh();
     }
 
     node.addEventListener("touchstart", onStart, { passive: true });
     node.addEventListener("touchmove", onMove, { passive: true });
     node.addEventListener("touchend", onEnd);
-    node.addEventListener("touchcancel", onEnd);
+    node.addEventListener("touchcancel", onCancel);
     return {
       destroy() {
         node.removeEventListener("touchstart", onStart);
         node.removeEventListener("touchmove", onMove);
         node.removeEventListener("touchend", onEnd);
-        node.removeEventListener("touchcancel", onEnd);
+        node.removeEventListener("touchcancel", onCancel);
       },
     };
   }
