@@ -91,6 +91,8 @@ Sendo を先に更新してから、GitHub の reader の fork の画面で「Sy
 
 reader は Sendo の API の型に合わせて作っているので、新しい reader を古い Sendo につなぐと、まだない API を呼ぶことがあります。
 
+自動で取り込みたいときは、Sendo の [sendo-updater](https://github.com/sendo-feed/sendo-updater) が reader の fork も受け持ちます。Sendo の fork が上流に追いつき、そのデプロイが成功してから reader を取り込むので、順番を手で守る必要はありません。入れ方は sendo-updater の README にあります。
+
 ### 手元からデプロイする
 
 Workers Builds を使わずに、手元からもデプロイできます。
