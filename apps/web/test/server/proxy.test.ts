@@ -45,6 +45,7 @@ describe("sendo への中継", () => {
         origin: "https://reader.example.com",
         "sec-fetch-site": "same-origin",
         authorization: "Bearer sendo_token",
+        "accept-encoding": "br, gzip",
         "x-custom": "kept",
       },
       body,
@@ -62,7 +63,35 @@ describe("sendo への中継", () => {
       origin: "https://reader.example.com",
       "sec-fetch-site": "same-origin",
       authorization: "Bearer sendo_token",
+      "accept-encoding": "br, gzip",
       "x-custom": "kept",
+    });
+  });
+
+  test("ページの移動の Sec-Fetch-* を書き換えずに渡す", async () => {
+    const { sendo, reader } = await start(ok);
+    // fetch は Sec-Fetch-Mode を cors に書き換えるので、ブラウザのページの移動を node:http で再現する
+    await new Promise<void>((resolve, reject) => {
+      const req = httpRequest(
+        `${reader.origin}/api/v1/auth/google/login?returnTo=%2F`,
+        {
+          headers: {
+            "sec-fetch-mode": "navigate",
+            "sec-fetch-dest": "document",
+            "sec-fetch-site": "same-origin",
+            "sec-fetch-user": "?1",
+          },
+        },
+        (res) => res.resume().on("end", resolve),
+      );
+      req.on("error", reject);
+      req.end();
+    });
+    expect(sendo.received[0]?.headers).toMatchObject({
+      "sec-fetch-mode": "navigate",
+      "sec-fetch-dest": "document",
+      "sec-fetch-site": "same-origin",
+      "sec-fetch-user": "?1",
     });
   });
 
@@ -87,7 +116,6 @@ describe("sendo への中継", () => {
     expect(headers.te).toBeUndefined();
     // Host は中継の先のもの。sendo は URL のオリジンを PUBLIC_URL に置き換える
     expect(headers.host).toBe(new URL(sendo.origin).host);
-    expect(headers["accept-encoding"]).toBe("identity");
   });
 
   test.each([
@@ -185,7 +213,7 @@ describe("sendo への中継", () => {
     expect(Buffer.compare(sendo.received[0]?.body ?? Buffer.alloc(0), Buffer.from(body))).toBe(0);
   });
 
-  test("圧縮しないよう頼んでも圧縮して返されたら、戻した本文に合うヘッダーにする", async () => {
+  test("圧縮した応答も、ヘッダーと本文をそのまま返す", async () => {
     const { reader } = await start((_request, response) => {
       const body = gzipSync('{"ok":true}');
       response.writeHead(200, {
@@ -196,7 +224,8 @@ describe("sendo への中継", () => {
       response.end(body);
     });
     const response = await fetch(`${reader.origin}/api/v1/me`);
-    expect(response.headers.get("content-encoding")).toBeNull();
+    expect(response.headers.get("content-encoding")).toBe("gzip");
+    // クライアント（ここでは fetch）が戻せる、正しい gzip のまま届く
     expect(await response.json()).toEqual({ ok: true });
   });
 

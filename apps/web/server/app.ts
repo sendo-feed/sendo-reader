@@ -11,8 +11,6 @@ export type ReaderServerOptions = {
   assets: Assets;
   /** 中継の先の sendo のオリジン（例：http://sendo:8787） */
   sendoOrigin: string;
-  /** テストで差し替える */
-  fetch?: typeof fetch;
 };
 
 export function createReaderServer(options: ReaderServerOptions) {
@@ -20,7 +18,7 @@ export function createReaderServer(options: ReaderServerOptions) {
   app.all("*", (c) => {
     const request = c.req.raw;
     return isSendoPath(new URL(request.url).pathname)
-      ? proxyToSendo(request, options.sendoOrigin, options.fetch)
+      ? proxyToSendo(request, options.sendoOrigin)
       : serveAsset(request, options.assets);
   });
   app.onError((error, c) => {
