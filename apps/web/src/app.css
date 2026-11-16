@@ -2,6 +2,10 @@
  * 画面の土台。色・余白・文字の大きさは、ここの変数だけを使う。
  * テーマは <html data-theme="light | dark"> で決め、付いていなければ OS の設定に従う
  * （lib/prefs.svelte.ts）。文字の大きさは data-text-size で変える。
+ *
+ * 部品の大きさは rem で書き、文字の大きさの設定は、根の文字の大きさ（--text-size）を変えて全体を
+ * 一緒に大きくする。中（既定）は、スマホで Feedly の一覧と同じくらいの大きさ（一覧のタイトルが
+ * 約 17px）にする。小は中より一段小さく、大は中より一段大きくする。
  */
 :root {
   color-scheme: light dark;
@@ -26,7 +30,7 @@
 
   --radius: 0.5rem;
   --radius-small: 0.375rem;
-  --text-size: 1rem;
+  --text-size: 1.125rem;
 
   font-family:
     system-ui, -apple-system, "Hiragino Sans", "Noto Sans JP", "Yu Gothic UI", sans-serif;
@@ -38,11 +42,11 @@
 }
 
 :root[data-text-size="small"] {
-  --text-size: 0.9375rem;
+  --text-size: 1rem;
 }
 
 :root[data-text-size="large"] {
-  --text-size: 1.125rem;
+  --text-size: 1.25rem;
 }
 
 :root[data-theme="light"] {
