@@ -89,12 +89,16 @@
   });
 
   /**
-   * 一覧を動かして、見出しの下を上へ通り過ぎた未読の記事を、既読にする（設定で切れる）。
-   * 行ごとに位置を測らず、IntersectionObserver で「見えなくなって、上にある」行だけを拾う。
-   * 少しためてから、まとめて書く
+   * 一覧を動かして、見出しの下へ入りはじめた未読の記事を、既読にする（設定で切れる）。
+   * 行がすっかり消えるのを待たず、行の上の端が見出しの下に隠れたら既読にする（Feedly と同じ。
+   * 動かすのをやめたときに、上に半分残っている行も、もう読み終えた行だから）。
+   * 行ごとに位置を測らず、IntersectionObserver の知らせで拾う。少しためてから、まとめて書く
    */
   let observer: IntersectionObserver | undefined;
-  /** 一度でも画面に出た行。出ていない行（別の一覧に替えた直後に上にある行など）は数えない */
+  /**
+   * 上の端まで見えていたことのある行。そうでない行（別の一覧に替えた直後に上にある行、開いたときから
+   * 上が切れている行）は、通り過ぎたのではないので数えない
+   */
   const seen = new WeakSet<Element>();
   const passed = new Set<string>();
   let flushTimer: ReturnType<typeof setTimeout> | undefined;
@@ -110,16 +114,15 @@
     for (const entry of entries) {
       const bounds = entry.rootBounds;
       const rect = entry.boundingClientRect;
-      if (entry.isIntersecting) {
-        seen.add(entry.target);
-        continue;
-      }
       // 一覧を出していないとき（狭い画面で記事を開いている）は、位置が分からないので何もしない
       if (bounds === null || bounds.height === 0 || rect.height === 0) continue;
-      // 監視を始めたときの知らせなど、画面に出たことのない行は、通り過ぎたのではない
+      // 上の端が見出しより下にある。見えているなら覚えておく（下にあって見えていない行は、まだ）
+      if (rect.top >= bounds.top - 1) {
+        if (entry.isIntersecting) seen.add(entry.target);
+        continue;
+      }
+      // 監視を始めたときの知らせなど、上の端まで見えたことのない行は、通り過ぎたのではない
       if (!seen.has(entry.target)) continue;
-      // 下にあって見えていない行は、まだ通り過ぎていない
-      if (rect.bottom > bounds.top) continue;
       const id = (entry.target as HTMLElement).dataset.article;
       // 探した結果は、読み進める一覧ではないので、通り過ぎても既読にしない
       if (id !== undefined && prefs.value.markReadOnScroll && kind !== "search") passed.add(id);
@@ -135,6 +138,9 @@
     observer ??= new IntersectionObserver(onPass, {
       root,
       rootMargin: `-${header?.offsetHeight ?? 0}px 0px 0px 0px`,
+      // 上の端が隠れはじめたとき（すべて見えている → 一部）にも知らせてもらう。端数で 1 に
+      // ならない行のために、少し手前にも置く
+      threshold: [0, 0.9, 1],
     });
     observer.observe(node);
     return { destroy: () => observer?.unobserve(node) };
