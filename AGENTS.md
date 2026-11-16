@@ -47,6 +47,7 @@ Sendo の公式リーダー。`packages/core`（同期エンジン）と `apps/w
     - `db.worker.ts`：DB と同期を持つワーカーの入口（`@sendo-reader/core/web/worker` を動かすだけ）
     - `lib/reader.ts`：ワーカーを起こす。`lib/trusted.ts` の Trusted Types の `sendo-worker` のポリシーで、自分のオリジンの URL だけを許す（Service Worker の登録も同じ）
     - Service Worker（vite-plugin-pwa、`vite.config.ts`）：アプリの外枠と SQLite の wasm をキャッシュし、ネットワークがなくても起動する。Trusted Types の都合で、Workbox の実行部分は `sw.js` に入れている（`importScripts` を使わない）
+    - `lib/app-update.ts`：新しい版への切り替え（`docs/decisions/ui.md` の 5）。前に出たときと一定の間隔で新しい版を確かめ、替わったら、画面が裏にある間か次に前に出たときに読み込み直す。読み込み直すと消えるものを出す画面を足したら、`main.ts` の `canReload` に足す
     - `e2e/`：画面を通したテスト（Playwright）
     - `lib/state.svelte.ts`：画面の状態（フォルダ、フィード、未読の数、同期の様子）。手元の表が変わったら読み直す
     - `lib/router.svelte.ts`：小さな自前のルーター（History API）

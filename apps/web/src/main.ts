@@ -1,6 +1,7 @@
 import { trimImageCache } from "@sendo-reader/core/web/image-cache";
 import { mount } from "svelte";
 import App from "./App.svelte";
+import { watchAppUpdate } from "./lib/app-update";
 import { AUTHORIZE_PATH } from "./lib/authorize";
 import { readerContext } from "./lib/context";
 import { startReader } from "./lib/reader";
@@ -38,7 +39,17 @@ if (location.pathname === AUTHORIZE_PATH) {
 }
 
 // アプリの外枠と SQLite の wasm を Service Worker でキャッシュし、ネットワークがなくても起動する
-// （docs/decisions/ui.md）。手元の dev サーバーでは使わない
+// （docs/decisions/ui.md）。新しい版に替わったら、画面が裏にある間か、次に前に出たときに
+// 読み込み直す。手元の dev サーバーでは使わない
 if (import.meta.env.PROD && "serviceWorker" in navigator) {
-  void navigator.serviceWorker.register(trustedScriptUrl("/sw.js"), { scope: "/" });
+  watchAppUpdate({
+    container: navigator.serviceWorker,
+    register: () => navigator.serviceWorker.register(trustedScriptUrl("/sw.js"), { scope: "/" }),
+    document,
+    reload: () => location.reload(),
+    // 設定の画面（発行したアクセストークンを一度だけ出す）と、OAuth の許可の画面では、
+    // 読み込み直さない。ほかの画面に移ってから切り替える
+    canReload: () => location.pathname !== "/settings" && location.pathname !== AUTHORIZE_PATH,
+    setInterval: (fn, ms) => setInterval(fn, ms),
+  });
 }
