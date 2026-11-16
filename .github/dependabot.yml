@@ -17,6 +17,9 @@ updates:
       # svelte-check が TypeScript 7 に対応するまで、6 系に留める（docs/decisions/ui.md）
       - dependency-name: typescript
         update-types: ["version-update:semver-major"]
+      # Node の型は、動かす Node のメジャー（.node-version）と揃える。Node を上げるときに一緒に上げる
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
     groups:
       # Svelte の本体と道具は揃えて上げないと噛み合わないことがあるのでまとめる
       svelte:
@@ -56,3 +59,8 @@ updates:
       default-days: 14
     commit-message:
       prefix: build
+    ignore:
+      # Node のメジャーは、.node-version・@types/node・sendo と揃えて、手で上げる。LTS でない奇数の版
+      # （25 は corepack が入っておらず、イメージが作れない）を提案させない。ダイジェストの更新は受ける
+      - dependency-name: node
+        update-types: ["version-update:semver-major"]
