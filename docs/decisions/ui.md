@@ -1,14 +1,14 @@
 # UI とツール
 
 - 状態：提案中
-- 関連：[ローカルファースト](local-first.md)、[速さの予算](performance.md)、sendo の[テックスタック](https://github.com/sendo-feed/sendo/blob/main/docs/decisions/tech-stack.md)、[技術構成](https://github.com/sendo-feed/sendo/blob/main/docs/tech-deck.md)（4・7・8 の未決事項 1・6）
+- 関連：[ローカルファースト](local-first.md)、[コンテナ版](container.md)、[速さの予算](performance.md)、sendo の[テックスタック](https://github.com/sendo-feed/sendo/blob/main/docs/decisions/tech-stack.md)、[技術構成](https://github.com/sendo-feed/sendo/blob/main/docs/tech-deck.md)（4・7・8 の未決事項 1・6）
 
 ## 決定
 
 1. **UI は Svelte 5 ＋ Vite で作る。** SvelteKit は使わず、SPA にする。画面の切り替えは、History API を使う小さな自前のルーターで行う。
 2. **Void（Cloudflare）は使わない。**
 3. **ネイティブは、あとで Capacitor で包む。** `apps/web` のビルドをそのまま包み、`apps/mobile` に置く。
-4. **配信は Workers Static Assets。** reader Worker（`apps/web/worker/`）が静的なファイルを返し、`/api` は Service binding で sendo（Worker 名 `sendo`）に中継する。ブラウザからは同じオリジンに見えるので、CORS は要らない。手元では、Vite の dev サーバーの proxy で `/api` を `http://localhost:8787` に中継する。
+4. **配信は、Cloudflare 版では Workers Static Assets。** reader Worker（`apps/web/worker/`）が静的なファイルを返し、`/api` は Service binding で sendo（Worker 名 `sendo`）に中継する。コンテナ版では、reader のコンテナのサーバーが同じ画面のビルドを返し、sendo のパスを中継する（[コンテナ版](container.md)）。どちらも、ブラウザからは同じオリジンに見えるので、CORS は要らない。手元では、Vite の dev サーバーの proxy で `/api` を `http://localhost:8787` に中継する。
 5. **PWA にする。** Service Worker で、アプリの外枠と SQLite の wasm をキャッシュし、ネットワークがなくても起動できるようにする（vite-plugin-pwa）。
    - **新しい版には、利用者が何もしなくても切り替わる。** 画面が前に出たときと、開いたままなら 1 時間ごとに、新しい版があるかを確かめる。新しい版は、裏で取り込んですぐ使い始める
    - 開いている画面は、読み込んだときの版のまま動くので、新しい版に替わったら読み込み直す。読み込み直すのは、画面が裏にある間か、次に前に出たときだけ。読んでいる最中には、読み込み直さない

@@ -1,9 +1,11 @@
 # デプロイ
 
 - 状態：提案中
-- 関連：sendo の[デプロイ](https://github.com/sendo-feed/sendo/blob/main/docs/decisions/deploy.md)、[UI とツール](ui.md)（4。配信と `/api` の中継）
+- 関連：sendo の[デプロイ](https://github.com/sendo-feed/sendo/blob/main/docs/decisions/deploy.md)、[UI とツール](ui.md)（4。配信と `/api` の中継）、[コンテナ版](container.md)
 
-sendo-reader も、使う人がそれぞれ自分の Cloudflare アカウントにデプロイする。sendo と同じアカウントに置き、`/api` を Service binding で sendo に中継する（[UI とツール](ui.md)の 4）。デプロイの形は sendo にそろえ、ここには reader だけの違いを決める。2026-11-16 に、fork と Workers Builds で実際にデプロイし、ブラウザでログインして確かめた。
+ここでは Cloudflare 版を決める。コンテナ版の sendo と組むときの配り方は、[コンテナ版](container.md)で決める。
+
+Cloudflare 版の sendo-reader も、使う人がそれぞれ自分の Cloudflare アカウントにデプロイする。sendo と同じアカウントに置き、`/api` を Service binding で sendo に中継する（[UI とツール](ui.md)の 4）。デプロイの形は sendo にそろえ、ここには reader だけの違いを決める。2026-11-16 に、fork と Workers Builds で実際にデプロイし、ブラウザでログインして確かめた。
 
 ## 決定
 

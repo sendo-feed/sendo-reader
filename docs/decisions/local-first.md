@@ -1,7 +1,7 @@
 # ローカルファースト
 
 - 状態：提案中
-- 関連：[UI とツール](ui.md)、[アカウントの画面](account.md)、[画像](images.md)、sendo の[差分同期](https://github.com/sendo-feed/sendo/blob/main/docs/decisions/sync.md)・[ユーザーと認証](https://github.com/sendo-feed/sendo/blob/main/docs/decisions/accounts.md)・[古い記事の片付け](https://github.com/sendo-feed/sendo/blob/main/docs/decisions/retention.md)、[技術構成](https://github.com/sendo-feed/sendo/blob/main/docs/tech-deck.md)（方針 03・06）
+- 関連：[UI とツール](ui.md)、[コンテナ版](container.md)、[アカウントの画面](account.md)、[画像](images.md)、sendo の[差分同期](https://github.com/sendo-feed/sendo/blob/main/docs/decisions/sync.md)・[ユーザーと認証](https://github.com/sendo-feed/sendo/blob/main/docs/decisions/accounts.md)・[古い記事の片付け](https://github.com/sendo-feed/sendo/blob/main/docs/decisions/retention.md)、[技術構成](https://github.com/sendo-feed/sendo/blob/main/docs/tech-deck.md)（方針 03・06）
 
 ## 決定
 
@@ -24,19 +24,19 @@
    - 代表のタブが閉じたら、待っていたタブが代表を引き継ぎ、DB を開き直す。引き継ぎの間に頼んだ読み書きは、新しい代表にやり直す（操作は冪等にしておく）
 6. **ログインは sendo のセッションで行い、reader はトークンを持たない**（sendo の[ユーザーと認証](https://github.com/sendo-feed/sendo/blob/main/docs/decisions/accounts.md)の 6）。
    - ログインの画面から `/api/v1/auth/google/login?returnTo=<戻るパス>` へページごと移る（fetch ではなく）。Google でログインすると、sendo がセッションのクッキー（HttpOnly）を置いて戻す。失敗したら `/?login_error=<理由>` に戻るので、理由を分かる言葉で出す
-   - `/api/v1/auth/...` へのページの移動は、Service Worker で横取りせず、reader Worker の中継で sendo に届ける
+   - `/api/v1/auth/...` へのページの移動は、Service Worker で横取りせず、reader Worker（コンテナ版は reader のコンテナのサーバー。[コンテナ版](container.md)）の中継で sendo に届ける
    - どのリクエストにも `Authorization` を付けない（付けると、sendo はクッキーを見ない）。前の版が手元に置いたトークンは消す
    - ログインしているかは `GET /api/v1/me` で確かめ、ログインしたユーザー（ID とメール）を手元の DB に置く。起動したら、置いたユーザーで画面を出す（オフラインでも読み書きできる）。手元にユーザーがなければ `/me` を見て、ログインしていればそのまま使い始める
    - 同期と、通信が要る操作の前に、`/me` のユーザーが手元のユーザーと同じかを確かめる。違えば（別のタブなどで、別のユーザーでログインした）、手元の DB を消して最初から同期する
    - `/me` や同期が 401 を返したら（セッションが切れた、取り消された）、手元のデータとまだ送っていない操作は残したまま、ログインし直すよう促す。同じユーザーでログインし直したら、続きから同期する。届かない（オフライン）ときは促さず、手元で動き続ける
    - ログアウトは、`POST /api/v1/auth/logout` を送り、手元の DB をまとめて消す。sendo に届かなくても、手元は消す。そのときは、ログインの操作をするまで、残ったクッキーで自動ではログインせず、届くようになったらログアウトを送り直す
-   - 状態を変えるリクエストは、同じオリジンから送る（sendo は、クッキーで認証した状態を変えるリクエストを、`Sec-Fetch-Site: same-origin` のものだけ受ける）。reader Worker の中継（手元では Vite の proxy）を通るので、そうなる
+   - 状態を変えるリクエストは、同じオリジンから送る（sendo は、クッキーで認証した状態を変えるリクエストを、`Sec-Fetch-Site: same-origin` のものだけ受ける）。reader Worker やコンテナのサーバーの中継（手元では Vite の proxy）を通るので、そうなる
 
 ### ページの守り
 
 セッションのクッキーは HttpOnly なので、ページの JS からは読めない。それでも、XSS などでページに他人の JS が入ると、ページを開いている間はセッションで API を使われ（クッキーは同じオリジンへのリクエストに付く）、手元の記事や購読のデータも読まれる。そこで、次の対策を取る。
 
-- **CSP を厳しくする。** 本番（Workers Static Assets）と、手元の Vite の dev サーバー・preview で、画面のすべての応答に付ける。
+- **CSP を厳しくする。** 本番（Workers Static Assets と、コンテナ版の reader のサーバー）と、手元の Vite の dev サーバー・preview で、画面のすべての応答に付ける。
   - `default-src 'none'`、`script-src 'self' 'wasm-unsafe-eval'`（wasm のため）、`worker-src 'self'`、`connect-src 'self'`、`img-src 'self' data:`、`style-src 'self'`、`manifest-src 'self'`、`base-uri 'none'`、`form-action 'none'`、`frame-ancestors 'none'`、`object-src 'none'`
   - インラインのスクリプトと `eval` を許さない。ほかのオリジンへの通信を許さないので、手元のデータを `fetch` で外に送れない
   - 記事のサムネイルやフィードのアイコンのために、`img-src` は緩めない。画像は sendo が中継し、同じオリジン（`/api/v1/images`）から読む（[画像](images.md)）
