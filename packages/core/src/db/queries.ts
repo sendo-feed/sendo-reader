@@ -34,6 +34,7 @@ type ArticleRow = {
   summary: string | null;
   author: string | null;
   thumbnail_url: string | null;
+  has_content: number;
   published_at: number;
   received_at: number;
   read_at: number | null;
@@ -41,7 +42,7 @@ type ArticleRow = {
 };
 
 const ARTICLE_COLUMNS =
-  "a.id, a.feed_id, a.url, a.title, a.summary, a.author, a.thumbnail_url, a.published_at, a.received_at, a.read_at, a.starred_at";
+  "a.id, a.feed_id, a.url, a.title, a.summary, a.author, a.thumbnail_url, a.has_content, a.published_at, a.received_at, a.read_at, a.starred_at";
 
 /** 記事を新しい順（公開日時、同じなら id の大きい順）か、その逆の古い順に読む */
 export async function listArticles(db: Executor, query: ArticleQuery = {}): Promise<Article[]> {
@@ -185,6 +186,7 @@ function toArticle(row: ArticleRow): Article {
     summary: row.summary,
     author: row.author,
     thumbnailUrl: row.thumbnail_url,
+    hasContent: row.has_content !== 0,
     publishedAt: row.published_at,
     receivedAt: row.received_at,
     readAt: row.read_at,

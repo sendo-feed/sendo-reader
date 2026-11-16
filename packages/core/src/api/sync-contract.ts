@@ -74,6 +74,7 @@ export function toSyncPage(body: unknown): SyncPage {
               summary: article.summary,
               author: article.author,
               thumbnailUrl: toSameOriginUrl(article.thumbnailUrl),
+              hasContent: article.hasContent,
               publishedAt: Date.parse(article.publishedAt),
               receivedAt: Date.parse(article.receivedAt),
               readAt: article.readAt === null ? null : Date.parse(article.readAt),
@@ -147,6 +148,9 @@ function parseSyncChanges(
         summary: nullableString(row.summary, at("summary")),
         author: nullableString(row.author, at("author")),
         thumbnailUrl: optionalString(row.thumbnailUrl, at("thumbnailUrl")),
+        // あとから足された項目。本文を配る前の版の sendo が相手なら、本文なし
+        hasContent:
+          row.hasContent === undefined ? false : boolean(row.hasContent, at("hasContent")),
         publishedAt: time(row.publishedAt, at("publishedAt")),
         receivedAt: time(row.receivedAt, at("receivedAt")),
         readAt: nullableTime(row.readAt, at("readAt")),

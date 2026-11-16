@@ -7,6 +7,12 @@ import { toSyncPage } from "./sync-contract";
 
 export { ApiError, type ApiErrorKind, errorFromBody, toApiError } from "./errors";
 
+/**
+ * 手元に置く本文の大きさの上限（文字数）。sendo は 256KB を超える本文を持たないので、これより
+ * 大きい応答は、決まりから外れている。本文なしとして扱う
+ */
+export const MAX_CONTENT_LENGTH = 1_000_000;
+
 /** 1 つのリクエストを待つ上限。止まった通信で同期がいつまでも終わらないようにする */
 export const REQUEST_TIMEOUT_MS = 30_000;
 
@@ -95,6 +101,29 @@ export function createSendoApi(options: SendoApiOptions) {
         throw new ApiError("server", "sendo の同期の応答が JSON でない", response.status);
       }
       return toSyncPage(body);
+    },
+
+    /**
+     * 記事の本文（GET /articles/{id}/content。sendo の docs/decisions/content.md の 6）。
+     * 本文がない（404。記事がない not_found も、本文がない no_content も）なら null。
+     * html は sendo がサニタイズしてあるが、信頼できない HTML として扱う。source は、知らない
+     * 値もそのまま返す（あとで、出どころが増える）
+     */
+    async articleContent(
+      id: string,
+      signal?: AbortSignal,
+    ): Promise<{ html: string; source: string } | null> {
+      const { data, error, response } = await client(signal).GET("/articles/{id}/content", {
+        params: { path: { id } },
+      });
+      if (response.status === 404) return null;
+      if (data === undefined) throw errorFromBody(response.status, error);
+      const body = data as { html?: unknown; source?: unknown } | null;
+      if (typeof body?.html !== "string" || typeof body.source !== "string") {
+        throw new ApiError("server", "sendo の本文の応答の形が違う");
+      }
+      if (body.html.length > MAX_CONTENT_LENGTH) return null;
+      return { html: body.html, source: body.source.slice(0, 100) };
     },
 
     /** セッションのユーザー（GET /me）。ログインしていなければ ApiError("unauthorized") */

@@ -13,6 +13,7 @@ describe("手元の DB のスキーマ", () => {
       "select name from sqlite_schema where type = 'table' order by name",
     );
     expect(tables.map((t) => t.name)).toEqual([
+      "article_contents",
       "articles",
       "feeds",
       "folders",

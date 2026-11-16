@@ -34,6 +34,7 @@ Sendo の公式リーダー。`packages/core`（同期エンジン）と `apps/w
   - `src/api/`：sendo の API。`schema.gen.ts` は OpenAPI から生成したもの。`sync-contract.ts` は、`/sync` の応答の形を確かめて（外から来たデータなので）、core の中の形（`src/sync/page.ts` の `SyncPage`）に変える。応答の形を扱うのはこのファイルだけにし、同期のロジックは `SyncPage` だけを扱う
   - `src/db/`：DB の窓口（`database.ts`）、スキーマとマイグレーション（`schema.ts`。足すだけにし、出したものは書き換えない）、画面のための読み出し（`queries.ts`）、sqlite-wasm の実装（`sqlite-wasm.ts`）
   - `src/settings.ts`：sendo に預ける設定の、名前と値の決まり（`reader.` で始める、一覧ごとの設定の名前）。項目の中身（どんな項目があるか、既定は何か）は画面（`apps/web/src/lib/prefs.svelte.ts`）が決める。手元の置き場所は `src/db/synced-settings.ts`（端末の種類・名前・値。手元だけの値を置く `settings` の表とは別）
+  - `src/content/parse.ts`：記事の本文の HTML（信頼できない）を、通すタグと属性だけの木（`ContentNode`）にする。通すものを変えるときは、ここと `test/content-parse.test.ts` を直す。手元の置き場所は `src/db/content.ts`（`article_contents` の表。記事を消すと、トリガーで一緒に消える）。本文は差分同期に載らず、記事ごとに取る（`ReaderCore` の `getArticleContent` は手元だけ、`fetchArticleContent` は、なければ sendo から取る）
   - `src/online.ts`：sendo に問い合わせないとできない操作（フィードの候補探し、購読、OPML の取り込み）。手元にすぐ反映できないので、画面では待っている間の表示を出す
   - `src/sync/`：差分同期（`pull.ts`）と操作キュー（`ops.ts` が操作ごとの「手元への反映・送り方・戻し方」、`queue.ts` が積む・まとめる・送る）。操作は手元への反映と同じトランザクションで積み、同期で届いた行の上に重ね直す。どの操作も冪等にする
   - `src/sync/scheduler.ts`：いつ同期するか（起動時、書き込みのあと、一定の間隔、届かなければ間隔を延ばしてやり直す）
@@ -55,7 +56,8 @@ Sendo の公式リーダー。`packages/core`（同期エンジン）と `apps/w
     - `lib/prefs.svelte.ts`：表示の好み（テーマ、文字の大きさ、一覧の形など）。正は手元の DB で、sendo に預けて同じ種類の端末（スマホ ／ それ以外）に引き継ぐ（`docs/decisions/settings.md`）。項目を足すときは、既定と同じ値を預けない、別々に変わるものは別の項目にする、を守る。localStorage には、起動してすぐ当てるための写しだけを置く
     - キーボードの操作は `routes/Reader.svelte` に割り当て、一覧を `components/ShortcutHelp.svelte` に出す（足したら両方を直す）
     - 色・余白・文字の大きさは `app.css` の変数を使う。アイコンは `components/Icon.svelte`（画像を足さない）
-    - sendo が中継した画像（サムネイル、フィードのアイコン）は、`components/RemoteImage.svelte` で出す（ほかの場所で `<img>` を書かない）
+    - sendo が中継した画像（サムネイル、フィードのアイコン、本文の中の画像）は、`components/RemoteImage.svelte` で出す（ほかの場所で `<img>` を書かない）
+    - 記事の本文は、`components/ArticleBody.svelte` で出す。core が作った木から要素を組み立て、HTML の文字列は扱わない。本文の見た目（CSS）もここで決める
     - `routes/`：画面（ログイン、読む画面、購読の管理）、`components/`：部品（`components/manage/` は購読の管理の部品）
     - `lib/errors.ts`：失敗（`ApiError` の `code` ／ `kind`）を、画面に出す文にする
     - 画面は `@sendo-reader/core/web` の窓口だけを使い、DB や sendo の API に直接触れない
@@ -93,7 +95,7 @@ Conventional Commits を土台にする。全文は https://github.com/sendo-fee
 - 画面はネットワークを待たない。読み書きはローカル DB に対して行い、サーバーとは同期で揃える。例外は、sendo にしかないものを扱うアカウントの画面（設定、OAuth の許可の画面。`docs/decisions/account.md`）で、手元の DB に置かず、core の API の窓口（`createAccountApi`）で sendo に聞く
 - OpenAPI から生成したファイルは手で直さない。sendo の OpenAPI を直して生成し直す
 - 記事のデータ（タイトル、要約、本文）は信頼できないデータとして扱う
-  - `{@html}` を使わない（Biome の `noSvelteAtHtmlTags` で検査している）。本文の HTML を出すときは、サニタイズしてから専用の部品で出す
+  - `{@html}` を使わない（Biome の `noSvelteAtHtmlTags` で検査している）。本文の HTML は、sendo がサニタイズしてあっても信頼しない。core で、通すタグと属性だけの木にしてから（`src/content/parse.ts`）、専用の部品（`ArticleBody.svelte`）で出す。HTML の文字列を、画面に渡さない（`innerHTML` や `DOMParser` に入れない）
   - URL は `toSafeHttpUrl`（`packages/core`）を通し、http ／ https のものだけを `href` に入れる
   - 画像の URL（記事の `thumbnailUrl`、フィードの `iconUrl`）は、sendo から受け取ったものをそのまま使う。組み立てない、書き換えない、中身（`url=` や `sig=`）を読まない（`docs/decisions/images.md`）。同じオリジンを指すかは、同期で受けるときに `toSameOriginUrl` で確かめる
 - CSP を緩めない（`apps/web/security-headers.ts`）。インラインのスクリプト、`eval`、テンプレートの `style` 属性（本番の CSP で止まる。`style:` ディレクティブか CSS のクラスを使う）、ほかのオリジンへの通信を使わない。緩める必要が出たら、`docs/decisions/local-first.md` を直してから変える

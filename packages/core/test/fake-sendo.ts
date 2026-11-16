@@ -69,6 +69,8 @@ interface InboxRow {
   summary: string | null;
   author: string | null;
   thumbnailUrl: string | null;
+  /** 本文（サニタイズした HTML）。なければ null。取り込んだときに決まり、あとから変わらない */
+  content: string | null;
   publishedAt: number;
   receivedAt: number;
   readAt: number | null;
@@ -322,6 +324,8 @@ export class FakeSendo {
       url?: string | null;
       id?: string;
       thumbnailUrl?: string | null;
+      /** 本文の HTML（sendo がサニタイズしたあとの形で渡す） */
+      content?: string | null;
     } = {},
   ): InboxRow {
     const seq = this.#bump("articles");
@@ -333,6 +337,7 @@ export class FakeSendo {
       summary: input.summary ?? null,
       author: input.author ?? null,
       thumbnailUrl: input.thumbnailUrl ?? null,
+      content: input.content ?? null,
       publishedAt: input.publishedAt ?? this.now,
       receivedAt: this.now,
       readAt: null,
@@ -361,6 +366,15 @@ export class FakeSendo {
   imageUrl(original: string): string {
     return `/api/v1/images?url=${encodeURIComponent(original)}&sig=${fakeSignature(original)}`;
   }
+
+  /** 本文を取りに来たリクエスト（記事の ID） */
+  readonly contentRequests: string[] = [];
+  /** hasContent は true のまま、本文だけがなくなったことにする記事（片付けの途中など） */
+  readonly contentGone = new Set<string>();
+  /** 本文の出どころとして返す値（あとで、記事のページから抜いた本文の値が増える） */
+  contentSource = "feed";
+  /** 本文を配る前の版の sendo のふりをする（記事に hasContent を付けない） */
+  omitHasContent = false;
 
   /** 画像の中継が返す状態（200 なら 1×1 の PNG）。502 は配信元から取れない、など */
   imageStatus = 200;
@@ -597,6 +611,18 @@ export class FakeSendo {
       const title = this.fetchable.get(feedUrl) ?? undefined;
       const created = this.subscribe({ url: feedUrl, folderId, ...(title ? { title } : {}) });
       return json(201, { feed: feedJson(created) });
+    }
+
+    const contentMatch = /^\/articles\/([^/]+)\/content$/.exec(path);
+    if (request.method === "GET" && contentMatch !== null) {
+      const id = decodeURIComponent(contentMatch[1] ?? "");
+      this.contentRequests.push(id);
+      const row = this.inbox.get(id);
+      if (row === undefined) return error(404, "not_found", "article does not exist");
+      if (row.content === null || this.contentGone.has(id)) {
+        return error(404, "no_content", "article has no content");
+      }
+      return json(200, { html: row.content, source: this.contentSource });
     }
 
     let match = /^\/articles\/([^/]+)$/.exec(path);
@@ -1029,6 +1055,7 @@ export class FakeSendo {
               summary: item.row.summary,
               author: item.row.author,
               thumbnailUrl: item.row.thumbnailUrl,
+              ...(this.omitHasContent ? {} : { hasContent: item.row.content !== null }),
               publishedAt: iso(item.row.publishedAt),
               receivedAt: iso(item.row.receivedAt),
               readAt: item.row.readAt === null ? null : iso(item.row.readAt),

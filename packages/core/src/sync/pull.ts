@@ -102,6 +102,9 @@ export async function pull(db: Database, api: SendoApi, options: PullOptions): P
 /**
  * 最初から取り直す。すべてのページを取り終えてから、1 つのトランザクションで手元を置き換える
  * （途中で届かなくなっても、手元の行は前のまま残る。オフラインで空にならない）。
+ *
+ * 手元に置いた本文は、記事の行と一緒に捨てる（開いたときに取り直す）。sendo が画像の署名の鍵を
+ * 作り直すと、本文の中の画像の URL が使えなくなるため（sendo の docs/decisions/content.md の 7）。
  */
 async function resync(
   db: Database,
@@ -228,6 +231,7 @@ async function applyFeed(tx: Executor, feed: SyncPage["feeds"][number]): Promise
 /** 記事を書き込むか、受信箱から消えた記録なら手元から消す */
 async function applyArticle(tx: Executor, article: SyncPage["articles"][number]): Promise<void> {
   if (article.deleted) {
+    // 手元に置いた本文も、一緒に消える（スキーマのトリガー）
     await tx.run("delete from articles where id = ?", [article.id]);
     return;
   }
@@ -241,13 +245,13 @@ async function applyArticle(tx: Executor, article: SyncPage["articles"][number])
 async function writeArticle(tx: Executor, article: Article): Promise<void> {
   await tx.run(
     `insert into articles (
-       id, feed_id, url, title, summary, author, thumbnail_url, published_at, received_at,
-       read_at, starred_at, read_synced
-     ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
+       id, feed_id, url, title, summary, author, thumbnail_url, has_content, published_at,
+       received_at, read_at, starred_at, read_synced
+     ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
      on conflict (id) do update set
        feed_id = excluded.feed_id, url = excluded.url, title = excluded.title,
        summary = excluded.summary, author = excluded.author,
-       thumbnail_url = excluded.thumbnail_url,
+       thumbnail_url = excluded.thumbnail_url, has_content = excluded.has_content,
        published_at = excluded.published_at, received_at = excluded.received_at,
        read_at = excluded.read_at, starred_at = excluded.starred_at, read_synced = 0`,
     [
@@ -258,6 +262,7 @@ async function writeArticle(tx: Executor, article: Article): Promise<void> {
       article.summary,
       article.author,
       article.thumbnailUrl,
+      article.hasContent ? 1 : 0,
       article.publishedAt,
       article.receivedAt,
       article.readAt,

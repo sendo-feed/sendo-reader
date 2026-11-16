@@ -1,4 +1,12 @@
 import { ApiError, createSendoApi, type SendoApi } from "./api/client";
+import { hasVisibleContent, parseContent } from "./content/parse";
+import {
+  getStoredContent,
+  listContentToPrefetch,
+  markContentMissing,
+  putStoredContent,
+  type StoredContent,
+} from "./db/content";
 import type { Database, Executor } from "./db/database";
 import {
   type ArticleQuery,
@@ -20,10 +28,12 @@ import {
 } from "./db/synced-settings";
 import {
   type Article,
+  type ArticleContent,
   DEVICE_TYPES,
   type DeviceType,
   type Feed,
   type Folder,
+  type LocalArticleContent,
   type SettingItem,
   type SettingsChange,
   type Table,
@@ -73,7 +83,18 @@ export interface ReaderCoreOptions {
    * 一緒に消す。失敗しても、ログアウトやユーザーの切り替えは止めない
    */
   onDataCleared?: () => Promise<void>;
+  /**
+   * 同期のあとに、未読の新しい記事の本文を、この数まで先に取っておく（オフラインでも読める
+   * ように）。既定は 0（取らない。開いたときに取る）
+   */
+  prefetchContents?: number;
 }
+
+/**
+ * 先に取っておく本文の数の目安（Web の既定）。本文 1 件につき、sendo の側で R2 を 1 回読み、
+ * Workers のリクエストを 1 回使うので、数を絞る。本文の中の画像は、表示するまで取らない
+ */
+export const DEFAULT_PREFETCH_CONTENTS = 30;
 
 export type ChangeListener = (tables: ReadonlySet<Table>) => void;
 
@@ -135,11 +156,16 @@ export class ReaderCore {
    * （画面がまとめる前の ID を持ったままでも使えるように）
    */
   readonly #folderIds = new Map<string, string>();
+  /** 取りにいっている本文（記事の ID ごと）。同じ記事を、同時に 2 回取らない */
+  readonly #contentFetches = new Map<string, Promise<StoredContent | null>>();
+  readonly #prefetchContents: number;
+  #prefetching: Promise<number> | null = null;
 
   private constructor(options: ReaderCoreOptions) {
     this.#db = options.db;
     this.#now = options.now ?? Date.now;
     this.#onDataCleared = options.onDataCleared;
+    this.#prefetchContents = options.prefetchContents ?? 0;
     this.#api = createSendoApi({
       baseUrl: options.baseUrl,
       ...(options.fetch === undefined ? {} : { fetch: options.fetch }),
@@ -299,6 +325,8 @@ export class ReaderCore {
     this.#syncing = null;
     this.#folderIds.clear();
     this.#onlineOps.clear();
+    this.#contentFetches.clear();
+    this.#prefetching = null;
     return this.#session.signal;
   }
 
@@ -321,6 +349,13 @@ export class ReaderCore {
       },
     );
     this.#syncing = running;
+    // 同期を終えたら、裏で、未読の新しい記事の本文を取っておく（同期の結果は待たせない）
+    if (this.#prefetchContents > 0) {
+      running.then(
+        () => void this.prefetchArticleContents(this.#prefetchContents).catch(() => undefined),
+        () => undefined,
+      );
+    }
     return running;
   }
 
@@ -799,6 +834,87 @@ export class ReaderCore {
     return countUnread(this.#db);
   }
 
+  // --- 記事の本文（sendo の docs/decisions/content.md の 6。差分同期には載らず、記事ごとに取る） ---
+
+  /**
+   * 手元の本文を読む（ネットワークを待たない）。手元になければ、sendo にあるか（missing）、
+   * 本文のない記事か（none）を返す。本文は、通すタグと属性だけの木にして返す（HTML の文字列は、
+   * 画面に渡さない）
+   */
+  async getArticleContent(articleId: string): Promise<LocalArticleContent> {
+    const found = await getStoredContent(this.#db, articleId);
+    if (found === null || !found.hasContent) return { status: "none" };
+    if (found.stored === null) return { status: "missing" };
+    const content = toArticleContent(found.stored);
+    return content === null ? { status: "none" } : { status: "ready", content };
+  }
+
+  /**
+   * 本文を返す。手元にあれば、ネットワークを待たない。なければ sendo から取り、手元に置く
+   * （本文は、記事を取り込んだあとは変わらないので、取り直さない）。本文のない記事と、sendo に
+   * 本文がなかった記事は null。届かなければ ApiError（network など）を投げる。
+   *
+   * 画面は、これを待っている間、要約を出しておく。
+   */
+  async fetchArticleContent(articleId: string): Promise<ArticleContent | null> {
+    this.#requireSignedIn();
+    // 待つ前に、今のログインの合図を取る（待っている間のログアウトで中断されるように）
+    const session = this.#session.signal;
+    const found = await getStoredContent(this.#db, articleId);
+    if (found === null || !found.hasContent) return null;
+    const stored = found.stored ?? (await this.#fetchContent(articleId, session));
+    return stored === null ? null : toArticleContent(stored);
+  }
+
+  /**
+   * 未読の新しい limit 件のうち、sendo に本文があって手元にまだない記事の本文を、1 つずつ取って
+   * おく。取った数を返す。届かなくなったら、そこでやめる（次の同期のあとに、続きを取る）。
+   * すでに取っている最中なら、その結果を返す
+   */
+  prefetchArticleContents(limit: number = DEFAULT_PREFETCH_CONTENTS): Promise<number> {
+    if (this.#prefetching !== null) return this.#prefetching;
+    const session = this.#session.signal;
+    const running = (async () => {
+      if (this.#user === null) return 0;
+      let fetched = 0;
+      for (const id of await listContentToPrefetch(this.#db, limit)) {
+        if (session.aborted) break;
+        if ((await this.#fetchContent(id, session)) !== null) fetched += 1;
+      }
+      return fetched;
+    })().finally(() => {
+      if (this.#prefetching === running) this.#prefetching = null;
+    });
+    this.#prefetching = running;
+    return running;
+  }
+
+  /** sendo から本文を取り、手元に置く。sendo になければ、その記事を本文なしにして null */
+  #fetchContent(articleId: string, session: AbortSignal): Promise<StoredContent | null> {
+    if (session.aborted) {
+      return Promise.reject(new ApiError("unauthorized", "ログインし直したので取らなかった"));
+    }
+    const existing = this.#contentFetches.get(articleId);
+    if (existing !== undefined) return existing;
+    const running = (async () => {
+      const content = await this.#api.articleContent(articleId, session);
+      const changed = await this.#db.transaction(async (tx) => {
+        // 取っている間にログアウトしたり、ユーザーが替わったりしたら、置かない
+        throwIfSessionEnded(session);
+        if (content === null) return markContentMissing(tx, articleId);
+        await putStoredContent(tx, articleId, content, this.#now());
+        return false;
+      });
+      // 本文なしに変えたら、記事を読み直してもらう
+      if (changed) this.#emit(new Set<Table>(["articles"]));
+      return content;
+    })().finally(() => {
+      if (this.#contentFetches.get(articleId) === running) this.#contentFetches.delete(articleId);
+    });
+    this.#contentFetches.set(articleId, running);
+    return running;
+  }
+
   // --- 変更の通知 ---
 
   /** 手元の表が変わったら呼ぶ。やめるときは返した関数を呼ぶ */
@@ -824,11 +940,21 @@ export class ReaderCore {
  */
 async function clearAll(tx: Executor): Promise<void> {
   await tx.run("delete from pending_ops");
+  // 手元に置いた本文も、記事と一緒に消える（スキーマのトリガー）
   await tx.run("delete from articles");
   await tx.run("delete from feeds");
   await tx.run("delete from folders");
   await tx.run("delete from synced_settings");
   await tx.run("delete from settings");
+}
+
+/**
+ * 手元に置いた本文（信頼できない HTML）を、画面に渡す木にする。出すもの（文字か画像）が
+ * 残らなければ null（要約を出す）
+ */
+function toArticleContent(stored: StoredContent): ArticleContent | null {
+  const nodes = parseContent(stored.html);
+  return hasVisibleContent(nodes) ? { nodes, source: stored.source } : null;
 }
 
 /** 端末の種類を確かめる（画面のワーカーの外から来た値なので） */

@@ -1,11 +1,12 @@
 <script lang="ts">
-  import { type Article, toSafeHttpUrl } from "@sendo-reader/core";
+  import { type Article, type ArticleContent, toSafeHttpUrl } from "@sendo-reader/core";
   import { untrack } from "svelte";
   import { useReader } from "../lib/context";
   import { formatDateTime } from "../lib/format";
   import type { ArticleListState } from "../lib/list.svelte";
   import { prefs } from "../lib/prefs.svelte";
   import { handleLink, router, viewHref } from "../lib/router.svelte";
+  import ArticleBody from "./ArticleBody.svelte";
   import Dialog from "./Dialog.svelte";
   import Icon from "./Icon.svelte";
   import Appearance from "./settings/Appearance.svelte";
@@ -34,6 +35,52 @@
   }
 
   /**
+   * 本文（sendo の docs/decisions/content.md）。
+   * - checking：手元を確かめている（すぐ終わる。本文のある記事では、要約を一瞬出さないよう待つ）
+   * - ready：本文を出す
+   * - loading：手元になく、sendo から取っている（取れるまで、要約を出しておく）
+   * - unavailable：取れなかった（オフラインなど）。要約を出し、つながったら読めると伝える
+   * - none：本文のない記事。要約を出す
+   */
+  let content = $state<ArticleContent | null>(null);
+  let contentState = $state<"checking" | "ready" | "loading" | "unavailable" | "none">("none");
+
+  async function loadContent(id: string) {
+    content = null;
+    contentState = "checking";
+    try {
+      // まず手元だけを読む（ネットワークを待たない）
+      const local = await reader.client.getArticleContent(id);
+      if (id !== articleId) return;
+      if (local.status === "ready") {
+        content = local.content;
+        contentState = "ready";
+        return;
+      }
+      if (local.status === "none") {
+        contentState = "none";
+        return;
+      }
+      contentState = "loading";
+      const fetched = await reader.client.fetchArticleContent(id);
+      if (id !== articleId) return;
+      content = fetched;
+      contentState = fetched === null ? "none" : "ready";
+    } catch {
+      if (id === articleId) contentState = "unavailable";
+    }
+  }
+
+  /** つながったら、取れなかった本文を取り直す */
+  $effect(() => {
+    const retry = () => {
+      if (articleId !== null && contentState === "unavailable") void loadContent(articleId);
+    };
+    window.addEventListener("online", retry);
+    return () => window.removeEventListener("online", retry);
+  });
+
+  /**
    * 開いたときに一度だけ、未読なら既読にする。表示が間に合わないうちに次の記事へ移っても
    * （j を続けて押したとき）、通り過ぎた記事を既読にする。開いている間に「未読に戻す」を
    * 押したら、そのままにする（記事が替わるまで、もう呼ばない）
@@ -54,6 +101,8 @@
       if (id === null) {
         article = null;
         missing = false;
+        content = null;
+        contentState = "none";
       } else {
         // 一覧にある記事は、手元の DB を待たずにすぐ出す（そのあと読み直す）
         const listed = list.find(id);
@@ -65,6 +114,7 @@
         // 書けなかったら、次に手元が変わったときの読み直しで、手元の DB の状態に戻る
         markOnOpen(id).catch(() => void list.refresh());
         void load(id);
+        void loadContent(id);
       }
     });
   });
@@ -175,6 +225,14 @@
 
   const feedHref = $derived(
     article === null ? "/" : viewHref({ kind: "feed", id: article.feedId }),
+  );
+
+  /**
+   * 要約を出すか。本文が出せる間は出さない。本文のある記事で、手元を確かめている間（すぐ終わる）も
+   * 出さない（要約が一瞬出て、本文に替わらないように）
+   */
+  const showSummary = $derived(
+    contentState !== "ready" && !(contentState === "checking" && article?.hasContent === true),
   );
 
   /** 要約は、空行で段落に分けて出す（HTML としては出さない） */
@@ -303,9 +361,18 @@
           {/if}
         </p>
       </header>
-      {#each paragraphs as text, index (index)}
-        <p class="summary">{text}</p>
-      {/each}
+      {#if content !== null}
+        <ArticleBody nodes={content.nodes} />
+      {:else if showSummary}
+        {#each paragraphs as text, index (index)}
+          <p class="summary">{text}</p>
+        {/each}
+        {#if contentState === "unavailable"}
+          <p class="content-note" role="status">
+            この記事には本文があります。sendo につながったら読めます。
+          </p>
+        {/if}
+      {/if}
       {#if link !== null}
         <p>
           <a class="read-on" href={link} target="_blank" rel="noopener noreferrer">
@@ -438,6 +505,12 @@
     line-height: 1.9;
     white-space: pre-wrap;
     overflow-wrap: anywhere;
+  }
+
+  .content-note {
+    margin: 0 0 1.25em;
+    color: var(--muted);
+    font-size: 0.875rem;
   }
 
   .read-on {

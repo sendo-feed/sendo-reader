@@ -442,6 +442,59 @@ export interface paths {
         };
         trace?: never;
     };
+    "/articles/{id}/content": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 記事の本文
+         * @description 記事の本文（HTML）を返す。記事の hasContent が true のときだけ、取りにいく。
+         *     HTML は Sendo がサニタイズしてある（決めたタグと属性だけ。スクリプトやスタイルはない）。それでも外部から来たデータなので、クライアントの側でも、信頼できない HTML として扱う。
+         *     本文の中の画像は、中継を通る URL（/api/v1/images?…。オリジンは付けない）に書き換えてある。リンクは絶対の URL。
+         *     本文は記事を取り込んだときに決まり、あとから変わらないので、手元に置いてよい。
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description 本文 */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ArticleContent"];
+                    };
+                };
+                /** @description 記事がない（not_found）か、その記事に本文がない（no_content） */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/articles/{id}": {
         parameters: {
             query?: never;
@@ -1645,6 +1698,15 @@ export interface components {
             /** @description null ならフォルダなしにする */
             folderId: string | null;
         };
+        ArticleContent: {
+            /** @description サニタイズした HTML */
+            html: string;
+            /**
+             * @description 本文の出どころ。feed は、フィードに入っていた本文
+             * @enum {string}
+             */
+            source: "feed";
+        };
         Article: {
             id: string;
             feedId: string;
@@ -1660,6 +1722,8 @@ export interface components {
              * @example /api/v1/images?url=https%3A%2F%2Fexample.com%2Fa.png&sig=0123456789abcdefghijkl
              */
             thumbnailUrl: string | null;
+            /** @description 本文（HTML）があるか。あれば、GET /articles/{id}/content で取れる。記事を取り込んだときに決まり、あとから変わらない */
+            hasContent: boolean;
             /** Format: date-time */
             publishedAt: string;
             /**

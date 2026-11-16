@@ -40,11 +40,61 @@ export interface Article {
   author: string | null;
   /** サムネイルの画像の URL。フィードの iconUrl と同じく、受け取ったものをそのまま使う */
   thumbnailUrl: string | null;
+  /**
+   * sendo に本文（HTML）がある。記事を取り込んだときに決まる。本文そのものは、記事ごとに取って
+   * 手元に置く（ReaderCore の getArticleContent ／ fetchArticleContent）
+   */
+  hasContent: boolean;
   publishedAt: number;
   receivedAt: number;
   readAt: number | null;
   starredAt: number | null;
 }
+
+/**
+ * 記事の本文の中の要素。本文の HTML（信頼できない）を、通すと決めたタグと属性だけの木にしたもの
+ * （content/parse.ts）。画面は、この木から要素を組み立てる。HTML の文字列は、画面に渡さない。
+ */
+export interface ContentElement {
+  /** 通すと決めたタグの名前（小文字） */
+  tag: string;
+  children: ContentNode[];
+  /** a だけ。http ／ https ／ mailto だと確かめた、絶対の URL */
+  href?: string;
+  /** img だけ。sendo の中継を通る、同じオリジンの URL（受け取ったまま） */
+  src?: string;
+  /** img だけ */
+  alt?: string;
+  /** img だけ。読み込む前に場所を取るための、もとの大きさ */
+  width?: number;
+  height?: number;
+  /** td ／ th だけ */
+  colspan?: number;
+  rowspan?: number;
+  /** ol だけ */
+  start?: number;
+}
+
+/** 文字（プレーンテキスト）か、要素 */
+export type ContentNode = string | ContentElement;
+
+/** 記事の本文 */
+export interface ArticleContent {
+  nodes: ContentNode[];
+  /** 出どころ。今は "feed"（フィードに入っていた本文）だけ。知らない値も、本文として出す */
+  source: string;
+}
+
+/**
+ * 手元の本文の様子。
+ * - ready：手元にある
+ * - missing：sendo にはあるが、まだ手元にない（つながれば取れる）
+ * - none：本文がない記事（要約を出す）
+ */
+export type LocalArticleContent =
+  | { status: "ready"; content: ArticleContent }
+  | { status: "missing" }
+  | { status: "none" };
 
 export interface UnreadCounts {
   total: number;

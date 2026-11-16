@@ -1,6 +1,6 @@
 import type { Database } from "../db/database";
 import type { Table } from "../models";
-import { ReaderCore } from "../reader";
+import { DEFAULT_PREFETCH_CONTENTS, ReaderCore } from "../reader";
 import { SyncScheduler, type SyncStatus } from "../sync/scheduler";
 import { openWebDatabase } from "./database";
 import { clearImageCache } from "./image-cache";
@@ -190,6 +190,8 @@ export function runReaderWorker(options: ReaderWorkerOptions = {}): void {
       ...(options.fetch === undefined ? {} : { fetch: options.fetch }),
       // 手元の DB を消すとき（ログアウト、ユーザーの切り替え）に、画像のキャッシュも消す
       onDataCleared: clearImageCache,
+      // 同期のあとに、未読の新しい記事の本文を取っておく（オフラインでも読めるように）
+      prefetchContents: DEFAULT_PREFETCH_CONTENTS,
     });
     const scheduler = new SyncScheduler(core, {
       onStatus: (status: SyncStatus) => {

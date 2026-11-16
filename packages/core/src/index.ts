@@ -18,10 +18,14 @@ export { NewerSchemaError, SCHEMA_VERSION } from "./db/schema";
 export { wrapSqliteWasm } from "./db/sqlite-wasm";
 export type {
   Article,
+  ArticleContent,
+  ContentElement,
+  ContentNode,
   DeviceType,
   Feed,
   Folder,
   JsonValue,
+  LocalArticleContent,
   SettingItem,
   SettingsChange,
   Table,

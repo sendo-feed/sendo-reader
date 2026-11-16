@@ -12,6 +12,8 @@ import type { Database } from "./database";
  * - feeds：ユーザーが購読しているフィード（id は REST API の /feeds/{id} の id）
  * - articles：ユーザーの受信箱の記事（記事の本体と、既読・スター）
  * - synced_settings：ユーザーが預けた設定の項目（端末の種類ごと）
+ *
+ * article_contents だけは、同期では届かない。記事ごとに取った本文を置く（db/content.ts）。
  */
 const migrations: readonly (readonly string[])[] = [
   [
@@ -125,6 +127,25 @@ const migrations: readonly (readonly string[])[] = [
       value text not null,
       primary key (device_type, name)
     ) strict, without rowid`,
+  ],
+  [
+    // sendo に本文があるか（sendo の docs/decisions/content.md）。すでに手元にある行は 0 のまま
+    // （本文のある記事でも、もう一度届くまでは要約を出す。最初から同期し直させない）
+    "alter table articles add column has_content integer not null default 0",
+    // 記事ごとに取った本文（sendo がサニタイズした HTML を、受け取ったまま置く。出すときに、
+    // 通すタグと属性だけの木にする）。記事の表と分けて、一覧の読み出しが本文を読まないようにする
+    `create table article_contents (
+      article_id text primary key,
+      html text not null,
+      source text not null,
+      fetched_at integer not null
+    ) strict`,
+    // 本文は、記事と一緒に消す。記事を消す文がいくつあっても（同期の消した記録、最初からの
+    // 同期し直し、購読の停止、ログアウト）、消し忘れないよう、トリガーで行う
+    `create trigger articles_delete_content after delete on articles
+     begin
+       delete from article_contents where article_id = old.id;
+     end`,
   ],
 ];
 

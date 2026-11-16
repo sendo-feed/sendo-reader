@@ -24,6 +24,8 @@ export const READER_METHODS = [
   "listArticles",
   "getArticle",
   "getArticles",
+  "getArticleContent",
+  "fetchArticleContent",
   "countUnread",
   "countReadSince",
   "setRead",
