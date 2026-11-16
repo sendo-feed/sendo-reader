@@ -873,14 +873,16 @@
     touch-action: pan-y;
   }
 
+  /*
+   * 行に色を付けるのは、マウスで指しているとき ／ 押しているときだけ。指で触る画面では付けない
+   * （一覧を動かそうと触っただけで :active になり、触っている行が選んだように見えるため。
+   * 押して開いた行は、開いた記事の画面に替わるので、押した手ごたえの色は要らない）
+   */
   @media (hover: hover) {
-    .row:hover {
+    .row:hover,
+    .row:active {
       background: var(--hover);
     }
-  }
-
-  .row:active {
-    background: var(--hover);
   }
 
   .row.current {
