@@ -210,7 +210,9 @@ test("記事を動かしてすぐ戻っても、進むで開き直すと、そ�
   await page.evaluate(() => window.scrollTo({ top: 600 }));
   const first = await scrollY();
   expect(first).toBeGreaterThan(300);
-  await page.getByRole("button", { name: "Back", exact: true }).click();
+  // 下に貼り付いたバーのボタンは、click() だと押す前にページを本文の終わりまで動かして見せる
+  // （指で押すときは動かない）。位置を変えずに押す
+  await page.getByRole("button", { name: "Back", exact: true }).dispatchEvent("click");
   await expect(page).not.toHaveURL(/article=/);
   await page.goForward();
   await expect(heading).toHaveText(opened);
