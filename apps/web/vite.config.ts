@@ -32,6 +32,49 @@ function securityHeadersPlugin(): Plugin {
   };
 }
 
+/** Workbox が、1 回の取得の間、プラグインの呼び出しに渡して回す入れ物 */
+type GenerationState = { state?: { generation?: string } };
+
+/**
+ * 画像のキャッシュを消したあと（ログアウト、ユーザーの切り替え）に、消す前に取りにいき始めた
+ * 画像が遅れて届いても、キャッシュに入れない（docs/decisions/images.md の 4）。
+ *
+ * 取りにいき始めたときの世代を覚え、入れる前と入れたあとに、世代が変わっていないかを見る。
+ * 世代の印は packages/core/src/web/image-cache.ts の clearImageCache が進める。
+ *
+ * この関数は、ビルドのときに文字にして Service Worker に埋め込まれる。外の変数や関数を
+ * 参照できないので、印の置き場所（IMAGE_CACHE_GENERATION と同じ名前）を直接書いている。
+ */
+const imageCacheGenerationPlugin = {
+  requestWillFetch: async ({ request, state }: { request: Request } & GenerationState) => {
+    const marker = await caches.match("/sendo-images-generation", {
+      cacheName: "sendo-images-generation",
+    });
+    if (state !== undefined) state.generation = marker === undefined ? "" : await marker.text();
+    return request;
+  },
+  cacheWillUpdate: async ({ response, state }: { response: Response } & GenerationState) => {
+    const marker = await caches.match("/sendo-images-generation", {
+      cacheName: "sendo-images-generation",
+    });
+    const generation = marker === undefined ? "" : await marker.text();
+    return state !== undefined && generation === state.generation ? response : null;
+  },
+  cacheDidUpdate: async ({
+    cacheName,
+    request,
+    state,
+  }: { cacheName: string; request: Request } & GenerationState) => {
+    const marker = await caches.match("/sendo-images-generation", {
+      cacheName: "sendo-images-generation",
+    });
+    const generation = marker === undefined ? "" : await marker.text();
+    if (state !== undefined && generation === state.generation) return;
+    const cache = await caches.open(cacheName);
+    await cache.delete(request);
+  },
+};
+
 export default defineConfig({
   plugins: [
     svelte(),
@@ -77,6 +120,7 @@ export default defineConfig({
               cacheName: IMAGE_CACHE_NAME,
               cacheableResponse: { statuses: [200] },
               expiration: { maxAgeSeconds: IMAGE_CACHE_MAX_AGE_SECONDS, purgeOnQuotaError: true },
+              plugins: [imageCacheGenerationPlugin],
             },
           },
         ],

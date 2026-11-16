@@ -183,3 +183,54 @@ test("ログアウトすると、画像のキャッシュも消える", async ({
   await expect.poll(() => cachedImages(page)).toEqual([]);
   await expect.poll(() => page.evaluate((name) => caches.has(name), IMAGE_CACHE)).toBe(false);
 });
+
+test("画像を取りにいっている間にキャッシュを消したら、遅れて届いた画像は入れない", async ({
+  page,
+  context,
+}) => {
+  const { server } = seed();
+  await routeFakeSendo(context, server);
+  // 合図を出すまで、画像の応答を止めておけるようにする
+  let holding = false;
+  const waiting: (() => void)[] = [];
+  const held = new Set<string>();
+  await context.route("**/api/v1/images**", async (route) => {
+    if (holding) {
+      held.add(route.request().url());
+      await new Promise<void>((resolve) => waiting.push(resolve));
+    }
+    await route.fallback();
+  });
+  await page.goto("/");
+  await signIn(page);
+  await expect(page.locator(".article-list .item")).toHaveCount(3);
+  await controlledByServiceWorker(page);
+  await expect.poll(() => cachedImages(page)).toHaveLength(2);
+
+  /** ログアウトやユーザーの切り替えのときと同じに、世代を進めてから、キャッシュを消す */
+  const clear = () =>
+    page.evaluate(async (name) => {
+      const marker = await caches.open("sendo-images-generation");
+      await marker.put("/sendo-images-generation", new Response(crypto.randomUUID()));
+      await caches.delete(name);
+    }, IMAGE_CACHE);
+
+  // キャッシュを空にしてから開き直す。画像を取りにいくが、応答は止まっている
+  await clear();
+  holding = true;
+  await page.reload();
+  await expect(page.locator(".article-list .item")).toHaveCount(3);
+  await expect.poll(() => held.size).toBeGreaterThanOrEqual(1);
+
+  // 取りにいっている間に、キャッシュを消す（ログアウトした）。そのあとで、応答が届く
+  await clear();
+  holding = false;
+  for (const resume of waiting.splice(0)) resume();
+  await expect.poll(() => loadedImages(page, ".article-list .thumb img")).toBe(1);
+  await page.waitForTimeout(500);
+  expect(await cachedImages(page)).toEqual([]);
+
+  // そのあとに取りにいった画像は、これまでどおり入る
+  await page.reload();
+  await expect.poll(() => cachedImages(page)).toHaveLength(2);
+});

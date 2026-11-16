@@ -6,6 +6,8 @@
  * - 日数（30 日）で捨てるのは、Service Worker の中の Workbox が行う
  * - 容量（100MB）で捨てるのは、ここで行う（Workbox は、件数と日数でしか捨てられない）
  * - ログアウトとユーザーの切り替えでは、手元の DB と一緒に、まとめて消す
+ * - 消したあとに、消す前に取りにいき始めた画像が遅れて届いても、キャッシュに入れない。
+ *   そのために「世代」の印を持つ（下の IMAGE_CACHE_GENERATION）
  */
 
 /** キャッシュの名前。Service Worker の設定と、消す側とで同じものを使う */
@@ -20,9 +22,31 @@ export const IMAGE_CACHE_MAX_AGE_SECONDS = 30 * 24 * 60 * 60;
 /** キャッシュの容量の上限（バイト） */
 export const IMAGE_CACHE_MAX_BYTES = 100 * 1024 * 1024;
 
-/** 画像のキャッシュをまとめて消す。キャッシュの仕組みがない環境（Node のテストなど）では何もしない */
+/**
+ * 画像のキャッシュの世代の印の置き場所。まとめて消すたびに、中身（世代）を替える。
+ *
+ * Service Worker は、画像を取りにいき始めたときの世代を覚えておき、キャッシュに入れる前と
+ * 入れたあとに、世代が変わっていないかを見る（apps/web/vite.config.ts のプラグイン）。変わって
+ * いたら、消す前に取りにいき始めた画像なので、入れない（入れてしまっていたら消す）。これが
+ * ないと、消したあとに遅れて届いた応答が、前の人の画像でキャッシュを作り直してしまう。
+ *
+ * Service Worker の設定は、ビルドのときに文字にして埋め込まれるので、この値を参照できない。
+ * 向こうには同じ名前を直接書いてある。変えるときは、両方を直す（E2E で確かめている）。
+ */
+export const IMAGE_CACHE_GENERATION = {
+  cacheName: "sendo-images-generation",
+  url: "/sendo-images-generation",
+} as const;
+
+/**
+ * 画像のキャッシュをまとめて消す。先に世代を進めてから消す（この順なら、消す前に取りにいき
+ * 始めた画像は、どの時点で届いても残らない）。キャッシュの仕組みがない環境（Node のテスト
+ * など）では何もしない
+ */
 export async function clearImageCache(): Promise<void> {
   if (typeof caches === "undefined") return;
+  const marker = await caches.open(IMAGE_CACHE_GENERATION.cacheName);
+  await marker.put(IMAGE_CACHE_GENERATION.url, new Response(crypto.randomUUID()));
   await caches.delete(IMAGE_CACHE_NAME);
 }
 
