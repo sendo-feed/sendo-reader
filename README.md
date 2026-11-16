@@ -81,7 +81,7 @@ pnpm dev
    | デプロイのコマンド | `pnpm run deploy`（`run` を付ける。`pnpm deploy` は pnpm 自身のコマンド） |
    | ルート ディレクトリ | 空のまま、または `/`（`apps/web` にしない） |
 
-4. Worker の「設定」→「ビルド」の「プレビューのベース」で、main 以外のブランチのビルドを無効にする。リポジトリの一番上には wrangler の設定がないので、既定のコマンドでは失敗する
+4. Worker の「設定」→「ビルド」で、「プレビュービルドの有効化」をオフにする（main 以外のブランチのビルドを止める）。リポジトリの一番上には wrangler の設定がないので、既定のコマンドでは失敗する
 5. `https://sendo-reader.<自分のサブドメイン>.workers.dev` を開き、Google でログインする
    - Sendo の Google の OAuth クライアントの「承認済みのリダイレクト URI」に、`https://sendo-reader.<自分のサブドメイン>.workers.dev/api/v1/auth/google/callback` を入れておく（[Sendo の README](https://github.com/sendo-feed/sendo#ブラウザでログインするgoogle)）
 
