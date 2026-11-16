@@ -375,7 +375,7 @@ test("一覧を動かして通り過ぎた記事は既読になる。設定で�
   const unreadRows = list.locator(".row.unread");
   await expect(list.locator(".item")).toHaveCount(40);
   await expect(unreadRows).toHaveCount(40);
-  const scrollBy = (top: number) => list.evaluate((el, top) => el.scrollBy({ top }), top);
+  const scrollBy = (top: number) => page.evaluate((top) => window.scrollBy({ top }), top);
 
   // 行がすっかり消えるのを待たない。上の端が見出しの下に少し隠れたら、その行は既読になる
   // 行の上に付く日付の見出しが隠れただけなら、まだ既読にしない
@@ -696,16 +696,16 @@ test("見出しや下のバーを押すと一覧の先頭に戻る。先頭で�
   await signIn(page);
   const list = page.locator(".article-list");
   await expect(list.locator(".item")).toHaveCount(40);
-  const scrollTop = () => list.evaluate((el) => el.scrollTop);
+  const scrollTop = () => page.evaluate(() => window.scrollY);
 
   // 見出しを押すと、先頭に戻る
-  await list.evaluate((el) => el.scrollTo({ top: 1500 }));
+  await page.evaluate(() => window.scrollTo({ top: 1500 }));
   await expect.poll(scrollTop).toBeGreaterThan(1000);
   await list.getByRole("button", { name: /^All/ }).click();
   await expect.poll(scrollTop).toBe(0);
 
   // 下のバーで、いまいる画面をもう一度押しても、先頭に戻る（画面は移らない）
-  await list.evaluate((el) => el.scrollTo({ top: 1500 }));
+  await page.evaluate(() => window.scrollTo({ top: 1500 }));
   await expect.poll(scrollTop).toBeGreaterThan(1000);
   await page.getByRole("navigation", { name: "Main" }).getByRole("link", { name: "All" }).click();
   await expect.poll(scrollTop).toBe(0);
@@ -749,7 +749,7 @@ test("見出しや下のバーを押すと一覧の先頭に戻る。先頭で�
   await expect(list.locator(".pull-busy")).toHaveCount(0);
 
   // 一覧の途中では、下に動かしても更新しない
-  await list.evaluate((el) => el.scrollTo({ top: 300 }));
+  await page.evaluate(() => window.scrollTo({ top: 300 }));
   const requests = server.requests.length;
   await drag(200);
   await page.waitForTimeout(500);
@@ -798,12 +798,72 @@ test("引いて更新の同期を待っている間に読み進めたら、同�
   await expect(list.locator(".pull-busy")).toBeVisible();
 
   // 待っている間に、読み進める
-  await list.evaluate((el) => el.scrollTo({ top: 900 }));
+  await page.evaluate(() => window.scrollTo({ top: 900 }));
   server.onRequest = null;
   release();
   await expect(list.locator(".pull-busy")).toHaveCount(0);
-  expect(await list.evaluate((el) => el.scrollTop)).toBeGreaterThan(800);
+  expect(await page.evaluate(() => window.scrollY)).toBeGreaterThan(800);
   // 届いた記事は、一覧には割り込ませず、件数で知らせる
   await expect(list.getByRole("button", { name: "1 new" })).toBeVisible();
   await expect(list.locator(".item")).toHaveCount(40);
+});
+
+test("狭い画面では、ページ全体が動く。記事は先頭から出し、戻ると一覧の位置に戻る", async ({
+  page,
+  context,
+}) => {
+  const server = new FakeSendo();
+  const feed = server.subscribe({ url: "https://blog.example/feed.xml", title: "Blog" });
+  for (let i = 0; i < 40; i++) {
+    server.deliver(feed.id, {
+      title: `記事 ${i}`,
+      summary: "本文。".repeat(200),
+      publishedAt: Date.now() - (i + 1) * 60_000,
+    });
+  }
+  await routeFakeSendo(context, server);
+  await page.setViewportSize({ width: 390, height: 780 });
+  await page.goto("/");
+  await signIn(page);
+  const list = page.locator(".article-list");
+  await expect(list.locator(".item")).toHaveCount(40);
+  const scrollY = () => page.evaluate(() => window.scrollY);
+
+  // 一覧の欄ではなく、ページが動く（iPhone の、いちばん上を押すと先頭に戻る動きが効く）
+  await page.evaluate(() => window.scrollTo({ top: 1500 }));
+  await expect.poll(scrollY).toBeGreaterThan(1000);
+  expect(await list.evaluate((el) => el.scrollTop)).toBe(0);
+  // 見出しは画面の上に、下のバーは画面の下に貼り付いたまま
+  expect(await list.locator("header").evaluate((el) => el.getBoundingClientRect().top)).toBe(0);
+  const tabs = page.getByRole("navigation", { name: "Main" });
+  expect(
+    await tabs.evaluate((el) => Math.round(window.innerHeight - el.getBoundingClientRect().bottom)),
+  ).toBe(0);
+  const listTop = await scrollY();
+
+  // 画面のまんなかの記事を開くと、記事は先頭から出る
+  const title = await page.evaluate(() => {
+    const row = document.elementFromPoint(200, 400)?.closest(".item");
+    return row?.querySelector(".title")?.textContent ?? "";
+  });
+  expect(title).toMatch(/^記事 \d+$/);
+  await list
+    .locator(".item", { hasText: new RegExp(`^${title}\\b`) })
+    .first()
+    .click();
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText(title);
+  await expect.poll(scrollY).toBe(0);
+  // 記事を読み進めても、記事の操作は画面の下に貼り付いたまま
+  await page.evaluate(() => window.scrollTo({ top: 600 }));
+  const toolbar = page.locator(".article-view .toolbar");
+  expect(
+    await toolbar.evaluate((el) =>
+      Math.round(window.innerHeight - el.getBoundingClientRect().bottom),
+    ),
+  ).toBe(0);
+
+  // 戻ると、開く前の一覧の位置に戻る
+  await page.getByRole("button", { name: "Back", exact: true }).click();
+  await expect(list).toBeVisible();
+  await expect.poll(scrollY).toBe(listTop);
 });

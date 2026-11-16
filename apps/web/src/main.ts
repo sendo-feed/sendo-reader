@@ -20,6 +20,9 @@ if (location.pathname === AUTHORIZE_PATH) {
   // （docs/decisions/account.md の 5）。DB のワーカーも起こさない
   mount(Authorize, { target });
 } else {
+  // 戻る・進むで、ブラウザに位置を戻させない。狭い画面では、一覧と記事が同じページを動かすので、
+  // 一覧の位置は画面の側で戻す（routes/Reader.svelte。docs/decisions/ui.md の 6）
+  history.scrollRestoration = "manual";
   const state = new ReaderState(startReader());
   // 設定の正は手元の DB（docs/decisions/settings.md）。つないで、読み直す
   prefs.connect(state.client);

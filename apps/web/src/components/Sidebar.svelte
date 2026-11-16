@@ -365,6 +365,8 @@
     flex: 1;
     min-height: 0;
     overflow-y: auto;
+    /* 端まで動かしても、うしろのページを動かさない（狭い画面では、メニューの下に一覧がある） */
+    overscroll-behavior: contain;
     padding: 0 0.5rem 0.75rem;
   }
 

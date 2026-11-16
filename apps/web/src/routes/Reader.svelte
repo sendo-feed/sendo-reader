@@ -13,6 +13,7 @@
   import ShortcutHelp from "../components/ShortcutHelp.svelte";
   import Sidebar from "../components/Sidebar.svelte";
   import { useReader } from "../lib/context";
+  import { layout } from "../lib/layout.svelte";
   import { ArticleListState, type ListProgress } from "../lib/list.svelte";
   import { prefs } from "../lib/prefs.svelte";
   import { handleLink, isPlainClick, router, type View, viewHref } from "../lib/router.svelte";
@@ -58,6 +59,30 @@
   const currentTab = $derived(TABS.find((tab) => tab.href === viewHref(router.view))?.href ?? null);
 
   let listView = $state<ArticleList>();
+
+  /**
+   * 狭い画面では、一覧も記事も同じページを動かす（docs/decisions/ui.md の 6）。記事を開く前の
+   * 一覧の位置を覚えておき、記事から戻ったら、その位置に戻す（記事は、先頭から出す）
+   */
+  let listScrollY = 0;
+  let wasReading = router.articleId !== null;
+
+  // 画面が替わる前（一覧がまだ出ている間）に、一覧の位置を覚える
+  $effect.pre(() => {
+    const reading = router.articleId !== null;
+    untrack(() => {
+      if (reading && !wasReading && layout.pageScroll) listScrollY = window.scrollY;
+    });
+  });
+
+  // 記事から一覧に戻ったら、覚えていた位置に戻す
+  $effect(() => {
+    const reading = router.articleId !== null;
+    untrack(() => {
+      if (!reading && wasReading && layout.pageScroll) window.scrollTo({ top: listScrollY });
+      wasReading = reading;
+    });
+  });
 
   /** 下のバーを押した。いまいる画面をもう一度押したら、一覧の先頭に戻る（移らない） */
   function onTab(event: MouseEvent, href: string) {
@@ -691,13 +716,30 @@
       grid-template-columns: minmax(0, 1fr);
     }
 
-    /* 一覧（か、購読の管理・設定）の下に、バーの行を足す。記事の画面では出さない */
+    /*
+     * ページ全体をスクロールする（docs/decisions/ui.md の 6）。高さを画面に固定せず、中身の分だけ
+     * 伸ばす。一覧（か、購読の管理・設定）の下のバーは、画面の下に貼り付け、その分を空けておく。
+     * 記事の画面では出さない（同じ場所に、記事の操作が入る）
+     */
     .reader {
-      grid-template-rows: minmax(0, 1fr) auto;
+      --tabs-height: calc(3.5rem + env(safe-area-inset-bottom, 0px));
+      grid-template-rows: auto;
+      height: auto;
+      min-height: 100dvh;
+    }
+
+    .reader:not(.reading) {
+      padding-bottom: var(--tabs-height);
     }
 
     .reader:not(.reading) > .tabs {
+      position: fixed;
+      right: 0;
+      bottom: 0;
+      left: 0;
+      z-index: 1;
       display: flex;
+      height: var(--tabs-height);
       padding-bottom: env(safe-area-inset-bottom, 0px);
       border-top: 1px solid var(--border);
       background: var(--background);
@@ -744,6 +786,10 @@
     }
 
     .bar {
+      position: sticky;
+      top: 0;
+      z-index: 1;
+      background: var(--background);
       display: flex;
       align-items: center;
       gap: 0.25rem;

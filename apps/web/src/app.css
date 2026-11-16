@@ -99,6 +99,14 @@
   box-sizing: border-box;
 }
 
+/*
+ * 先頭や末尾での、ブラウザ自身の引っぱり（ゴムのような戻り）は出さない。狭い画面では、ページ全体を
+ * 動かすので、ページ（html）にも付ける（docs/decisions/ui.md の 6）
+ */
+html {
+  overscroll-behavior: none;
+}
+
 body {
   margin: 0;
   overscroll-behavior: none;

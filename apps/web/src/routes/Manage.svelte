@@ -23,6 +23,13 @@
     overflow-y: auto;
   }
 
+  /* 狭い画面では、ページ全体を動かす（docs/decisions/ui.md の 6） */
+  @media (max-width: 56rem) {
+    .manage {
+      overflow-y: visible;
+    }
+  }
+
   h1 {
     margin: 0;
     font-size: 1.5rem;

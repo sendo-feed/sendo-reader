@@ -1,7 +1,9 @@
 <script lang="ts">
   import type { Article } from "@sendo-reader/core";
+  import { untrack } from "svelte";
   import { useReader } from "../lib/context";
   import { compactCount, dayLabel, shortTime } from "../lib/format";
+  import { layout, scrollToTop as scrollPage, scrollTopOf } from "../lib/layout.svelte";
   import type { ArticleListState, ListProgress } from "../lib/list.svelte";
   import { prefs, type ViewOptions } from "../lib/prefs.svelte";
   import { handleLink, isPlainClick, router } from "../lib/router.svelte";
@@ -99,6 +101,8 @@
    * 行ごとに位置を測らず、IntersectionObserver の知らせで拾う。少しためてから、まとめて書く
    */
   let observer: IntersectionObserver | undefined;
+  /** 見ている行（狭い画面と広い画面を行き来したら、見る相手を替えて、見直す） */
+  const watched = new Set<HTMLElement>();
   /**
    * 上の端まで見えていたことのある行。そうでない行（別の一覧に替えた直後に上にある行、開いたときから
    * 上が切れている行）は、通り過ぎたのではないので数えない
@@ -136,25 +140,49 @@
     flushTimer = setTimeout(flushPassed, 250);
   }
 
-  function watchPass(node: HTMLElement) {
-    const root = node.closest<HTMLElement>(".article-list");
-    const header = root?.querySelector("header");
-    observer ??= new IntersectionObserver(onPass, {
-      root,
+  /**
+   * 行を見る IntersectionObserver。狭い画面ではページ全体が動くので画面（root: null）を、
+   * 広い画面では一覧の欄を相手にする。どちらも、貼り付いた見出しの分だけ上を狭める
+   */
+  function passObserver(): IntersectionObserver {
+    if (observer !== undefined) return observer;
+    const header = scroller?.querySelector("header");
+    observer = new IntersectionObserver(onPass, {
+      root: layout.pageScroll ? null : (scroller ?? null),
       rootMargin: `-${header?.offsetHeight ?? 0}px 0px 0px 0px`,
       // 上の端が隠れはじめたとき（すべて見えている → 一部）にも知らせてもらう。端数で 1 に
       // ならない行のために、少し手前にも置く
       threshold: [0, 0.9, 1],
     });
-    observer.observe(node);
-    return { destroy: () => observer?.unobserve(node) };
+    return observer;
   }
+
+  function watchPass(node: HTMLElement) {
+    watched.add(node);
+    passObserver().observe(node);
+    return {
+      destroy: () => {
+        watched.delete(node);
+        observer?.unobserve(node);
+      },
+    };
+  }
+
+  // 狭い画面と広い画面を行き来したら（窓の幅を変えた、端末を回した）、見る相手を替える
+  $effect(() => {
+    void layout.pageScroll;
+    untrack(() => {
+      observer?.disconnect();
+      observer = undefined;
+      for (const node of watched) passObserver().observe(node);
+    });
+  });
 
   // 別の一覧に替えたら、先頭に戻す（前の一覧の位置のまま、新しい一覧の途中を出さない）
   $effect(() => {
     void list.opened;
     passed.clear();
-    scroller?.scrollTo({ top: 0 });
+    scrollPage(scroller);
   });
 
   /** 探す言葉を打つたびに探す。打っている途中で何度も探さないように、少し待つ */
@@ -186,15 +214,20 @@
   }
 
   /** 一覧の終わりが近づいたら、続きを読む */
-  function autoload(node: HTMLElement) {
-    const observer = new IntersectionObserver(
-      (entries) => {
-        if (entries.some((entry) => entry.isIntersecting)) void list.loadMore();
-      },
-      { root: node.closest(".article-list"), rootMargin: "600px" },
-    );
-    observer.observe(node);
-    return { destroy: () => observer.disconnect() };
+  function autoload(node: HTMLElement, pageScroll: boolean) {
+    let observer: IntersectionObserver | undefined;
+    function watch(pageScroll: boolean) {
+      observer?.disconnect();
+      observer = new IntersectionObserver(
+        (entries) => {
+          if (entries.some((entry) => entry.isIntersecting)) void list.loadMore();
+        },
+        { root: pageScroll ? null : node.closest(".article-list"), rootMargin: "600px" },
+      );
+      observer.observe(node);
+    }
+    watch(pageScroll);
+    return { update: watch, destroy: () => observer?.disconnect() };
   }
 
   /** その向き（dx が正なら右へ）のスワイプに割り当てた操作（設定で変えられる） */
@@ -330,17 +363,15 @@
 
   /**
    * 一覧の先頭に戻る（見出しを押したとき、下のバーで今の画面をもう一度押したとき）。
-   * iPhone の「画面のいちばん上を押すと先頭に戻る」は、ページ全体を動かすときにしか効かない。
-   * ここは一覧だけを動かしているので、自分で持つ
+   * 狭い画面では、iPhone の「画面のいちばん上を押す」でも戻る（ページ全体を動かしているので）
    */
   export function scrollToTop() {
-    const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    scroller?.scrollTo({ top: 0, behavior: reduce ? "auto" : "smooth" });
+    scrollPage(scroller, 0, true);
   }
 
   async function reload() {
     await list.load();
-    scroller?.scrollTo({ top: 0 });
+    scrollPage(scroller);
   }
 
   /** 引いた長さ（px）が、これを超えて指を離したら、更新する */
@@ -372,7 +403,7 @@
       ]);
       // 待っている間に、読み進めたり、別の一覧に移ったりしていたら、読み直さない（位置を先頭に
       // 戻さない、移った先の一覧を巻き込まない）。届いた記事は「新しい記事 N 件」で知らせる
-      if (list.generation === loaded && (scroller?.scrollTop ?? 0) <= 0) await reload();
+      if (list.generation === loaded && scrollTopOf(scroller) <= 0) await reload();
     } catch {
       // 読み直せなくても、一覧は前のまま使える
     } finally {
@@ -391,7 +422,7 @@
       const touch = event.touches[0];
       pulling = false;
       if (event.touches.length !== 1 || touch === undefined) return;
-      if (node.scrollTop > 0 || refreshing) return;
+      if (scrollTopOf(node) > 0 || refreshing) return;
       startX = touch.clientX;
       startY = touch.clientY;
       pulling = null;
@@ -405,10 +436,9 @@
       if (pulling === null) {
         if (Math.abs(dx) < 8 && Math.abs(dy) < 8) return;
         // 横に動かした（行のスワイプ）、上に動かした、途中で一覧が動いた、なら引く動きではない
-        pulling = dy > 0 && Math.abs(dy) > Math.abs(dx) && node.scrollTop <= 0;
+        pulling = dy > 0 && Math.abs(dy) > Math.abs(dx) && scrollTopOf(node) <= 0;
         if (!pulling) return;
       }
-      // 指より少し遅れて付いてくる（引いている手ごたえ）
       dragging = true;
       // 指より少し遅れて付いてくる（引いている手ごたえ）
       pull = Math.max(0, Math.min(PULL_MAX, dy * 0.6));
@@ -661,7 +691,7 @@
       <button
         type="button"
         class="more"
-        use:autoload
+        use:autoload={layout.pageScroll}
         onclick={() => list.loadMore()}
         disabled={list.loadingMore}
       >
@@ -691,6 +721,17 @@
     overscroll-behavior-y: none;
     border-right: 1px solid var(--border);
     background: var(--background);
+  }
+
+  /*
+   * 狭い画面では、一覧の欄ではなくページ全体を動かす（docs/decisions/ui.md の 6。iPhone の
+   * 「画面のいちばん上を押すと先頭に戻る」を効かせるため）。見出しは画面の上に貼り付く
+   */
+  @media (max-width: 56rem) {
+    .article-list {
+      overflow-y: visible;
+      border-right: 0;
+    }
   }
 
   /* 先頭で下に引いたときの、すき間。引いた分だけ、一覧を下に押す */

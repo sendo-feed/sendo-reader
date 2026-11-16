@@ -3,6 +3,7 @@
   import { untrack } from "svelte";
   import { useReader } from "../lib/context";
   import { formatDateTime } from "../lib/format";
+  import { scrollToTop } from "../lib/layout.svelte";
   import type { ArticleListState } from "../lib/list.svelte";
   import { prefs } from "../lib/prefs.svelte";
   import { handleLink, router, viewHref } from "../lib/router.svelte";
@@ -61,7 +62,8 @@
           article = listed;
           missing = false;
         }
-        scroller?.scrollTo({ top: 0 });
+        // 記事は先頭から出す（狭い画面では、ページ全体を動かしている）
+        scrollToTop(scroller);
         // 書けなかったら、次に手元が変わったときの読み直しで、手元の DB の状態に戻る
         markOnOpen(id).catch(() => void list.refresh());
         void load(id);
@@ -492,6 +494,15 @@
   }
 
   @media (max-width: 56rem) {
+    /*
+     * ページ全体を動かす（docs/decisions/ui.md の 6）。中身が短くても、記事の操作が画面の下に
+     * 来るように、画面の高さまでは伸ばす
+     */
+    .article-view {
+      min-height: 100dvh;
+      overflow-y: visible;
+    }
+
     .back {
       display: inline-grid;
     }
