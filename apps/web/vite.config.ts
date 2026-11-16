@@ -1,3 +1,4 @@
+import { execSync } from "node:child_process";
 import { svelte } from "@sveltejs/vite-plugin-svelte";
 import { defineConfig, type Plugin } from "vite";
 import { VitePWA } from "vite-plugin-pwa";
@@ -75,7 +76,25 @@ const imageCacheGenerationPlugin = {
   },
 };
 
+/**
+ * 動いている版を、設定の画面で見分けるための印（コミットと、ビルドした時刻）。
+ * PWA は、新しい版に替わるのが遅れることがあるので、いまどの版かを画面で確かめられるようにする。
+ * Workers Builds はコミットを環境変数で渡す。手元では git から読む
+ */
+function appVersion(): string {
+  let commit = process.env.WORKERS_CI_COMMIT_SHA ?? "";
+  if (commit === "") {
+    try {
+      commit = execSync("git rev-parse HEAD", { encoding: "utf8" }).trim();
+    } catch {
+      commit = "unknown";
+    }
+  }
+  return `${commit.slice(0, 7)} (${new Date().toISOString().slice(0, 16).replace("T", " ")} UTC)`;
+}
+
 export default defineConfig({
+  define: { __APP_VERSION__: JSON.stringify(appVersion()) },
   plugins: [
     svelte(),
     securityHeadersPlugin(),

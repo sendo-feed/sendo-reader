@@ -17,6 +17,9 @@
    */
   const reader = useReader();
 
+  /** 動いている版。PWA が新しい版に替わったかを、ここで確かめられる */
+  const version = __APP_VERSION__;
+
   function confirm(signal?: AbortSignal): Promise<void> {
     return confirmAccount(reader.user, () => void reader.client.syncNow(), signal);
   }
@@ -33,6 +36,7 @@
       <Grants {confirm} />
     {/if}
   {/key}
+  <p class="version">Version {version}</p>
 </main>
 
 <style>
@@ -43,6 +47,13 @@
     max-width: 48rem;
     padding: 1rem 1.5rem 3rem;
     overflow-y: auto;
+  }
+
+  .version {
+    margin: 0;
+    color: var(--faint);
+    font-size: 0.75rem;
+    font-variant-numeric: tabular-nums;
   }
 
   h1 {
