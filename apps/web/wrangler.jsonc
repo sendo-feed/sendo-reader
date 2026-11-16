@@ -8,6 +8,11 @@
   "observability": {
     "enabled": true
   },
+  // workers.dev の URL で使う。プレビューの URL は使わない（main 以外のブランチの版が、本番の sendo への
+  // 中継につながったまま外から開けてしまうため）。書かないと、デプロイのたびに画面の設定との違いを
+  // 警告される（docs/decisions/deploy.md の 6）
+  "workers_dev": true,
+  "preview_urls": false,
 
   // 画面（vite build の出力）。SPA なので、ないパスには index.html を返す。
   // /api だけは先に Worker に回し、sendo に中継する

@@ -56,16 +56,48 @@ pnpm dev
 | `pnpm build` | 画面をビルドし、reader Worker をデプロイせずにバンドルして確かめる |
 | `pnpm size` | ビルドのあとに、画面の JS とワーカーの JS・wasm の大きさが予算に収まるか確かめる |
 | `pnpm e2e` | 画面を通したテスト（Playwright。`pnpm build` のあとに） |
+| `pnpm run deploy` | 画面をビルドし、reader Worker をデプロイする（[デプロイ](#デプロイ)。ふつうは fork への push で Workers Builds が動かす） |
 | `pnpm --filter @sendo-reader/web lighthouse` | 初回の読み込みを Lighthouse で測る |
 | `pnpm --filter @sendo-reader/core api:fetch` | 手元の Sendo から API の定義（OpenAPI）を写す |
 | `pnpm --filter @sendo-reader/core api:generate` | 写した定義から API の型を作る |
 
 ## デプロイ
 
-画面は Cloudflare Workers の Static Assets で配信し、reader Worker が `/api` を Service binding で Sendo（Worker 名 `sendo`）に中継します。Sendo を同じアカウントにデプロイしてから、次を実行します。
+自分の Cloudflare アカウントに、GitHub の fork からデプロイします。fork の `main` に push するたびに、Cloudflare（Workers Builds）がビルドしてデプロイします（[決定](docs/decisions/deploy.md)）。Cloudflare の無料プランで動きます。
+
+画面は Workers Static Assets で配信し、reader Worker が `/api` を Service binding で Sendo（Worker 名 `sendo`）に中継します。Sendo を、同じアカウントに先にデプロイしておいてください（[Sendo の README](https://github.com/sendo-feed/sendo#デプロイ)）。
+
+### 初めてのデプロイ
+
+1. GitHub で `sendo-feed/sendo-reader` を、自分のアカウントに fork する
+2. Cloudflare の画面で、Workers & Pages →「作成」→「リポジトリをインポート」を選び、fork を選ぶ。Cloudflare の GitHub App の「Repository access」に、この fork を入れる
+   - Sendo の fork だけを入れていたら、GitHub の Settings → Applications → Cloudflare Workers and Pages で足す。入れ忘れると、画面から始めたビルドは動くのに、push してもビルドが始まらない
+3. 次のように入れてデプロイする
+
+   | 項目 | 値 |
+   |---|---|
+   | Worker の名前 | `sendo-reader`（変えない。`wrangler.jsonc` の `name` と違うとビルドが失敗し、Sendo の `READER_URL` やリダイレクト URI も、この名前の URL を前提にしている） |
+   | ビルドのコマンド | 空のまま |
+   | デプロイのコマンド | `pnpm run deploy`（`run` を付ける。`pnpm deploy` は pnpm 自身のコマンド） |
+   | ルート ディレクトリ | 空のまま、または `/`（`apps/web` にしない） |
+
+4. Worker の「設定」→「ビルド」の「プレビューのベース」で、main 以外のブランチのビルドを無効にする。リポジトリの一番上には wrangler の設定がないので、既定のコマンドでは失敗する
+5. `https://sendo-reader.<自分のサブドメイン>.workers.dev` を開き、Google でログインする
+   - Sendo の Google の OAuth クライアントの「承認済みのリダイレクト URI」に、`https://sendo-reader.<自分のサブドメイン>.workers.dev/api/v1/auth/google/callback` を入れておく（[Sendo の README](https://github.com/sendo-feed/sendo#ブラウザでログインするgoogle)）
+
+### 更新する
+
+Sendo を先に更新してから、GitHub の reader の fork の画面で「Sync fork」→「Update branch」を押します。上流の変更が fork の `main` に入り、その push でデプロイされます。
+
+reader は Sendo の API の型に合わせて作っているので、新しい reader を古い Sendo につなぐと、まだない API を呼ぶことがあります。
+
+### 手元からデプロイする
+
+Workers Builds を使わずに、手元からもデプロイできます。
 
 ```sh
-pnpm --filter @sendo-reader/web run deploy
+pnpm --filter @sendo-reader/web exec wrangler login   # 最初に 1 回
+pnpm run deploy
 ```
 
 ## ディレクトリ構成

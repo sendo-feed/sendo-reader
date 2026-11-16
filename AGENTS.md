@@ -20,6 +20,7 @@ Sendo の公式リーダー。`packages/core`（同期エンジン）と `apps/w
 - `pnpm format`：整形して、直せる lint の指摘を直す（Biome。`.svelte` も対象）
 - `pnpm dev`：画面の dev サーバー（http://localhost:5173）。`/api` は手元の sendo（http://localhost:8787）に中継する。sendo は sendo の README のとおりに別に動かす
 - `pnpm build`：画面をビルドし、reader Worker をデプロイせずにバンドルして確かめる
+- `pnpm run deploy`：画面をビルドし、reader Worker をデプロイする。ふつうは各自の fork への push で、Workers Builds がこれを動かす（`docs/decisions/deploy.md`）。手順を変えるときは、画面のコマンド（`pnpm run deploy`）を変えずに済むよう、`package.json` の側で直す
 - `pnpm size`：ビルドのあとに、画面のスレッドの JS（gzip 後 100KB）と、DB のワーカーの JS と wasm（550KB）が予算に収まるか確かめる
 - `pnpm e2e`：画面を通したテスト（Playwright）。`pnpm build` のあとに動かす。本番のビルドを `vite preview` で開き、`/api` には `packages/core/test/fake-sendo.ts` の偽の sendo が答える。速さの予算（キャッシュ済みの起動から記事まで 1 秒、操作の反応 100ms）も、CPU を 4 倍遅くして確かめる
 - `pnpm --filter @sendo-reader/web lighthouse`：初回の読み込みを Lighthouse で測り、`apps/web/.lighthouseci/` に残す（上限はまだ決めていない）。手元では `CHROME_PATH` に Chromium の場所を渡す
