@@ -164,8 +164,7 @@
 
   <div class="scroll">
     <div class="views">
-      {@render item({ kind: "unread" }, "未読", reader.unread.total, "inbox")}
-      {@render item({ kind: "all" }, "すべて", 0, "layers")}
+      {@render item({ kind: "all" }, "All", reader.unread.total, "inbox")}
       {@render item({ kind: "starred" }, "スター", 0, "star")}
       {@render item({ kind: "search" }, "検索", 0, "search")}
     </div>

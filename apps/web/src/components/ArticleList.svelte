@@ -26,7 +26,7 @@
     list: ArticleListState;
     title: string;
     /** 開いている一覧の種類。空のときの文と、出す操作を決める */
-    kind: "unread" | "all" | "starred" | "feed" | "folder" | "search";
+    kind: "all" | "starred" | "feed" | "folder" | "search";
     /** 検索の画面で探している言葉（検索でなければ null） */
     search: string | null;
     onsearch: (query: string) => void;
@@ -46,6 +46,9 @@
   } = $props();
 
   const reader = useReader();
+
+  /** 未読だけに絞れる一覧（スターと検索は、絞らない） */
+  const filterable = $derived(kind === "all" || kind === "feed" || kind === "folder");
 
   /** 一覧の中で、いま開いている（開いていなければ、キーボードで選んでいる）記事 */
   const currentId = $derived(router.articleId ?? list.cursorId);
@@ -487,7 +490,7 @@
         </button>
       </h2>
     {/if}
-    {#if kind === "feed" || kind === "folder"}
+    {#if filterable}
       <button
         type="button"
         class="icon-button"
@@ -575,7 +578,7 @@
         <Icon name="rss" />
         <p>まだフィードを購読していません。</p>
         <a href="/manage" onclick={(e) => handleLink(e, "/manage")}>フィードを追加する</a>
-      {:else if kind === "unread" || ((kind === "feed" || kind === "folder") && options.unreadOnly)}
+      {:else if filterable && options.unreadOnly}
         <Icon name="check" />
         <p>すべて読み終えました。</p>
       {:else if kind === "search"}

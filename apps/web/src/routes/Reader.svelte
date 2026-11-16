@@ -35,7 +35,7 @@
     menuOpen = false;
   });
 
-  type ListKind = "unread" | "all" | "starred" | "feed" | "folder" | "search";
+  type ListKind = "all" | "starred" | "feed" | "folder" | "search";
   interface Listing {
     kind: ListKind;
     query: ArticleQuery;
@@ -49,7 +49,7 @@
   /** 狭い画面の下のバーに並べる行き先（メニューのボタンのあとに、この順で並べる） */
   const TABS: { href: string; label: string; icon: IconName }[] = [
     { href: "/starred", label: "スター", icon: "star" },
-    { href: "/", label: "未読", icon: "inbox" },
+    { href: "/", label: "All", icon: "inbox" },
     { href: "/manage", label: "追加", icon: "plus" },
     { href: "/search", label: "検索", icon: "search" },
   ];
@@ -82,14 +82,6 @@
       case "manage":
       case "settings":
         return null;
-      case "all":
-        return {
-          kind: "all",
-          query: { ...order },
-          title: "すべて",
-          scope: { all: true },
-          unread: reader.unread.total,
-        };
       case "search":
         return {
           kind: "search",
@@ -123,10 +115,11 @@
           unread: reader.unread.folders.get(view.id) ?? 0,
         };
       default:
+        // 未読は、一覧の種類ではなく、絞り込みの状態（docs/decisions/settings.md の 2）
         return {
-          kind: "unread",
-          query: { state: "unread", ...order },
-          title: "未読",
+          kind: "all",
+          query: { ...state, ...order },
+          title: "All",
           scope: { all: true },
           unread: reader.unread.total,
         };
@@ -362,7 +355,6 @@
       chord = false;
       clearTimeout(chordTimer);
       const views: Record<string, View> = {
-        u: { kind: "unread" },
         a: { kind: "all" },
         s: { kind: "starred" },
         m: { kind: "manage" },

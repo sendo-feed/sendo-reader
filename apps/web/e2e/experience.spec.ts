@@ -30,9 +30,9 @@ test("キーボードで、記事を移り、既読とスターを切り替え�
   await signIn(page);
   const list = page.locator(".article-list");
   const view = page.locator(".article-view");
-  const unread = page.locator("nav.sidebar a", { hasText: "未読" });
+  const unread = page.locator("nav.sidebar a", { hasText: "All" });
   await expect(list.locator(".item")).toHaveCount(3);
-  await expect(page).toHaveTitle("(3) 未読 - Sendo");
+  await expect(page).toHaveTitle("(3) All - Sendo");
 
   // j で次の記事を開く（開くと既読になる）。k で前に戻る
   await page.keyboard.press("j");
@@ -44,8 +44,8 @@ test("キーボードで、記事を移り、既読とスターを切り替え�
   await expect(view.getByRole("heading", { level: 1 })).toHaveText("1 番目");
   // 左上に、未読の数と、この一覧の進み具合（2 件読んで 1 件残っている）を出す。押すと内訳が出る
   await page.getByRole("button", { name: "未読 1 件。この一覧の進み具合 67%" }).click();
-  await expect(page.getByRole("dialog")).toContainText("「未読」で読んだ記事 2 件");
-  await expect(page.getByRole("dialog")).toContainText("「未読」に残っている未読 1 件");
+  await expect(page.getByRole("dialog")).toContainText("「All」で読んだ記事 2 件");
+  await expect(page.getByRole("dialog")).toContainText("「All」に残っている未読 1 件");
   await page.keyboard.press("Escape");
 
   // s でスター、m で未読に戻す
@@ -73,27 +73,27 @@ test("キーボードで、記事を移り、既読とスターを切り替え�
   await page.keyboard.press("Shift+A");
   await expect(page.getByRole("dialog")).toContainText("未読 2 件");
   await page.keyboard.press("Enter");
-  await expect(page).toHaveTitle("未読 - Sendo");
+  await expect(page).toHaveTitle("All - Sendo");
   await page.getByRole("status").getByRole("button", { name: "取り消す" }).click();
   await expect(page.getByRole("status")).toContainText("2 件を未読に戻しました。");
-  await expect(page).toHaveTitle("(2) 未読 - Sendo");
+  await expect(page).toHaveTitle("(2) All - Sendo");
   await page.keyboard.press("Shift+A");
   await page.getByRole("button", { name: "1 日より古い記事だけ" }).click();
   await expect(page.getByRole("status")).toContainText("既読にする記事はありませんでした。");
-  await expect(page).toHaveTitle("(2) 未読 - Sendo");
+  await expect(page).toHaveTitle("(2) All - Sendo");
   await page.keyboard.press("Shift+A");
   await page.getByRole("dialog").getByRole("button", { name: "すべて既読にする" }).click();
   await expect(page.getByRole("status")).toContainText("2 件を既読にしました。");
   await expect(unread).not.toContainText("2");
-  await expect(page).toHaveTitle("未読 - Sendo");
+  await expect(page).toHaveTitle("All - Sendo");
 
-  // ? で操作の一覧、g a で「すべて」に移る
+  // ? で操作の一覧、g a で All に移る
   await page.keyboard.press("?");
   await expect(page.getByRole("dialog")).toContainText("キーボードの操作");
   await page.keyboard.press("Escape");
   await page.keyboard.press("g");
   await page.keyboard.press("a");
-  await expect(page).toHaveURL(/\/all$/);
+  await expect(page).toHaveURL(/\/$/);
 
   await page.getByRole("button", { name: "今すぐ同期" }).click();
   await expect
@@ -132,14 +132,25 @@ test("一覧の形・並び順・絞り込みは一覧ごとに覚え、表示�
   await list.getByRole("button", { name: "古い順に並べる" }).click();
   await expect(list.locator(".title")).toHaveText(["3 番目", "2 番目", "1 番目"]);
 
-  // フィードの一覧は既読の記事も出す。未読だけに絞れる。表示の設定は一覧ごとに覚えるので、
-  // 「未読」で変えた並び順と形は、ここには及ばない
+  // 未読は、一覧の絞り込みの状態。どの一覧も、はじめは未読だけを出し、切り替えると既読も出す。
+  // 表示の設定は一覧ごとに覚えるので、All で変えた並び順と形は、ここには及ばない
   await list.getByText("3 番目").click();
   await page.locator("nav.sidebar").getByRole("link", { name: "Blog" }).click();
-  await expect(list.locator(".title")).toHaveText(["1 番目", "3 番目"]);
-  await expect(list.locator("ol")).not.toHaveClass(/compact/);
-  await list.getByRole("button", { name: "未読だけを出す" }).click();
   await expect(list.locator(".title")).toHaveText(["1 番目"]);
+  await expect(list.locator("ol")).not.toHaveClass(/compact/);
+  const unreadOnly = list.getByRole("button", { name: "未読だけを出す" });
+  await expect(unreadOnly).toHaveAttribute("aria-pressed", "true");
+  await unreadOnly.click();
+  await expect(list.locator(".title")).toHaveText(["1 番目", "3 番目"]);
+  await unreadOnly.click();
+  await expect(list.locator(".title")).toHaveText(["1 番目"]);
+  // All でも、同じ切り替えで既読も出せる
+  await page.locator("nav.sidebar").getByRole("link", { name: "All" }).click();
+  await expect(list.locator(".title")).toHaveText(["2 番目", "1 番目"]);
+  await unreadOnly.click();
+  await expect(list.locator(".title")).toHaveText(["3 番目", "2 番目", "1 番目"]);
+  await unreadOnly.click();
+  await expect(list.locator(".title")).toHaveText(["2 番目", "1 番目"]);
 
   // フォルダを畳み、未読のないフィードを隠す
   const nav = page.locator("nav.sidebar");
@@ -181,9 +192,11 @@ test("狭い画面では、メニューを左から開き、一覧と記事を�
 
   await page.getByRole("button", { name: "メニュー", exact: true }).click();
   await expect(nav).toBeVisible();
-  await nav.getByRole("link", { name: "すべて" }).click();
+  await nav.getByRole("link", { name: "All" }).click();
   await expect(nav).toBeHidden();
-  await expect(page).toHaveURL(/\/all$/);
+  // 既読の記事も出す（未読だけにするかは、一覧の絞り込みで選ぶ）
+  await list.getByRole("button", { name: "未読だけを出す" }).click();
+  await expect(page).toHaveURL(/\/$/);
 
   // 行を右へスワイプするとスター、左へスワイプすると既読・未読（縦に動かしたときは、何もしない）
   const flick = (title: string, dx: number, dy: number) =>
@@ -228,10 +241,10 @@ test("狭い画面では、メニューを左から開き、一覧と記事を�
   await tabs.getByRole("link", { name: "追加" }).click();
   await expect(page.getByRole("heading", { name: "購読の管理" })).toBeVisible();
   await expect(tabs).toBeVisible();
-  await tabs.getByRole("link", { name: "未読" }).click();
+  await tabs.getByRole("link", { name: "All" }).click();
   await expect(page).toHaveURL(/\/$/);
   await page.getByRole("button", { name: "メニュー", exact: true }).click();
-  await nav.getByRole("link", { name: "すべて" }).click();
+  await nav.getByRole("link", { name: "All" }).click();
 
   // 記事を開くと記事だけになり、「戻る」で一覧に戻る
   await list.getByText("2 番目").click();
@@ -264,7 +277,7 @@ test("狭い画面では、メニューを左から開き、一覧と記事を�
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("3 番目");
   await flickArticle(140, 10);
   await expect(list).toBeVisible();
-  await expect(page).toHaveURL(/\/all$/);
+  await expect(page).toHaveURL(/\/$/);
   await expect(tabs).toBeVisible();
 
   // 設定で、記事を左へスワイプしたら次の記事、一覧の行を左へスワイプしても何もしない、に変える
@@ -282,7 +295,7 @@ test("狭い画面では、メニューを左から開き、一覧と記事を�
   await expect(row).not.toHaveClass(/unread/);
   await expect(row.getByRole("button", { name: "スターを外す" })).toBeAttached();
   await page.getByRole("button", { name: "メニュー", exact: true }).click();
-  await nav.getByRole("link", { name: "すべて" }).click();
+  await nav.getByRole("link", { name: "All" }).click();
   await list.getByText("2 番目").click();
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("2 番目");
   await flickArticle(-140, 10);
@@ -308,7 +321,7 @@ test("j を続けて押して通り過ぎた記事も、既読になる", async 
   await page.keyboard.press("j");
   await page.keyboard.press("j");
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("3 番目");
-  await expect(page).toHaveTitle("未読 - Sendo");
+  await expect(page).toHaveTitle("All - Sendo");
   await expect(
     page.getByRole("button", { name: "未読 0 件。この一覧の進み具合 100%" }),
   ).toBeVisible();
@@ -526,14 +539,13 @@ test("行を長く押す（右クリックする）と記事の操作が出て�
 
   // 未読だけを出していて記事がないフィードでも、次のフィードへ進める
   await nav.getByRole("link", { name: "Alpha" }).click();
-  await list.getByRole("button", { name: "未読だけを出す" }).click();
   await expect(list.getByText("すべて読み終えました。")).toBeVisible();
   await list.getByRole("button", { name: "次のフィード「Beta」へ" }).click();
   await expect(page).toHaveURL(new RegExp(`/feeds/${beta.id}$`));
   await expect(list.locator(".title")).toHaveText(["B 1"]);
 
   // Shift + J で、次の未読のあるフィードへ
-  await nav.getByRole("link", { name: "未読" }).click();
+  await nav.getByRole("link", { name: "All" }).click();
   await page.keyboard.press("Shift+J");
   await expect(page).toHaveURL(new RegExp(`/feeds/${beta.id}$`));
 });
@@ -674,7 +686,7 @@ test("手元の記事を探せる（オフラインでも）。探した結果�
   await expect(page).toHaveURL(/\/starred$/);
 
   // 左のメニューからも開ける
-  await page.locator("nav.sidebar").getByRole("link", { name: "未読" }).click();
+  await page.locator("nav.sidebar").getByRole("link", { name: "All" }).click();
   await page.locator("nav.sidebar").getByRole("link", { name: "検索" }).click();
   await expect(list.getByRole("searchbox", { name: "記事を探す" })).toHaveValue("");
 });
@@ -699,7 +711,7 @@ test("見出しや下のバーを押すと一覧の先頭に戻る。先頭で�
   // 見出しを押すと、先頭に戻る
   await list.evaluate((el) => el.scrollTo({ top: 1500 }));
   await expect.poll(scrollTop).toBeGreaterThan(1000);
-  await list.getByRole("button", { name: /^未読/ }).click();
+  await list.getByRole("button", { name: /^All/ }).click();
   await expect.poll(scrollTop).toBe(0);
 
   // 下のバーで、いまいる画面をもう一度押しても、先頭に戻る（画面は移らない）
@@ -707,7 +719,7 @@ test("見出しや下のバーを押すと一覧の先頭に戻る。先頭で�
   await expect.poll(scrollTop).toBeGreaterThan(1000);
   await page
     .getByRole("navigation", { name: "主な画面" })
-    .getByRole("link", { name: "未読" })
+    .getByRole("link", { name: "All" })
     .click();
   await expect.poll(scrollTop).toBe(0);
   await expect(page).toHaveURL(/\/$/);

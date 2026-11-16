@@ -42,7 +42,7 @@ export interface Swipes {
 /** 一覧ごとに変えられるもの */
 export interface ViewOptions {
   layout: ListLayout;
-  /** 未読だけを出す（フィードとフォルダの一覧） */
+  /** 未読だけを出す（All、フォルダ、フィードの一覧） */
   unreadOnly: boolean;
   /** 古い順に並べる */
   oldestFirst: boolean;
@@ -55,7 +55,7 @@ export interface PrefsValue {
   theme: Theme;
   textSize: TextSize;
   layout: ListLayout;
-  /** フィードとフォルダの一覧で、未読だけを出す */
+  /** 一覧（All、フォルダ、フィード）で、未読だけを出す */
   unreadOnly: boolean;
   /** 一覧を動かして、上へ通り過ぎた未読の記事を既読にする */
   markReadOnScroll: boolean;
@@ -83,7 +83,7 @@ const DEFAULTS: PrefsValue = {
   theme: "auto",
   textSize: "medium",
   layout: "comfortable",
-  unreadOnly: false,
+  unreadOnly: true,
   markReadOnScroll: true,
   oldestFirst: false,
   hideReadFeeds: false,

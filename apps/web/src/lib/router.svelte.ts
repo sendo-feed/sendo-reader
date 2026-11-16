@@ -1,8 +1,7 @@
 /**
  * 小さな自前のルーター（History API。docs/decisions/ui.md）。
  *
- * - /                未読
- * - /all             すべて
+ * - /                All（すべてのフィードの記事。未読だけにするかは、一覧の絞り込みで選ぶ）
  * - /starred         スター
  * - /search?q=<言葉> 検索（手元の記事を探す）
  * - /feeds/:id       フィード
@@ -12,7 +11,6 @@
  * 開いている記事は ?article=<id> に持つ。
  */
 export type View =
-  | { kind: "unread" }
   | { kind: "all" }
   | { kind: "starred" }
   | { kind: "search" }
@@ -32,7 +30,6 @@ class Router {
 
   get view(): View {
     const path = this.url.pathname;
-    if (path === "/all") return { kind: "all" };
     if (path === "/starred") return { kind: "starred" };
     if (path === "/search") return { kind: "search" };
     if (path === "/manage") return { kind: "manage" };
@@ -41,7 +38,8 @@ class Router {
     if (feed?.[1] !== undefined) return { kind: "feed", id: decodeURIComponent(feed[1]) };
     const folder = /^\/folders\/([^/]+)$/.exec(path);
     if (folder?.[1] !== undefined) return { kind: "folder", id: decodeURIComponent(folder[1]) };
-    return { kind: "unread" };
+    // 前にあった /all（既読も出す画面）も、ここに来る。未読だけにするかは、一覧の絞り込みで選ぶ
+    return { kind: "all" };
   }
 
   /** 検索の画面で探している言葉 */
@@ -96,10 +94,8 @@ export const router = new Router();
 
 export function viewHref(view: View): string {
   switch (view.kind) {
-    case "unread":
-      return "/";
     case "all":
-      return "/all";
+      return "/";
     case "starred":
       return "/starred";
     case "search":
