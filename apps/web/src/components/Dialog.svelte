@@ -47,6 +47,35 @@
     box-shadow: var(--shadow);
   }
 
+  /* 開くときに、少し小さく薄いところから出し、後ろを暗くしていく */
+  dialog[open] {
+    animation: dialog-in 0.18s ease-out;
+  }
+
+  dialog[open]::backdrop {
+    animation: backdrop-in 0.18s ease-out;
+  }
+
+  @keyframes dialog-in {
+    from {
+      opacity: 0;
+      transform: scale(0.96);
+    }
+  }
+
+  @keyframes backdrop-in {
+    from {
+      opacity: 0;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    dialog[open],
+    dialog[open]::backdrop {
+      animation: none;
+    }
+  }
+
   dialog::backdrop {
     background: var(--scrim);
   }

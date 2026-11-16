@@ -245,8 +245,16 @@ test("狭い画面では、メニューを左から開き、一覧と記事を�
   // 記事の画面では、下のバーを出さない（同じ場所に、記事の操作が入る）
   await expect(tabs).toBeHidden();
   await expect(page.getByRole("button", { name: "Back" })).toBeVisible();
+  // 「戻る」で戻ったときは、一覧を左から入れる
+  await page.getByRole("button", { name: "Back" }).click();
+  await expect(list).toBeVisible();
+  await expect(page.locator(".reader")).toHaveClass(/returning/);
+  await list.getByText("2 番目").click();
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText("2 番目");
+  // 次の記事へ移ると、中身を短く浮かび上がらせる
   await page.getByRole("button", { name: "Next" }).click();
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("3 番目");
+  await expect(page.locator(".article-view .content")).toHaveClass(/fade-in/);
   // 記事を右へスワイプすると、一覧に戻る。左には何も割り当てていない（縦に読み進める動きでも、
   // 何も起きない）。割り当ては、設定で変えられる
   const flickArticle = (dx: number, dy: number) =>
@@ -319,6 +327,8 @@ test("狭い画面では、メニューを左から開き、一覧と記事を�
   await touchArticle("touchend", 140);
   await expect(list).toBeVisible();
   await expect(page).toHaveURL(/\/$/);
+  // スワイプで戻ったときは、後ろに見せていた一覧にそのまま替わる（入れ直さない）
+  await expect(page.locator(".reader")).not.toHaveClass(/returning/);
   await list.getByText("3 番目").click();
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("3 番目");
   await flickArticle(140, 10);

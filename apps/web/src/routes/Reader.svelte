@@ -13,7 +13,7 @@
   import ShortcutHelp from "../components/ShortcutHelp.svelte";
   import Sidebar from "../components/Sidebar.svelte";
   import { useReader } from "../lib/context";
-  import { layout } from "../lib/layout.svelte";
+  import { layout, reducedMotion } from "../lib/layout.svelte";
   import { ArticleListState, type ListProgress } from "../lib/list.svelte";
   import { prefs } from "../lib/prefs.svelte";
   import { handleLink, isPlainClick, router, type View, viewHref } from "../lib/router.svelte";
@@ -89,8 +89,10 @@
     const reading = router.articleId !== null;
     untrack(() => {
       if (!reading && wasReading && layout.pageScroll) window.scrollTo({ top: listScrollY });
+      // 戻るボタンや Esc で戻ったときは、一覧を左から入れる。スワイプで戻ったときは、後ろに
+      // 見せていた一覧と同じ位置で、そのまま一覧に替わる（入れ直さない）
+      returning = !reading && wasReading && !peeking;
       wasReading = reading;
-      // スワイプで戻ったときは、後ろに見せていた一覧と同じ位置で、そのまま一覧に替わる
       if (!reading) peeking = false;
     });
   });
@@ -100,6 +102,9 @@
    * 記事を開く前の位置まで動かしておく（戻ったら、ページをその位置に戻すので、そのまま替わる）
    */
   let peeking = $state(false);
+
+  /** 記事から一覧に戻ったところ（狭い画面で、一覧を左から入れる） */
+  let returning = $state(false);
 
   async function peek(on: boolean) {
     if (!layout.pageScroll || router.articleId === null) return;
@@ -271,10 +276,26 @@
   let toast = $state<{ message: string; undo: string[] | null } | null>(null);
   let toastTimer: ReturnType<typeof setTimeout> | undefined;
 
+  /** 知らせを消している最中（薄くしてから消す） */
+  let toastLeaving = $state(false);
+
   function showToast(message: string, undo: string[] | null = null) {
     clearTimeout(toastTimer);
     toast = { message, undo };
-    toastTimer = setTimeout(() => (toast = null), undo === null ? 4000 : 10_000);
+    toastLeaving = false;
+    toastTimer = setTimeout(hideToast, undo === null ? 4000 : 10_000);
+  }
+
+  function hideToast() {
+    if (reducedMotion()) {
+      toast = null;
+      return;
+    }
+    toastLeaving = true;
+    toastTimer = setTimeout(() => {
+      toast = null;
+      toastLeaving = false;
+    }, 200);
   }
 
   type Range = NonNullable<Parameters<typeof reader.client.markAllRead>[1]>;
@@ -461,6 +482,7 @@
   class:reading={router.articleId !== null}
   class:menu-open={menuOpen}
   class:peeking
+  class:returning
 >
   <Sidebar onhelp={() => (helpOpen = true)} {progress} onprogress={() => (progressOpen = true)} />
   <button
@@ -612,7 +634,7 @@
 </Dialog>
 
 {#if toast !== null}
-  <div class="toast" role="status">
+  <div class="toast" class:leaving={toastLeaving} role="status">
     <span>{toast.message}</span>
     {#if toast.undo !== null}
       <button type="button" onclick={undoMarkAll}>Undo</button>
@@ -725,6 +747,31 @@
     color: var(--background);
     font-size: 0.9375rem;
     box-shadow: var(--shadow);
+    animation: toast-in 0.2s ease-out;
+    transition:
+      opacity 0.2s ease-in,
+      transform 0.2s ease-in;
+  }
+
+  /* 下から入れ、薄くしてから消す */
+  @keyframes toast-in {
+    from {
+      opacity: 0;
+      transform: translateY(0.75rem);
+    }
+  }
+
+  .toast.leaving {
+    opacity: 0;
+    transform: translateY(0.75rem);
+    pointer-events: none;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .toast {
+      animation: none;
+      transition: none;
+    }
   }
 
   .toast button {
@@ -850,7 +897,8 @@
       transform: none;
     }
 
-    .reader.menu-open > .scrim {
+    /* メニューの後ろを暗くする。メニューと同じ速さで、暗くして・明るくする */
+    .reader > .scrim {
       display: block;
       position: fixed;
       inset: 0;
@@ -859,10 +907,21 @@
       border: 0;
       border-radius: 0;
       background: var(--scrim);
+      visibility: hidden;
+      opacity: 0;
+      transition:
+        opacity 0.18s ease-out,
+        visibility 0.18s;
+    }
+
+    .reader.menu-open > .scrim {
+      visibility: visible;
+      opacity: 1;
     }
 
     @media (prefers-reduced-motion: reduce) {
-      .reader > :global(.sidebar) {
+      .reader > :global(.sidebar),
+      .reader > .scrim {
         transition: none;
       }
     }
@@ -897,6 +956,24 @@
     .reader.reading.peeking > :global(.article-view) {
       position: relative;
       z-index: 2;
+    }
+
+    /* 記事から（戻るボタンや Esc で）一覧に戻ったときに、一覧を左から入れる */
+    .reader.returning:not(.reading) > :global(.article-list) {
+      animation: list-in 0.22s cubic-bezier(0.2, 0.8, 0.2, 1);
+    }
+
+    @keyframes list-in {
+      from {
+        opacity: 0;
+        transform: translateX(-8%);
+      }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .reader.returning:not(.reading) > :global(.article-list) {
+        animation: none;
+      }
     }
   }
 </style>

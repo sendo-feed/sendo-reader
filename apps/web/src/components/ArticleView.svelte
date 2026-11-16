@@ -3,7 +3,7 @@
   import { tick, untrack } from "svelte";
   import { useReader } from "../lib/context";
   import { formatDateTime } from "../lib/format";
-  import { reducedMotion, scrollToTop } from "../lib/layout.svelte";
+  import { layout, reducedMotion, scrollToTop } from "../lib/layout.svelte";
   import type { ArticleListState } from "../lib/list.svelte";
   import { type ArticleSwipe, prefs } from "../lib/prefs.svelte";
   import { handleLink, router, viewHref } from "../lib/router.svelte";
@@ -98,9 +98,19 @@
     await reader.client.setRead(id, true);
   }
 
+  /**
+   * 記事を替えたとき（次・前の記事、広い画面で一覧から選んだとき）に、中身を短く浮かび上がらせる。
+   * 狭い画面で一覧から開いたときは、記事の画面ごと入れる（CSS）ので、ここでは動かさない。
+   * スワイプで替えたときは、横から入れるので、これも動かさない
+   */
+  let fadeIn = $state(false);
+  let shownId: string | null = null;
+
   $effect(() => {
     const id = articleId;
     untrack(() => {
+      fadeIn = id !== null && !settling && (shownId !== null || !layout.pageScroll);
+      shownId = id;
       saveError = null;
       if (id === null) {
         article = null;
@@ -538,44 +548,46 @@
       {/if}
     </div>
 
-    <div class="content">
-      <header>
-        <p class="meta">
-          <a class="feed" href={feedHref} onclick={(e) => handleLink(e, feedHref)}>
-            {reader.feedTitle(article.feedId)}
-          </a>
-        </p>
-        <h1>{article.title ?? "(Untitled)"}</h1>
-        <p class="meta">
-          <time datetime={new Date(article.publishedAt).toISOString()}>
-            {formatDateTime(article.publishedAt)}
-          </time>
-          {#if article.author !== null}
-            <span>・ {article.author}</span>
+    {#key articleId}
+      <div class="content" class:fade-in={fadeIn}>
+        <header>
+          <p class="meta">
+            <a class="feed" href={feedHref} onclick={(e) => handleLink(e, feedHref)}>
+              {reader.feedTitle(article.feedId)}
+            </a>
+          </p>
+          <h1>{article.title ?? "(Untitled)"}</h1>
+          <p class="meta">
+            <time datetime={new Date(article.publishedAt).toISOString()}>
+              {formatDateTime(article.publishedAt)}
+            </time>
+            {#if article.author !== null}
+              <span>・ {article.author}</span>
+            {/if}
+          </p>
+        </header>
+        {#if content !== null}
+          <ArticleBody nodes={content.nodes} />
+        {:else if showSummary}
+          {#each paragraphs as text, index (index)}
+            <p class="summary">{text}</p>
+          {/each}
+          {#if contentState === "unavailable"}
+            <p class="content-note" role="status">
+              この記事には本文があります。sendo につながったら読めます。
+            </p>
           {/if}
-        </p>
-      </header>
-      {#if content !== null}
-        <ArticleBody nodes={content.nodes} />
-      {:else if showSummary}
-        {#each paragraphs as text, index (index)}
-          <p class="summary">{text}</p>
-        {/each}
-        {#if contentState === "unavailable"}
-          <p class="content-note" role="status">
-            この記事には本文があります。sendo につながったら読めます。
+        {/if}
+        {#if link !== null}
+          <p>
+            <a class="read-on" href={link} target="_blank" rel="noopener noreferrer">
+              Open original
+              <Icon name="external" />
+            </a>
           </p>
         {/if}
-      {/if}
-      {#if link !== null}
-        <p>
-          <a class="read-on" href={link} target="_blank" rel="noopener noreferrer">
-            Open original
-            <Icon name="external" />
-          </a>
-        </p>
-      {/if}
-    </div>
+      </div>
+    {/key}
   {:else if missing}
     <div class="placeholder"><p>この記事は手元にありません。</p></div>
   {:else}
@@ -674,6 +686,17 @@
   .open:hover {
     background: var(--hover);
     color: var(--text);
+  }
+
+  .content.fade-in {
+    animation: content-in 0.16s ease-out;
+  }
+
+  @keyframes content-in {
+    from {
+      opacity: 0;
+      transform: translateY(0.375rem);
+    }
   }
 
   .content {
@@ -786,6 +809,15 @@
     .article-view {
       min-height: 100dvh;
       overflow: visible;
+      /* 一覧から開いたとき（出ていなかった記事の画面が出たとき）に、右から入れる */
+      animation: article-in 0.22s cubic-bezier(0.2, 0.8, 0.2, 1);
+    }
+
+    @keyframes article-in {
+      from {
+        opacity: 0;
+        transform: translateX(12%);
+      }
     }
 
     /*
@@ -867,8 +899,16 @@
   }
 
   @media (max-width: 56rem) and (prefers-reduced-motion: reduce) {
+    .article-view,
     .article-view.moved {
       transition: none;
+      animation: none;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .content.fade-in {
+      animation: none;
     }
   }
 </style>
