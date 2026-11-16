@@ -110,14 +110,14 @@
   </li>
 {/snippet}
 
-<nav class="sidebar" aria-label="フィード">
+<nav class="sidebar" aria-label="Feeds">
   <div class="brand">
     <span class="logo">Sendo</span>
     <a
       class="add"
       href="/manage"
-      title="フィードを追加"
-      aria-label="フィードを追加"
+      title="Add feed"
+      aria-label="Add feed"
       onclick={(e) => handleLink(e, "/manage")}
     >
       <Icon name="plus" />
@@ -129,9 +129,9 @@
     class="today"
     disabled={progress === null}
     aria-label={progress === null
-      ? `未読 ${reader.unread.total} 件`
-      : `未読 ${reader.unread.total} 件。この一覧の進み具合 ${progress.percent}%`}
-    title="進み具合の内訳"
+      ? `${reader.unread.total} unread`
+      : `${reader.unread.total} unread. Progress ${progress.percent}%`}
+    title="Progress"
     onclick={onprogress}
   >
     {#if progress !== null}
@@ -151,7 +151,7 @@
     {/if}
     <span class="numbers">
       <strong>{reader.unread.total}</strong>
-      <span>件の未読</span>
+      <span>unread</span>
       {#if progress !== null}
         <span class="done">
           {progress.remaining === 0 && progress.done === 0
@@ -165,18 +165,18 @@
   <div class="scroll">
     <div class="views">
       {@render item({ kind: "all" }, "All", reader.unread.total, "inbox")}
-      {@render item({ kind: "starred" }, "スター", 0, "star")}
-      {@render item({ kind: "search" }, "検索", 0, "search")}
+      {@render item({ kind: "starred" }, "Saved", 0, "star")}
+      {@render item({ kind: "search" }, "Search", 0, "search")}
     </div>
 
     <div class="heading">
-      <span>フィード</span>
+      <span>Feeds</span>
       <button
         type="button"
         class="icon-button"
         aria-pressed={prefs.value.hideReadFeeds}
-        aria-label="未読のあるフィードだけを出す"
-        title="未読のあるフィードだけを出す"
+        aria-label="Unread feeds only"
+        title="Unread feeds only"
         onclick={() => prefs.set({ hideReadFeeds: !prefs.value.hideReadFeeds })}
       >
         <Icon name="filter" />
@@ -191,7 +191,7 @@
             type="button"
             class="toggle"
             aria-expanded={!collapsed}
-            aria-label={`${folder.name} を${collapsed ? "開く" : "畳む"}`}
+            aria-label={`${collapsed ? "Expand" : "Collapse"} ${folder.name}`}
             onclick={() => prefs.toggleCollapsed(folder.id)}
           >
             <Icon name={collapsed ? "chevronRight" : "chevronDown"} />
@@ -219,7 +219,7 @@
     {#if reader.feeds.length === 0}
       <p class="empty">
         購読しているフィードはまだありません。
-        <a href="/manage" onclick={(e) => handleLink(e, "/manage")}>フィードを追加</a>
+        <a href="/manage" onclick={(e) => handleLink(e, "/manage")}>Add feed</a>
       </p>
     {:else if groups.length === 0 && loose.length === 0}
       <p class="empty">未読のあるフィードはありません。</p>
@@ -229,8 +229,8 @@
   <footer>
     <SyncStatus />
     <div class="links">
-      {@render item({ kind: "manage" }, "購読の管理", 0, "rss")}
-      {@render item({ kind: "settings" }, "設定", 0, "sliders")}
+      {@render item({ kind: "manage" }, "Manage feeds", 0, "rss")}
+      {@render item({ kind: "settings" }, "Settings", 0, "sliders")}
     </div>
     <div class="account">
       {#if reader.user !== null}
@@ -239,8 +239,8 @@
       <button
         type="button"
         class="icon-button"
-        aria-label="キーボードの操作"
-        title="キーボードの操作（?）"
+        aria-label="Keyboard shortcuts"
+        title="Keyboard shortcuts (?)"
         onclick={onhelp}
       >
         <Icon name="keyboard" />
@@ -248,8 +248,8 @@
       <button
         type="button"
         class="icon-button"
-        aria-label="ログアウト"
-        title="ログアウト"
+        aria-label="Sign out"
+        title="Sign out"
         onclick={signOut}
       >
         <Icon name="logout" />

@@ -11,8 +11,8 @@ function seed() {
 }
 
 async function openSettings(page: import("@playwright/test").Page) {
-  await page.locator("nav.sidebar").getByRole("link", { name: "設定" }).click();
-  await expect(page.getByRole("heading", { name: "設定", level: 1 })).toBeVisible();
+  await page.locator("nav.sidebar").getByRole("link", { name: "Settings" }).click();
+  await expect(page.getByRole("heading", { name: "Settings", level: 1 })).toBeVisible();
 }
 
 test("変えた設定を sendo に預け、読み込み直しても残る。既定に戻したら、項目を消す", async ({
@@ -26,7 +26,7 @@ test("変えた設定を sendo に預け、読み込み直しても残る。既�
   await expect(page.locator(".article-list .item")).toHaveCount(1);
 
   await openSettings(page);
-  await page.getByText("ダーク", { exact: true }).click();
+  await page.getByText("Dark", { exact: true }).click();
   await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
   // PC のブラウザーは desktop として預ける。既定のままの項目は、預けない
   await expect.poll(() => server.settingsOf("desktop")).toEqual({ "reader.theme": "dark" });
@@ -34,9 +34,9 @@ test("変えた設定を sendo に預け、読み込み直しても残る。既�
 
   await page.reload();
   await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
-  await expect(page.getByLabel("ダーク")).toBeChecked();
+  await expect(page.getByLabel("Dark")).toBeChecked();
 
-  await page.getByText("端末に合わせる", { exact: true }).click();
+  await page.getByText("Auto", { exact: true }).click();
   await expect(page.locator("html")).not.toHaveAttribute("data-theme");
   await expect.poll(() => server.settingsOf("desktop")).toEqual({});
 });
@@ -55,7 +55,7 @@ test("ほかの端末が変えた設定が、同期で届いて画面に当た�
 
   server.putSetting("desktop", "reader.textSize", "large");
   server.putSetting("desktop", "reader.markReadOnScroll", false);
-  await page.getByRole("button", { name: "今すぐ同期" }).click();
+  await page.getByRole("button", { name: "Sync now" }).click();
   await expect(page.locator("html")).toHaveAttribute("data-text-size", "large");
   // 前の版が預けた、もう使わない項目（一覧の形）があっても、壊れない
   server.putSetting("desktop", "reader.layout", "compact");
@@ -63,7 +63,7 @@ test("ほかの端末が変えた設定が、同期で届いて画面に当た�
 
   // 消した（既定に戻した）ことも届く
   server.removeSetting("desktop", "reader.textSize");
-  await page.getByRole("button", { name: "今すぐ同期" }).click();
+  await page.getByRole("button", { name: "Sync now" }).click();
   await expect(page.locator("html")).not.toHaveAttribute("data-text-size");
 });
 
@@ -77,13 +77,13 @@ test("オフラインで変えた設定は、つながったあとに送る", as
   // sendo に届かない
   server.onRequest = () => Promise.reject(new TypeError("offline"));
   await openSettings(page);
-  await page.getByText("大", { exact: true }).click();
+  await page.getByText("Large", { exact: true }).click();
   await expect(page.locator("html")).toHaveAttribute("data-text-size", "large");
   await page.waitForTimeout(1000);
   expect(server.settingsOf("desktop")).toEqual({});
 
   server.onRequest = null;
-  await page.getByRole("button", { name: "今すぐ同期" }).click();
+  await page.getByRole("button", { name: "Sync now" }).click();
   await expect.poll(() => server.settingsOf("desktop")).toEqual({ "reader.textSize": "large" });
 });
 
@@ -131,7 +131,7 @@ test("購読をやめると、そのフィードの一覧の設定を消す", as
   await page.goto("/");
   await signIn(page);
   await page.locator("nav.sidebar").getByRole("link", { name: /Blog/ }).click();
-  await page.getByRole("button", { name: "古い順に並べる" }).click();
+  await page.getByRole("button", { name: "Oldest first" }).click();
   const name = `reader.list:/feeds/${feed.id}`;
   await expect.poll(() => Object.keys(server.settingsOf("desktop"))).toEqual([name]);
 
@@ -156,9 +156,9 @@ test.describe("スマホ", () => {
     await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
     await expect(page.locator("html")).not.toHaveAttribute("data-text-size");
 
-    await page.getByRole("button", { name: "メニュー", exact: true }).click();
+    await page.getByRole("button", { name: "Menu", exact: true }).click();
     await openSettings(page);
-    await page.getByText("小", { exact: true }).click();
+    await page.getByText("Small", { exact: true }).click();
     await expect
       .poll(() => server.settingsOf("mobile"))
       .toEqual({ "reader.theme": "dark", "reader.textSize": "small" });

@@ -6,7 +6,7 @@
 </script>
 
 <main class="manage">
-  <h1>購読の管理</h1>
+  <h1>Manage feeds</h1>
   <AddFeed />
   <Folders />
   <Feeds />

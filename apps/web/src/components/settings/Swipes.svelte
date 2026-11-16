@@ -10,22 +10,30 @@
 
   /** 指でのスワイプの割り当て。sendo に預け、同じ種類の端末に引き継ぐ（lib/prefs.svelte.ts） */
   const LIST_LABELS: Record<ListSwipe, string> = {
-    none: "何もしない",
-    read: "既読・未読を切り替える",
-    star: "スターを付ける・外す",
+    none: "None",
+    read: "Toggle read",
+    star: "Save / Unsave",
   };
   const ARTICLE_LABELS: Record<ArticleSwipe, string> = {
-    none: "何もしない",
-    back: "一覧に戻る",
-    next: "次の記事",
-    previous: "前の記事",
+    none: "None",
+    back: "Back",
+    next: "Next",
+    previous: "Previous",
   };
 
   const ROWS: { key: keyof Swipes; label: string; options: [string, string][] }[] = [
-    { key: "listRight", label: "一覧の行を右へ", options: entries(LIST_SWIPES, LIST_LABELS) },
-    { key: "listLeft", label: "一覧の行を左へ", options: entries(LIST_SWIPES, LIST_LABELS) },
-    { key: "articleRight", label: "記事を右へ", options: entries(ARTICLE_SWIPES, ARTICLE_LABELS) },
-    { key: "articleLeft", label: "記事を左へ", options: entries(ARTICLE_SWIPES, ARTICLE_LABELS) },
+    { key: "listRight", label: "List: swipe right", options: entries(LIST_SWIPES, LIST_LABELS) },
+    { key: "listLeft", label: "List: swipe left", options: entries(LIST_SWIPES, LIST_LABELS) },
+    {
+      key: "articleRight",
+      label: "Article: swipe right",
+      options: entries(ARTICLE_SWIPES, ARTICLE_LABELS),
+    },
+    {
+      key: "articleLeft",
+      label: "Article: swipe left",
+      options: entries(ARTICLE_SWIPES, ARTICLE_LABELS),
+    },
   ];
 
   function entries<T extends string>(values: readonly T[], labels: Record<T, string>) {
@@ -39,7 +47,7 @@
 </script>
 
 <section aria-labelledby="swipes-heading">
-  <h2 id="swipes-heading">スワイプ</h2>
+  <h2 id="swipes-heading">Swipe</h2>
   <p class="note">指で横に動かしたときにすることを選びます。</p>
   {#each ROWS as row (row.key)}
     <label>

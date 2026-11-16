@@ -13,12 +13,13 @@
   const label = $derived.by(() => {
     const status = reader.status;
     if (status === null) return "";
-    if (status.syncing || syncing) return "同期しています…";
-    if (status.error === "network") return "オフライン";
-    if (status.error === "unauthorized") return "ログインが切れました";
-    if (status.error !== null) return "同期できませんでした";
+    if (status.syncing || syncing) return "Syncing…";
+    if (status.error === "network") return "Offline";
+    if (status.error === "unauthorized") return "Session expired";
+    if (status.error !== null) return "Sync failed";
     if (status.lastSyncedAt === null) return "";
-    return `${fromNow(status.lastSyncedAt)}に同期`;
+    const ago = fromNow(status.lastSyncedAt);
+    return ago === "now" ? "Synced just now" : `Synced ${ago} ago`;
   });
 
   const busy = $derived(syncing || reader.status?.syncing === true);
@@ -55,15 +56,15 @@
   {#if reader.status?.error === "unauthorized"}
     <span class="label warn">{label}</span>
     <button type="button" class="primary" onclick={signInAgain} disabled={signingIn}>
-      ログインし直す
+      Sign in again
     </button>
   {:else}
     <button
       type="button"
       class="icon-button"
       class:spinning={busy}
-      aria-label="今すぐ同期"
-      title="今すぐ同期（r）"
+      aria-label="Sync now"
+      title="Sync now (r)"
       onclick={syncNow}
       disabled={syncing}
     >
@@ -72,7 +73,7 @@
     <span class="label" class:warn={reader.status?.error != null}>{label}</span>
   {/if}
   {#if (reader.status?.pending ?? 0) > 0}
-    <span class="pending">未送信 {reader.status?.pending} 件</span>
+    <span class="pending">{reader.status?.pending} pending</span>
   {/if}
   {#if signInError !== null || reader.loginError !== null}
     <p class="error" role="alert">{signInError ?? reader.loginError}</p>

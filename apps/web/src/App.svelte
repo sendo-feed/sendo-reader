@@ -7,7 +7,7 @@
 </script>
 
 {#if state.signedIn === null}
-  <p class="starting" aria-live="polite">起動しています…</p>
+  <p class="starting" aria-live="polite">Loading…</p>
 {:else if state.signedIn}
   <Reader />
 {:else}

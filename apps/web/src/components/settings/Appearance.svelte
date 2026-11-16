@@ -3,29 +3,29 @@
 
   /** 表示の設定。sendo に預け、同じ種類の端末に引き継ぐ（lib/prefs.svelte.ts） */
   const THEMES: [Theme, string][] = [
-    ["auto", "端末に合わせる"],
-    ["light", "ライト"],
-    ["dark", "ダーク"],
+    ["auto", "Auto"],
+    ["light", "Light"],
+    ["dark", "Dark"],
   ];
   const SIZES: [TextSize, string][] = [
-    ["small", "小"],
-    ["medium", "中"],
-    ["large", "大"],
+    ["small", "Small"],
+    ["medium", "Medium"],
+    ["large", "Large"],
   ];
   /** reading なら、読むときに変えたいもの（テーマと文字の大きさ）だけを出す。記事の画面から開く */
   let { reading = false }: { reading?: boolean } = $props();
 </script>
 
-<section aria-label="表示">
+<section aria-label="Appearance">
   {#if !reading}
-    <h2>表示</h2>
+    <h2>Appearance</h2>
     <p class="note">
       スマホと、それ以外（PC・タブレット）で、別々に覚えます。同じ種類の端末には、同期で引き継ぎます。
     </p>
   {/if}
 
   <fieldset>
-    <legend>テーマ</legend>
+    <legend>Theme</legend>
     {#each THEMES as [value, label] (value)}
       <label>
         <input
@@ -41,7 +41,7 @@
   </fieldset>
 
   <fieldset>
-    <legend>文字の大きさ</legend>
+    <legend>Text size</legend>
     {#each SIZES as [value, label] (value)}
       <label>
         <input
@@ -58,14 +58,14 @@
 
   {#if !reading}
     <fieldset>
-      <legend>既読にするとき</legend>
+      <legend>Mark as read</legend>
       <label class="check">
         <input
           type="checkbox"
           checked={prefs.value.markReadOnScroll}
           onchange={(e) => prefs.set({ markReadOnScroll: e.currentTarget.checked })}
         >
-        一覧を動かして通り過ぎた記事を、既読にする
+        Mark as read on scroll
       </label>
     </fieldset>
   {/if}

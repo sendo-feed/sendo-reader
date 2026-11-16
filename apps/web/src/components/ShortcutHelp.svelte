@@ -6,46 +6,48 @@
   /** キーボードの操作の一覧（実際の割り当ては routes/Reader.svelte） */
   const GROUPS: { title: string; keys: [string[], string][] }[] = [
     {
-      title: "記事を移る",
+      title: "Navigate",
       keys: [
-        [["j"], "次の記事を開く"],
-        [["k"], "前の記事を開く"],
-        [["n"], "次の記事を選ぶ（開かない）"],
-        [["p"], "前の記事を選ぶ（開かない）"],
-        [["o", "Enter"], "選んだ記事を開く"],
-        [["Esc"], "記事を閉じる"],
+        [["j"], "Open next"],
+        [["k"], "Open previous"],
+        [["n"], "Select next"],
+        [["p"], "Select previous"],
+        [["o", "Enter"], "Open selected"],
+        [["Esc"], "Close"],
       ],
     },
     {
-      title: "記事の操作",
+      title: "Actions",
       keys: [
-        [["m"], "既読・未読を切り替える"],
-        [["s"], "スターを付ける・外す"],
-        [["v"], "元の記事を新しいタブで開く"],
-        [["Shift", "A"], "一覧をまとめて既読にする（取り消せる）"],
+        [["m"], "Toggle read"],
+        [["s"], "Save / Unsave"],
+        [["v"], "Open original in new tab"],
+        [["Shift", "A"], "Mark all as read"],
       ],
     },
     {
-      title: "画面を移る",
+      title: "Go to",
       keys: [
         [["g", "a"], "All"],
-        [["g", "s"], "スター"],
-        [["Shift", "J"], "次の、未読のあるフィード"],
-        [["Shift", "K"], "前の、未読のあるフィード"],
-        [["/"], "記事を探す"],
-        [["g", "m"], "購読の管理"],
-        [["r"], "今すぐ同期"],
-        [["?"], "この一覧を出す"],
+        [["g", "s"], "Saved"],
+        [["Shift", "J"], "Next unread feed"],
+        [["Shift", "K"], "Previous unread feed"],
+        [["/"], "Search articles"],
+        [["g", "m"], "Manage feeds"],
+        [["r"], "Sync now"],
+        [["?"], "Show shortcuts"],
       ],
     },
   ];
 </script>
 
-<Dialog bind:open title="キーボードの操作">
+<Dialog bind:open title="Keyboard shortcuts">
   <div class="groups">
     <p class="touch">
-      指では、一覧の行を右へスワイプするとスター、左へスワイプすると既読・未読。長く押す（右クリック）と、
-      その記事の操作。記事を右へスワイプすると一覧に戻る。スワイプの割り当ては、設定で変えられます。
+      指では、一覧の行を右へスワイプすると
+      Save、左へスワイプすると既読・未読。長く押す（右クリック）と、
+      その記事の操作。記事を右へスワイプすると一覧に戻る。スワイプの割り当ては、Settings
+      で変えられます。
     </p>
     {#each GROUPS as group (group.title)}
       <section>

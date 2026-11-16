@@ -23,7 +23,7 @@
 </script>
 
 <main class="settings">
-  <h1>設定</h1>
+  <h1>Settings</h1>
   <Appearance />
   <Swipes />
   {#key reader.user?.id}

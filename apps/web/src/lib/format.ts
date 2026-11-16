@@ -1,21 +1,20 @@
 const dateTime = new Intl.DateTimeFormat("ja", { dateStyle: "medium", timeStyle: "short" });
-const relative = new Intl.RelativeTimeFormat("ja", { numeric: "auto" });
-
-/** 「3 時間前」のような、今からの相対の時刻 */
+/** 「3h」「5m」「2d」のような、今からの相対の時刻。1 分以内は now。1 週間より前は、日付と時刻 */
 export function fromNow(ms: number, now = Date.now()): string {
-  const minutes = Math.round((ms - now) / 60_000);
-  if (Math.abs(minutes) < 60) return relative.format(minutes, "minute");
+  const minutes = Math.round(Math.abs(now - ms) / 60_000);
+  if (minutes < 1) return "now";
+  if (minutes < 60) return `${minutes}m`;
   const hours = Math.round(minutes / 60);
-  if (Math.abs(hours) < 24) return relative.format(hours, "hour");
+  if (hours < 24) return `${hours}h`;
   const days = Math.round(hours / 24);
-  if (Math.abs(days) < 7) return relative.format(days, "day");
+  if (days < 7) return `${days}d`;
   return dateTime.format(ms);
 }
 
 const shortDate = new Intl.DateTimeFormat("ja", { month: "numeric", day: "numeric" });
 const longDate = new Intl.DateTimeFormat("ja", { dateStyle: "medium" });
 
-/** 一覧に出す短い時刻。この 1 週間は「3 時間前」、それより前は日付（今年でなければ年も） */
+/** 一覧に出す短い時刻。この 1 週間は「3h」、それより前は日付（今年でなければ年も） */
 export function shortTime(ms: number, now = Date.now()): string {
   if (Math.abs(now - ms) < 7 * 86_400_000) return fromNow(ms, now);
   const sameYear = new Date(ms).getFullYear() === new Date(now).getFullYear();
@@ -29,8 +28,8 @@ const month = new Intl.DateTimeFormat("ja", { year: "numeric", month: "long" });
 export function dayLabel(ms: number, now = Date.now()): string {
   const startOfDay = (time: number) => new Date(time).setHours(0, 0, 0, 0);
   const days = Math.round((startOfDay(now) - startOfDay(ms)) / 86_400_000);
-  if (days <= 0) return "今日";
-  if (days === 1) return "昨日";
+  if (days <= 0) return "Today";
+  if (days === 1) return "Yesterday";
   if (days < 7) return weekday.format(ms);
   return month.format(ms);
 }

@@ -8,7 +8,7 @@ test("設定の画面で、トークンを発行して一度だけ控え、取�
 
   await page.goto("/");
   await signIn(page);
-  await page.getByRole("link", { name: "設定" }).click();
+  await page.getByRole("link", { name: "Settings" }).click();
   await expect(page).toHaveURL(/\/settings$/);
   await expect(page.getByText("発行したトークンはまだありません。")).toBeVisible();
 
@@ -85,15 +85,15 @@ test("設定の画面は、sendo に届かなければその旨を出し、読�
   await routeFakeSendo(context, server);
   await page.goto("/");
   await signIn(page);
-  await expect(page.getByRole("button", { name: "今すぐ同期" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Sync now" })).toBeVisible();
 
   // トークンと許可の読み込みが、どちらも届かない
   server.failNext("network", "network");
-  await page.getByRole("link", { name: "設定" }).click();
+  await page.getByRole("link", { name: "Settings" }).click();
   await expect(page.getByRole("alert")).toHaveCount(2);
   await expect(page.getByRole("alert").first()).toContainText("sendo に届きません");
 
-  await page.getByRole("button", { name: "読み込み直す" }).first().click();
+  await page.getByRole("button", { name: "Reload" }).first().click();
   await expect(page.getByText("発行したトークンはまだありません。")).toBeVisible();
 });
 

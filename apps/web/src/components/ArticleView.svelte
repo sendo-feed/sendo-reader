@@ -199,8 +199,8 @@
       <button
         type="button"
         class="icon-button back"
-        aria-label="一覧に戻る"
-        title="一覧に戻る（Esc）"
+        aria-label="Back"
+        title="Back (Esc)"
         onclick={() => router.openArticle(null)}
       >
         <Icon name="arrowLeft" />
@@ -208,8 +208,8 @@
       <button
         type="button"
         class="icon-button close"
-        aria-label="記事を閉じる"
-        title="記事を閉じる（Esc）"
+        aria-label="Close"
+        title="Close (Esc)"
         onclick={() => router.openArticle(null)}
       >
         <Icon name="close" />
@@ -217,8 +217,8 @@
       <button
         type="button"
         class="icon-button"
-        aria-label="前の記事"
-        title="前の記事（k）"
+        aria-label="Previous"
+        title="Previous (k)"
         onclick={() => onstep(-1)}
       >
         <Icon name="arrowUp" />
@@ -226,8 +226,8 @@
       <button
         type="button"
         class="icon-button"
-        aria-label="次の記事"
-        title="次の記事（j）"
+        aria-label="Next"
+        title="Next (j)"
         onclick={() => onstep(1)}
       >
         <Icon name="arrowDown" />
@@ -242,8 +242,8 @@
       <button
         type="button"
         class="icon-button"
-        aria-label={article.readAt === null ? "既読にする" : "未読に戻す"}
-        title={article.readAt === null ? "既読にする（m）" : "未読に戻す（m）"}
+        aria-label={article.readAt === null ? "Mark as read" : "Mark as unread"}
+        title={article.readAt === null ? "Mark as read (m)" : "Mark as unread (m)"}
         onclick={() => toggle("readAt")}
       >
         <Icon name={article.readAt === null ? "check" : "circle"} />
@@ -252,28 +252,22 @@
         type="button"
         class="icon-button star"
         aria-pressed={article.starredAt !== null}
-        aria-label={article.starredAt === null ? "スターを付ける" : "スターを外す"}
-        title={article.starredAt === null ? "スターを付ける（s）" : "スターを外す（s）"}
+        aria-label={article.starredAt === null ? "Save" : "Unsave"}
+        title={article.starredAt === null ? "Save (s)" : "Unsave (s)"}
         onclick={() => toggle("starredAt")}
       >
         <Icon name="star" filled={article.starredAt !== null} />
       </button>
       {#if link !== null}
-        <button
-          type="button"
-          class="icon-button"
-          aria-label="共有する"
-          title="共有する"
-          onclick={share}
-        >
+        <button type="button" class="icon-button" aria-label="Share" title="Share" onclick={share}>
           <Icon name="share" />
         </button>
       {/if}
       <button
         type="button"
         class="icon-button aa"
-        aria-label="文字の大きさとテーマ"
-        title="文字の大きさとテーマ"
+        aria-label="Appearance"
+        title="Appearance"
         onclick={() => (displayOpen = true)}
       >
         Aa
@@ -284,8 +278,8 @@
           href={link}
           target="_blank"
           rel="noopener noreferrer"
-          aria-label="元の記事を開く"
-          title="元の記事を開く（v）"
+          aria-label="Open original"
+          title="Open original (v)"
         >
           <Icon name="external" />
         </a>
@@ -299,7 +293,7 @@
             {reader.feedTitle(article.feedId)}
           </a>
         </p>
-        <h1>{article.title ?? "（タイトルなし）"}</h1>
+        <h1>{article.title ?? "(Untitled)"}</h1>
         <p class="meta">
           <time datetime={new Date(article.publishedAt).toISOString()}>
             {formatDateTime(article.publishedAt)}
@@ -315,7 +309,7 @@
       {#if link !== null}
         <p>
           <a class="read-on" href={link} target="_blank" rel="noopener noreferrer">
-            元の記事を読む
+            Open original
             <Icon name="external" />
           </a>
         </p>
@@ -332,7 +326,7 @@
   {/if}
 </article>
 
-<Dialog bind:open={displayOpen} title="文字の大きさとテーマ">
+<Dialog bind:open={displayOpen} title="Appearance">
   <Appearance reading />
 </Dialog>
 

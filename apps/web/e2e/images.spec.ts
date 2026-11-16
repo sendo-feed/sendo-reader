@@ -180,7 +180,7 @@ test("ログアウトすると、画像のキャッシュも消える", async ({
   await controlledByServiceWorker(page);
   await expect.poll(() => cachedImages(page)).toHaveLength(2);
 
-  await page.locator("nav.sidebar").getByRole("button", { name: "ログアウト" }).click();
+  await page.locator("nav.sidebar").getByRole("button", { name: "Sign out" }).click();
   await expect(page.getByRole("button", { name: "Google でログイン" })).toBeVisible();
   await expect.poll(() => cachedImages(page)).toEqual([]);
   await expect.poll(() => page.evaluate((name) => caches.has(name), IMAGE_CACHE)).toBe(false);

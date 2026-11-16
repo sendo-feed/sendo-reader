@@ -23,9 +23,9 @@
 <div class="problem" role="alert">
   <p>{signInError ?? describeError(error)}</p>
   {#if unauthorized}
-    <button type="button" onclick={signInAgain}>ログインし直す</button>
+    <button type="button" onclick={signInAgain}>Sign in again</button>
   {:else}
-    <button type="button" onclick={retry}>読み込み直す</button>
+    <button type="button" onclick={retry}>Reload</button>
   {/if}
 </div>
 

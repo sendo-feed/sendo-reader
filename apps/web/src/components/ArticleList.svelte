@@ -288,11 +288,11 @@
       node.dataset.swipeLabel =
         action === "read"
           ? current.readAt === null
-            ? "既読にする"
-            : "未読に戻す"
+            ? "Mark as read"
+            : "Mark as unread"
           : current.starredAt === null
-            ? "スターを付ける"
-            : "スターを外す";
+            ? "Save"
+            : "Unsave";
       node.style.setProperty("--swipe", `${dx}px`);
       if (Math.abs(dx) >= SWIPE) node.dataset.armed = "";
       else delete node.dataset.armed;
@@ -448,8 +448,8 @@
       <button
         type="button"
         class="gauge"
-        aria-label={`この一覧の進み具合 ${progress.percent}%`}
-        title="進み具合の内訳"
+        aria-label={`Progress ${progress.percent}%`}
+        title="Progress"
         onclick={onprogress}
       >
         <svg viewBox="0 0 36 36" aria-hidden="true">
@@ -473,8 +473,8 @@
         type="search"
         enterkeyhint="search"
         autocomplete="off"
-        placeholder="記事を探す"
-        aria-label="記事を探す"
+        placeholder="Search articles"
+        aria-label="Search articles"
         value={search}
         oninput={onSearchInput}
         onkeydown={onSearchKeydown}
@@ -482,7 +482,7 @@
       >
     {:else}
       <h2>
-        <button type="button" class="to-top" title="先頭に戻る" onclick={scrollToTop}>
+        <button type="button" class="to-top" title="Back to top" onclick={scrollToTop}>
           <span class="name">{title}</span>
           {#if unread !== null && unread > 0}
             <span class="count">{unread}</span>
@@ -495,8 +495,8 @@
         type="button"
         class="icon-button"
         aria-pressed={options.unreadOnly}
-        aria-label="未読だけを出す"
-        title="未読だけを出す"
+        aria-label="Unread only"
+        title="Unread only"
         onclick={() => onoption({ unreadOnly: !options.unreadOnly })}
       >
         <Icon name="filter" />
@@ -506,8 +506,8 @@
       type="button"
       class="icon-button"
       aria-pressed={options.oldestFirst}
-      aria-label="古い順に並べる"
-      title="古い順に並べる"
+      aria-label="Oldest first"
+      title="Oldest first"
       onclick={() => onoption({ oldestFirst: !options.oldestFirst })}
     >
       <Icon name="sort" />
@@ -516,8 +516,8 @@
       <button
         type="button"
         class="icon-button"
-        aria-label="まとめて既読にする"
-        title="まとめて既読にする（Shift + A）"
+        aria-label="Mark all as read"
+        title="Mark all as read (Shift + A)"
         disabled={unread === 0}
         onclick={onmarkall}
       >
@@ -537,15 +537,15 @@
       <Icon name="refresh" />
       <span
         >{refreshing
-          ? "更新しています"
+          ? "Refreshing…"
           : pull >= PULL_THRESHOLD
-            ? "離して更新"
-            : "引いて更新"}</span
+            ? "Release to refresh"
+            : "Pull to refresh"}</span
       >
     </div>
   {/if}
   {#if list.fresh > 0}
-    <button type="button" class="fresh" onclick={reload}>新しい記事 {list.fresh} 件を読む</button>
+    <button type="button" class="fresh" onclick={reload}>{list.fresh} new</button>
   {/if}
 
   {#if search !== null && search.trim() === ""}
@@ -560,13 +560,13 @@
         <div></div>
       {/each}
     </div>
-    <p class="visually-hidden" role="status">読んでいます…</p>
+    <p class="visually-hidden" role="status">Loading…</p>
   {:else if list.articles.length === 0}
     <div class="empty">
       {#if reader.feeds.length === 0}
         <Icon name="rss" />
         <p>まだフィードを購読していません。</p>
-        <a href="/manage" onclick={(e) => handleLink(e, "/manage")}>フィードを追加する</a>
+        <a href="/manage" onclick={(e) => handleLink(e, "/manage")}>Add a feed</a>
       {:else if filterable && options.unreadOnly}
         <Icon name="check" />
         <p>すべて読み終えました。</p>
@@ -575,7 +575,7 @@
         <p>見つかりませんでした。</p>
       {:else if kind === "starred"}
         <Icon name="star" />
-        <p>スターを付けた記事が、ここに並びます。</p>
+        <p>Save した記事が、ここに並びます。</p>
       {:else}
         <p>記事はありません。</p>
       {/if}
@@ -606,7 +606,7 @@
             >
               <!-- 要約は出さない。行の高さを、どの行も同じにする（docs/decisions/images.md の 5） -->
               <span class="text">
-                <span class="title">{article.title ?? "（タイトルなし）"}</span>
+                <span class="title">{article.title ?? "(Untitled)"}</span>
                 <span class="meta">
                   <span class="feed-icon">
                     <RemoteImage src={reader.feedIcon(article.feedId)} />
@@ -623,8 +623,8 @@
               <button
                 type="button"
                 class="icon-button"
-                aria-label={article.readAt === null ? "既読にする" : "未読に戻す"}
-                title={article.readAt === null ? "既読にする" : "未読に戻す"}
+                aria-label={article.readAt === null ? "Mark as read" : "Mark as unread"}
+                title={article.readAt === null ? "Mark as read" : "Mark as unread"}
                 onclick={() => toggle(article, "readAt")}
               >
                 <Icon name={article.readAt === null ? "check" : "circle"} />
@@ -633,8 +633,8 @@
                 type="button"
                 class="icon-button star"
                 aria-pressed={article.starredAt !== null}
-                aria-label={article.starredAt === null ? "スターを付ける" : "スターを外す"}
-                title={article.starredAt === null ? "スターを付ける" : "スターを外す"}
+                aria-label={article.starredAt === null ? "Save" : "Unsave"}
+                title={article.starredAt === null ? "Save" : "Unsave"}
                 onclick={() => toggle(article, "starredAt")}
               >
                 <Icon name="star" filled={article.starredAt !== null} />
@@ -652,11 +652,11 @@
         onclick={() => list.loadMore()}
         disabled={list.loadingMore}
       >
-        {list.loadingMore ? "読んでいます…" : "もっと読む"}
+        {list.loadingMore ? "Loading…" : "Load more"}
       </button>
     {:else}
       <div class="end">
-        <p>ここまで</p>
+        <p>End of list</p>
         {#if next !== null}
           <button type="button" class="primary" onclick={next.go}>{next.label}</button>
         {/if}

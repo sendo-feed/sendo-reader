@@ -88,7 +88,7 @@ test("拒否すると access_denied を持って戻る。許可の画面は、�
   // reader でもログインしている
   await page.goto("/");
   await signIn(page);
-  await expect(page.getByRole("button", { name: "今すぐ同期" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Sync now" })).toBeVisible();
   server.requests.length = 0;
 
   await page.goto(authorizeUrl());

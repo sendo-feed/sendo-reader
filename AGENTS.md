@@ -69,6 +69,7 @@ Sendo の公式リーダー。`packages/core`（同期エンジン）と `apps/w
 
 - 文書、コミットメッセージ、PR、レビューコメントは日本語で書く（一般に公開したら英語に切り替える）
 - 識別子は英語
+- 画面の文字は、短い呼び名を英語にする：画面の名前（All、Saved、Search、Settings）、操作の名前（Mark as read、Unread only、Sync now）、時刻（3h、2d、Today）。文になるもの（説明、確認、空のときの文、エラー）は日本語で書く
 
 ## コミットメッセージ
 

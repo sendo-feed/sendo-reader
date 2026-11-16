@@ -27,7 +27,7 @@
   <div class="body">
     <header>
       <h2>{title}</h2>
-      <button type="button" class="icon-button" aria-label="閉じる" onclick={() => (open = false)}>
+      <button type="button" class="icon-button" aria-label="Close" onclick={() => (open = false)}>
         <Icon name="close" />
       </button>
     </header>
