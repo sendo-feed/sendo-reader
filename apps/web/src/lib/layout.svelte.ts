@@ -22,10 +22,15 @@ class Layout {
 
 export const layout = new Layout();
 
+/** 動きを減らす設定（prefers-reduced-motion）にしている。そのときは、動きを付けずに切り替える */
+export function reducedMotion(): boolean {
+  return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+}
+
 /** 動きを減らす設定なら、なめらかに動かさない */
 function scrollBehavior(smooth: boolean): ScrollBehavior {
   if (!smooth) return "auto";
-  return window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth";
+  return reducedMotion() ? "auto" : "smooth";
 }
 
 /** 狭い画面ならページの、広い画面なら欄（element）の、いまの位置 */

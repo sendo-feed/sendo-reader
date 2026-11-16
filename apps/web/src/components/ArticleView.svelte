@@ -1,11 +1,11 @@
 <script lang="ts">
   import { type Article, type ArticleContent, toSafeHttpUrl } from "@sendo-reader/core";
-  import { untrack } from "svelte";
+  import { tick, untrack } from "svelte";
   import { useReader } from "../lib/context";
   import { formatDateTime } from "../lib/format";
-  import { scrollToTop } from "../lib/layout.svelte";
+  import { reducedMotion, scrollToTop } from "../lib/layout.svelte";
   import type { ArticleListState } from "../lib/list.svelte";
-  import { prefs } from "../lib/prefs.svelte";
+  import { type ArticleSwipe, prefs } from "../lib/prefs.svelte";
   import { handleLink, router, viewHref } from "../lib/router.svelte";
   import ArticleBody from "./ArticleBody.svelte";
   import Dialog from "./Dialog.svelte";
@@ -16,11 +16,14 @@
     articleId,
     list,
     onstep,
+    onpeek = () => {},
   }: {
     articleId: string | null;
     list: ArticleListState;
     /** 一覧の前（-1）・次（1）の記事に移る */
-    onstep: (delta: 1 | -1) => void;
+    onstep: (delta: 1 | -1) => Promise<void> | void;
+    /** スワイプで戻る間、記事の後ろに一覧を見せる（true）・見せるのをやめる（false） */
+    onpeek?: (on: boolean) => void;
   } = $props();
 
   const reader = useReader();
@@ -159,16 +162,102 @@
   /**
    * 指で記事を横にスワイプする。割り当ては設定で変えられる（既定は、右へスワイプすると一覧に
    * 戻る。左は何もしない）。縦に読み進める動きや、文字を選ぶ動きと取り違えないように、
-   * はっきり横に動かしたときだけにする
+   * はっきり横に動かし始めたときだけにする。
+   *
+   * 記事は指に付いて横に動き、離したら、外へ流して操作するか、元の位置へ戻す。戻る動きでは、
+   * 狭い画面なら記事の後ろに一覧を見せる（onpeek）。次・前の記事へは、外へ流したあと、
+   * 次の記事を反対の側から入れる
    */
-  let touchStart: { x: number; y: number } | null = null;
+
+  /** 記事を、指で横に動かしている分（px） */
+  let dragX = $state(0);
+  /** 指で動かしている最中（動きを付けず、指にそのまま付いていく） */
+  let dragging = $state(false);
+  /** 指を離したあとの動きの最中（その間は、次のスワイプを受けない） */
+  let settling = $state(false);
+  /** 記事を、元の位置からずらしている */
+  const moved = $derived(dragX !== 0 || settling);
+
+  /** 外へ流す・元に戻す時間（ミリ秒）。CSS の transition と揃える */
+  const SLIDE = 220;
+  /** これだけ横に動かして離したら、操作する（px） */
+  const SWIPE_DISTANCE = 80;
+  /** これより短くても、これより速く（px/ミリ秒）はじいたら、操作する */
+  const FLICK_DISTANCE = 30;
+  const FLICK_SPEED = 0.5;
+
+  interface Gesture {
+    startX: number;
+    startY: number;
+    /** 横に動かしている（true）、縦に動かしている（false）、まだ分からない（null） */
+    sideways: boolean | null;
+    lastX: number;
+    lastTime: number;
+    /** 横に動かしている速さ（px/ミリ秒。右が正） */
+    speed: number;
+    /** 記事の後ろに一覧を見せている */
+    peeking: boolean;
+  }
+  let gesture: Gesture | null = null;
+
+  /** その向き（dx が正なら右へ）のスワイプに割り当てた操作 */
+  function actionFor(dx: number): ArticleSwipe {
+    return dx < 0 ? prefs.value.swipes.articleLeft : prefs.value.swipes.articleRight;
+  }
+
+  function startPeek(current: Gesture) {
+    if (current.peeking) return;
+    current.peeking = true;
+    onpeek(true);
+  }
 
   function onTouchStart(event: TouchEvent) {
     const touch = event.touches[0];
-    touchStart =
-      event.touches.length === 1 && touch !== undefined && !startsInSideScroller(event.target)
-        ? { x: touch.clientX, y: touch.clientY }
+    if (event.touches.length !== 1 || touch === undefined) {
+      // 2 本目の指が触れた（拡大など）。動かしていた記事は元に戻す
+      abandon();
+      return;
+    }
+    gesture =
+      !settling && article !== null && !startsInSideScroller(event.target)
+        ? {
+            startX: touch.clientX,
+            startY: touch.clientY,
+            sideways: null,
+            lastX: touch.clientX,
+            lastTime: event.timeStamp,
+            speed: 0,
+            peeking: false,
+          }
         : null;
+  }
+
+  /** 横に動かしている間は、ページを縦に動かさない（そのため、受け身でない listener で受ける） */
+  function onTouchMove(event: TouchEvent) {
+    const touch = event.touches[0];
+    const current = gesture;
+    if (current === null || touch === undefined || current.sideways === false) return;
+    const dx = touch.clientX - current.startX;
+    const dy = touch.clientY - current.startY;
+    if (current.sideways === null) {
+      if (Math.abs(dx) < 10 && Math.abs(dy) < 10) return;
+      current.sideways =
+        Math.abs(dx) > Math.abs(dy) * 2 &&
+        getSelection()?.isCollapsed !== false &&
+        actionFor(dx) !== "none";
+      if (!current.sideways) return;
+      dragging = true;
+    }
+    event.preventDefault();
+    if (event.timeStamp > current.lastTime) {
+      current.speed = (touch.clientX - current.lastX) / (event.timeStamp - current.lastTime);
+      current.lastX = touch.clientX;
+      current.lastTime = event.timeStamp;
+    }
+    const action = actionFor(dx);
+    if (action === "back") startPeek(current);
+    // 何も割り当てていない向きには、ほとんど動かさない（手ごたえだけ）
+    dragX = action === "none" ? dx * 0.1 : dx;
   }
 
   /**
@@ -190,18 +279,96 @@
 
   function onTouchEnd(event: TouchEvent) {
     const touch = event.changedTouches[0];
-    const start = touchStart;
-    touchStart = null;
-    if (start === null || touch === undefined || article === null) return;
-    if (getSelection()?.isCollapsed === false) return;
-    const dx = touch.clientX - start.x;
-    const dy = touch.clientY - start.y;
-    if (Math.abs(dx) < 80 || Math.abs(dx) <= Math.abs(dy) * 2) return;
-    const action = dx < 0 ? prefs.value.swipes.articleLeft : prefs.value.swipes.articleRight;
-    if (action === "back") router.openArticle(null);
-    else if (action === "next") onstep(1);
-    else if (action === "previous") onstep(-1);
+    const current = gesture;
+    gesture = null;
+    if (current === null || touch === undefined || current.sideways === false) return;
+    const dx = touch.clientX - current.startX;
+    const dy = touch.clientY - current.startY;
+    // 動かす途中を受け取らないまま離した（すばやくはじいた）なら、ここで向きを確かめる
+    if (
+      current.sideways === null &&
+      (Math.abs(dx) <= Math.abs(dy) * 2 || getSelection()?.isCollapsed === false)
+    ) {
+      return;
+    }
+    const action = actionFor(dx);
+    // 指を止めてから離したなら、はじいたことにはしない
+    const speed = event.timeStamp - current.lastTime > 100 ? 0 : current.speed;
+    const flick = Math.abs(dx) >= FLICK_DISTANCE && speed * Math.sign(dx) >= FLICK_SPEED;
+    if (action === "none" || (Math.abs(dx) < SWIPE_DISTANCE && !flick)) {
+      void settleBack(current.peeking);
+      return;
+    }
+    if (action === "back") startPeek(current);
+    void complete(action, dx < 0 ? -1 : 1, current.peeking);
   }
+
+  function abandon() {
+    const current = gesture;
+    gesture = null;
+    if (current?.sideways === true) void settleBack(current.peeking);
+  }
+
+  /** 記事を x まで、動きを付けて動かす。動き終わったら返る */
+  function slide(x: number): Promise<void> {
+    dragging = false;
+    dragX = x;
+    return new Promise((resolve) => setTimeout(resolve, reducedMotion() ? 0 : SLIDE));
+  }
+
+  /** 記事を x に、動きを付けずに置く（次に slide したときに、そこから動くように） */
+  async function place(x: number) {
+    dragging = true;
+    dragX = x;
+    await tick();
+    // 置いた位置を、いったん描画の計算に乗せる（でないと、次の動きがここから始まらない）
+    scroller?.getBoundingClientRect();
+  }
+
+  /** 足りないところで離した。元の位置に戻す */
+  async function settleBack(peeking: boolean) {
+    if (dragX === 0 && !peeking) {
+      dragging = false;
+      return;
+    }
+    settling = true;
+    await slide(0);
+    if (peeking) onpeek(false);
+    settling = false;
+  }
+
+  /** 操作するところまで動かして離した。記事を外へ流してから、操作する */
+  async function complete(
+    action: Exclude<ArticleSwipe, "none">,
+    direction: 1 | -1,
+    peeking: boolean,
+  ) {
+    settling = true;
+    const width = scroller?.clientWidth || window.innerWidth;
+    await slide(direction * width);
+    if (action === "back") {
+      // 後ろに見せていた一覧は、Reader が、一覧に戻ったところで元に戻す
+      router.openArticle(null);
+      await place(0);
+    } else {
+      if (peeking) onpeek(false);
+      const before = articleId;
+      await onstep(action === "next" ? 1 : -1);
+      if (articleId !== before) {
+        // 次の記事は、反対の側から入れる
+        await place(-direction * width);
+      }
+      await slide(0);
+    }
+    settling = false;
+  }
+
+  $effect(() => {
+    const node = scroller;
+    if (node === undefined) return;
+    node.addEventListener("touchmove", onTouchMove, { passive: false });
+    return () => node.removeEventListener("touchmove", onTouchMove);
+  });
 
   /** 共有したときなどの、少しの間出す知らせ */
   let notice = $state<string | null>(null);
@@ -269,7 +436,10 @@
   bind:this={scroller}
   ontouchstart={onTouchStart}
   ontouchend={onTouchEnd}
-  ontouchcancel={() => (touchStart = null)}
+  ontouchcancel={abandon}
+  class:moved
+  class:dragging
+  style:--drag={`${dragX}px`}
 >
   {#if article !== null}
     <div class="toolbar">
@@ -421,8 +591,28 @@
     display: flex;
     flex-direction: column;
     min-width: 0;
+    overflow-x: hidden;
     overflow-y: auto;
     background: var(--background);
+  }
+
+  /*
+   * 指で横にスワイプしている間と、離したあとに外へ流す・元に戻す間。広い画面では、欄の中で
+   * 中身を動かす（欄の外にははみ出さない）
+   */
+  .article-view.moved > :not(dialog) {
+    transform: translateX(var(--drag));
+    transition: transform 0.22s cubic-bezier(0.2, 0.8, 0.2, 1);
+  }
+
+  .article-view.dragging > :not(dialog) {
+    transition: none;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .article-view.moved > :not(dialog) {
+      transition: none;
+    }
   }
 
   .toolbar {
@@ -590,7 +780,26 @@
      */
     .article-view {
       min-height: 100dvh;
-      overflow-y: visible;
+      overflow: visible;
+    }
+
+    /*
+     * 狭い画面では、記事をまるごと動かす（戻る動きでは、後ろに一覧が見える）。
+     * 横にはみ出した分は、Reader が切り取る
+     */
+    .article-view.moved > :not(dialog) {
+      transform: none;
+      transition: none;
+    }
+
+    .article-view.moved {
+      box-shadow: var(--shadow);
+      transform: translateX(var(--drag));
+      transition: transform 0.22s cubic-bezier(0.2, 0.8, 0.2, 1);
+    }
+
+    .article-view.dragging {
+      transition: none;
     }
 
     .back {
@@ -649,6 +858,12 @@
 
     h1 {
       font-size: 1.375rem;
+    }
+  }
+
+  @media (max-width: 56rem) and (prefers-reduced-motion: reduce) {
+    .article-view.moved {
+      transition: none;
     }
   }
 </style>

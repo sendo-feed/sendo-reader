@@ -265,7 +265,61 @@ test("狭い画面では、メニューを左から開き、一覧と記事を�
     );
   await flickArticle(60, -200);
   await flickArticle(-140, 10);
-  await page.waitForTimeout(200);
+  await page.waitForTimeout(300);
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText("3 番目");
+  // 右へ動かしている間は、記事が指に付いて動き、後ろに一覧が見える。足りないところで指を止めて
+  // 離すと、記事は元の位置に戻る
+  const view = page.locator(".article-view");
+  const touchArticle = (type: "touchmove" | "touchend", dx: number) =>
+    view.evaluate(
+      (element, { type, dx }) => {
+        const at = (x: number) =>
+          new Touch({ identifier: 1, target: element, clientX: x, clientY: 300 });
+        if (type === "touchmove") {
+          element.dispatchEvent(
+            new TouchEvent("touchstart", {
+              bubbles: true,
+              touches: [at(200)],
+              changedTouches: [at(200)],
+            }),
+          );
+          for (const step of [0.3, 0.6, 1]) {
+            const touch = at(200 + dx * step);
+            element.dispatchEvent(
+              new TouchEvent("touchmove", {
+                bubbles: true,
+                cancelable: true,
+                touches: [touch],
+                changedTouches: [touch],
+              }),
+            );
+          }
+        } else {
+          element.dispatchEvent(
+            new TouchEvent("touchend", {
+              bubbles: true,
+              touches: [],
+              changedTouches: [at(200 + dx)],
+            }),
+          );
+        }
+      },
+      { type, dx },
+    );
+  await touchArticle("touchmove", 50);
+  await expect(view).toHaveClass(/moved/);
+  await expect(list).toBeVisible();
+  await page.waitForTimeout(150);
+  await touchArticle("touchend", 50);
+  await expect(view).not.toHaveClass(/moved/);
+  await expect(list).toBeHidden();
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText("3 番目");
+  // 十分に動かしてから離すと、記事を外へ流して、一覧に戻る
+  await touchArticle("touchmove", 140);
+  await touchArticle("touchend", 140);
+  await expect(list).toBeVisible();
+  await expect(page).toHaveURL(/\/$/);
+  await list.getByText("3 番目").click();
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("3 番目");
   await flickArticle(140, 10);
   await expect(list).toBeVisible();
@@ -292,6 +346,8 @@ test("狭い画面では、メニューを左から開き、一覧と記事を�
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("2 番目");
   await flickArticle(-140, 10);
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("3 番目");
+  // 次の記事が、反対の側から入り終わるまでは、次のスワイプを受けない
+  await expect(view).not.toHaveClass(/moved/);
   await flickArticle(140, 10);
   await expect(list).toBeVisible();
 

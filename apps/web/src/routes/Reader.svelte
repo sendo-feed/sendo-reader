@@ -5,7 +5,7 @@
     type MarkReadScope,
     toSafeHttpUrl,
   } from "@sendo-reader/core";
-  import { untrack } from "svelte";
+  import { tick, untrack } from "svelte";
   import ArticleList from "../components/ArticleList.svelte";
   import ArticleView from "../components/ArticleView.svelte";
   import Dialog from "../components/Dialog.svelte";
@@ -90,8 +90,24 @@
     untrack(() => {
       if (!reading && wasReading && layout.pageScroll) window.scrollTo({ top: listScrollY });
       wasReading = reading;
+      // スワイプで戻ったときは、後ろに見せていた一覧と同じ位置で、そのまま一覧に替わる
+      if (!reading) peeking = false;
     });
   });
+
+  /**
+   * 狭い画面で、記事を横にスワイプして戻る間、記事の後ろに一覧を見せる。一覧は画面に固定し、
+   * 記事を開く前の位置まで動かしておく（戻ったら、ページをその位置に戻すので、そのまま替わる）
+   */
+  let peeking = $state(false);
+
+  async function peek(on: boolean) {
+    if (!layout.pageScroll || router.articleId === null) return;
+    peeking = on;
+    if (!on) return;
+    await tick();
+    listView?.peekAt(listScrollY);
+  }
 
   /** 下のバーを押した。いまいる画面をもう一度押したら、一覧の先頭に戻る（移らない） */
   function onTab(event: MouseEvent, href: string) {
@@ -444,6 +460,7 @@
   class:managing={listing === null}
   class:reading={router.articleId !== null}
   class:menu-open={menuOpen}
+  class:peeking
 >
   <Sidebar onhelp={() => (helpOpen = true)} {progress} onprogress={() => (progressOpen = true)} />
   <button
@@ -479,7 +496,13 @@
       {progress}
       onprogress={() => (progressOpen = true)}
     />
-    <ArticleView bind:this={articleView} articleId={router.articleId} {list} onstep={step} />
+    <ArticleView
+      bind:this={articleView}
+      articleId={router.articleId}
+      {list}
+      onstep={step}
+      onpeek={peek}
+    />
   {/if}
 
   <!--
@@ -741,7 +764,8 @@
       padding-bottom: var(--tabs-height);
     }
 
-    .reader:not(.reading) > .tabs {
+    .reader:not(.reading) > .tabs,
+    .reader.peeking > .tabs {
       position: fixed;
       right: 0;
       bottom: 0;
@@ -849,6 +873,30 @@
 
     .reader:not(.reading) > :global(.article-view) {
       display: none;
+    }
+
+    /* 記事を横に動かしても、ページは横に動かない（はみ出した分を切り取る） */
+    .reader {
+      overflow-x: clip;
+    }
+
+    /*
+     * スワイプで戻る間、記事の後ろに一覧を見せる。一覧は画面に固定し、欄の中を、記事を開く前の
+     * 位置まで動かしておく（下のバーの分も、ページと同じに空ける）。触れても何も起きない
+     */
+    .reader.reading.peeking > :global(.article-list) {
+      display: flex;
+      position: fixed;
+      inset: 0;
+      z-index: 0;
+      overflow: hidden;
+      padding-bottom: var(--tabs-height);
+      pointer-events: none;
+    }
+
+    .reader.reading.peeking > :global(.article-view) {
+      position: relative;
+      z-index: 2;
     }
   }
 </style>

@@ -3,7 +3,12 @@
   import { untrack } from "svelte";
   import { useReader } from "../lib/context";
   import { compactCount, dayLabel, shortTime } from "../lib/format";
-  import { layout, scrollToTop as scrollPage, scrollTopOf } from "../lib/layout.svelte";
+  import {
+    layout,
+    reducedMotion,
+    scrollToTop as scrollPage,
+    scrollTopOf,
+  } from "../lib/layout.svelte";
   import type { ArticleListState, ListProgress } from "../lib/list.svelte";
   import { prefs, type ViewOptions } from "../lib/prefs.svelte";
   import { handleLink, isPlainClick, router } from "../lib/router.svelte";
@@ -239,6 +244,8 @@
   const SWIPE = 72;
   /** これだけ押し続けたら、その記事の操作を出す（ミリ秒） */
   const LONG_PRESS = 500;
+  /** 離したあと、行が元の位置に戻るまで（ミリ秒）。CSS の transition と揃える */
+  const SETTLE = 200;
 
   /**
    * 指で行を横にスワイプする。割り当ては設定で変えられる（既定は、右でスター、左で既読・未読）。
@@ -278,18 +285,39 @@
       event.stopPropagation();
     }
 
+    /** 離したあと、行を元の位置に戻し終えるまでの待ち */
+    let settleTimer: ReturnType<typeof setTimeout> | undefined;
+
     function reset() {
       clearTimeout(pressTimer);
+      clearTimeout(settleTimer);
       tracking = false;
       sideways = false;
       // class は Svelte が書き直すので、data 属性で持つ
       delete node.dataset.swiping;
       delete node.dataset.armed;
+      delete node.dataset.settling;
       node.style.removeProperty("--swipe");
+    }
+
+    /**
+     * 指を離した。行を、なめらかに元の位置へ戻す（一瞬で戻すと、動きが硬く見える）。
+     * 戻るまでは、下に出した操作（色と文字）も残し、何をしたかが分かるようにする
+     */
+    function settle() {
+      if (node.dataset.swiping === undefined || reducedMotion()) return reset();
+      clearTimeout(pressTimer);
+      tracking = false;
+      sideways = false;
+      node.dataset.settling = "";
+      node.style.setProperty("--swipe", "0px");
+      settleTimer = setTimeout(reset, SETTLE);
     }
 
     function onStart(event: TouchEvent) {
       const touch = event.touches[0];
+      // 戻している最中に触れたら、戻し終えたことにして、新しく始める
+      if (node.dataset.settling !== undefined) reset();
       if (event.touches.length !== 1 || touch === undefined) return reset();
       startX = touch.clientX;
       startY = touch.clientY;
@@ -336,13 +364,13 @@
       if (sideways && Math.abs(dx) >= SWIPE && action !== "none") {
         toggle(current, action === "read" ? "readAt" : "starredAt");
       }
-      reset();
+      settle();
     }
 
     node.addEventListener("touchstart", onStart, { passive: true });
     node.addEventListener("touchmove", onMove, { passive: true });
     node.addEventListener("touchend", onEnd);
-    node.addEventListener("touchcancel", reset);
+    node.addEventListener("touchcancel", settle);
     node.addEventListener("contextmenu", onContextMenu);
     node.addEventListener("click", onClickCapture, { capture: true });
     return {
@@ -353,10 +381,11 @@
         node.removeEventListener("touchstart", onStart);
         node.removeEventListener("touchmove", onMove);
         node.removeEventListener("touchend", onEnd);
-        node.removeEventListener("touchcancel", reset);
+        node.removeEventListener("touchcancel", settle);
         node.removeEventListener("contextmenu", onContextMenu);
         node.removeEventListener("click", onClickCapture, { capture: true });
         clearTimeout(pressTimer);
+        clearTimeout(settleTimer);
       },
     };
   }
@@ -367,6 +396,14 @@
    */
   export function scrollToTop() {
     scrollPage(scroller, 0, true);
+  }
+
+  /**
+   * 狭い画面で、記事を横に動かして戻る間、記事の後ろに一覧を見せる（Reader が一覧を画面に
+   * 固定する）。その間はページではなく一覧の欄を、記事を開く前の位置まで動かしておく
+   */
+  export function peekAt(top: number) {
+    if (scroller !== undefined) scroller.scrollTop = top;
   }
 
   async function reload() {
@@ -1246,5 +1283,16 @@
 
   .row:global([data-swiping]) .actions {
     display: none;
+  }
+
+  /* 指を離したあと、元の位置へなめらかに戻す */
+  .row:global([data-settling]) .item {
+    transition: transform 0.2s ease-out;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .row:global([data-settling]) .item {
+      transition: none;
+    }
   }
 </style>
