@@ -9,7 +9,7 @@ import { trustedScriptUrl } from "./lib/trusted";
 import Authorize from "./routes/Authorize.svelte";
 import "./app.css";
 // 表示の好み（テーマ、文字の大きさ）を、画面を出す前に当てる
-import "./lib/prefs.svelte";
+import { prefs } from "./lib/prefs.svelte";
 
 const target = document.getElementById("app");
 if (!target) throw new Error("#app が見つからない");
@@ -20,6 +20,8 @@ if (location.pathname === AUTHORIZE_PATH) {
   mount(Authorize, { target });
 } else {
   const state = new ReaderState(startReader());
+  // 設定の正は手元の DB（docs/decisions/settings.md）。つないで、読み直す
+  prefs.connect(state.client);
   mount(App, { target, context: readerContext(state) });
   void state.init();
 

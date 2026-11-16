@@ -6,8 +6,8 @@ Sendo の公式リーダー。`packages/core`（同期エンジン）と `apps/w
 
 ## 最初に読むもの
 
-- `docs/decisions/`：このリポジトリの今の決定。ほかの文書と食い違ったら、こちらが正しい。特に `local-first.md`（同期とローカル DB）、`ui.md`（UI とツール）、`performance.md`（速さの予算）、`images.md`（サムネイルとアイコン）
-- サーバーとの約束ごと（認証、差分同期）は sendo の決定が正：`accounts.md`、`sync.md`
+- `docs/decisions/`：このリポジトリの今の決定。ほかの文書と食い違ったら、こちらが正しい。特に `local-first.md`（同期とローカル DB）、`ui.md`（UI とツール）、`performance.md`（速さの予算）、`images.md`（サムネイルとアイコン）、`settings.md`（設定の同期）
+- サーバーとの約束ごと（認証、差分同期、設定の預かり方）は sendo の決定が正：`accounts.md`、`sync.md`、`settings.md`
 - プロダクト全体の目的・進め方・技術構成は sendo リポジトリにある：
   - https://github.com/sendo-feed/sendo/tree/main/docs/decisions
   - https://github.com/sendo-feed/sendo/blob/main/docs/inception-deck.md
@@ -33,6 +33,7 @@ Sendo の公式リーダー。`packages/core`（同期エンジン）と `apps/w
   - `src/reader.ts`：`ReaderCore`。ログイン、同期、手元の DB の読み出し、変更の通知をまとめる窓口
   - `src/api/`：sendo の API。`schema.gen.ts` は OpenAPI から生成したもの。`sync-contract.ts` は、`/sync` の応答の形を確かめて（外から来たデータなので）、core の中の形（`src/sync/page.ts` の `SyncPage`）に変える。応答の形を扱うのはこのファイルだけにし、同期のロジックは `SyncPage` だけを扱う
   - `src/db/`：DB の窓口（`database.ts`）、スキーマとマイグレーション（`schema.ts`。足すだけにし、出したものは書き換えない）、画面のための読み出し（`queries.ts`）、sqlite-wasm の実装（`sqlite-wasm.ts`）
+  - `src/settings.ts`：sendo に預ける設定の、名前と値の決まり（`reader.` で始める、一覧ごとの設定の名前）。項目の中身（どんな項目があるか、既定は何か）は画面（`apps/web/src/lib/prefs.svelte.ts`）が決める。手元の置き場所は `src/db/synced-settings.ts`（端末の種類・名前・値。手元だけの値を置く `settings` の表とは別）
   - `src/online.ts`：sendo に問い合わせないとできない操作（フィードの候補探し、購読、OPML の取り込み）。手元にすぐ反映できないので、画面では待っている間の表示を出す
   - `src/sync/`：差分同期（`pull.ts`）と操作キュー（`ops.ts` が操作ごとの「手元への反映・送り方・戻し方」、`queue.ts` が積む・まとめる・送る）。操作は手元への反映と同じトランザクションで積み、同期で届いた行の上に重ね直す。どの操作も冪等にする
   - `src/sync/scheduler.ts`：いつ同期するか（起動時、書き込みのあと、一定の間隔、届かなければ間隔を延ばしてやり直す）
@@ -50,7 +51,7 @@ Sendo の公式リーダー。`packages/core`（同期エンジン）と `apps/w
     - `lib/state.svelte.ts`：画面の状態（フォルダ、フィード、未読の数、同期の様子）。手元の表が変わったら読み直す
     - `lib/router.svelte.ts`：小さな自前のルーター（History API）
     - `lib/list.svelte.ts`：開いている記事の一覧（読み出し、続き、楽観的な更新、前後の記事）。一覧・記事・キーボードの操作が同じものを見る
-    - `lib/prefs.svelte.ts`：表示の好み（テーマ、文字の大きさ、一覧の形など）。この端末の localStorage に置き、sendo には送らない
+    - `lib/prefs.svelte.ts`：表示の好み（テーマ、文字の大きさ、一覧の形など）。正は手元の DB で、sendo に預けて同じ種類の端末（スマホ ／ それ以外）に引き継ぐ（`docs/decisions/settings.md`）。項目を足すときは、既定と同じ値を預けない、別々に変わるものは別の項目にする、を守る。localStorage には、起動してすぐ当てるための写しだけを置く
     - キーボードの操作は `routes/Reader.svelte` に割り当て、一覧を `components/ShortcutHelp.svelte` に出す（足したら両方を直す）
     - 色・余白・文字の大きさは `app.css` の変数を使う。アイコンは `components/Icon.svelte`（画像を足さない）
     - sendo が中継した画像（サムネイル、フィードのアイコン）は、`components/RemoteImage.svelte` で出す（ほかの場所で `<img>` を書かない）

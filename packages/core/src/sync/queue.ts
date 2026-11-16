@@ -1,7 +1,16 @@
 import { ApiError, type SendoApi } from "../api/client";
 import type { Database, Executor } from "../db/database";
 import type { Table } from "../models";
-import { applyLocally, keyOf, merge, type Operation, remapFolderId, send, undo } from "./ops";
+import {
+  applyLocally,
+  isRetryable,
+  keyOf,
+  merge,
+  type Operation,
+  remapFolderId,
+  send,
+  undo,
+} from "./ops";
 
 /**
  * 操作キュー（docs/decisions/local-first.md、sendo の sync.md の 5）。
@@ -186,7 +195,7 @@ export async function push(
       }
     } catch (error) {
       if (!(error instanceof ApiError)) throw error;
-      if (isTransient(error)) {
+      if (isRetryable(error)) {
         if (!signal.aborted) {
           await db.run(
             "update pending_ops set attempts = attempts + 1, last_error = ? where id = ?",
@@ -217,7 +226,9 @@ export async function push(
         // 戻したところに、残りの操作を重ね直す（このあと届かなくても、手元は最新の操作のまま）
         await reapplyPending(tx);
       });
-      options.onChange?.(new Set<Table>(["folders", "feeds", "articles"]));
+      options.onChange?.(
+        new Set<Table>(op.kind === "setSettings" ? ["settings"] : ["folders", "feeds", "articles"]),
+      );
       result.rejected.push({ op, error });
     }
   }
@@ -231,9 +242,4 @@ async function currentRev(db: Executor, id: number): Promise<number | null> {
 /** 送り終えた操作を消す。送っている間にまとめられていたら（rev が変わっていたら）残す */
 async function complete(tx: Executor, id: number, rev: number): Promise<void> {
   await tx.run("delete from pending_ops where id = ? and rev = ?", [id, rev]);
-}
-
-/** あとでやり直せば通るかもしれない失敗 */
-function isTransient(error: ApiError): boolean {
-  return error.kind === "network" || error.kind === "server" || error.kind === "unauthorized";
 }

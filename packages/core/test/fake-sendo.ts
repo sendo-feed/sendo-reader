@@ -27,7 +27,19 @@
  * client_id、redirect_uri、response_type、scope、state だけを見る（PKCE などは見ない）。
  */
 
-type TableName = "folders" | "feeds" | "articles";
+type TableName = "folders" | "feeds" | "articles" | "settings";
+
+/** 設定の項目（sendo の docs/decisions/settings.md）。消すと、行を残して消した印を付け、値を捨てる */
+export interface SettingRow {
+  deviceType: string;
+  name: string;
+  value: unknown;
+  deleted: boolean;
+  seq: number;
+}
+
+const SETTING_NAME = /^[a-z][a-z0-9-]{0,31}\.[\x21-\x7e]+$/;
+const DEVICE_TYPES = new Set(["mobile", "desktop"]);
 
 interface FolderRow {
   id: string;
@@ -70,6 +82,8 @@ interface Cursor {
   folders: number;
   feeds: number;
   articles: number;
+  /** 設定の位置。設定を配る前の版が出したカーソルには、ない */
+  settings?: number;
   /** 最初の同期の途中なら、その範囲の起点（直近 30 日の始まり） */
   initialSince?: number;
   /** 最後まで送り終えた（この応答の hasMore が false だった） */
@@ -166,9 +180,23 @@ export class FakeSendo {
   /** リクエストを受けて、答える前に呼ぶ（送っている途中に画面で操作したことにする、など） */
   onRequest: ((path: string) => Promise<void>) | null = null;
 
-  readonly #maxSeq: Record<TableName, number> = { folders: 0, feeds: 0, articles: 0 };
+  /** 設定の項目（鍵は「端末の種類 ＋ 改行 ＋ 名前」） */
+  readonly settings = new Map<string, SettingRow>();
+  /** 受けた PATCH /settings/{deviceType} */
+  readonly settingsRequests: { deviceType: string; body: Record<string, unknown> }[] = [];
+  /** 設定を配る前の版の sendo のふりをする（/sync に settings がなく、/settings は 404） */
+  settingsSupported = true;
+  /** 端末の種類ごとの、項目の数の上限（超えると 409 の settings_full） */
+  maxSettings = 1000;
+
+  readonly #maxSeq: Record<TableName, number> = { folders: 0, feeds: 0, articles: 0, settings: 0 };
   /** 消した印を回収した範囲。これより古いカーソルでは差分を出せない */
-  readonly #purgedUpTo: Record<TableName, number> = { folders: 0, feeds: 0, articles: 0 };
+  readonly #purgedUpTo: Record<TableName, number> = {
+    folders: 0,
+    feeds: 0,
+    articles: 0,
+    settings: 0,
+  };
   readonly #failures: Failure[] = [];
   /** "hang-body" で止めた本文のうち、読み手に取り消されたものの数 */
   cancelledBodies = 0;
@@ -355,6 +383,40 @@ export class FakeSendo {
     }
   }
 
+  /** ほかの端末が設定を置いたことにする。今と同じ値なら、何も変えない */
+  putSetting(deviceType: string, name: string, value: unknown): void {
+    const key = `${deviceType}\n${name}`;
+    const row = this.settings.get(key);
+    if (row !== undefined && !row.deleted && JSON.stringify(row.value) === JSON.stringify(value)) {
+      return;
+    }
+    this.settings.set(key, {
+      deviceType,
+      name,
+      value,
+      deleted: false,
+      seq: this.#bump("settings"),
+    });
+  }
+
+  /** ほかの端末が設定を消したことにする。ない項目、もう消してある項目は、何も変えない */
+  removeSetting(deviceType: string, name: string): void {
+    const row = this.settings.get(`${deviceType}\n${name}`);
+    if (row === undefined || row.deleted) return;
+    row.deleted = true;
+    row.value = undefined;
+    row.seq = this.#bump("settings");
+  }
+
+  /** その種類の、消していない項目（名前から値へ） */
+  settingsOf(deviceType: string): Record<string, unknown> {
+    const out: Record<string, unknown> = {};
+    for (const row of this.settings.values()) {
+      if (row.deviceType === deviceType && !row.deleted) out[row.name] = row.value;
+    }
+    return out;
+  }
+
   /** 消した印と記録をすべて物理的に消す。それより古いカーソルには 400 を返すようになる */
   purgeTombstones(): void {
     for (const [table, rows] of [
@@ -371,6 +433,11 @@ export class FakeSendo {
       this.#purgedUpTo.articles = Math.max(this.#purgedUpTo.articles, seq);
     }
     this.removals.clear();
+    for (const [key, row] of this.settings) {
+      if (!row.deleted) continue;
+      this.settings.delete(key);
+      this.#purgedUpTo.settings = Math.max(this.#purgedUpTo.settings, row.seq);
+    }
   }
 
   advance(ms: number): void {
@@ -512,6 +579,10 @@ export class FakeSendo {
       return json(202, { accepted, skippedCount: 0, skipped: [] });
     }
     const body = request.body === null ? {} : ((await request.json()) as Record<string, unknown>);
+    if (path.startsWith("/settings/")) {
+      if (!this.settingsSupported) return error(404, "not_found", "not found");
+      return this.#settings(request.method, path.slice("/settings/".length), body);
+    }
     if (request.method === "POST" && path === "/feeds") {
       const feedUrl = String(body.url ?? "");
       const folderId = (body.folderId as string | null | undefined) ?? null;
@@ -796,6 +867,46 @@ export class FakeSendo {
     });
   }
 
+  #settings(method: string, deviceType: string, body: Record<string, unknown>): Response {
+    if (!DEVICE_TYPES.has(deviceType)) {
+      return error(400, "invalid_request", "deviceType: mobile or desktop");
+    }
+    if (method === "GET") {
+      const items = Object.entries(this.settingsOf(deviceType))
+        .sort(([a], [b]) => (a < b ? -1 : 1))
+        .map(([name, value]) => ({ name, value }));
+      return json(200, { items });
+    }
+    if (method !== "PATCH") return error(404, "not_found", "not found");
+    this.settingsRequests.push({ deviceType, body });
+    const put = (body.put ?? []) as { name: string; value: unknown }[];
+    const remove = (body.remove ?? []) as string[];
+    const names = [...put.map((item) => item.name), ...remove];
+    if (
+      names.length > 100 ||
+      new Set(names).size !== names.length ||
+      names.some(
+        (name) => typeof name !== "string" || name.length > 128 || !SETTING_NAME.test(name),
+      ) ||
+      put.some(
+        (item) =>
+          item.value === undefined ||
+          new TextEncoder().encode(JSON.stringify(item.value)).length > 8192,
+      )
+    ) {
+      return error(400, "invalid_request", "invalid settings");
+    }
+    // 消すほうを先に済ませる。上限を超えるなら、置くほうは 1 つも置かない
+    for (const name of remove) this.removeSetting(deviceType, name);
+    const current = this.settingsOf(deviceType);
+    const added = put.filter((item) => !(item.name in current)).length;
+    if (Object.keys(current).length + added > this.maxSettings) {
+      return error(409, "settings_full", "too many settings");
+    }
+    for (const item of put) this.putSetting(deviceType, item.name, item.value);
+    return new Response(null, { status: 204 });
+  }
+
   #sync(rawCursor: string | null): Response {
     const cursor = rawCursor === null ? null : decodeCursor(rawCursor);
     if (
@@ -803,12 +914,18 @@ export class FakeSendo {
       (cursor !== null &&
         (cursor.folders < this.#purgedUpTo.folders ||
           cursor.feeds < this.#purgedUpTo.feeds ||
-          cursor.articles < this.#purgedUpTo.articles))
+          cursor.articles < this.#purgedUpTo.articles ||
+          (cursor.settings !== undefined && cursor.settings < this.#purgedUpTo.settings)))
     ) {
       return error(400, "invalid_cursor", "cursor is invalid; start over without it");
     }
 
-    const since: Cursor = cursor ?? { folders: 0, feeds: 0, articles: 0, done: false };
+    // 設定の位置を持たない古いカーソルには、設定だけを最初から送る（全体の同期し直しはさせない）
+    const since: Required<Pick<Cursor, TableName>> & Cursor = {
+      settings: 0,
+      ...(cursor ?? { folders: 0, feeds: 0, articles: 0, done: false }),
+    };
+    const settingsInitial = cursor === null || cursor.settings === undefined;
     const initialSince = cursor === null ? this.now - 30 * DAY : cursor.initialSince;
     const initial = initialSince !== undefined;
 
@@ -837,6 +954,11 @@ export class FakeSendo {
               .filter(([, seq]) => seq > since.articles)
               .map(([id, seq]) => ({ seq, removed: id }))),
       ].sort(bySeq),
+      settings: this.settingsSupported
+        ? [...this.settings.values()]
+            .filter((row) => row.seq > since.settings && !(settingsInitial && row.deleted))
+            .sort(bySeq)
+        : [],
     };
 
     let room = this.pageSize;
@@ -846,8 +968,9 @@ export class FakeSendo {
       folders: [] as FolderRow[],
       feeds: [] as FeedRow[],
       articles: [] as (typeof pending)["articles"],
+      settings: [] as SettingRow[],
     };
-    for (const table of ["folders", "feeds", "articles"] as const) {
+    for (const table of ["folders", "feeds", "articles", "settings"] as const) {
       const rows = pending[table];
       const taken = rows.slice(0, room);
       room -= taken.length;
@@ -865,9 +988,20 @@ export class FakeSendo {
     else delete next.initialSince;
     next.done = !hasMore;
 
+    if (!this.settingsSupported) delete (next as Cursor).settings;
+
     return json(200, {
       cursor: encodeCursor(next),
       hasMore,
+      ...(this.settingsSupported
+        ? {
+            settings: page.settings.map((row) =>
+              row.deleted
+                ? { deviceType: row.deviceType, name: row.name, deleted: true }
+                : { deviceType: row.deviceType, name: row.name, value: row.value, deleted: false },
+            ),
+          }
+        : {}),
       folders: page.folders.map((row) => ({
         id: row.id,
         name: row.name,

@@ -35,6 +35,9 @@ export const READER_METHODS = [
   "deleteFolder",
   "moveFeed",
   "unsubscribe",
+  "listSettings",
+  "changeSettings",
+  "seedSettings",
   "discoverFeeds",
   "subscribe",
   "importOpml",
@@ -64,6 +67,7 @@ export const WRITE_METHODS = new Set<Method>([
   "deleteFolder",
   "moveFeed",
   "unsubscribe",
+  "changeSettings",
 ]);
 
 /**
@@ -75,6 +79,8 @@ export const SYNC_NOW_METHODS = new Set<Method>([
   "signOut",
   "subscribe",
   "importOpml",
+  // 移行待ちの設定は、同期を終えたときに送る
+  "seedSettings",
 ]);
 
 export type Result = { ok: true; value: unknown } | { ok: false; error: SerializedError };

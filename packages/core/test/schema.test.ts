@@ -19,6 +19,7 @@ describe("手元の DB のスキーマ", () => {
       "pending_ops",
       "settings",
       "sqlite_sequence",
+      "synced_settings",
     ]);
   });
 

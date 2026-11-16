@@ -1,7 +1,7 @@
 <script lang="ts">
   import { type ListLayout, prefs, type TextSize, type Theme } from "../../lib/prefs.svelte";
 
-  /** 表示の設定。この端末だけに置き、sendo には送らない（lib/prefs.svelte.ts） */
+  /** 表示の設定。sendo に預け、同じ種類の端末に引き継ぐ（lib/prefs.svelte.ts） */
   const THEMES: [Theme, string][] = [
     ["auto", "端末に合わせる"],
     ["light", "ライト"],
@@ -24,7 +24,9 @@
 <section aria-label="表示">
   {#if !reading}
     <h2>表示</h2>
-    <p class="note">この端末だけの設定です。</p>
+    <p class="note">
+      スマホと、それ以外（PC・タブレット）で、別々に覚えます。同じ種類の端末には、同期で引き継ぎます。
+    </p>
   {/if}
 
   <fieldset>

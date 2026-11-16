@@ -2,6 +2,9 @@ import { ApiError, errorFromBody, type SendoApi } from "../api/client";
 import type { Executor } from "../db/database";
 import { getSetting, setSetting } from "../db/settings";
 import { requestResync } from "../db/synced";
+import { putSyncedSetting, removeSyncedSetting } from "../db/synced-settings";
+import type { DeviceType, JsonValue, SettingItem } from "../models";
+import { MAX_SETTINGS_PER_REQUEST } from "../settings";
 
 /**
  * 手元にすぐ反映して、あとで sendo に送る操作（docs/decisions/local-first.md、sendo の sync.md）。
@@ -35,7 +38,12 @@ export type Operation =
   | { kind: "renameFolder"; folderId: string; name: string }
   | { kind: "deleteFolder"; folderId: string }
   | { kind: "moveFeed"; feedId: string; folderId: string | null }
-  | { kind: "unsubscribe"; feedId: string };
+  | { kind: "unsubscribe"; feedId: string }
+  /**
+   * 設定を置く ／ 消す（docs/decisions/settings.md）。同じ名前は、put と remove のどちらか一方に
+   * 1 度だけ入れる
+   */
+  | { kind: "setSettings"; deviceType: DeviceType; put: SettingItem[]; remove: string[] };
 
 /** まとめて既読の範囲 */
 export type MarkReadScope = { all: true } | { feedId: string } | { folderId: string };
@@ -74,6 +82,8 @@ export function keyOf(op: Operation): string {
     case "moveFeed":
     case "unsubscribe":
       return op.feedId;
+    case "setSettings":
+      return `settings:${op.deviceType}`;
   }
 }
 
@@ -94,6 +104,17 @@ export function merge(previous: Operation, next: Operation): Operation | null {
   }
   if (previous.kind === "moveFeed" && next.kind === "moveFeed") {
     return previous.feedId === next.feedId ? next : null;
+  }
+  if (previous.kind === "setSettings" && next.kind === "setSettings") {
+    if (previous.deviceType !== next.deviceType) return null;
+    // 同じ名前は、最後の操作だけを残す
+    const touched = new Set([...next.put.map((item) => item.name), ...next.remove]);
+    return {
+      kind: "setSettings",
+      deviceType: next.deviceType,
+      put: [...previous.put.filter((item) => !touched.has(item.name)), ...next.put],
+      remove: [...previous.remove.filter((name) => !touched.has(name)), ...next.remove],
+    };
   }
   return null;
 }
@@ -145,6 +166,10 @@ export async function applyLocally(tx: Executor, op: Operation): Promise<void> {
       // 同じように消しておく（自分の操作の楽観的な反映。同期では、記事ごとの消した記録が届いた
       // ときにだけ消す。docs/decisions/local-first.md）
       await tx.run("delete from articles where feed_id = ? and starred_at is null", [op.feedId]);
+      return;
+    case "setSettings":
+      for (const name of op.remove) await removeSyncedSetting(tx, op.deviceType, name);
+      for (const item of op.put) await putSyncedSetting(tx, op.deviceType, item.name, item.value);
       return;
   }
 }
@@ -250,6 +275,27 @@ export async function send(api: SendoApi, op: Operation, signal: AbortSignal): P
         if (!(error instanceof ApiError && error.kind === "not_found")) throw error;
       }
       return {};
+    case "setSettings": {
+      // 1 回に送れる数（100 項目）ごとに分ける。何度送っても同じ結果になるので、途中で届かなく
+      // なったら、次は最初から送り直す
+      const entries: ({ put: SettingItem } | { remove: string })[] = [
+        ...op.remove.map((name) => ({ remove: name })),
+        ...op.put.map((item) => ({ put: item })),
+      ];
+      for (let i = 0; i < entries.length; i += MAX_SETTINGS_PER_REQUEST) {
+        const chunk = entries.slice(i, i + MAX_SETTINGS_PER_REQUEST);
+        check(
+          await client.PATCH("/settings/{deviceType}", {
+            params: { path: { deviceType: op.deviceType } },
+            body: {
+              put: chunk.flatMap((entry) => ("put" in entry ? [entry.put] : [])),
+              remove: chunk.flatMap((entry) => ("remove" in entry ? [entry.remove] : [])),
+            },
+          }),
+        );
+      }
+      return {};
+    }
   }
 }
 
@@ -312,6 +358,39 @@ export async function undo(
       });
       return;
     }
+    case "setSettings": {
+      // 手元には、置き換える前の値がない。sendo の今の値を読み、この操作が触った項目を置き直す
+      // （名前の形や値の大きさで断られた、項目の数や合計の上限を超えた。settings.md の 7）
+      let items: { name: string; value?: unknown }[];
+      try {
+        items = check(
+          await api.client(signal).GET("/settings/{deviceType}", {
+            params: { path: { deviceType: op.deviceType } },
+          }),
+        ).items;
+      } catch (failure) {
+        // 届かなかったら、戻さずに残す（次の同期でやり直す）。読むこと自体を断られたら
+        // （設定を配る前の版の sendo）、戻す先が分からないので、手元はそのままにして捨てる
+        if (failure instanceof ApiError && !isRetryable(failure)) return;
+        throw failure;
+      }
+      const current = new Map(items.map((item) => [item.name, item.value]));
+      await write(async (tx) => {
+        for (const name of [...op.put.map((item) => item.name), ...op.remove]) {
+          if (current.has(name)) {
+            await putSyncedSetting(
+              tx,
+              op.deviceType,
+              name,
+              (current.get(name) ?? null) as JsonValue,
+            );
+          } else {
+            await removeSyncedSetting(tx, op.deviceType, name);
+          }
+        }
+      });
+      return;
+    }
     case "markRead":
     case "deleteFolder":
     case "unsubscribe":
@@ -358,6 +437,11 @@ async function findFolderByName(
 ): Promise<string | null> {
   const { items } = check(await api.client(signal).GET("/folders"));
   return items.find((item) => item.name === name)?.id ?? null;
+}
+
+/** あとでやり直せば通るかもしれない失敗（届かない、サーバーの不具合、セッションが切れた） */
+export function isRetryable(error: ApiError): boolean {
+  return error.kind === "network" || error.kind === "server" || error.kind === "unauthorized";
 }
 
 /** まとめて既読のカーソルを sendo が受け付けなかった */

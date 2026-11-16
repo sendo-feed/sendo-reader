@@ -55,4 +55,33 @@ export interface UnreadCounts {
 }
 
 /** 手元の DB の表。変わったことを画面に知らせるときに使う */
-export type Table = "folders" | "feeds" | "articles";
+export type Table = "folders" | "feeds" | "articles" | "settings";
+
+/**
+ * 端末の種類。設定は、この種類ごとに sendo に預ける（docs/decisions/settings.md）。どちらとして
+ * 動くかは、画面が決めて渡す
+ */
+export type DeviceType = "mobile" | "desktop";
+
+export const DEVICE_TYPES: readonly DeviceType[] = ["mobile", "desktop"];
+
+/** JSON の値 */
+export type JsonValue =
+  | string
+  | number
+  | boolean
+  | null
+  | JsonValue[]
+  | { [key: string]: JsonValue };
+
+/** 設定の項目。名前は reader. で始める。値の中身は、core も sendo も解釈しない */
+export interface SettingItem {
+  name: string;
+  value: JsonValue;
+}
+
+/** 設定の変更。put は置く項目、remove は消す（既定に戻す）項目の名前 */
+export interface SettingsChange {
+  put?: SettingItem[];
+  remove?: string[];
+}

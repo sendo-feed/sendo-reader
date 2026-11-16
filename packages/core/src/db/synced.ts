@@ -24,6 +24,7 @@ export async function requestResync(tx: Executor): Promise<void> {
 /**
  * 同期で届いた行（記事、購読、フォルダ）とカーソルを消す（最初から取り直した行で置き換えるとき）。
  * ログインしたユーザーと、まだ送り終えていない操作は残す（取り直した行の上に重ね直す）。
+ * 設定は、取り直した応答に設定が載っているときにだけ、呼ぶ側で消す（db/synced-settings.ts）。
  */
 export async function clearSyncedRows(tx: Executor): Promise<void> {
   await tx.run("delete from articles");

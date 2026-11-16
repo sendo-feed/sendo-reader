@@ -62,7 +62,7 @@ describe("ログイン（sendo のセッション）", () => {
     expect(await core.listArticles()).toEqual([]);
     expect(await core.listFeeds()).toEqual([]);
     expect(await db.all("select key from settings")).toEqual([{ key: "auth.logoutPending" }]);
-    expect(changes).toEqual([["articles", "feeds", "folders"]]);
+    expect(changes).toEqual([["articles", "feeds", "folders", "settings"]]);
 
     expect(await core.sendPendingSignOut()).toBe(true);
     expect(server.requests).toEqual(["POST /auth/logout"]);
@@ -186,7 +186,7 @@ describe("送る前に、セッションのユーザーを確かめる", () => {
     expect(await core.listArticles()).toEqual([]);
     expect(await core.listFeeds()).toMatchObject([{ id: feed.id }]);
     expect(await core.countPending()).toBe(0);
-    expect(changes[0]).toEqual(["articles", "feeds", "folders"]);
+    expect(changes[0]).toEqual(["articles", "feeds", "folders", "settings"]);
   });
 
   test("別のユーザーでログインしていたら、前のユーザーのために頼まれた購読は送らない", async () => {

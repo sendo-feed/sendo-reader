@@ -12,7 +12,24 @@ import {
 } from "./db/queries";
 import { migrate } from "./db/schema";
 import { deleteSetting, getSetting, setSetting } from "./db/settings";
-import type { Article, Feed, Folder, Table, UnreadCounts, User } from "./models";
+import {
+  getSettingsSeed,
+  hasSyncedSetting,
+  listSyncedSettings,
+  setSettingsSeed,
+} from "./db/synced-settings";
+import {
+  type Article,
+  DEVICE_TYPES,
+  type DeviceType,
+  type Feed,
+  type Folder,
+  type SettingItem,
+  type SettingsChange,
+  type Table,
+  type UnreadCounts,
+  type User,
+} from "./models";
 import {
   discoverFeeds,
   type FeedCandidate,
@@ -20,6 +37,7 @@ import {
   type OpmlImportResult,
   subscribe,
 } from "./online";
+import { feedListPath, folderListPath, listSettingName, normalizeSettingsChange } from "./settings";
 import {
   FOLDER_ID_PATTERN,
   getFolderIdRemaps,
@@ -39,7 +57,7 @@ const USER_KEY = "auth.user";
  */
 const LOGOUT_PENDING_KEY = "auth.logoutPending";
 
-const ALL_TABLES: ReadonlySet<Table> = new Set<Table>(["folders", "feeds", "articles"]);
+const ALL_TABLES: ReadonlySet<Table> = new Set<Table>(["folders", "feeds", "articles", "settings"]);
 
 export interface ReaderCoreOptions {
   db: Database;
@@ -321,15 +339,54 @@ export class ReaderCore {
     this.#requireSignedIn();
     // 別のユーザーでログインしていたら、手元を消して、そのユーザーで最初から同期する
     const signal = await this.#confirmUser(started);
-    const pushed = await this.#push(signal, (id) => {
+    const allow = (id: number) => {
       const limit = this.#pushLimit();
       return limit === null || id <= limit || this.#onlineOps.has(id);
-    });
+    };
+    const pushed = await this.#push(signal, allow);
+    let promoted = false;
     const pulled = await pull(this.#db, this.#api, {
       signal,
       onPage: (changed) => this.#emit(changed),
+      onComplete: async (tx, { settings }) => {
+        if (!settings || !(await this.#promoteSettingsSeed(tx))) return [];
+        promoted = true;
+        return ["settings"];
+      },
     });
+    // 移行待ちの設定を積んだら、続けて送る（次の同期を待たない）
+    if (promoted) {
+      const again = await this.#push(signal, allow);
+      pushed.sent += again.sent;
+      pushed.rejected.push(...again.rejected);
+      pushed.remapped.push(...again.remapped);
+    }
     return { push: pushed, pull: pulled };
+  }
+
+  /**
+   * 移行待ちの設定（前の版が localStorage に置いていたもの）のうち、手元にない名前だけを、操作
+   * キューに積む（docs/decisions/settings.md の 9）。同期を最後まで終えたときに、同じ
+   * トランザクションの中で呼ぶので、手元にない名前は、sendo にもない。ある名前は、届いたほうを
+   * 採る。済んだら、移行待ちを消す。移行待ちがあったら true
+   */
+  async #promoteSettingsSeed(tx: Executor): Promise<boolean> {
+    const seed = await getSettingsSeed(tx);
+    if (seed === null) return false;
+    const missing: SettingItem[] = [];
+    for (const item of seed.items) {
+      if (!(await hasSyncedSetting(tx, seed.deviceType, item.name))) missing.push(item);
+    }
+    if (missing.length > 0) {
+      await this.#enqueue(tx, {
+        kind: "setSettings",
+        deviceType: seed.deviceType,
+        put: missing,
+        remove: [],
+      });
+    }
+    await setSettingsSeed(tx, null);
+    return true;
   }
 
   #push(signal: AbortSignal, allow: (id: number) => boolean): Promise<PushResult> {
@@ -488,10 +545,17 @@ export class ReaderCore {
     ]);
   }
 
-  /** フォルダを消す。入っていたフィードはフォルダなしに戻す（フィードは消さない） */
+  /**
+   * フォルダを消す。入っていたフィードはフォルダなしに戻す（フィードは消さない）。そのフォルダの
+   * 一覧の設定も消す
+   */
   deleteFolder(folderId: string): Promise<void> {
     const id = this.#folderIds.get(folderId) ?? folderId;
-    return this.#write({ kind: "deleteFolder", folderId: id }, ["folders", "feeds"]);
+    return this.#writeWithListSettings(
+      { kind: "deleteFolder", folderId: id },
+      [...new Set([folderId, id])].map(folderListPath),
+      ["folders", "feeds"],
+    );
   }
 
   /** フィードを別のフォルダに移す。null ならフォルダなし */
@@ -500,9 +564,98 @@ export class ReaderCore {
     return this.#write({ kind: "moveFeed", feedId, folderId: resolved }, ["feeds"]);
   }
 
-  /** 購読をやめる。記事はスターを付けたものだけが残る */
+  /** 購読をやめる。記事はスターを付けたものだけが残る。そのフィードの一覧の設定も消す */
   unsubscribe(feedId: string): Promise<void> {
-    return this.#write({ kind: "unsubscribe", feedId }, ["feeds", "articles"]);
+    return this.#writeWithListSettings(
+      { kind: "unsubscribe", feedId },
+      [feedListPath(feedId)],
+      ["feeds", "articles"],
+    );
+  }
+
+  /**
+   * 操作を積み、あわせて、なくなる一覧（やめた購読、消したフォルダ）の設定を、両方の端末の種類で
+   * 消す（docs/decisions/settings.md の 3。sendo は名前を解釈しないので、消すのは reader の仕事）。
+   * 手元にその項目がない種類には、何も送らない
+   */
+  async #writeWithListSettings(op: Operation, paths: string[], tables: Table[]): Promise<void> {
+    this.#requireSignedIn();
+    const session = this.#session.signal;
+    let removed = false;
+    await this.#db.transaction(async (tx) => {
+      throwIfSessionEnded(session);
+      await this.#enqueue(tx, op);
+      const names = paths.flatMap((path) => listSettingName(path) ?? []);
+      for (const deviceType of DEVICE_TYPES) {
+        const present = new Set(
+          (await listSyncedSettings(tx, deviceType)).map((item) => item.name),
+        );
+        const remove = names.filter((name) => present.has(name));
+        if (remove.length === 0) continue;
+        await this.#dropFromSettingsSeed(tx, deviceType, remove);
+        await this.#enqueue(tx, { kind: "setSettings", deviceType, put: [], remove });
+        removed = true;
+      }
+    });
+    this.#emit(new Set<Table>(removed ? [...tables, "settings"] : tables));
+  }
+
+  // --- 設定（docs/decisions/settings.md。手元にすぐ反映し、操作キューに積む） ---
+
+  /** その端末の種類の設定の項目（手元の DB だけを読む） */
+  listSettings(deviceType: DeviceType): Promise<SettingItem[]> {
+    return listSyncedSettings(this.#db, deviceType);
+  }
+
+  /**
+   * 設定を置く ／ 消す（既定に戻す）。名前は reader. で始める。名前の形が違う、値が大きすぎる、
+   * 同じ名前が 2 度あるときは RangeError
+   */
+  async changeSettings(deviceType: DeviceType, change: SettingsChange): Promise<void> {
+    requireDeviceType(deviceType);
+    const { put, remove } = normalizeSettingsChange(change);
+    if (put.length === 0 && remove.length === 0) return;
+    this.#requireSignedIn();
+    const session = this.#session.signal;
+    await this.#db.transaction(async (tx) => {
+      throwIfSessionEnded(session);
+      // 変えた項目は、移行待ちからも外す（消した項目が、移行待ちの値で戻らないように）
+      await this.#dropFromSettingsSeed(tx, deviceType, [
+        ...put.map((item) => item.name),
+        ...remove,
+      ]);
+      await this.#enqueue(tx, { kind: "setSettings", deviceType, put, remove });
+    });
+    this.#emit(new Set<Table>(["settings"]));
+  }
+
+  /**
+   * 前の版が localStorage に置いていた設定を、移行待ちとして手元に置く（docs/decisions/settings.md
+   * の 9）。次に同期を最後まで終えたときに、sendo にない項目だけを送る。それまでは、手元にその
+   * 名前の項目がない間、設定として使う。同じものを何度渡してもよい
+   */
+  async seedSettings(deviceType: DeviceType, items: SettingItem[]): Promise<void> {
+    requireDeviceType(deviceType);
+    const { put } = normalizeSettingsChange({ put: items });
+    this.#requireSignedIn();
+    const session = this.#session.signal;
+    await this.#db.transaction(async (tx) => {
+      throwIfSessionEnded(session);
+      await setSettingsSeed(tx, put.length === 0 ? null : { deviceType, items: put });
+    });
+    this.#emit(new Set<Table>(["settings"]));
+  }
+
+  async #dropFromSettingsSeed(
+    tx: Executor,
+    deviceType: DeviceType,
+    names: readonly string[],
+  ): Promise<void> {
+    const seed = await getSettingsSeed(tx);
+    if (seed === null || seed.deviceType !== deviceType) return;
+    const dropped = new Set(names);
+    const items = seed.items.filter((item) => !dropped.has(item.name));
+    if (items.length !== seed.items.length) await setSettingsSeed(tx, { deviceType, items });
   }
 
   // --- 通信が要る操作（画面では待っている間の表示を出す） ---
@@ -679,7 +832,15 @@ async function clearAll(tx: Executor): Promise<void> {
   await tx.run("delete from articles");
   await tx.run("delete from feeds");
   await tx.run("delete from folders");
+  await tx.run("delete from synced_settings");
   await tx.run("delete from settings");
+}
+
+/** 端末の種類を確かめる（画面のワーカーの外から来た値なので） */
+function requireDeviceType(value: unknown): asserts value is DeviceType {
+  if (!DEVICE_TYPES.some((type) => type === value)) {
+    throw new RangeError("端末の種類は mobile か desktop");
+  }
 }
 
 /**

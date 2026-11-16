@@ -11,6 +11,7 @@ import type { Database } from "./database";
  * - folders：ユーザーのフォルダ
  * - feeds：ユーザーが購読しているフィード（id は REST API の /feeds/{id} の id）
  * - articles：ユーザーの受信箱の記事（記事の本体と、既読・スター）
+ * - synced_settings：ユーザーが預けた設定の項目（端末の種類ごと）
  */
 const migrations: readonly (readonly string[])[] = [
   [
@@ -114,6 +115,16 @@ const migrations: readonly (readonly string[])[] = [
     // （sendo は、記事のサムネイルをさかのぼって付けない。フィードのアイコンは、付いたら同期で届く）
     "alter table articles add column thumbnail_url text",
     "alter table feeds add column icon_url text",
+  ],
+  [
+    // sendo に預ける設定（docs/decisions/settings.md）。端末の種類・名前・値（JSON）で置く。
+    // 手元だけの値（カーソルなど）を置く settings の表とは別
+    `create table synced_settings (
+      device_type text not null,
+      name text not null,
+      value text not null,
+      primary key (device_type, name)
+    ) strict, without rowid`,
   ],
 ];
 

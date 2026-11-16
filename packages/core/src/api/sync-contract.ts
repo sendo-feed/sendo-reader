@@ -6,13 +6,15 @@
  * - カーソルなしで呼ぶと、最初の同期（未読、スター、直近 30 日に受信箱に入った記事）
  * - hasMore が true なら、返ってきたカーソルですぐ続きを取る
  * - 消したフォルダと購読は deleted: true の行で、受信箱から消えた記事は { id, deleted: true } で届く
+ * - 設定の項目（settings）は、どの端末の種類の分も届く。消した項目は deleted: true で届く
  * - カーソルが読めない（古すぎる、など）ときは 400 と error.code = "invalid_cursor"。最初から同期し直す
  *
  * 応答は外から来たデータなので、生成した型を当てる前に形を確かめる。確かめたものを生成した型
  * （SyncChanges）として組み立てるので、sendo が形を変えたら、ここが型チェックで止まる。
  */
 
-import type { SyncArticle, SyncPage } from "../sync/page";
+import { DEVICE_TYPES, type JsonValue } from "../models";
+import type { SyncArticle, SyncPage, SyncSetting } from "../sync/page";
 import { toSameOriginUrl } from "../url";
 import { ApiError } from "./errors";
 import type { components } from "./schema.gen";
@@ -24,6 +26,24 @@ export type SyncChanges = Schemas["SyncChanges"];
 export function toSyncPage(body: unknown): SyncPage {
   const changes = parseSyncChanges(body);
   return {
+    // 知らない端末の種類の項目は、使わない（置かない）
+    settings:
+      changes.settings === undefined
+        ? null
+        : changes.settings.flatMap((setting): SyncSetting[] => {
+            const deviceType = DEVICE_TYPES.find((type) => type === setting.deviceType);
+            if (deviceType === undefined) return [];
+            return setting.deleted
+              ? [{ deviceType, name: setting.name, deleted: true }]
+              : [
+                  {
+                    deviceType,
+                    name: setting.name,
+                    value: (setting.value ?? null) as JsonValue,
+                    deleted: false,
+                  },
+                ];
+          }),
     cursor: changes.cursor,
     hasMore: changes.hasMore,
     folders: changes.folders.map((folder) => ({
@@ -69,9 +89,24 @@ export function toSyncPage(body: unknown): SyncPage {
  * 確かめる（画面では HTML として出さない）。時刻は読める形であることを確かめる。画像の URL
  * （thumbnailUrl、iconUrl）は、core の中の形にするときに、同じオリジンを指すものだけを残す。
  */
-function parseSyncChanges(body: unknown): SyncChanges {
+function parseSyncChanges(
+  body: unknown,
+): Omit<SyncChanges, "settings"> & { settings: SyncChanges["settings"] | undefined } {
   const root = record(body, "(root)");
   return {
+    // あとから足された項目。設定を配る前の版の sendo が相手でも、同期を止めない
+    settings:
+      root.settings === undefined
+        ? undefined
+        : array(root.settings, "settings").map((value, i): Schemas["SyncSetting"] => {
+            const row = record(value, `settings[${i}]`);
+            const at = (field: string) => `settings[${i}].${field}`;
+            const deviceType = string(row.deviceType, at("deviceType"));
+            const name = string(row.name, at("name"));
+            if (boolean(row.deleted, at("deleted"))) return { deviceType, name, deleted: true };
+            // 値は JSON の値なら何でもよい（JSON として届いているので、形は確かめない）
+            return { deviceType, name, value: row.value, deleted: false };
+          }),
     cursor: string(root.cursor, "cursor"),
     hasMore: boolean(root.hasMore, "hasMore"),
     folders: array(root.folders, "folders").map((value, i): Schemas["SyncFolder"] => {

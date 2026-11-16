@@ -1009,6 +1009,118 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/settings/{deviceType}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 設定の項目の一覧
+         * @description その端末の種類の、消していない項目をすべて返す。差分同期（/sync）を使うクライアントは、呼ばなくてよい。
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description 端末の種類。どちらとして動くかは、クライアントが決める */
+                    deviceType: "mobile" | "desktop";
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description 項目（名前の順） */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            items: components["schemas"]["Setting"][];
+                        };
+                    };
+                };
+                /** @description 端末の種類が mobile ／ desktop でない */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * 設定の項目を置く ／ 消す
+         * @description その端末の種類の項目を、まとめて置く ／ 消す。何度送り直しても同じ結果になる。
+         *     同じ項目をほかの端末も変えていたら、あとから受けたほうを採る。項目ごとに比べるので、別の項目の変更は互いに消さない。
+         *     今と同じ値を置いても、ない項目を消しても、何も変わらない（同期でも届かない）。
+         *     項目の数（1000）か、名前と値の合計（262144 バイト）を超えるなら、1 つも置かずに 409 を返す（remove は済んでいる）。
+         *     結果は、次の同期（/sync の settings）で届く。
+         */
+        patch: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description 端末の種類。どちらとして動くかは、クライアントが決める */
+                    deviceType: "mobile" | "desktop";
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["SettingsPatchRequest"];
+                };
+            };
+            responses: {
+                /** @description 置いた ／ 消した */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description 名前の形が違う、値が大きすぎるか深すぎる、項目が多すぎる、同じ名前が 2 度ある、端末の種類が mobile ／ desktop でない */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description 項目の数か合計の上限を超える（settings_full）。項目を消せば置ける */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description 本文が大きすぎる */
+                413: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        trace?: never;
+    };
     "/sync": {
         parameters: {
             query?: never;
@@ -1018,10 +1130,11 @@ export interface paths {
         };
         /**
          * 前回の同期からの差分を取る
-         * @description カーソルなしで呼ぶと、最初の同期を始める（消した印の付いていないフォルダと購読、未読・スター・直近 30 日の記事）。
+         * @description カーソルなしで呼ぶと、最初の同期を始める（消した印の付いていないフォルダ・購読・設定、未読・スター・直近 30 日の記事）。
          *     応答の cursor を次に渡すと、そのあとに変わったものだけを返す。hasMore が true なら、すぐにもう一度呼ぶ。
          *     配列は変更番号の順に並んでいる。同じ id が続けて来たら、後のものを採る。
          *     deleted が true のものは手元から消す。手元の行を消すのは、その行の deleted が届いたときだけにする。購読をやめた（feeds の deleted）からといって、そのフィードの記事を消さない（配列ごとにページを送るので、配列をまたいだ順序は保証されない）。
+         *     settings には、どの端末の種類の項目も届く。クライアントは、自分の種類の分だけを使えばよい。
          *     cursor の中身には意味を持たせていないので、クライアントはそのまま送り返すだけにする。
          */
         get: {
@@ -1621,12 +1734,32 @@ export interface components {
                 reason: "url_not_allowed" | "url_too_long" | "duplicate" | "too_many";
             }[];
         };
+        Setting: {
+            name: string;
+            /** @description JSON の値（オブジェクト、配列、文字列、数、真偽、null）。Sendo は中身を解釈しない */
+            value?: unknown;
+        };
+        SettingsPatchRequest: {
+            /** @description 置く項目。なければ作り、あれば値を替える */
+            put?: {
+                /**
+                 * @description `<クライアント>.<残り>` の形。公式リーダーは `reader.` で始める。128 文字まで、空白を除く印字できる ASCII
+                 * @example reader.theme
+                 */
+                name: string;
+                /** @description JSON の値。JSON にして 8192 バイトまで、入れ子は 16 段まで。Sendo は中身を解釈しない */
+                value: unknown;
+            }[];
+            /** @description 消す項目の名前。ない項目は、そのまま通す */
+            remove?: string[];
+        };
         SyncChanges: {
             cursor: string;
             hasMore: boolean;
             folders: components["schemas"]["SyncFolder"][];
             feeds: components["schemas"]["SyncFeed"][];
             articles: components["schemas"]["SyncArticle"][];
+            settings: components["schemas"]["SyncSetting"][];
         };
         SyncFolder: {
             id: string;
@@ -1669,6 +1802,29 @@ export interface components {
             id: string;
             /**
              * @description 受信箱から消えた記事。手元から消す
+             * @enum {boolean}
+             */
+            deleted: true;
+        };
+        SyncSetting: components["schemas"]["SyncPutSetting"] | components["schemas"]["SyncRemovedSetting"];
+        SyncPutSetting: {
+            /** @description 端末の種類（mobile ／ desktop） */
+            deviceType: string;
+            name: string;
+            /** @description JSON の値（オブジェクト、配列、文字列、数、真偽、null）。Sendo は中身を解釈しない */
+            value?: unknown;
+            /**
+             * @description 置いてある項目
+             * @enum {boolean}
+             */
+            deleted: false;
+        };
+        SyncRemovedSetting: {
+            /** @description 端末の種類（mobile ／ desktop） */
+            deviceType: string;
+            name: string;
+            /**
+             * @description 消した項目。手元から消す（既定に戻す）
              * @enum {boolean}
              */
             deleted: true;

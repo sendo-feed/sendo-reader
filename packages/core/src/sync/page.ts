@@ -1,4 +1,4 @@
-import type { Article, Feed, Folder } from "../models";
+import type { Article, DeviceType, Feed, Folder, JsonValue } from "../models";
 
 /**
  * 差分同期の 1 ページ（core の中の形）。sendo の応答の形からの変換は API の境界
@@ -15,6 +15,15 @@ export interface SyncPage {
   feeds: (Feed & { deleted: boolean })[];
   /** 受信箱の記事か、受信箱から消えた記録 */
   articles: SyncArticle[];
+  /**
+   * 設定の項目（どの端末の種類の分も届く）。deleted なら、消した印。手元からも消す。
+   * 設定を配る前の版の sendo が相手なら null
+   */
+  settings: SyncSetting[] | null;
 }
+
+export type SyncSetting =
+  | { deviceType: DeviceType; name: string; value: JsonValue; deleted: false }
+  | { deviceType: DeviceType; name: string; deleted: true };
 
 export type SyncArticle = (Article & { deleted: false }) | { id: string; deleted: true };

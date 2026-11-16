@@ -8,7 +8,7 @@
     type Swipes,
   } from "../../lib/prefs.svelte";
 
-  /** 指でのスワイプの割り当て。この端末だけに置き、sendo には送らない（lib/prefs.svelte.ts） */
+  /** 指でのスワイプの割り当て。sendo に預け、同じ種類の端末に引き継ぐ（lib/prefs.svelte.ts） */
   const LIST_LABELS: Record<ListSwipe, string> = {
     none: "何もしない",
     read: "既読・未読を切り替える",
@@ -40,7 +40,7 @@
 
 <section aria-labelledby="swipes-heading">
   <h2 id="swipes-heading">スワイプ</h2>
-  <p class="note">指で横に動かしたときにすることを選びます。この端末だけの設定です。</p>
+  <p class="note">指で横に動かしたときにすることを選びます。</p>
   {#each ROWS as row (row.key)}
     <label>
       <span>{row.label}</span>

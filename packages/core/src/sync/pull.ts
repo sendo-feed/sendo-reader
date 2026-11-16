@@ -8,6 +8,7 @@ import {
   markSyncComplete,
   RESYNC_KEY,
 } from "../db/synced";
+import { clearSyncedSettings, putSyncedSetting, removeSyncedSetting } from "../db/synced-settings";
 import type { Article, Table } from "../models";
 import type { SyncPage } from "./page";
 import { reapplyPending, widenPendingMarkRead } from "./queue";
@@ -29,6 +30,11 @@ export interface PullOptions {
   signal?: AbortSignal;
   /** ページを書き込むたびに呼ぶ（画面に変わった表を知らせる） */
   onPage?: (changed: Set<Table>) => void;
+  /**
+   * 最後まで同期し終えたときに、最後のページの書き込みと同じトランザクションの中で呼ぶ。
+   * settings は、sendo が設定を配っているか（配る前の版なら false）。表を変えたら、その表を返す
+   */
+  onComplete?: (tx: Executor, info: { settings: boolean }) => Promise<Iterable<Table>>;
 }
 
 /**
@@ -76,7 +82,11 @@ export async function pull(db: Database, api: SendoApi, options: PullOptions): P
       await widenPendingMarkRead(tx, deliveredIds(page));
       await reapplyPending(tx);
       await setSetting(tx, CURSOR_KEY, page.cursor);
-      if (!page.hasMore) await markSyncComplete(tx, page.cursor);
+      if (!page.hasMore) {
+        await markSyncComplete(tx, page.cursor);
+        const more = await options.onComplete?.(tx, { settings: page.settings !== null });
+        for (const table of more ?? []) changed.add(table);
+      }
       return changed;
     });
     result.pages += 1;
@@ -120,6 +130,9 @@ async function resync(
        )`,
     );
     await clearSyncedRows(tx);
+    // 設定も、届いたもので置き換える（設定を配る前の版の sendo が相手なら、手元のまま残す）
+    const settings = pages.some((page) => page.settings !== null);
+    if (settings) await clearSyncedSettings(tx);
     for (const page of pages) {
       await applyPage(tx, page);
       await widenPendingMarkRead(tx, deliveredIds(page));
@@ -136,12 +149,13 @@ async function resync(
     if (cursor !== null) {
       await setSetting(tx, CURSOR_KEY, cursor);
       await markSyncComplete(tx, cursor);
+      await options.onComplete?.(tx, { settings });
     }
     await deleteSetting(tx, RESYNC_KEY);
   });
   result.pages += pages.length;
   result.reset = true;
-  const all = new Set<Table>(["folders", "feeds", "articles"]);
+  const all = new Set<Table>(["folders", "feeds", "articles", "settings"]);
   for (const table of all) result.changed.add(table);
   options.onPage?.(all);
 }
@@ -165,6 +179,12 @@ async function applyPage(tx: Executor, page: SyncPage): Promise<Set<Table>> {
   if (page.feeds.length > 0) changed.add("feeds");
   for (const article of page.articles) await applyArticle(tx, article);
   if (page.articles.length > 0) changed.add("articles");
+  // 配列は変更番号の順。同じ項目が続けて来たら、後のものが残る
+  for (const setting of page.settings ?? []) {
+    if (setting.deleted) await removeSyncedSetting(tx, setting.deviceType, setting.name);
+    else await putSyncedSetting(tx, setting.deviceType, setting.name, setting.value);
+  }
+  if ((page.settings?.length ?? 0) > 0) changed.add("settings");
   return changed;
 }
 
