@@ -1,6 +1,6 @@
 <script lang="ts">
   import type { Article } from "@sendo-reader/core";
-  import { untrack } from "svelte";
+  import { tick, untrack } from "svelte";
   import { useReader } from "../lib/context";
   import { compactCount, dayLabel, shortTime } from "../lib/format";
   import {
@@ -11,7 +11,7 @@
   } from "../lib/layout.svelte";
   import type { ArticleListState, ListProgress } from "../lib/list.svelte";
   import { prefs, type ViewOptions } from "../lib/prefs.svelte";
-  import { handleLink, isPlainClick, router } from "../lib/router.svelte";
+  import { handleLink, isPlainClick, type ListAnchor, router } from "../lib/router.svelte";
   import Icon from "./Icon.svelte";
   import RemoteImage from "./RemoteImage.svelte";
 
@@ -112,7 +112,7 @@
    * 上の端まで見えていたことのある行。そうでない行（別の一覧に替えた直後に上にある行、開いたときから
    * 上が切れている行）は、通り過ぎたのではないので数えない
    */
-  const seen = new WeakSet<Element>();
+  let seen = new WeakSet<Element>();
   const passed = new Set<string>();
   let flushTimer: ReturnType<typeof setTimeout> | undefined;
 
@@ -173,14 +173,20 @@
     };
   }
 
+  /** 行を見直す。forget なら、上の端まで見えていた行も忘れる（いまの位置から数え直す） */
+  function rewatch(forget = false) {
+    // まだ届けていない知らせも捨てる（見直す前の位置の知らせで、既読にしない）
+    observer?.takeRecords();
+    observer?.disconnect();
+    observer = undefined;
+    if (forget) seen = new WeakSet();
+    for (const node of watched) passObserver().observe(node);
+  }
+
   // 狭い画面と広い画面を行き来したら（窓の幅を変えた、端末を回した）、見る相手を替える
   $effect(() => {
     void layout.pageScroll;
-    untrack(() => {
-      observer?.disconnect();
-      observer = undefined;
-      for (const node of watched) passObserver().observe(node);
-    });
+    untrack(() => rewatch());
   });
 
   // 別の一覧に替えたら、先頭に戻す（前の一覧の位置のまま、新しい一覧の途中を出さない）
@@ -404,6 +410,57 @@
    */
   export function peekAt(top: number) {
     if (scroller !== undefined) scroller.scrollTop = top;
+  }
+
+  /** 一覧の見えている範囲の上の端（貼り付いた見出しのすぐ下） */
+  function visibleTop(): number {
+    return scroller?.querySelector("header")?.getBoundingClientRect().bottom ?? 0;
+  }
+
+  function rowOf(id: string): HTMLElement | null {
+    if (scroller === undefined) return null;
+    for (const row of scroller.querySelectorAll<HTMLElement>(".row[data-article]")) {
+      if (row.dataset.article === id) return row;
+    }
+    return null;
+  }
+
+  /**
+   * いま見ている位置（見出しのすぐ下に出ている行の記事）。先頭にいるなら null。
+   * 読み込み直したり戻ったりしたときに、restore で同じ位置に戻す
+   */
+  export function anchor(): ListAnchor | null {
+    if (scroller === undefined || scrollTopOf(scroller) <= 0) return null;
+    const top = visibleTop();
+    for (const row of scroller.querySelectorAll<HTMLElement>(".row[data-article]")) {
+      const rect = row.getBoundingClientRect();
+      if (rect.height === 0 || rect.bottom <= top) continue;
+      const article = list.find(row.dataset.article ?? null);
+      if (article === null) return null;
+      return { id: article.id, publishedAt: article.publishedAt, offset: rect.top - top };
+    }
+    return null;
+  }
+
+  /**
+   * anchor で覚えた位置に戻す。その記事が一覧から消えていたら（未読だけの一覧で既読にした）、
+   * 並び順で次の記事を、見出しのすぐ下に出す。戻す前に動かし始めていたら、何もしない。
+   * 戻すときに飛び越えた行は、通り過ぎたのではないので、既読にしない
+   */
+  export async function restore(anchor: ListAnchor): Promise<void> {
+    const generation = list.generation;
+    const target = await list.seek(anchor);
+    if (target === null || list.generation !== generation) return;
+    // 見ていた記事より前が、すべて一覧から消えていた。先頭のまま出す
+    if (target.id !== anchor.id && target.id === list.articles[0]?.id) return;
+    await tick();
+    const row = rowOf(target.id);
+    if (row === null || scrollTopOf(scroller) > 0) return;
+    const offset = target.id === anchor.id ? anchor.offset : 0;
+    const delta = row.getBoundingClientRect().top - visibleTop() - offset;
+    scrollPage(scroller, scrollTopOf(scroller) + delta);
+    passed.clear();
+    rewatch(true);
   }
 
   async function reload() {

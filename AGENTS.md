@@ -51,7 +51,7 @@ Sendo の公式リーダー。`packages/core`（同期エンジン）と `apps/w
     - `lib/app-update.ts`：新しい版への切り替え（`docs/decisions/ui.md` の 5）。前に出たときと一定の間隔で新しい版を確かめ、替わったら、画面が裏にある間か次に前に出たときに読み込み直す。読み込み直すと消えるものを出す画面を足したら、`main.ts` の `canReload` に足す
     - `e2e/`：画面を通したテスト（Playwright）
     - `lib/state.svelte.ts`：画面の状態（フォルダ、フィード、未読の数、同期の様子）。手元の表が変わったら読み直す
-    - `lib/router.svelte.ts`：小さな自前のルーター（History API）
+    - `lib/router.svelte.ts`：小さな自前のルーター（History API）。どの画面か（一覧、探す言葉、開いている記事）は URL に、その画面のどこを見ていたか（一覧と記事の位置）は履歴の項目（`history.state`）に持ち、読み込み直しても、戻る・進むでも同じところに戻す
     - `lib/list.svelte.ts`：開いている記事の一覧（読み出し、続き、楽観的な更新、前後の記事）。一覧・記事・キーボードの操作が同じものを見る
     - `lib/prefs.svelte.ts`：表示の好み（テーマ、文字の大きさ、一覧の形など）。正は手元の DB で、sendo に預けて同じ種類の端末（スマホ ／ それ以外）に引き継ぐ（`docs/decisions/settings.md`）。項目を足すときは、既定と同じ値を預けない、別々に変わるものは別の項目にする、を守る。localStorage には、起動してすぐ当てるための写しだけを置く
     - キーボードの操作は `routes/Reader.svelte` に割り当て、一覧を `components/ShortcutHelp.svelte` に出す（足したら両方を直す）

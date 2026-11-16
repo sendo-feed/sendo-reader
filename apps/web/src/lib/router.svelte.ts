@@ -9,6 +9,12 @@
  * - /manage          購読の管理（追加、フォルダ、OPML の取り込み）
  * - /settings        設定（アクセストークンと OAuth の許可。docs/decisions/account.md）
  * 開いている記事は ?article=<id> に持つ。
+ *
+ * 画面の状態のうち、共有しても意味のあるもの（どの画面か、探す言葉、開いている記事）は URL に、
+ * その画面のどこを見ていたか（一覧と記事の位置）は履歴の項目（history.state）に持つ。どちらも、
+ * 読み込み直しても、戻る・進むでも残るので、同じ画面の同じ位置に戻れる。
+ * 一覧の表示の設定（未読だけ、並び順）は、一覧ごとの設定として手元の DB に持つ（prefs.svelte.ts）。
+ * docs/decisions/ui.md の 1
  */
 export type View =
   | { kind: "all" }
@@ -19,13 +25,58 @@ export type View =
   | { kind: "manage" }
   | { kind: "settings" };
 
+/** 一覧のどこを見ていたか。見出しのすぐ下に出ていた行の記事と、その行の上の端のずれ（px） */
+export interface ListAnchor {
+  id: string;
+  publishedAt: number;
+  offset: number;
+}
+
+/** 履歴の項目に持つ、その画面のどこを見ていたか */
+export interface Position {
+  /** 一覧の位置。key は一覧の条件（条件が替わったら、前の位置には戻さない） */
+  list?: { key: string; anchor: ListAnchor } | undefined;
+  /** 記事の位置（px） */
+  article?: { id: string; top: number } | undefined;
+}
+
 class Router {
   url = $state(new URL(location.href));
 
+  /**
+   * いまの履歴の項目に入ったときに、その項目に残っていた位置（読み込み直した、戻る・進むで来た）。
+   * 戻したら消す（そのあとに一覧を読み直しても、また戻さない）
+   */
+  #entered: Position = positionOf(history.state);
+
+  /** 履歴の項目を移る直前に呼ぶ（見ていた位置を、いまの項目に書いておく） */
+  beforeLeave: (() => void) | null = null;
+
   constructor() {
     window.addEventListener("popstate", () => {
+      this.#entered = positionOf(history.state);
       this.url = new URL(location.href);
     });
+  }
+
+  /** いまの履歴の項目に、見ている位置を書く（URL は変えない） */
+  remember(position: Position): void {
+    const state: unknown = history.state;
+    history.replaceState({ ...(isRecord(state) ? state : {}), ...position }, "");
+  }
+
+  /** この項目に入ったときの一覧の位置（一覧の条件が同じときだけ）。一度だけ返す */
+  takeList(key: string): ListAnchor | null {
+    const list = this.#entered.list;
+    this.#entered.list = undefined;
+    return list?.key === key ? list.anchor : null;
+  }
+
+  /** この項目に入ったときの記事の位置（同じ記事のときだけ）。一度だけ返す */
+  takeArticle(id: string): number | null {
+    const article = this.#entered.article;
+    this.#entered.article = undefined;
+    return article?.id === id ? article.top : null;
   }
 
   get view(): View {
@@ -52,6 +103,7 @@ class Router {
     const next = new URL("/search", location.href);
     if (query !== "") next.searchParams.set("q", query);
     history.replaceState(null, "", next);
+    this.#entered = {};
     this.url = next;
   }
 
@@ -62,7 +114,9 @@ class Router {
   navigate(href: string): void {
     const next = new URL(href, location.href);
     if (next.origin !== location.origin) return;
+    this.beforeLeave?.();
     history.pushState(null, "", next);
+    this.#entered = {};
     this.url = next;
   }
 
@@ -84,13 +138,40 @@ class Router {
       history.replaceState(history.state, "", next);
       this.url = next;
     } else {
-      history.pushState({ opened: true }, "", next);
+      // 一覧はそのままなので、一覧の位置は引き継ぐ（記事を開いたまま読み込み直しても、広い画面の
+      // 一覧の位置が戻る）
+      this.beforeLeave?.();
+      const list = positionOf(history.state).list;
+      history.pushState({ opened: true, list }, "", next);
+      this.#entered = {};
       this.url = next;
     }
   }
 }
 
 export const router = new Router();
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+/** 履歴の項目の状態から、位置を取り出す（前の版が書いた、形の違う状態は捨てる） */
+export function positionOf(state: unknown): Position {
+  if (!isRecord(state)) return {};
+  const position: Position = {};
+  const list = state.list;
+  if (isRecord(list) && typeof list.key === "string" && isRecord(list.anchor)) {
+    const { id, publishedAt, offset } = list.anchor;
+    if (typeof id === "string" && typeof publishedAt === "number" && typeof offset === "number") {
+      position.list = { key: list.key, anchor: { id, publishedAt, offset } };
+    }
+  }
+  const article = state.article;
+  if (isRecord(article) && typeof article.id === "string" && typeof article.top === "number") {
+    position.article = { id: article.id, top: article.top };
+  }
+  return position;
+}
 
 export function viewHref(view: View): string {
   switch (view.kind) {

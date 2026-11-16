@@ -109,9 +109,19 @@ export class ArticleListState {
     this.loading = false;
   }
 
-  async loadMore(): Promise<void> {
+  /** 続きを読む。読んでいる最中に頼まれたら、その読み出しが終わるのを待つ */
+  loadMore(): Promise<void> {
+    this.#more ??= this.#loadMore().finally(() => {
+      this.#more = null;
+    });
+    return this.#more;
+  }
+
+  #more: Promise<void> | null = null;
+
+  async #loadMore(): Promise<void> {
     const last = this.articles.at(-1);
-    if (last === undefined || this.loadingMore || !this.hasMore) return;
+    if (last === undefined || !this.hasMore) return;
     const current = this.#generation;
     this.loadingMore = true;
     try {
@@ -174,6 +184,29 @@ export class ArticleListState {
       const order = byTime !== 0 ? byTime : article.id > last.id ? 1 : -1;
       return order * direction > 0;
     }).length;
+  }
+
+  /**
+   * 並び順で、その記事か、それより後ろにある最初の記事（前に見ていた位置に戻すとき。その記事が
+   * 一覧から消えていたら、次の記事に合わせる）。出していなければ、続きを pages ページまで読んで探す。
+   * 末尾まで来たら、最後の記事。探している間に一覧が読み直されたら null
+   */
+  async seek(anchor: { id: string; publishedAt: number }, pages = 10): Promise<Article | null> {
+    const current = this.#generation;
+    const direction = this.#query.order === "oldest" ? -1 : 1;
+    const before = (article: Article) => {
+      if (article.id === anchor.id) return false;
+      const byTime = article.publishedAt - anchor.publishedAt;
+      const order = byTime !== 0 ? byTime : article.id > anchor.id ? 1 : -1;
+      return order * direction > 0;
+    };
+    for (let page = 0; ; page++) {
+      const found = this.articles.find((article) => !before(article));
+      if (found !== undefined) return found;
+      if (!this.hasMore || page >= pages) return this.articles.at(-1) ?? null;
+      await this.loadMore();
+      if (current !== this.#generation) return null;
+    }
   }
 
   find(id: string | null): Article | null {
