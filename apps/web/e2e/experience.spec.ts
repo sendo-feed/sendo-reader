@@ -739,14 +739,14 @@ test("見出しや下のバーを押すと一覧の先頭に戻る。先頭で�
   await drag(200, "touchcancel");
   await page.waitForTimeout(300);
   await expect(list.locator(".item")).toHaveCount(40);
-  await expect(list.locator(".pull")).toHaveCount(0);
+  await expect(list.locator(".pull-busy")).toHaveCount(0);
 
   // 先頭で下に引いて離すと、既読の記事が消えて、届いた記事が先頭に入る
   await drag(200);
   await expect(list.locator(".title").first()).toHaveText("届いたばかり");
   await expect(list.locator(".item")).toHaveCount(41 - readCount);
   await expect(list.locator(".row:not(.unread)")).toHaveCount(0);
-  await expect(list.locator(".pull")).toHaveCount(0);
+  await expect(list.locator(".pull-busy")).toHaveCount(0);
 
   // 一覧の途中では、下に動かしても更新しない
   await list.evaluate((el) => el.scrollTo({ top: 300 }));
@@ -795,13 +795,13 @@ test("引いて更新の同期を待っている間に読み進めたら、同�
     fire("touchmove", [at(400)], [at(400)]);
     fire("touchend", [], [at(400)]);
   });
-  await expect(list.locator(".pull")).toBeVisible();
+  await expect(list.locator(".pull-busy")).toBeVisible();
 
   // 待っている間に、読み進める
   await list.evaluate((el) => el.scrollTo({ top: 900 }));
   server.onRequest = null;
   release();
-  await expect(list.locator(".pull")).toHaveCount(0);
+  await expect(list.locator(".pull-busy")).toHaveCount(0);
   expect(await list.evaluate((el) => el.scrollTop)).toBeGreaterThan(800);
   // 届いた記事は、一覧には割り込ませず、件数で知らせる
   await expect(list.getByRole("button", { name: "1 new" })).toBeVisible();

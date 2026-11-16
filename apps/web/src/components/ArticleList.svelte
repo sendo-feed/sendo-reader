@@ -344,13 +344,15 @@
   }
 
   /** 引いた長さ（px）が、これを超えて指を離したら、更新する */
-  const PULL_THRESHOLD = 64;
-  const PULL_MAX = 96;
+  const PULL_THRESHOLD = 72;
+  const PULL_MAX = 260;
   /** 同期を待つ上限。届かなくても、手元の一覧は読み直す */
   const PULL_SYNC_TIMEOUT_MS = 8000;
 
   /** 一覧の先頭で、下に引いている長さ（px）。引いていなければ 0 */
   let pull = $state(0);
+  /** 指で引いている最中（一覧を、指の動きにそのまま付いていかせる。離したら、なめらかに戻す） */
+  let dragging = $state(false);
   let refreshing = $state(false);
 
   /**
@@ -407,7 +409,9 @@
         if (!pulling) return;
       }
       // 指より少し遅れて付いてくる（引いている手ごたえ）
-      pull = Math.max(0, Math.min(PULL_MAX, dy * 0.5));
+      dragging = true;
+      // 指より少し遅れて付いてくる（引いている手ごたえ）
+      pull = Math.max(0, Math.min(PULL_MAX, dy * 0.6));
     }
 
     function onEnd() {
@@ -419,6 +423,7 @@
     /** ブラウザや OS がタッチを取り消した。引いた分を戻すだけで、更新はしない */
     function onCancel() {
       pulling = false;
+      dragging = false;
       pull = 0;
     }
 
@@ -526,24 +531,32 @@
     {/if}
   </header>
 
-  {#if pull > 0 || refreshing}
-    <div
-      class="pull"
-      class:ready={pull >= PULL_THRESHOLD}
-      class:pull-busy={refreshing}
-      style:height={refreshing ? undefined : `${pull}px`}
-      role="status"
-    >
-      <Icon name="refresh" />
-      <span
-        >{refreshing
-          ? "Refreshing…"
-          : pull >= PULL_THRESHOLD
-            ? "Release to refresh"
-            : "Pull to refresh"}</span
+  <!--
+    先頭で下に引いたときの、すき間。引いた分だけ一覧を下に押し、まんなかに、回る印だけを出す
+    （文字は出さない）。離すと、更新している間は小さなすき間を残し、終わったら閉じる
+  -->
+  <div
+    class="pull"
+    class:dragging
+    class:pull-busy={refreshing}
+    style:height={refreshing ? undefined : `${pull}px`}
+  >
+    {#if pull > 0 || refreshing}
+      <svg
+        class="spinner"
+        class:ready={pull >= PULL_THRESHOLD}
+        viewBox="0 0 24 24"
+        aria-hidden="true"
+        style:opacity={refreshing ? undefined : String(Math.min(1, pull / PULL_THRESHOLD))}
+        style:transform={refreshing ? undefined : `rotate(${Math.round(pull * 3)}deg)`}
       >
-    </div>
-  {/if}
+        <path d="M12 3a9 9 0 1 0 9 9" />
+      </svg>
+    {/if}
+    {#if refreshing}
+      <span class="visually-hidden" role="status">Refreshing…</span>
+    {/if}
+  </div>
   {#if list.fresh > 0}
     <button type="button" class="fresh" onclick={reload}>{list.fresh} new</button>
   {/if}
@@ -671,35 +684,53 @@
     flex-direction: column;
     min-width: 0;
     overflow-y: auto;
-    /* 端まで動かしたときに、外側（ページ）まで動かさない。先頭で下に引く動きは、更新に使う */
-    overscroll-behavior-y: contain;
+    /*
+     * 端まで動かしたときに、外側（ページ）を動かさず、ブラウザ自身の引っぱり（ゴムのような戻り）も
+     * 出さない。先頭で下に引く動きは、更新に使う（すき間は、こちらで作る）
+     */
+    overscroll-behavior-y: none;
     border-right: 1px solid var(--border);
     background: var(--background);
   }
 
-  /* 先頭で下に引いたときに出す。引いた分だけ、一覧を下に押す */
+  /* 先頭で下に引いたときの、すき間。引いた分だけ、一覧を下に押す */
   .pull {
     display: flex;
     flex: none;
     align-items: center;
     justify-content: center;
-    gap: 0.5rem;
+    height: 0;
     overflow: hidden;
-    color: var(--faint);
-    font-size: 0.8125rem;
+    transition: height 0.2s ease-out;
   }
 
-  .pull.ready {
-    color: var(--accent);
+  /* 引いている最中は、指の動きにそのまま付いていく */
+  .pull.dragging {
+    transition: none;
   }
 
   .pull-busy {
-    height: 2.75rem;
-    color: var(--muted);
+    height: 3.25rem;
   }
 
-  .pull-busy :global(.icon) {
-    animation: pull-spin 0.9s linear infinite;
+  .spinner {
+    flex: none;
+    width: 1.25rem;
+    height: 1.25rem;
+    fill: none;
+    stroke: var(--faint);
+    stroke-width: 2;
+    stroke-linecap: round;
+  }
+
+  /* 離せば更新する、ところまで引いた */
+  .spinner.ready {
+    stroke: var(--accent);
+  }
+
+  .pull-busy .spinner {
+    stroke: var(--muted);
+    animation: pull-spin 0.8s linear infinite;
   }
 
   @keyframes pull-spin {
@@ -709,7 +740,11 @@
   }
 
   @media (prefers-reduced-motion: reduce) {
-    .pull-busy :global(.icon) {
+    .pull {
+      transition: none;
+    }
+
+    .pull-busy .spinner {
       animation: none;
     }
   }
