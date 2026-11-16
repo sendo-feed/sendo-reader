@@ -325,9 +325,104 @@
     };
   }
 
+  /**
+   * 一覧の先頭に戻る（見出しを押したとき、下のバーで今の画面をもう一度押したとき）。
+   * iPhone の「画面のいちばん上を押すと先頭に戻る」は、ページ全体を動かすときにしか効かない。
+   * ここは一覧だけを動かしているので、自分で持つ
+   */
+  export function scrollToTop() {
+    const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    scroller?.scrollTo({ top: 0, behavior: reduce ? "auto" : "smooth" });
+  }
+
   async function reload() {
     await list.load();
     scroller?.scrollTo({ top: 0 });
+  }
+
+  /** 引いた長さ（px）が、これを超えて指を離したら、更新する */
+  const PULL_THRESHOLD = 64;
+  const PULL_MAX = 96;
+  /** 同期を待つ上限。届かなくても、手元の一覧は読み直す */
+  const PULL_SYNC_TIMEOUT_MS = 8000;
+
+  /** 一覧の先頭で、下に引いている長さ（px）。引いていなければ 0 */
+  let pull = $state(0);
+  let refreshing = $state(false);
+
+  /**
+   * 一覧を読み直して、同期する（先頭で下に引いたとき）。まず手元を読み直すので、ネットワークを
+   * 待たずに、既読にした記事が消えて未読の先頭に戻る。そのあと同期し、届いた記事も入れる
+   */
+  async function refresh() {
+    if (refreshing) return;
+    refreshing = true;
+    try {
+      await reload();
+      // 届かない、時間がかかる、のどちらでも、待つのはここまで
+      await Promise.race([
+        reader.client.syncNow().catch(() => {}),
+        new Promise((resolve) => setTimeout(resolve, PULL_SYNC_TIMEOUT_MS)),
+      ]);
+      await reload();
+    } catch {
+      // 読み直せなくても、一覧は前のまま使える
+    } finally {
+      refreshing = false;
+    }
+  }
+
+  /** 一覧の先頭で、指で下に引いたら更新する（マウスでは、何もしない） */
+  function pullToRefresh(node: HTMLElement) {
+    let startX = 0;
+    let startY = 0;
+    /** null はまだ向きが分からない。false は、引く動きではない（横のスワイプ、上への動き） */
+    let pulling: boolean | null = false;
+
+    function onStart(event: TouchEvent) {
+      const touch = event.touches[0];
+      pulling = false;
+      if (event.touches.length !== 1 || touch === undefined) return;
+      if (node.scrollTop > 0 || refreshing) return;
+      startX = touch.clientX;
+      startY = touch.clientY;
+      pulling = null;
+    }
+
+    function onMove(event: TouchEvent) {
+      const touch = event.touches[0];
+      if (pulling === false || touch === undefined) return;
+      const dx = touch.clientX - startX;
+      const dy = touch.clientY - startY;
+      if (pulling === null) {
+        if (Math.abs(dx) < 8 && Math.abs(dy) < 8) return;
+        // 横に動かした（行のスワイプ）、上に動かした、途中で一覧が動いた、なら引く動きではない
+        pulling = dy > 0 && Math.abs(dy) > Math.abs(dx) && node.scrollTop <= 0;
+        if (!pulling) return;
+      }
+      // 指より少し遅れて付いてくる（引いている手ごたえ）
+      pull = Math.max(0, Math.min(PULL_MAX, dy * 0.5));
+    }
+
+    function onEnd() {
+      const reached = pulling === true && pull >= PULL_THRESHOLD;
+      pulling = false;
+      pull = 0;
+      if (reached) void refresh();
+    }
+
+    node.addEventListener("touchstart", onStart, { passive: true });
+    node.addEventListener("touchmove", onMove, { passive: true });
+    node.addEventListener("touchend", onEnd);
+    node.addEventListener("touchcancel", onEnd);
+    return {
+      destroy() {
+        node.removeEventListener("touchstart", onStart);
+        node.removeEventListener("touchmove", onMove);
+        node.removeEventListener("touchend", onEnd);
+        node.removeEventListener("touchcancel", onEnd);
+      },
+    };
   }
 
   function toggle(article: Article, field: "readAt" | "starredAt") {
@@ -336,7 +431,7 @@
   }
 </script>
 
-<section class="article-list" aria-label={title} bind:this={scroller}>
+<section class="article-list" aria-label={title} bind:this={scroller} use:pullToRefresh>
   <header>
     {#if progress !== null}
       <button
@@ -376,10 +471,12 @@
       >
     {:else}
       <h2>
-        <span class="name">{title}</span>
-        {#if unread !== null && unread > 0}
-          <span class="count">{unread}</span>
-        {/if}
+        <button type="button" class="to-top" title="先頭に戻る" onclick={scrollToTop}>
+          <span class="name">{title}</span>
+          {#if unread !== null && unread > 0}
+            <span class="count">{unread}</span>
+          {/if}
+        </button>
       </h2>
     {/if}
     {#if kind === "feed" || kind === "folder"}
@@ -429,6 +526,24 @@
     {/if}
   </header>
 
+  {#if pull > 0 || refreshing}
+    <div
+      class="pull"
+      class:ready={pull >= PULL_THRESHOLD}
+      class:pull-busy={refreshing}
+      style:height={refreshing ? undefined : `${pull}px`}
+      role="status"
+    >
+      <Icon name="refresh" />
+      <span
+        >{refreshing
+          ? "更新しています"
+          : pull >= PULL_THRESHOLD
+            ? "離して更新"
+            : "引いて更新"}</span
+      >
+    </div>
+  {/if}
   {#if list.fresh > 0}
     <button type="button" class="fresh" onclick={reload}>新しい記事 {list.fresh} 件を読む</button>
   {/if}
@@ -558,8 +673,47 @@
     flex-direction: column;
     min-width: 0;
     overflow-y: auto;
+    /* 端まで動かしたときに、外側（ページ）まで動かさない。先頭で下に引く動きは、更新に使う */
+    overscroll-behavior-y: contain;
     border-right: 1px solid var(--border);
     background: var(--background);
+  }
+
+  /* 先頭で下に引いたときに出す。引いた分だけ、一覧を下に押す */
+  .pull {
+    display: flex;
+    flex: none;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    overflow: hidden;
+    color: var(--faint);
+    font-size: 0.8125rem;
+  }
+
+  .pull.ready {
+    color: var(--accent);
+  }
+
+  .pull-busy {
+    height: 2.75rem;
+    color: var(--muted);
+  }
+
+  .pull-busy :global(.icon) {
+    animation: pull-spin 0.9s linear infinite;
+  }
+
+  @keyframes pull-spin {
+    to {
+      transform: rotate(360deg);
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .pull-busy :global(.icon) {
+      animation: none;
+    }
   }
 
   header {
@@ -645,11 +799,28 @@
   h2 {
     display: flex;
     flex: 1;
-    align-items: baseline;
-    gap: 0.5rem;
     min-width: 0;
     margin: 0;
     font-size: 1.0625rem;
+  }
+
+  /* 見出しは、押すと一覧の先頭に戻る。見た目は見出しのまま、押せる範囲を見出しの幅いっぱいにする */
+  h2 .to-top {
+    display: flex;
+    flex: 1;
+    align-items: baseline;
+    gap: 0.5rem;
+    min-width: 0;
+    min-height: 2.25rem;
+    padding: 0;
+    border: 0;
+    background: none;
+    font-weight: inherit;
+    text-align: start;
+  }
+
+  h2 .to-top:hover {
+    background: none;
   }
 
   h2 .name {

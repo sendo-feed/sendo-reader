@@ -15,7 +15,7 @@
   import { useReader } from "../lib/context";
   import { ArticleListState, type ListProgress } from "../lib/list.svelte";
   import { prefs } from "../lib/prefs.svelte";
-  import { handleLink, router, type View, viewHref } from "../lib/router.svelte";
+  import { handleLink, isPlainClick, router, type View, viewHref } from "../lib/router.svelte";
   import Manage from "./Manage.svelte";
   import Settings from "./Settings.svelte";
 
@@ -56,6 +56,18 @@
 
   /** 下のバーで、いまいる場所として示すもの（フィードやフォルダの一覧は、どれでもない） */
   const currentTab = $derived(TABS.find((tab) => tab.href === viewHref(router.view))?.href ?? null);
+
+  let listView = $state<ArticleList>();
+
+  /** 下のバーを押した。いまいる画面をもう一度押したら、一覧の先頭に戻る（移らない） */
+  function onTab(event: MouseEvent, href: string) {
+    if (currentTab === href && isPlainClick(event)) {
+      event.preventDefault();
+      listView?.scrollToTop();
+      return;
+    }
+    handleLink(event, href);
+  }
 
   /** 開いている一覧の表示の設定（要約を出すか、並び順、未読だけ）。一覧ごとに覚える */
   const viewKey = $derived(viewHref(router.view));
@@ -426,6 +438,7 @@
     </div>
   {:else}
     <ArticleList
+      bind:this={listView}
       {list}
       title={listing.title}
       kind={listing.kind}
@@ -463,7 +476,7 @@
         class="tab"
         href={tab.href}
         aria-current={currentTab === tab.href ? "page" : undefined}
-        onclick={(e) => handleLink(e, tab.href)}
+        onclick={(e) => onTab(e, tab.href)}
       >
         <Icon name={tab.icon} filled={tab.icon === "star" && currentTab === tab.href} />
         <span>{tab.label}</span>

@@ -668,3 +668,73 @@ test("手元の記事を探せる（オフラインでも）。探した結果�
   await page.locator("nav.sidebar").getByRole("link", { name: "検索" }).click();
   await expect(list.getByRole("searchbox", { name: "記事を探す" })).toHaveValue("");
 });
+
+test("見出しや下のバーを押すと一覧の先頭に戻る。先頭で下に引くと、読み直して同期する", async ({
+  page,
+  context,
+}) => {
+  const server = new FakeSendo();
+  const feed = server.subscribe({ url: "https://blog.example/feed.xml", title: "Blog" });
+  for (let i = 0; i < 40; i++) {
+    server.deliver(feed.id, { title: `記事 ${i}`, publishedAt: Date.now() - (i + 1) * 60_000 });
+  }
+  await routeFakeSendo(context, server);
+  await page.setViewportSize({ width: 390, height: 780 });
+  await page.goto("/");
+  await signIn(page);
+  const list = page.locator(".article-list");
+  await expect(list.locator(".item")).toHaveCount(40);
+  const scrollTop = () => list.evaluate((el) => el.scrollTop);
+
+  // 見出しを押すと、先頭に戻る
+  await list.evaluate((el) => el.scrollTo({ top: 1500 }));
+  await expect.poll(scrollTop).toBeGreaterThan(1000);
+  await list.getByRole("button", { name: /^未読/ }).click();
+  await expect.poll(scrollTop).toBe(0);
+
+  // 下のバーで、いまいる画面をもう一度押しても、先頭に戻る（画面は移らない）
+  await list.evaluate((el) => el.scrollTo({ top: 1500 }));
+  await expect.poll(scrollTop).toBeGreaterThan(1000);
+  await page
+    .getByRole("navigation", { name: "主な画面" })
+    .getByRole("link", { name: "未読" })
+    .click();
+  await expect.poll(scrollTop).toBe(0);
+  await expect(page).toHaveURL(/\/$/);
+
+  // 通り過ぎて既読になった記事は、一覧に残っている。その間に、新しい記事が sendo に届いた
+  await expect(list.locator(".row:not(.unread)").first()).toBeAttached();
+  const readCount = await list.locator(".row:not(.unread)").count();
+  expect(readCount).toBeGreaterThan(0);
+  server.deliver(feed.id, { title: "届いたばかり", publishedAt: Date.now() });
+
+  const drag = (dy: number) =>
+    list.evaluate((el, dy) => {
+      const at = (y: number) => new Touch({ identifier: 1, target: el, clientX: 200, clientY: y });
+      const fire = (type: string, touches: Touch[], changed: Touch[]) =>
+        el.dispatchEvent(new TouchEvent(type, { bubbles: true, touches, changedTouches: changed }));
+      fire("touchstart", [at(200)], [at(200)]);
+      for (const step of [0.3, 0.6, 1])
+        fire("touchmove", [at(200 + dy * step)], [at(200 + dy * step)]);
+      fire("touchend", [], [at(200 + dy)]);
+    }, dy);
+
+  // 少し引いただけでは、何もしない
+  await drag(60);
+  await page.waitForTimeout(300);
+  await expect(list.locator(".item")).toHaveCount(40);
+
+  // 先頭で下に引いて離すと、既読の記事が消えて、届いた記事が先頭に入る
+  await drag(200);
+  await expect(list.locator(".title").first()).toHaveText("届いたばかり");
+  await expect(list.locator(".item")).toHaveCount(41 - readCount);
+  await expect(list.locator(".row:not(.unread)")).toHaveCount(0);
+  await expect(list.locator(".pull")).toHaveCount(0);
+
+  // 一覧の途中では、下に動かしても更新しない
+  await list.evaluate((el) => el.scrollTo({ top: 300 }));
+  const requests = server.requests.length;
+  await drag(200);
+  await page.waitForTimeout(500);
+  expect(server.requests.length).toBe(requests);
+});
