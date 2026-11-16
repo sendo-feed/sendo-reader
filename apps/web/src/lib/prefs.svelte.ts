@@ -19,7 +19,10 @@ import type { ReaderClient } from "@sendo-reader/core/web";
  * 文字の大きさを当てるため）。写しから DB には戻さない。
  */
 export type Theme = "auto" | "light" | "dark";
-export type TextSize = "small" | "medium" | "large";
+export type TextSize = "xsmall" | "small" | "medium" | "large" | "xlarge";
+
+/** 文字の大きさ。小さい順（設定の画面のスライダーの並び） */
+export const TEXT_SIZES: readonly TextSize[] = ["xsmall", "small", "medium", "large", "xlarge"];
 
 /** 一覧の行を、横にスワイプしたときにすること */
 export type ListSwipe = "none" | "read" | "star";
@@ -105,7 +108,7 @@ export function parsePrefs(text: string | null): PrefsValue {
     typeof raw[key] === "boolean" ? (raw[key] as boolean) : (DEFAULTS[key] as boolean);
   return {
     theme: oneOf(raw.theme, ["auto", "light", "dark"], DEFAULTS.theme),
-    textSize: oneOf(raw.textSize, ["small", "medium", "large"], DEFAULTS.textSize),
+    textSize: oneOf(raw.textSize, TEXT_SIZES, DEFAULTS.textSize),
     unreadOnly: flag("unreadOnly"),
     markReadOnScroll: flag("markReadOnScroll"),
     oldestFirst: flag("oldestFirst"),
