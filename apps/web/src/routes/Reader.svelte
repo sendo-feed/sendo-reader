@@ -75,6 +75,15 @@
     });
   });
 
+  // 別の画面（一覧の種類、購読の管理、設定）に移ったら、ページの先頭から出す。前の画面の位置を
+  // 引き継がない（記事を開く・閉じるは、同じ画面のうちなので、ここでは扱わない）
+  $effect(() => {
+    void viewHref(router.view);
+    untrack(() => {
+      if (layout.pageScroll) window.scrollTo({ top: 0 });
+    });
+  });
+
   // 記事から一覧に戻ったら、覚えていた位置に戻す
   $effect(() => {
     const reading = router.articleId !== null;

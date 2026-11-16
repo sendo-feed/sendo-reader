@@ -866,4 +866,9 @@ test("狭い画面では、ページ全体が動く。記事は先頭から出�
   await page.getByRole("button", { name: "Back", exact: true }).click();
   await expect(list).toBeVisible();
   await expect.poll(scrollY).toBe(listTop);
+
+  // 別の画面（購読の管理）に移ると、前の画面の位置を引き継がず、先頭から出す
+  await tabs.getByRole("link", { name: "Add" }).click();
+  await expect(page.getByRole("heading", { name: "Manage feeds", level: 1 })).toBeVisible();
+  await expect.poll(scrollY).toBe(0);
 });
