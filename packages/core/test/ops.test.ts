@@ -398,7 +398,8 @@ describe("フォルダ", () => {
     expect(await core.listFeeds()).toMatchObject([{ folderId: null }]);
     server.deleteFolder(folder.id);
     const result = await core.sync();
-    expect(result.push).toEqual({ sent: 1, rejected: [], remapped: [] });
+    // フォルダの削除と、そのフォルダの一覧の設定の削除（端末の種類ごと）
+    expect(result.push).toEqual({ sent: 3, rejected: [], remapped: [] });
   });
 
   test("フォルダ名は空白をまとめ、200 文字（UTF-16）で切り、サロゲートペアの途中では切らない", () => {
@@ -715,8 +716,8 @@ describe("最初から取り直すあいだも、手元を空にしない", () =
     await core.deleteFolder(folder.id);
     await core.setStarred(article.id, true);
 
-    // フォルダの削除は断られ（400）、スターで届かなくなる
-    server.failNext(null, 400, "network");
+    // フォルダの削除は断られ（400）、一覧の設定の削除（2 つ）は届き、スターで届かなくなる
+    server.failNext(null, 400, null, null, "network");
     await core.sync().catch(() => undefined);
     expect(await core.listFeeds()).toMatchObject([{ id: feed.id }]);
     expect((await core.getArticle(article.id))?.starredAt).toEqual(expect.any(Number));

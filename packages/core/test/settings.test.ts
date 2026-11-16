@@ -342,12 +342,24 @@ describe("なくなった一覧の設定", () => {
     expect(server.feeds.get(feed.id)?.deletedAt).not.toBeNull();
   });
 
-  test("一覧の設定がなければ、設定の操作は積まない", async () => {
+  test("手元にまだ届いていない一覧の設定も消す（ほかの端末が置いた直後に、購読をやめた）", async () => {
     const { server, core, db } = await setup();
     const feed = server.subscribe({ url: "https://a.example/feed" });
     await core.sync();
+    // この端末が差分を受け取る前に、ほかの端末が一覧の設定を置いた
+    const name = `reader.list:/feeds/${feed.id}`;
+    server.putSetting("desktop", name, { layout: "compact" });
+
     await core.unsubscribe(feed.id);
-    expect((await listPending(db)).map(({ op }) => op.kind)).toEqual(["unsubscribe"]);
+    expect((await listPending(db)).map(({ op }) => op.kind)).toEqual([
+      "unsubscribe",
+      "setSettings",
+      "setSettings",
+    ]);
+    await core.sync();
+    expect(server.settingsOf("desktop")).toEqual({});
+    expect(await settingsOf(core, "desktop")).toEqual({});
+    expect(await core.countPending()).toBe(0);
   });
 
   test("フォルダを消したら、そのフォルダの一覧の設定を消す", async () => {

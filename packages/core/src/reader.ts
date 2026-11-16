@@ -576,28 +576,23 @@ export class ReaderCore {
   /**
    * 操作を積み、あわせて、なくなる一覧（やめた購読、消したフォルダ）の設定を、両方の端末の種類で
    * 消す（docs/decisions/settings.md の 3。sendo は名前を解釈しないので、消すのは reader の仕事）。
-   * 手元にその項目がない種類には、何も送らない
+   * 手元にその項目がなくても送る（ほかの端末が置いた設定が、まだ手元に届いていないことがある。
+   * ない項目を消しても、sendo では何も起きない）
    */
   async #writeWithListSettings(op: Operation, paths: string[], tables: Table[]): Promise<void> {
     this.#requireSignedIn();
     const session = this.#session.signal;
-    let removed = false;
+    const remove = paths.flatMap((path) => listSettingName(path) ?? []);
     await this.#db.transaction(async (tx) => {
       throwIfSessionEnded(session);
       await this.#enqueue(tx, op);
-      const names = paths.flatMap((path) => listSettingName(path) ?? []);
+      if (remove.length === 0) return;
       for (const deviceType of DEVICE_TYPES) {
-        const present = new Set(
-          (await listSyncedSettings(tx, deviceType)).map((item) => item.name),
-        );
-        const remove = names.filter((name) => present.has(name));
-        if (remove.length === 0) continue;
         await this.#dropFromSettingsSeed(tx, deviceType, remove);
         await this.#enqueue(tx, { kind: "setSettings", deviceType, put: [], remove });
-        removed = true;
       }
     });
-    this.#emit(new Set<Table>(removed ? [...tables, "settings"] : tables));
+    this.#emit(new Set<Table>(remove.length > 0 ? [...tables, "settings"] : tables));
   }
 
   // --- 設定（docs/decisions/settings.md。手元にすぐ反映し、操作キューに積む） ---
