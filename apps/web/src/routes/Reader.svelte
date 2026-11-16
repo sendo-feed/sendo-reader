@@ -69,7 +69,7 @@
     handleLink(event, href);
   }
 
-  /** 開いている一覧の表示の設定（要約を出すか、並び順、未読だけ）。一覧ごとに覚える */
+  /** 開いている一覧の表示の設定（画像を出すか、並び順、未読だけ）。一覧ごとに覚える */
   const viewKey = $derived(viewHref(router.view));
   const options = $derived(prefs.viewOptions(viewKey));
 

@@ -114,11 +114,21 @@ test("一覧の形・並び順・絞り込みは一覧ごとに覚え、表示�
   await signIn(page);
   const list = page.locator(".article-list");
   await expect(list.locator(".title")).toHaveText(["1 番目", "2 番目", "3 番目"]);
-  await expect(list.getByText("1 番目の要約")).toBeVisible();
-
-  // タイトルだけにし、古い順に並べる
-  await list.getByRole("button", { name: "要約も出す" }).click();
+  // 一覧には、要約を出さない。行の高さは、どの行も同じ
   await expect(list.getByText("1 番目の要約")).toHaveCount(0);
+  const rowHeights = () =>
+    list
+      .locator(".row")
+      .evaluateAll((rows) => [
+        ...new Set(rows.map((row) => Math.round(row.getBoundingClientRect().height))),
+      ]);
+  expect(await rowHeights()).toHaveLength(1);
+  await expect(list.locator("ol")).not.toHaveClass(/compact/);
+
+  // タイトルを 1 行だけにし、古い順に並べる
+  await list.getByRole("button", { name: "画像も出す" }).click();
+  await expect(list.locator("ol")).toHaveClass(/compact/);
+  expect(await rowHeights()).toHaveLength(1);
   await list.getByRole("button", { name: "古い順に並べる" }).click();
   await expect(list.locator(".title")).toHaveText(["3 番目", "2 番目", "1 番目"]);
 
@@ -127,7 +137,7 @@ test("一覧の形・並び順・絞り込みは一覧ごとに覚え、表示�
   await list.getByText("3 番目").click();
   await page.locator("nav.sidebar").getByRole("link", { name: "Blog" }).click();
   await expect(list.locator(".title")).toHaveText(["1 番目", "3 番目"]);
-  await expect(list.getByText("1 番目の要約")).toBeVisible();
+  await expect(list.locator("ol")).not.toHaveClass(/compact/);
   await list.getByRole("button", { name: "未読だけを出す" }).click();
   await expect(list.locator(".title")).toHaveText(["1 番目"]);
 
@@ -154,7 +164,7 @@ test("一覧の形・並び順・絞り込みは一覧ごとに覚え、表示�
   await page.goto("/");
   await expect(list.locator(".title")).toHaveText(["2 番目", "1 番目"]);
   await expect(oldest).toHaveAttribute("aria-pressed", "true");
-  await expect(list.getByText("1 番目の要約")).toHaveCount(0);
+  await expect(list.locator("ol")).toHaveClass(/compact/);
 });
 
 test("狭い画面では、メニューを左から開き、一覧と記事を行き来する", async ({ page, context }) => {

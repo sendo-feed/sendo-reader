@@ -513,8 +513,8 @@
       type="button"
       class="icon-button"
       aria-pressed={options.layout === "comfortable"}
-      aria-label="要約も出す"
-      title="要約も出す"
+      aria-label="画像も出す"
+      title="画像も出す"
       onclick={() =>
         onoption({ layout: options.layout === "comfortable" ? "compact" : "comfortable" })}
     >
@@ -612,7 +612,9 @@
               aria-current={router.articleId === article.id ? "true" : undefined}
               onclick={(e) => open(e, article.id)}
             >
+              <!-- 要約は出さない。行の高さを、どの行も同じにする（docs/decisions/images.md の 5） -->
               <span class="text">
+                <span class="title">{article.title ?? "（タイトルなし）"}</span>
                 <span class="meta">
                   <span class="feed-icon">
                     <RemoteImage src={reader.feedIcon(article.feedId)} />
@@ -620,10 +622,6 @@
                   <span class="feed">{reader.feedTitle(article.feedId)}</span>
                   <span class="time">{shortTime(article.publishedAt)}</span>
                 </span>
-                <span class="title">{article.title ?? "（タイトルなし）"}</span>
-                {#if options.layout === "comfortable" && article.summary}
-                  <span class="summary">{article.summary.slice(0, 240)}</span>
-                {/if}
               </span>
               {#if options.layout === "comfortable" && article.thumbnailUrl !== null}
                 <span class="thumb"><RemoteImage src={article.thumbnailUrl} /></span>
@@ -854,7 +852,7 @@
   /* 画面の外の行は、描くのを後回しにする（長い一覧でも、動かしたときに重くしない） */
   li {
     content-visibility: auto;
-    contain-intrinsic-size: auto 5.5rem;
+    contain-intrinsic-size: auto 6.5rem;
   }
 
   h3 {
@@ -889,10 +887,16 @@
     background: var(--selected);
   }
 
+  /*
+   * 行の高さは、どの行も同じにする（タイトルの長さや、画像のある・なしで変えない）。
+   * 指で動かしたときに、同じ動かし方で同じ数だけ進む
+   */
   .item {
     display: flex;
     gap: 0.75rem;
-    padding: 0.625rem 1rem 0.75rem 1.375rem;
+    align-items: center;
+    height: 6.5rem;
+    padding: 0 1rem 0 1.375rem;
     color: var(--muted);
     text-decoration: none;
   }
@@ -900,18 +904,20 @@
   .text {
     display: grid;
     flex: 1;
-    align-content: start;
-    gap: 0.125rem;
+    /* 長いフィードの名前やタイトルで、幅を押し広げない（画像の下にもぐらない） */
+    grid-template-columns: minmax(0, 1fr);
+    align-content: center;
+    gap: 0.25rem;
     min-width: 0;
   }
 
   /*
-   * サムネイル。決まった大きさの正方形で、はみ出す分は切る（縦横比の違う画像でも、行の高さは
+   * サムネイル。決まった大きさで、はみ出す分は切る（縦横比の違う画像でも、行の高さは
    * 変わらない）。場所は、画像が届く前に取っておく。読み込みに失敗したら、場所ごと出さない
    */
   .thumb {
     flex: none;
-    width: 4.5rem;
+    width: 6.75rem;
     height: 4.5rem;
     overflow: hidden;
     border-radius: var(--radius-small);
@@ -952,7 +958,7 @@
   .row.unread .item::before {
     content: "";
     position: absolute;
-    top: 1.05rem;
+    top: calc(50% - 0.21875rem);
     left: 0.5rem;
     width: 0.4375rem;
     height: 0.4375rem;
@@ -962,13 +968,15 @@
 
   .meta {
     display: flex;
-    gap: 0.5rem;
+    gap: 0.375rem;
     align-items: baseline;
+    min-width: 0;
     font-size: 0.75rem;
     color: var(--muted);
   }
 
   .feed {
+    min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -976,17 +984,21 @@
 
   .time {
     flex: none;
-    margin-left: auto;
     color: var(--faint);
     font-variant-numeric: tabular-nums;
+  }
+
+  /* フィードの名前と時刻の間の区切り */
+  .time::before {
+    content: "/ ";
   }
 
   .title {
     display: -webkit-box;
     overflow: hidden;
     -webkit-box-orient: vertical;
-    -webkit-line-clamp: 2;
-    line-clamp: 2;
+    -webkit-line-clamp: 3;
+    line-clamp: 3;
     font-size: 0.9375rem;
     line-height: 1.45;
     overflow-wrap: anywhere;
@@ -1002,27 +1014,12 @@
     font-weight: 600;
   }
 
-  .summary {
-    display: -webkit-box;
-    overflow: hidden;
-    -webkit-box-orient: vertical;
-    -webkit-line-clamp: 2;
-    line-clamp: 2;
-    font-size: 0.8125rem;
-    line-height: 1.5;
-    overflow-wrap: anywhere;
-  }
-
   .compact li {
     contain-intrinsic-size: auto 3.5rem;
   }
 
   .compact .item {
-    padding-block: 0.4rem 0.5rem;
-  }
-
-  .compact .row.unread .item::before {
-    top: 0.85rem;
+    height: 3.5rem;
   }
 
   /* 行の操作（既読、スター）。マウスでは、行に乗せたときと、キーボードで入ったときだけ出す */

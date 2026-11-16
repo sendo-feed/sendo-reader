@@ -25,7 +25,7 @@ function seed() {
     publishedAt: t - 1000,
   });
   server.deliver(news.id, {
-    title: "画像が取れない記事",
+    title: "画像が取れない記事。タイトルが長くて、何行にも折り返す。".repeat(4),
     summary: "要約",
     thumbnailUrl: server.imageUrl("https://news.example/broken.png"),
     publishedAt: t - 2000,
@@ -102,6 +102,14 @@ test("サムネイルとフィードのアイコンを、CSP を変えずに出�
   await expect(list.locator(".row", { hasText: "画像のない記事" }).locator(".thumb")).toHaveCount(
     0,
   );
+  // 画像のある行も、ない行も、取れなかった行も、高さは同じ
+  expect(
+    await list
+      .locator(".row")
+      .evaluateAll((rows) => [
+        ...new Set(rows.map((row) => Math.round(row.getBoundingClientRect().height))),
+      ]),
+  ).toHaveLength(1);
   // 飾りなので、alt は空
   await expect(list.locator(".thumb img")).toHaveAttribute("alt", "");
 
@@ -118,9 +126,9 @@ test("サムネイルとフィードのアイコンを、CSP を変えずに出�
   expect(await violations()).toEqual([]);
 
   // 表示を「タイトルだけ」にすると、サムネイルは出さない
-  await list.getByRole("button", { name: "要約も出す" }).click();
+  await list.getByRole("button", { name: "画像も出す" }).click();
   await expect(list.locator(".thumb")).toHaveCount(0);
-  await list.getByRole("button", { name: "要約も出す" }).click();
+  await list.getByRole("button", { name: "画像も出す" }).click();
   await expect(list.locator(".thumb:visible")).toHaveCount(1);
 
   // オフラインで開き直しても、一度出した画像は出る
@@ -151,7 +159,7 @@ test("画像が 401 ／ 403 ／ 502 を返しても、画面は崩れず、キ�
   await controlledByServiceWorker(page);
   await expect(list.locator(".title")).toHaveText([
     "画像のある記事",
-    "画像が取れない記事",
+    /^画像が取れない記事/,
     "画像のない記事",
   ]);
 

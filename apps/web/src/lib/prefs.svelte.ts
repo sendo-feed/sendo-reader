@@ -20,7 +20,7 @@ import type { ReaderClient } from "@sendo-reader/core/web";
  */
 export type Theme = "auto" | "light" | "dark";
 export type TextSize = "small" | "medium" | "large";
-/** compact はタイトルだけ、comfortable は要約も出す */
+/** compact はタイトルを 1 行だけ、comfortable はタイトルを 3 行までと画像。どちらも要約は出さない */
 export type ListLayout = "compact" | "comfortable";
 
 /** 一覧の行を、横にスワイプしたときにすること */

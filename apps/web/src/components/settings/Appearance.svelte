@@ -16,8 +16,8 @@
   let { reading = false }: { reading?: boolean } = $props();
 
   const LAYOUTS: [ListLayout, string][] = [
-    ["comfortable", "要約も出す"],
-    ["compact", "タイトルだけ"],
+    ["comfortable", "画像も出す"],
+    ["compact", "タイトルだけ（1 行）"],
   ];
 </script>
 
