@@ -340,3 +340,43 @@ test("悪意のある本文でも、スクリプトは動かず、画面のス�
   await view.getByRole("button", { name: "Save" }).click();
   await expect(view.getByRole("button", { name: "Unsave" })).toBeVisible();
 });
+
+test.describe("スマホ", () => {
+  test.use({ viewport: { width: 390, height: 844 }, hasTouch: true });
+
+  test("表やコードを横に動かす指の動きは、記事のスワイプとして扱わない", async ({
+    page,
+    context,
+  }) => {
+    const { server } = seed();
+    await routeFakeSendo(context, server);
+    await page.goto("/");
+    await signIn(page);
+    await open(page, "全文のある記事");
+    const view = page.locator(".article-view");
+    await expect(view.locator(".body h2")).toHaveText("はじめに");
+
+    /** selector の要素の上で、指を右へ払う（既定では、記事を右へスワイプすると一覧に戻る） */
+    const flickRight = (selector: string) =>
+      view.locator(selector).evaluate((element) => {
+        const at = (x: number) =>
+          new Touch({ identifier: 1, target: element, clientX: x, clientY: 300 });
+        const fire = (type: string, touches: Touch[], changed: Touch[]) =>
+          element.dispatchEvent(
+            new TouchEvent(type, { bubbles: true, touches, changedTouches: changed }),
+          );
+        fire("touchstart", [at(100)], [at(100)]);
+        fire("touchend", [], [at(260)]);
+      });
+
+    for (const selector of [".body td >> nth=0", ".body pre code"]) {
+      await flickRight(selector);
+      await page.waitForTimeout(200);
+      await expect(page.getByRole("heading", { level: 1 })).toHaveText("全文のある記事");
+    }
+    // 横に動かせないところでは、これまでどおり一覧に戻る
+    await flickRight(".body blockquote");
+    await expect(page.locator(".article-list")).toBeVisible();
+    await expect(page).toHaveURL(/\/$/);
+  });
+});

@@ -164,9 +164,26 @@
   function onTouchStart(event: TouchEvent) {
     const touch = event.touches[0];
     touchStart =
-      event.touches.length === 1 && touch !== undefined
+      event.touches.length === 1 && touch !== undefined && !startsInSideScroller(event.target)
         ? { x: touch.clientX, y: touch.clientY }
         : null;
+  }
+
+  /**
+   * 本文の中の、横に動かせるところ（幅の広い表、長い行のコード）から始まった動きか。そこでの
+   * 横の動きは、中身を動かすためのものなので、記事のスワイプとして扱わない
+   */
+  function startsInSideScroller(target: EventTarget | null): boolean {
+    for (
+      let element = target instanceof Element ? target : null;
+      element !== null && element !== scroller;
+      element = element.parentElement
+    ) {
+      if (element.scrollWidth <= element.clientWidth) continue;
+      const overflow = getComputedStyle(element).overflowX;
+      if (overflow === "auto" || overflow === "scroll") return true;
+    }
+    return false;
   }
 
   function onTouchEnd(event: TouchEvent) {
