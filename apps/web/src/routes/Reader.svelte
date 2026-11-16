@@ -252,6 +252,12 @@
    * 読み込み直したりする）に書く。狭い画面で記事を開いている間は、一覧の位置は書かない
    */
   function rememberPosition() {
+    const position = currentPosition();
+    if (position !== null) router.remember(position);
+  }
+
+  /** いま見ている位置（書くものがなければ null） */
+  function currentPosition(): Position | null {
     clearTimeout(rememberTimer);
     const articleId = router.articleId;
     const position: Position = {};
@@ -262,7 +268,7 @@
     if (articleId !== null && articleView !== undefined) {
       position.article = { id: articleId, top: articleView.scrollTop() };
     }
-    if (Object.keys(position).length > 0) router.remember(position);
+    return Object.keys(position).length > 0 ? position : null;
   }
 
   let rememberTimer: ReturnType<typeof setTimeout> | undefined;
@@ -273,7 +279,7 @@
   }
 
   $effect(() => {
-    router.beforeLeave = rememberPosition;
+    router.beforeLeave = currentPosition;
     const onHidden = () => {
       if (document.visibilityState === "hidden") rememberPosition();
     };

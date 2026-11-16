@@ -47,22 +47,59 @@ class Router {
    * いまの履歴の項目に入ったときに、その項目に残っていた位置（読み込み直した、戻る・進むで来た）。
    * 戻したら消す（そのあとに一覧を読み直しても、また戻さない）
    */
-  #entered: Position = positionOf(history.state);
+  #entered: Position;
 
-  /** 履歴の項目を移る直前に呼ぶ（見ていた位置を、いまの項目に書いておく） */
-  beforeLeave: (() => void) | null = null;
+  /** いまの履歴の項目の鍵（項目ごとに付ける） */
+  #key: string;
+
+  /**
+   * 項目ごとの位置の写し。戻る・進むでは、移ったあとにしか知らせが来ず、移る前の項目には書けない
+   * ので、移る前の位置はここに残す（その項目に戻ったときは、history.state よりこちらを使う）
+   */
+  readonly #memory = new Map<string, Position>();
+
+  /** 履歴の項目を移る直前に呼び、見ている位置を返してもらう（戻る・進むでは、まだ前の画面のまま） */
+  beforeLeave: (() => Position | null) | null = null;
 
   constructor() {
+    this.#key = keyOf(history.state) ?? this.#stamp();
+    this.#entered = positionOf(history.state);
     window.addEventListener("popstate", () => {
-      this.#entered = positionOf(history.state);
+      const left = this.beforeLeave?.() ?? null;
+      if (left !== null) this.#memory.set(this.#key, { ...this.#memory.get(this.#key), ...left });
+      this.#key = keyOf(history.state) ?? this.#stamp();
+      this.#entered = { ...positionOf(history.state), ...this.#memory.get(this.#key) };
       this.url = new URL(location.href);
     });
+  }
+
+  /** 鍵のない項目（前の版が足した項目）に、鍵を付ける */
+  #stamp(): string {
+    const key = crypto.randomUUID();
+    const state: unknown = history.state;
+    history.replaceState({ ...(isRecord(state) ? state : {}), key }, "");
+    return key;
   }
 
   /** いまの履歴の項目に、見ている位置を書く（URL は変えない） */
   remember(position: Position): void {
     const state: unknown = history.state;
     history.replaceState({ ...(isRecord(state) ? state : {}), ...position }, "");
+    this.#memory.set(this.#key, { ...this.#memory.get(this.#key), ...position });
+  }
+
+  /** 別の項目を足す前に、いまの項目に見ている位置を書く */
+  #leave(): void {
+    const position = this.beforeLeave?.() ?? null;
+    if (position !== null) this.remember(position);
+  }
+
+  /** 新しい項目を足す */
+  #push(state: Record<string, unknown>, url: URL): void {
+    this.#key = crypto.randomUUID();
+    history.pushState({ ...state, key: this.#key }, "", url);
+    this.#entered = {};
+    this.url = url;
   }
 
   /** この項目に入ったときの一覧の位置（一覧の条件が同じときだけ）。一度だけ返す */
@@ -102,7 +139,7 @@ class Router {
   setSearchQuery(query: string): void {
     const next = new URL("/search", location.href);
     if (query !== "") next.searchParams.set("q", query);
-    history.replaceState(null, "", next);
+    history.replaceState({ key: this.#key }, "", next);
     this.#entered = {};
     this.url = next;
   }
@@ -114,10 +151,8 @@ class Router {
   navigate(href: string): void {
     const next = new URL(href, location.href);
     if (next.origin !== location.origin) return;
-    this.beforeLeave?.();
-    history.pushState(null, "", next);
-    this.#entered = {};
-    this.url = next;
+    this.#leave();
+    this.#push({}, next);
   }
 
   /**
@@ -140,11 +175,8 @@ class Router {
     } else {
       // 一覧はそのままなので、一覧の位置は引き継ぐ（記事を開いたまま読み込み直しても、広い画面の
       // 一覧の位置が戻る）
-      this.beforeLeave?.();
-      const list = positionOf(history.state).list;
-      history.pushState({ opened: true, list }, "", next);
-      this.#entered = {};
-      this.url = next;
+      this.#leave();
+      this.#push({ opened: true, list: positionOf(history.state).list }, next);
     }
   }
 }
@@ -153,6 +185,10 @@ export const router = new Router();
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
+}
+
+function keyOf(state: unknown): string | null {
+  return isRecord(state) && typeof state.key === "string" ? state.key : null;
 }
 
 /** 履歴の項目の状態から、位置を取り出す（前の版が書いた、形の違う状態は捨てる） */

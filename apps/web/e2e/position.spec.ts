@@ -194,3 +194,34 @@ test("未読だけの一覧で、見ていた記事まで読んで消えてい�
   expect(await list.locator(".title").first().textContent()).not.toBe(title);
   expect(await list.evaluate((el) => el.scrollTop)).toBe(0);
 });
+
+test("記事を動かしてすぐ戻っても、進むで開き直すと、その位置に戻る", async ({ page, context }) => {
+  const { server } = seed({ "reader.markReadOnScroll": false });
+  await routeFakeSendo(context, server);
+  await page.setViewportSize({ width: 390, height: 780 });
+  await page.goto("/");
+  await signIn(page);
+  await expect(page.locator(".article-list .item")).toHaveCount(40);
+  const heading = page.getByRole("heading", { level: 1 });
+  const scrollY = () => page.evaluate(() => window.scrollY);
+  const opened = await openBelow(page);
+
+  // 画面の Back のボタンで閉じる（位置を書く前に、履歴を戻る）
+  await page.evaluate(() => window.scrollTo({ top: 600 }));
+  const first = await scrollY();
+  expect(first).toBeGreaterThan(300);
+  await page.getByRole("button", { name: "Back", exact: true }).click();
+  await expect(page).not.toHaveURL(/article=/);
+  await page.goForward();
+  await expect(heading).toHaveText(opened);
+  await expect.poll(async () => Math.abs((await scrollY()) - first)).toBeLessThan(16);
+
+  // ブラウザーの戻るで閉じる
+  await page.evaluate(() => window.scrollTo({ top: 300 }));
+  const second = await scrollY();
+  await page.goBack();
+  await expect(page).not.toHaveURL(/article=/);
+  await page.goForward();
+  await expect(heading).toHaveText(opened);
+  await expect.poll(async () => Math.abs((await scrollY()) - second)).toBeLessThan(16);
+});
