@@ -59,7 +59,7 @@ export interface ContentElement {
   /** 通すと決めたタグの名前（小文字） */
   tag: string;
   children: ContentNode[];
-  /** a だけ。http ／ https ／ mailto だと確かめた、絶対の URL */
+  /** a だけ。http ／ https だと確かめた、絶対の URL */
   href?: string;
   /** img だけ。sendo の中継を通る、同じオリジンの URL（受け取ったまま） */
   src?: string;

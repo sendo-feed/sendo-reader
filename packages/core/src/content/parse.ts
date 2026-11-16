@@ -1,5 +1,5 @@
 import type { ContentElement, ContentNode } from "../models";
-import { toSameOriginUrl } from "../url";
+import { toSafeHttpUrl, toSameOriginUrl } from "../url";
 
 /**
  * 記事の本文の HTML を、通すと決めたタグと属性だけの木にする。
@@ -11,7 +11,8 @@ import { toSameOriginUrl } from "../url";
  *
  * - 通すタグと属性は、sendo が配るものと同じ。知らないタグは、タグを落として中身だけ残す
  * - script ／ style ／ 埋め込みなどは、中身ごと落とす
- * - リンクは http ／ https ／ mailto の絶対の URL だけ。画像は同じオリジンを指す URL だけ
+ * - リンクは http ／ https の絶対の URL だけ（toSafeHttpUrl。記事の URL と同じ決まり。sendo は
+ *   mailto も通すが、reader の決定（docs/decisions/ui.md）は http ／ https だけなので、通さない）。画像は同じオリジンを指す URL だけ
  *   （sendo の中継。受け取ったまま使う）。そうでないリンクは中身だけ残し、画像は落とす
  * - ブラウザの HTML の読み方（閉じ忘れの補い方など）は真似ない。sendo は、開いたタグを必ず
  *   閉じた HTML を返す
@@ -175,7 +176,7 @@ export function parseContent(html: string): ContentNode[] {
     if (name === "a") {
       // リンクの中のリンクは作らない
       closeUntil("a");
-      const href = toLinkUrl(read.get("href"));
+      const href = toSafeHttpUrl(read.get("href")?.trim());
       // 行き先のないリンクは、タグを落として中身だけ残す
       if (href === null) continue;
       element.href = href;
@@ -244,16 +245,4 @@ function decodeText(raw: string): string {
 
 function toCount(value: string | undefined): number | null {
   return value !== undefined && DIGITS.test(value) ? Number(value) : null;
-}
-
-/** リンクに入れてよい URL（http ／ https ／ mailto の絶対の URL）にする。そうでなければ null */
-function toLinkUrl(raw: string | undefined): string | null {
-  if (raw === undefined) return null;
-  let url: URL;
-  try {
-    url = new URL(raw.trim());
-  } catch {
-    return null;
-  }
-  return ["http:", "https:", "mailto:"].includes(url.protocol) ? url.href : null;
 }

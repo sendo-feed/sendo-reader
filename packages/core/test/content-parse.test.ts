@@ -83,14 +83,14 @@ describe("sendo が配る形の本文", () => {
     ]);
   });
 
-  test("リンクは、絶対の URL（http ／ https ／ mailto）だけを通す。rel と target は持たない（画面が付ける）", () => {
+  test("リンクは、絶対の URL（http ／ https）だけを通す。rel と target は持たない（画面が付ける）", () => {
     const nodes = parseContent(
       '<p><a href="https://example.com/a?x=1&amp;y=2" rel="noopener noreferrer nofollow">a</a>' +
-        '<a href="mailto:me@example.com">m</a></p>',
+        '<a href="http://example.com/">b</a></p>',
     );
     expect(elements(nodes).filter((element) => element.tag === "a")).toEqual([
       { tag: "a", href: "https://example.com/a?x=1&y=2", children: ["a"] },
-      { tag: "a", href: "mailto:me@example.com", children: ["m"] },
+      { tag: "a", href: "http://example.com/", children: ["b"] },
     ]);
   });
 
@@ -169,6 +169,8 @@ describe("悪意のある本文（sendo のサニタイズをすり抜けたと�
       "&#106;avascript:alert(1)",
       "data:text/html,<script>alert(1)</script>",
       "vbscript:x",
+      // sendo は通すが、reader は http ／ https だけ
+      "mailto:me@example.com",
       "blob:https://example.com/x",
       "file:///etc/passwd",
       "/relative",
