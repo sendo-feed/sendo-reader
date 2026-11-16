@@ -7,7 +7,7 @@
 
 # 画面（vite build）とサーバー（esbuild でひとつのファイルにまとめる）を作る。できるのは JS と wasm で
 # CPU に依らないので、ビルドするマシンの CPU で 1 回だけ作る（arm64 をエミュレーションで作ると遅いため）
-FROM --platform=$BUILDPLATFORM node:24-bookworm-slim@sha256:dc26ae92c9fb15cf6b1d63e20f0944b2efe0f115b20e00be48fb23fceb061c54 AS build
+FROM --platform=$BUILDPLATFORM node:25-bookworm-slim@sha256:81db02c4b671288a03915da9534dbd54f96d0e7c24d80ccc54f5b36b2e684370 AS build
 # pnpm は package.json の packageManager の版を、corepack で入れる
 ENV COREPACK_ENABLE_DOWNLOAD_PROMPT=0
 RUN corepack enable
@@ -26,7 +26,7 @@ RUN APP_COMMIT_SHA="$APP_COMMIT_SHA" pnpm --filter @sendo-reader/web exec vite b
   && pnpm --filter @sendo-reader/web run build:server
 
 # 動かすイメージ。画面のビルドと、依存まで含めたサーバーのバンドルだけを入れる（node_modules は要らない）
-FROM node:24-bookworm-slim@sha256:dc26ae92c9fb15cf6b1d63e20f0944b2efe0f115b20e00be48fb23fceb061c54 AS runtime
+FROM node:25-bookworm-slim@sha256:81db02c4b671288a03915da9534dbd54f96d0e7c24d80ccc54f5b36b2e684370 AS runtime
 ENV NODE_ENV=production \
     PORT=8080
 WORKDIR /app
