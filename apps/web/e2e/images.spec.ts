@@ -125,12 +125,6 @@ test("サムネイルとフィードのアイコンを、CSP を変えずに出�
     .toEqual(["https://blog.example/a.png", "https://blog.example/favicon.ico"]);
   expect(await violations()).toEqual([]);
 
-  // 表示を「タイトルだけ」にすると、サムネイルは出さない
-  await list.getByRole("button", { name: "画像も出す" }).click();
-  await expect(list.locator(".thumb")).toHaveCount(0);
-  await list.getByRole("button", { name: "画像も出す" }).click();
-  await expect(list.locator(".thumb:visible")).toHaveCount(1);
-
   // オフラインで開き直しても、一度出した画像は出る
   await context.setOffline(true);
   server.imageRequests.length = 0;

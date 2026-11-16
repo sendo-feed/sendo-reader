@@ -24,8 +24,6 @@
     rss: "M5 5a14 14 0 0 1 14 14M5 11a8 8 0 0 1 8 8M5.5 18.5h.01",
     keyboard: "M3 6h18v12H3zM7 10h.01M11 10h.01M15 10h.01M8 14h8",
     logout: "M10 4H4v16h6M15 8l4 4-4 4M19 12H9",
-    rows: "M4 6h16M4 10h16M4 14h16M4 18h16",
-    cards: "M4 5h16v6H4zM4 14h16v6H4z",
     sort: "M7 5v14M4 16l3 3 3-3M17 19V5M14 8l3-3 3 3",
     filter: "M4 5h16l-6 7v6l-4 2v-8z",
   } as const;

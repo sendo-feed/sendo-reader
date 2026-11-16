@@ -512,17 +512,6 @@
     >
       <Icon name="sort" />
     </button>
-    <button
-      type="button"
-      class="icon-button"
-      aria-pressed={options.layout === "comfortable"}
-      aria-label="画像も出す"
-      title="画像も出す"
-      onclick={() =>
-        onoption({ layout: options.layout === "comfortable" ? "compact" : "comfortable" })}
-    >
-      <Icon name={options.layout === "comfortable" ? "cards" : "rows"} />
-    </button>
     {#if unread !== null}
       <button
         type="button"
@@ -595,7 +584,7 @@
       {/if}
     </div>
   {:else}
-    <ol class:compact={options.layout === "compact"}>
+    <ol>
       {#each rows as { article, heading } (article.id)}
         <li>
           {#if heading !== null}
@@ -626,7 +615,7 @@
                   <span class="time">{shortTime(article.publishedAt)}</span>
                 </span>
               </span>
-              {#if options.layout === "comfortable" && article.thumbnailUrl !== null}
+              {#if article.thumbnailUrl !== null}
                 <span class="thumb"><RemoteImage src={article.thumbnailUrl} /></span>
               {/if}
             </a>
@@ -1007,22 +996,9 @@
     overflow-wrap: anywhere;
   }
 
-  .compact .title {
-    -webkit-line-clamp: 1;
-    line-clamp: 1;
-  }
-
   .row.unread .title {
     color: var(--text);
     font-weight: 600;
-  }
-
-  .compact li {
-    contain-intrinsic-size: auto 3.5rem;
-  }
-
-  .compact .item {
-    height: 3.5rem;
   }
 
   /* 行の操作（既読、スター）。マウスでは、行に乗せたときと、キーボードで入ったときだけ出す */

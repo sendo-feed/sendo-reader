@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { type ListLayout, prefs, type TextSize, type Theme } from "../../lib/prefs.svelte";
+  import { prefs, type TextSize, type Theme } from "../../lib/prefs.svelte";
 
   /** 表示の設定。sendo に預け、同じ種類の端末に引き継ぐ（lib/prefs.svelte.ts） */
   const THEMES: [Theme, string][] = [
@@ -14,11 +14,6 @@
   ];
   /** reading なら、読むときに変えたいもの（テーマと文字の大きさ）だけを出す。記事の画面から開く */
   let { reading = false }: { reading?: boolean } = $props();
-
-  const LAYOUTS: [ListLayout, string][] = [
-    ["comfortable", "画像も出す"],
-    ["compact", "タイトルだけ（1 行）"],
-  ];
 </script>
 
 <section aria-label="表示">
@@ -62,22 +57,6 @@
   </fieldset>
 
   {#if !reading}
-    <fieldset>
-      <legend>記事の一覧（一覧ごとに変えていないとき）</legend>
-      {#each LAYOUTS as [value, label] (value)}
-        <label>
-          <input
-            type="radio"
-            name="layout"
-            {value}
-            checked={prefs.value.layout === value}
-            onchange={() => prefs.set({ layout: value })}
-          >
-          {label}
-        </label>
-      {/each}
-    </fieldset>
-
     <fieldset>
       <legend>既読にするとき</legend>
       <label class="check">

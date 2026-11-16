@@ -54,10 +54,11 @@ test("ほかの端末が変えた設定が、同期で届いて画面に当た�
   await expect(page.locator("html")).not.toHaveAttribute("data-theme");
 
   server.putSetting("desktop", "reader.textSize", "large");
-  server.putSetting("desktop", "reader.layout", "compact");
+  server.putSetting("desktop", "reader.markReadOnScroll", false);
   await page.getByRole("button", { name: "今すぐ同期" }).click();
   await expect(page.locator("html")).toHaveAttribute("data-text-size", "large");
-  await expect(page.locator(".article-list ol")).toHaveClass(/compact/);
+  // 前の版が預けた、もう使わない項目（一覧の形）があっても、壊れない
+  server.putSetting("desktop", "reader.layout", "compact");
   await expect(page.locator("html")).not.toHaveAttribute("data-theme");
 
   // 消した（既定に戻した）ことも届く
@@ -101,7 +102,7 @@ test("前の版が localStorage に置いた設定は、同期してから、sen
       JSON.stringify({
         theme: "dark",
         textSize: "large",
-        layout: "comfortable",
+        layout: "compact",
         views: { [`/feeds/${feedId}`]: { oldestFirst: true } },
         swipes: { listLeft: "read", listRight: "none", articleLeft: "none", articleRight: "back" },
       }),

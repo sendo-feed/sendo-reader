@@ -123,21 +123,16 @@ test("一覧の形・並び順・絞り込みは一覧ごとに覚え、表示�
         ...new Set(rows.map((row) => Math.round(row.getBoundingClientRect().height))),
       ]);
   expect(await rowHeights()).toHaveLength(1);
-  await expect(list.locator("ol")).not.toHaveClass(/compact/);
 
-  // タイトルを 1 行だけにし、古い順に並べる
-  await list.getByRole("button", { name: "画像も出す" }).click();
-  await expect(list.locator("ol")).toHaveClass(/compact/);
-  expect(await rowHeights()).toHaveLength(1);
+  // 古い順に並べる
   await list.getByRole("button", { name: "古い順に並べる" }).click();
   await expect(list.locator(".title")).toHaveText(["3 番目", "2 番目", "1 番目"]);
 
   // 未読は、一覧の絞り込みの状態。どの一覧も、はじめは未読だけを出し、切り替えると既読も出す。
-  // 表示の設定は一覧ごとに覚えるので、All で変えた並び順と形は、ここには及ばない
+  // 表示の設定は一覧ごとに覚えるので、All で変えた並び順は、ここには及ばない
   await list.getByText("3 番目").click();
   await page.locator("nav.sidebar").getByRole("link", { name: "Blog" }).click();
   await expect(list.locator(".title")).toHaveText(["1 番目"]);
-  await expect(list.locator("ol")).not.toHaveClass(/compact/);
   const unreadOnly = list.getByRole("button", { name: "未読だけを出す" });
   await expect(unreadOnly).toHaveAttribute("aria-pressed", "true");
   await unreadOnly.click();
@@ -175,7 +170,6 @@ test("一覧の形・並び順・絞り込みは一覧ごとに覚え、表示�
   await page.goto("/");
   await expect(list.locator(".title")).toHaveText(["2 番目", "1 番目"]);
   await expect(oldest).toHaveAttribute("aria-pressed", "true");
-  await expect(list.locator("ol")).toHaveClass(/compact/);
 });
 
 test("狭い画面では、メニューを左から開き、一覧と記事を行き来する", async ({ page, context }) => {

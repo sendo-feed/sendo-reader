@@ -20,8 +20,6 @@ import type { ReaderClient } from "@sendo-reader/core/web";
  */
 export type Theme = "auto" | "light" | "dark";
 export type TextSize = "small" | "medium" | "large";
-/** compact はタイトルを 1 行だけ、comfortable はタイトルを 3 行までと画像。どちらも要約は出さない */
-export type ListLayout = "compact" | "comfortable";
 
 /** 一覧の行を、横にスワイプしたときにすること */
 export type ListSwipe = "none" | "read" | "star";
@@ -41,7 +39,6 @@ export interface Swipes {
 
 /** 一覧ごとに変えられるもの */
 export interface ViewOptions {
-  layout: ListLayout;
   /** 未読だけを出す（All、フォルダ、フィードの一覧） */
   unreadOnly: boolean;
   /** 古い順に並べる */
@@ -54,7 +51,6 @@ const MAX_COLLAPSED = 200;
 export interface PrefsValue {
   theme: Theme;
   textSize: TextSize;
-  layout: ListLayout;
   /** 一覧（All、フォルダ、フィード）で、未読だけを出す */
   unreadOnly: boolean;
   /** 一覧を動かして、上へ通り過ぎた未読の記事を既読にする */
@@ -69,7 +65,7 @@ export interface PrefsValue {
   swipes: Swipes;
   /**
    * 一覧ごとに変えた設定（鍵は一覧のパス。/feeds/<id> など）。変えていないものは、上の
-   * layout ／ unreadOnly ／ oldestFirst を既定として使う
+   * unreadOnly ／ oldestFirst を既定として使う
    */
   views: Record<string, Partial<ViewOptions>>;
 }
@@ -82,7 +78,6 @@ const LEGACY_KEY = "sendo.prefs";
 const DEFAULTS: PrefsValue = {
   theme: "auto",
   textSize: "medium",
-  layout: "comfortable",
   unreadOnly: true,
   markReadOnScroll: true,
   oldestFirst: false,
@@ -111,7 +106,6 @@ export function parsePrefs(text: string | null): PrefsValue {
   return {
     theme: oneOf(raw.theme, ["auto", "light", "dark"], DEFAULTS.theme),
     textSize: oneOf(raw.textSize, ["small", "medium", "large"], DEFAULTS.textSize),
-    layout: oneOf(raw.layout, ["compact", "comfortable"], DEFAULTS.layout),
     unreadOnly: flag("unreadOnly"),
     markReadOnScroll: flag("markReadOnScroll"),
     oldestFirst: flag("oldestFirst"),
@@ -143,7 +137,6 @@ function parseViews(raw: unknown): Record<string, Partial<ViewOptions>> {
     if (typeof value !== "object" || value === null) continue;
     const entry = value as Record<string, unknown>;
     const options: Partial<ViewOptions> = {};
-    if (entry.layout === "compact" || entry.layout === "comfortable") options.layout = entry.layout;
     if (typeof entry.unreadOnly === "boolean") options.unreadOnly = entry.unreadOnly;
     if (typeof entry.oldestFirst === "boolean") options.oldestFirst = entry.oldestFirst;
     views.push([key, options]);
@@ -161,7 +154,6 @@ const SWIPE_NAMES = {
 const SIMPLE_NAMES = {
   theme: "reader.theme",
   textSize: "reader.textSize",
-  layout: "reader.layout",
   unreadOnly: "reader.unreadOnly",
   markReadOnScroll: "reader.markReadOnScroll",
   oldestFirst: "reader.oldestFirst",
@@ -330,7 +322,6 @@ class Prefs {
   viewOptions(key: string): ViewOptions {
     const own = this.value.views[key] ?? {};
     return {
-      layout: own.layout ?? this.value.layout,
       unreadOnly: own.unreadOnly ?? this.value.unreadOnly,
       oldestFirst: own.oldestFirst ?? this.value.oldestFirst,
     };
