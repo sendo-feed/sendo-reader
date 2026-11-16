@@ -344,17 +344,22 @@
     peeking: boolean,
   ) {
     settling = true;
+    const from = articleId;
     const width = scroller?.clientWidth || window.innerWidth;
     await slide(direction * width);
-    if (action === "back") {
+    if (articleId !== from) {
+      // 動いている間に、ほかの操作（ブラウザーの戻る、キーボード）で記事が替わった。
+      // スワイプの操作はやめ、記事を元の位置に置く
+      if (peeking) onpeek(false);
+      await place(0);
+    } else if (action === "back") {
       // 後ろに見せていた一覧は、Reader が、一覧に戻ったところで元に戻す
       router.openArticle(null);
       await place(0);
     } else {
       if (peeking) onpeek(false);
-      const before = articleId;
       await onstep(action === "next" ? 1 : -1);
-      if (articleId !== before) {
+      if (articleId !== from) {
         // 次の記事は、反対の側から入れる
         await place(-direction * width);
       }

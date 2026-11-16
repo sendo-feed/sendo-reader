@@ -350,6 +350,15 @@ test("狭い画面では、メニューを左から開き、一覧と記事を�
   await expect(view).not.toHaveClass(/moved/);
   await flickArticle(140, 10);
   await expect(list).toBeVisible();
+  // 記事を外へ流している間に、ブラウザーの戻るで一覧に戻ったら、次の記事は開かない
+  await list.getByText("2 番目").click();
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText("2 番目");
+  await flickArticle(-140, 10);
+  await page.evaluate(() => history.back());
+  await expect(list).toBeVisible();
+  await page.waitForTimeout(500);
+  await expect(page).not.toHaveURL(/article=/);
+  await expect(list).toBeVisible();
 
   // 広い画面では、左のメニューを出したままにして、下のバーは出さない
   await page.setViewportSize({ width: 1100, height: 780 });
