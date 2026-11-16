@@ -3,6 +3,7 @@ node_modules/
 
 # ビルドと実行の生成物
 dist/
+dist-server/
 .wrangler/
 coverage/
 

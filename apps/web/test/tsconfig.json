@@ -3,5 +3,7 @@
   "compilerOptions": {
     "lib": ["es2024"]
   },
-  "include": [".", "../worker/worker-configuration.d.ts"]
+  "include": [".", "../worker/worker-configuration.d.ts"],
+  // server/ はコンテナ版のサーバーのテスト。Node で動くので、server/ の tsconfig で調べる
+  "exclude": ["server"]
 }

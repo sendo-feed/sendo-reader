@@ -1,0 +1,108 @@
+name: Container
+
+# コンテナ版の reader のイメージを作る（docs/decisions/container.md の 1、9）。
+# - main に入ったら、amd64 と arm64 で作り、GHCR（ghcr.io/sendo-feed/sendo-reader）に main のタグで置く
+# - PR では、両方の CPU で作れることを確かめ、amd64 のイメージを動かして画面が返るかを見る（置かない）
+#
+# 動かすイメージの段はファイルを写すだけ（RUN がない）で、画面とサーバーのビルドはビルドするマシンの
+# CPU で行うので、arm64 もエミュレーション（QEMU）なしで作れる
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    paths:
+      - Dockerfile
+      - .dockerignore
+      - package.json
+      - pnpm-lock.yaml
+      - pnpm-workspace.yaml
+      - tsconfig.base.json
+      - packages/core/**
+      - apps/web/**
+      - .github/workflows/container.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  IMAGE: ghcr.io/${{ github.repository }}
+
+jobs:
+  image:
+    name: Image
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      # main に入ったときだけ、GHCR に置くのに使う
+      packages: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
+        if: github.event_name == 'push'
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # タグは main（いつも最新の main）と、コミットごとの sha-<コミット>。版のタグは、sendo が版を
+      # 切るときに一緒に決める（決定の 1）
+      - id: meta
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
+        with:
+          images: ${{ env.IMAGE }}
+          tags: |
+            type=ref,event=branch
+            type=sha,format=long
+
+      # PR では、amd64 のイメージを手元に読み込んで、下で動かす
+      - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        if: github.event_name == 'pull_request'
+        with:
+          context: .
+          platforms: linux/amd64
+          load: true
+          tags: sendo-reader:ci
+          build-args: APP_COMMIT_SHA=${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # 動かして、画面（/）がセキュリティのヘッダー付きで返り、ヘルスチェックが通るかを見る。
+      # sendo はないので、中継は 502 になる
+      - name: Smoke test
+        if: github.event_name == 'pull_request'
+        run: |
+          docker run -d --name reader -p 127.0.0.1:8080:8080 -e SENDO_URL=http://127.0.0.1:9 sendo-reader:ci
+          for i in $(seq 1 30); do
+            status=$(docker inspect -f '{{.State.Health.Status}}' reader)
+            [ "$status" = healthy ] && break
+            sleep 2
+          done
+          docker logs reader
+          [ "$status" = healthy ] || { echo "::error::reader のコンテナが healthy にならない（$status）"; exit 1; }
+          curl -fsS -D headers.txt -o index.html http://127.0.0.1:8080/settings
+          grep -qi '^content-security-policy: default-src' headers.txt
+          grep -q '<title>Sendo</title>' index.html
+          code=$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8080/api/v1/me)
+          [ "$code" = 502 ] || { echo "::error::/api の中継が 502 にならない（$code）"; exit 1; }
+
+      - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: ${{ github.event_name == 'push' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: APP_COMMIT_SHA=${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

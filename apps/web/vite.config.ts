@@ -8,6 +8,7 @@ import {
   IMAGE_CACHE_URL_PATTERN,
 } from "../../packages/core/src/web/image-cache.ts";
 import { renderHeadersFile, securityHeaders } from "./security-headers.ts";
+import { SENDO_NAVIGATION_DENYLIST } from "./sendo-paths.ts";
 
 /** 手元のサーバーにはヘッダーを付け、本番のビルドには _headers を書き出す */
 function securityHeadersPlugin(): Plugin {
@@ -79,10 +80,11 @@ const imageCacheGenerationPlugin = {
 /**
  * 動いている版を、設定の画面で見分けるための印（コミットと、ビルドした時刻）。
  * PWA は、新しい版に替わるのが遅れることがあるので、いまどの版かを画面で確かめられるようにする。
- * Workers Builds はコミットを環境変数で渡す。手元では git から読む
+ * Workers Builds はコミットを環境変数で渡す。コンテナ版のイメージは、CI がビルドの引数で APP_COMMIT_SHA に
+ * 渡す（イメージを作るときは .git がない）。手元では git から読む
  */
 function appVersion(): string {
-  let commit = process.env.WORKERS_CI_COMMIT_SHA ?? "";
+  let commit = process.env.WORKERS_CI_COMMIT_SHA || process.env.APP_COMMIT_SHA || "";
   if (commit === "") {
     try {
       commit = execSync("git rev-parse HEAD", { encoding: "utf8" }).trim();
@@ -119,9 +121,10 @@ export default defineConfig({
         globPatterns: ["**/*.{js,css,html,svg,wasm,webmanifest}"],
         // sqlite-wasm が一緒に出力するが、使わないワーカーの JS はキャッシュしない
         globIgnores: ["**/sqlite3-worker1-*.js", "**/sqlite3-opfs-async-proxy-*.js"],
-        // SPA なので、ないパスには index.html を返す。/api は sendo に任せる
+        // SPA なので、ないパスには index.html を返す。sendo のパス（/api、コンテナ版で同じオリジンに
+        // 並ぶ /mcp や OAuth など）は横取りせず、sendo に届ける（docs/decisions/container.md の 3）
         navigateFallback: "/index.html",
-        navigateFallbackDenylist: [/^\/api\//],
+        navigateFallbackDenylist: SENDO_NAVIGATION_DENYLIST,
         // CSP で Trusted Types を強制しているので、Service Worker の中で importScripts に
         // 文字列を渡せない。Workbox の実行部分を sw.js に入れる
         inlineWorkboxRuntime: true,

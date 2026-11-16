@@ -53,15 +53,21 @@ pnpm dev
 | `pnpm lint` | lint と整形の確認（Biome） |
 | `pnpm format` | 整形して、直せる lint の指摘を直す |
 | `pnpm test` | テスト（Vitest） |
-| `pnpm build` | 画面をビルドし、reader Worker をデプロイせずにバンドルして確かめる |
+| `pnpm build` | 画面をビルドし、reader Worker をデプロイせずにバンドルして確かめる。コンテナ版のサーバーもバンドルする |
 | `pnpm size` | ビルドのあとに、画面の JS とワーカーの JS・wasm の大きさが予算に収まるか確かめる |
 | `pnpm e2e` | 画面を通したテスト（Playwright。`pnpm build` のあとに） |
 | `pnpm run deploy` | 画面をビルドし、reader Worker をデプロイする（[デプロイ](#デプロイ)。ふつうは fork への push で Workers Builds が動かす） |
+| `pnpm --filter @sendo-reader/web start:server` | コンテナ版のサーバーを手元の Node で動かす（`pnpm build` のあとに。`SENDO_URL=http://localhost:8787` で手元の Sendo に中継する） |
 | `pnpm --filter @sendo-reader/web lighthouse` | 初回の読み込みを Lighthouse で測る |
 | `pnpm --filter @sendo-reader/core api:fetch` | 手元の Sendo から API の定義（OpenAPI）を写す |
 | `pnpm --filter @sendo-reader/core api:generate` | 写した定義から API の型を作る |
 
 ## デプロイ
+
+Sendo と同じく、2 つの版があります。Sendo と同じ版を使ってください（版をまたぐ組み合わせは使えません）。
+
+- **Cloudflare 版**：自分の Cloudflare アカウントに、fork からデプロイします（このあとの節）
+- **コンテナ版**：自分のサーバーで、Sendo のコンテナ版と並べて Docker で動かします（[コンテナ版で動かす](#コンテナ版で動かす)）
 
 自分の Cloudflare アカウントに、GitHub の fork からデプロイします。fork の `main` に push するたびに、Cloudflare（Workers Builds）がビルドしてデプロイします（[決定](docs/decisions/deploy.md)）。Cloudflare の無料プランで動きます。
 
@@ -102,6 +108,23 @@ pnpm --filter @sendo-reader/web exec wrangler login   # 最初に 1 回
 pnpm run deploy
 ```
 
+## コンテナ版で動かす
+
+上流の CI が作ったイメージ（`ghcr.io/sendo-feed/sendo-reader`）を、Sendo のコンテナ版と同じ `compose.yaml` で動かします。fork もビルドも要りません。手順は [Sendo の README](https://github.com/sendo-feed/sendo#コンテナ版で動かす) にあります（[決定](docs/decisions/container.md)）。
+
+- 外に出すのは reader のコンテナだけです。reader のコンテナが画面を返し、Sendo のパス（`/api`、`/mcp`、OAuth、Google Reader API など）を、compose の中の Sendo に中継します。外からは reader のオリジン 1 つに見えます
+- Sendo の `PUBLIC_URL` と `READER_URL` には、どちらも reader のオリジン（例：`https://reader.example.com`）を入れます。Google のリダイレクト URI、リーダーアプリのサーバー、MCP の URL も、このオリジンにします
+- TLS は、手前に置くリバースプロキシや Cloudflare Tunnel で終えます。コンテナは HTTP（既定はポート 8080）だけを受けます
+
+reader のコンテナの設定（環境変数）は、次の 2 つだけです。どちらも、ふつうは変えません。
+
+| 名前 | 既定 | 意味 |
+|---|---|---|
+| `SENDO_URL` | `http://sendo:8787` | 中継の先の Sendo（compose の中の名前） |
+| `PORT` | `8080` | 受けるポート |
+
+手元でイメージを作るときは `docker build -t sendo-reader .` です。
+
 ## ディレクトリ構成
 
 ```text
@@ -112,9 +135,12 @@ sendo-reader/
 │   └── web/                  # PWA（Svelte 5 ＋ Vite）
 │       ├── src/              # 画面
 │       ├── worker/           # reader Worker（静的なファイル ＋ /api の中継）
+│       ├── server/           # コンテナ版のサーバー（静的なファイル ＋ Sendo のパスの中継）
+│       ├── sendo-paths.ts    # コンテナ版で Sendo に中継するパス
 │       ├── security-headers.ts  # CSP などのヘッダー
 │       └── wrangler.jsonc    # Cloudflare Workers の設定
 ├── scripts/                  # 手元と CI で動かす道具
+├── Dockerfile                # コンテナ版のイメージ
 ├── docs/decisions/           # 今の決定
 └── biome.json                # lint と整形の設定
 ```

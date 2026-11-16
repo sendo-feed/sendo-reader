@@ -8,6 +8,6 @@
     // vite.config.ts は Vite が Node でそのまま読むので、import に拡張子を付ける
     "allowImportingTsExtensions": true
   },
-  // worker/ と test/ はそれぞれの tsconfig で調べる（実行する場所が違うため）
-  "include": ["src", "vite.config.ts", "vitest.config.ts", "security-headers.ts"]
+  // worker/、server/、test/ はそれぞれの tsconfig で調べる（実行する場所が違うため）
+  "include": ["src", "vite.config.ts", "vitest.config.ts", "security-headers.ts", "sendo-paths.ts"]
 }
