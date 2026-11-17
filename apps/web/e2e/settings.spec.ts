@@ -20,6 +20,7 @@ test("トークンの説明が長くても、取り消すボタンは各行の�
   await routeFakeSendo(context, server);
   await page.goto("/settings");
   await signIn(page);
+  await page.getByRole("tab", { name: "Connections", exact: true }).click();
   const rows = page.locator("li", {
     has: page.getByRole("button", { name: "取り消す", exact: true }),
   });
@@ -61,6 +62,7 @@ test("設定の画面で、トークンを発行して一度だけ控え、取�
   await page.goto("/");
   await signIn(page);
   await page.getByRole("link", { name: "Settings" }).click();
+  await page.getByRole("tab", { name: "Connections", exact: true }).click();
   await expect(page).toHaveURL(/\/settings$/);
   await expect(page.getByText("発行したトークンはまだありません。")).toBeVisible();
 
@@ -113,6 +115,7 @@ test("OAuth で許可したクライアントを見て、取り消す", async ({
 
   await page.goto("/settings");
   await signIn(page);
+  await page.getByRole("tab", { name: "Connections", exact: true }).click();
   await expect(page).toHaveURL(/\/settings$/);
 
   const agent = page.locator("li", { hasText: "Agent" });
@@ -145,6 +148,7 @@ test("設定の画面は、sendo に届かなければその旨を出し、読�
     if (failures.delete(path)) throw new TypeError("offline");
   };
   await page.getByRole("link", { name: "Settings" }).click();
+  await page.getByRole("tab", { name: "Connections", exact: true }).click();
   await expect(page.getByRole("alert")).toHaveCount(2);
   await expect(page.getByRole("alert").first()).toContainText("sendo に届きません");
 
@@ -160,6 +164,7 @@ test("別のアカウントのセッションに替わっていたら、設定�
   await routeFakeSendo(context, server);
   await page.goto("/settings");
   await signIn(page);
+  await page.getByRole("tab", { name: "Connections", exact: true }).click();
   await expect(page.getByText(`ログインしているアカウント：${USER.email}`)).toBeVisible();
   await expect(page.getByText("発行したトークンはまだありません。")).toBeVisible();
 
@@ -182,4 +187,105 @@ test("別のアカウントのセッションに替わっていたら、設定�
   await expect(page.getByText("ログインしているアカウント：b@example.com")).toBeVisible();
   expect(server.tokens.size).toBe(0);
   await expect(page.getByLabel("名前")).toHaveValue("");
+});
+
+test("設定をキーボードで切り替え、通信できなくてもプレビューと読む操作を変えられる", async ({
+  page,
+  context,
+}) => {
+  const server = new FakeSendo();
+  const accountRequests: string[] = [];
+  let offline = false;
+  server.onRequest = async (path) => {
+    if (path === "GET /tokens" || path === "GET /oauth/grants") accountRequests.push(path);
+    if (offline) throw new TypeError("offline");
+  };
+  await routeFakeSendo(context, server);
+  await page.goto("/settings");
+  await signIn(page);
+
+  const appearance = page.getByRole("tab", { name: "Appearance", exact: true });
+  await expect(appearance).toHaveAttribute("aria-selected", "true");
+  offline = true;
+  await expect(page.getByText("PC・タブレット向けの設定です。", { exact: false })).toBeVisible();
+  const preview = page.getByRole("article", { name: "記事のプレビュー" });
+  const body = preview.locator(".body");
+  const before = await body.evaluate((element) =>
+    Number.parseFloat(getComputedStyle(element).fontSize),
+  );
+  await page.getByText("Dark", { exact: true }).click();
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
+  await page.getByRole("slider", { name: "Text size" }).fill("4");
+  await expect
+    .poll(() => body.evaluate((element) => Number.parseFloat(getComputedStyle(element).fontSize)))
+    .toBeGreaterThan(before);
+  await expect(page.getByRole("slider", { name: "Text size" })).toHaveAttribute(
+    "aria-valuetext",
+    "Largest",
+  );
+  expect(accountRequests).toEqual([]);
+
+  await appearance.focus();
+  await appearance.press("ArrowRight");
+  const reading = page.getByRole("tab", { name: "Reading", exact: true });
+  await expect(reading).toBeFocused();
+  await expect(reading).toHaveAttribute("aria-selected", "true");
+  await expect(preview).toHaveCount(0);
+  await page.getByLabel("Mark as read on scroll").uncheck();
+  await page.getByLabel("List: swipe left").selectOption("none");
+  expect(accountRequests).toEqual([]);
+
+  offline = false;
+  await reading.press("End");
+  await expect(page.getByRole("tab", { name: "Connections", exact: true })).toBeFocused();
+  await expect(page.getByText("発行したトークンはまだありません。")).toBeVisible();
+  expect(accountRequests.sort()).toEqual(["GET /oauth/grants", "GET /tokens"]);
+  await page.getByRole("tab", { name: "Connections", exact: true }).press("Home");
+  await expect(appearance).toBeFocused();
+  await expect(preview).toBeVisible();
+  await appearance.press("ArrowRight");
+  await expect(page.getByLabel("Mark as read on scroll")).not.toBeChecked();
+  await expect(page.getByLabel("List: swipe left")).toHaveValue("none");
+});
+
+test("Connections を離れたら発行したトークンの中身を捨てる", async ({ page, context }) => {
+  const server = new FakeSendo();
+  await routeFakeSendo(context, server);
+  await page.goto("/settings");
+  await signIn(page);
+  await page.getByRole("tab", { name: "Connections", exact: true }).click();
+  await page.getByLabel("名前").fill("One-time token");
+  await page.getByRole("button", { name: "発行する" }).click();
+  const secret = page.locator(".secret");
+  await expect(secret).toHaveText(/^sendo_/);
+  const value = (await secret.textContent()) ?? "";
+  await page.getByRole("tab", { name: "Reading", exact: true }).click();
+  await expect(page.getByText(value, { exact: true })).toHaveCount(0);
+  await page.getByRole("tab", { name: "Connections", exact: true }).click();
+  await expect(page.locator("li", { hasText: "One-time token" })).toBeVisible();
+  await expect(page.getByText(value, { exact: true })).toHaveCount(0);
+  await expect(page.getByLabel("名前")).toHaveValue("");
+});
+
+test("幅 320px の画面でも各カテゴリを選べ、プレビューの文字を大きくできる", async ({
+  page,
+  context,
+}) => {
+  const server = new FakeSendo();
+  await routeFakeSendo(context, server);
+  await page.setViewportSize({ width: 320, height: 800 });
+  await page.goto("/settings");
+  await signIn(page);
+  await page.getByRole("slider", { name: "Text size" }).fill("4");
+  for (const category of ["Reading", "Connections", "Appearance"]) {
+    const tab = page.getByRole("tab", { name: category, exact: true });
+    await tab.click();
+    await expect(tab).toHaveAttribute("aria-selected", "true");
+    expect(await tab.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
+    await expect(page.getByRole("tabpanel", { name: category, exact: true })).toBeVisible();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(
+      320,
+    );
+  }
+  await expect(page.getByRole("article", { name: "記事のプレビュー" })).toBeVisible();
 });

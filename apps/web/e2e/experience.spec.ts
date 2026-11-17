@@ -389,9 +389,11 @@ test("狭い画面では、メニューを左から開き、一覧と記事を�
   // （既定では、一覧の行を左へスワイプすると既読・未読が替わる）
   await page.getByRole("button", { name: "Menu", exact: true }).click();
   await nav.getByRole("link", { name: "Settings" }).click();
+  await page.getByRole("tab", { name: "Reading", exact: true }).click();
   await page.getByLabel("Article: swipe left").selectOption({ label: "Next" });
   await page.getByLabel("List: swipe left").selectOption({ label: "None" });
   await page.reload();
+  await page.getByRole("tab", { name: "Reading", exact: true }).click();
   await expect(page.getByLabel("Article: swipe left")).toHaveValue("next");
   await tabs.getByRole("link", { name: "Saved" }).click();
   await expect(list.locator(".title")).toHaveText(["1 番目"]);
@@ -538,6 +540,7 @@ test("一覧を動かして通り過ぎた記事は既読になる。設定で�
   // 切ると、動かしても既読にしない
   await page.getByRole("button", { name: "Menu", exact: true }).click();
   await page.locator("nav.sidebar").getByRole("link", { name: "Settings" }).click();
+  await page.getByRole("tab", { name: "Reading", exact: true }).click();
   await page.getByLabel("Mark as read on scroll").uncheck();
   await page.goBack();
   await expect(list.locator(".item").first()).toBeVisible();
