@@ -144,6 +144,27 @@ test("スクロール既読を切っているときは、末尾でも未読を�
   await expect(page.locator(".read-celebration")).toHaveCount(0);
 });
 
+test("一部をスクロールで読んだあと、残りが別端末で既読になっても祝わない", async ({
+  page,
+  context,
+}) => {
+  const { server } = seed(20);
+  await routeFakeSendo(context, server);
+  await page.goto("/");
+  await signIn(page);
+  const list = page.locator(".article-list");
+  await expect(list.locator(".row.unread")).toHaveCount(20);
+  await page.waitForTimeout(400);
+  await scroll(page, 220);
+  await expect.poll(() => list.locator(".row.unread").count()).toBeLessThan(20);
+  expect(await list.locator(".row.unread").count()).toBeGreaterThan(0);
+  for (const article of server.inbox.values()) server.setArticleState(article.id, { read: true });
+  await page.getByRole("button", { name: "Sync now", exact: true }).click();
+  await expect(list.locator(".row.unread")).toHaveCount(0);
+  await expect(page.locator(".read-celebration")).toHaveCount(0);
+  await expect(list.locator(".end").getByRole("status")).toHaveCount(0);
+});
+
 test("途中のページでは祝わず、別の一覧へ移っても完了を持ち越さない", async ({ page, context }) => {
   const { server, feed } = seed(61);
   await routeFakeSendo(context, server);
