@@ -138,7 +138,7 @@
 
   .categories {
     display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(3, auto);
     padding: 0.25rem;
     border: 1px solid var(--border);
     border-radius: var(--radius-small);
