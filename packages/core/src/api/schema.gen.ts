@@ -185,6 +185,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/features": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * この Sendo で使える機能
+         * @description Sendo には 2 つの版があり、版によって使える機能が違う（docs/decisions/container.md の 3）。
+         *     クライアントは、これを見て画面を出し分ける。版の名前は返さない（機能ごとに見る）。
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description 使える機能 */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Features"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/feeds": {
         parameters: {
             query?: never;
@@ -451,14 +491,19 @@ export interface paths {
         };
         /**
          * 記事の本文
-         * @description 記事の本文（HTML）を返す。記事の hasContent が true のときだけ、取りにいく。
+         * @description 記事の本文（HTML）を返す。出どころは 2 つあり、source で選ぶ。
+         *     - feed（既定）：フィードに入っていた本文。記事の hasContent が true のときだけ、取りにいく。
+         *     - page：記事のページから抜いた本文。まだ抜いていなければ、このリクエストの中でページを取りにいって抜く（数秒かかることがある）。使える版だけ（GET /features の pageContent）。抜けなかったら 404（page_content_unavailable）で、1 日たつまで取りにいき直さない。
          *     HTML は Sendo がサニタイズしてある（決めたタグと属性だけ。スクリプトやスタイルはない）。それでも外部から来たデータなので、クライアントの側でも、信頼できない HTML として扱う。
          *     本文の中の画像は、中継を通る URL（/api/v1/images?…。オリジンは付けない）に書き換えてある。リンクは絶対の URL。
-         *     本文は記事を取り込んだときに決まり、あとから変わらないので、手元に置いてよい。
+         *     本文は、いったん返したらあとから変わらないので、手元に置いてよい。
          */
         get: {
             parameters: {
-                query?: never;
+                query?: {
+                    /** @description 本文の出どころ。feed はフィードに入っていた本文、page は記事のページから抜いた本文 */
+                    source?: "feed" | "page";
+                };
                 header?: never;
                 path: {
                     id: string;
@@ -476,8 +521,17 @@ export interface paths {
                         "application/json": components["schemas"]["ArticleContent"];
                     };
                 };
-                /** @description 記事がない（not_found）か、その記事に本文がない（no_content） */
+                /** @description 記事がない（not_found）か、その記事にフィードの本文がない（no_content）か、ページから本文を抜けなかった（page_content_unavailable） */
                 404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description この版では、ページから本文を抜けない（feature_unavailable。GET /features を見る） */
+                501: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -1662,6 +1716,10 @@ export interface components {
             /** @example you@example.com */
             email: string;
         };
+        Features: {
+            /** @description 記事のページから本文を抜けるか（GET /articles/{id}/content?source=page）。コンテナ版だけ */
+            pageContent: boolean;
+        };
         Feed: {
             id: string;
             /** @example https://example.com/feed.xml */
@@ -1702,10 +1760,10 @@ export interface components {
             /** @description サニタイズした HTML */
             html: string;
             /**
-             * @description 本文の出どころ。feed は、フィードに入っていた本文
+             * @description 本文の出どころ。feed はフィードに入っていた本文、page は記事のページから抜いた本文
              * @enum {string}
              */
-            source: "feed";
+            source: "feed" | "page";
         };
         Article: {
             id: string;

@@ -1,6 +1,7 @@
 import { ApiError, createSendoApi, type SendoApi } from "./api/client";
 import { hasVisibleContent, parseContent } from "./content/parse";
 import {
+  type ContentSource,
   getStoredContent,
   listContentToPrefetch,
   markContentMissing,
@@ -156,7 +157,7 @@ export class ReaderCore {
    * （画面がまとめる前の ID を持ったままでも使えるように）
    */
   readonly #folderIds = new Map<string, string>();
-  /** 取りにいっている本文（記事の ID ごと）。同じ記事を、同時に 2 回取らない */
+  /** 取りにいっている本文（出どころと記事の ID ごと）。同じ本文を同時に 2 回取らない */
   readonly #contentFetches = new Map<string, Promise<StoredContent | null>>();
   readonly #prefetchContents: number;
   #prefetching: Promise<number> | null = null;
@@ -840,9 +841,13 @@ export class ReaderCore {
    * 手元の本文を読む（ネットワークを待たない）。手元になければ、sendo にあるか（missing）、
    * 本文のない記事か（none）を返す。本文は、通すタグと属性だけの木にして返す（HTML の文字列は、
    * 画面に渡さない）
+   * source=page は hasContent によらず、手元に全文がなければ missing
    */
-  async getArticleContent(articleId: string): Promise<LocalArticleContent> {
-    const found = await getStoredContent(this.#db, articleId);
+  async getArticleContent(
+    articleId: string,
+    source: ContentSource = "feed",
+  ): Promise<LocalArticleContent> {
+    const found = await getStoredContent(this.#db, articleId, source);
     if (found === null || !found.hasContent) return { status: "none" };
     if (found.stored === null) return { status: "missing" };
     const content = toArticleContent(found.stored);
@@ -855,15 +860,27 @@ export class ReaderCore {
    * 本文がなかった記事は null。届かなければ ApiError（network など）を投げる。
    *
    * 画面は、これを待っている間、要約を出しておく。
+   * source=page の 404 は、フィード本文の hasContent を変えない（あとで再試行できる）
    */
-  async fetchArticleContent(articleId: string): Promise<ArticleContent | null> {
+  async fetchArticleContent(
+    articleId: string,
+    source: ContentSource = "feed",
+  ): Promise<ArticleContent | null> {
     this.#requireSignedIn();
     // 待つ前に、今のログインの合図を取る（待っている間のログアウトで中断されるように）
     const session = this.#session.signal;
-    const found = await getStoredContent(this.#db, articleId);
+    const found = await getStoredContent(this.#db, articleId, source);
     if (found === null || !found.hasContent) return null;
-    const stored = found.stored ?? (await this.#fetchContent(articleId, session));
+    const stored = found.stored ?? (await this.#fetchContent(articleId, session, false, source));
     return stored === null ? null : toArticleContent(stored);
+  }
+
+  /** この sendo で元ページから全文を取れるか。オフラインでも保存済みの全文は読める */
+  async pageContentAvailable(): Promise<boolean> {
+    this.#requireSignedIn();
+    const session = this.#session.signal;
+    await this.#confirmSameUser(session);
+    return this.#api.pageContentAvailable(session);
   }
 
   /**
@@ -905,7 +922,8 @@ export class ReaderCore {
   }
 
   /**
-   * sendo から本文を取り、手元に置く。sendo になければ、その記事を本文なしにして null。
+   * sendo から本文を取り、手元に置く。フィード本文がなければ、記事を本文なしにして null。
+   * ページの全文がなければ、フィード本文は変えずに null（上流で再試行する時期を決める）。
    * 取る前に、セッションのユーザーを確かめる（confirmed なら、呼ぶ側が確かめてある）。別の
    * ユーザーのセッションで聞くと、その人の受信箱にない記事は 404 になり、本文なしと取り違える
    */
@@ -913,29 +931,31 @@ export class ReaderCore {
     articleId: string,
     session: AbortSignal,
     confirmed = false,
+    source: ContentSource = "feed",
   ): Promise<StoredContent | null> {
     if (session.aborted) {
       return Promise.reject(new ApiError("unauthorized", "ログインし直したので取らなかった"));
     }
-    const existing = this.#contentFetches.get(articleId);
+    const key = `${source}:${articleId}`;
+    const existing = this.#contentFetches.get(key);
     if (existing !== undefined) return existing;
     const running = (async () => {
       if (!confirmed) await this.#confirmSameUser(session);
-      const content = await this.#api.articleContent(articleId, session);
+      const content = await this.#api.articleContent(articleId, session, source);
       const changed = await this.#db.transaction(async (tx) => {
         // 取っている間にログアウトしたり、ユーザーが替わったりしたら、置かない
         throwIfSessionEnded(session);
-        if (content === null) return markContentMissing(tx, articleId);
-        await putStoredContent(tx, articleId, content, this.#now());
+        if (content === null) return source === "feed" && markContentMissing(tx, articleId);
+        await putStoredContent(tx, articleId, content, this.#now(), source);
         return false;
       });
       // 本文なしに変えたら、記事を読み直してもらう
       if (changed) this.#emit(new Set<Table>(["articles"]));
       return content;
     })().finally(() => {
-      if (this.#contentFetches.get(articleId) === running) this.#contentFetches.delete(articleId);
+      if (this.#contentFetches.get(key) === running) this.#contentFetches.delete(key);
     });
-    this.#contentFetches.set(articleId, running);
+    this.#contentFetches.set(key, running);
     return running;
   }
 

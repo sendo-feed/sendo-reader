@@ -200,6 +200,137 @@ describe("本文を取る", () => {
   });
 });
 
+describe("元ページの全文", () => {
+  test("要約だけの記事でも取得し、オフラインでは手元から返す。フィード本文とは混ぜない", async () => {
+    const { server, core, feed } = await seeded();
+    server.pageContentEnabled = true;
+    const article = server.deliver(feed.id, { summary: "要約" });
+    server.pageContents.set(article.id, "<p>元ページの全文</p>");
+    await core.sync();
+    expect(await core.pageContentAvailable()).toBe(true);
+    expect(await core.getArticleContent(article.id, "page")).toEqual({ status: "missing" });
+    const full = await core.fetchArticleContent(article.id, "page");
+    expect(full).toEqual({
+      source: "page",
+      nodes: [{ tag: "p", children: ["元ページの全文"] }],
+    });
+    expect(await core.getArticleContent(article.id)).toEqual({ status: "none" });
+    expect((await core.getArticle(article.id))?.hasContent).toBe(false);
+    server.failNext("network");
+    expect(await core.fetchArticleContent(article.id, "page")).toEqual(full);
+    expect(await core.getArticleContent(article.id, "page")).toEqual({
+      status: "ready",
+      content: full,
+    });
+    expect(server.pageContentRequests).toEqual([article.id]);
+    expect(server.contentRequests).toEqual([]);
+  });
+
+  test("同じ記事の全文は同時に 1 回だけ取得する。フィード本文の取得とは分ける", async () => {
+    const { server, core, feed } = await seeded();
+    server.pageContentEnabled = true;
+    const article = server.deliver(feed.id, { content: "<p>フィード本文</p>" });
+    server.pageContents.set(article.id, "<p>全文</p>");
+    await core.sync();
+    const [a, b, feedContent] = await Promise.all([
+      core.fetchArticleContent(article.id, "page"),
+      core.fetchArticleContent(article.id, "page"),
+      core.fetchArticleContent(article.id),
+    ]);
+    expect(a).toEqual(b);
+    expect(a?.source).toBe("page");
+    expect(feedContent?.source).toBe("feed");
+    expect((await core.getArticleContent(article.id)).status).toBe("ready");
+    expect((await core.getArticleContent(article.id, "page")).status).toBe("ready");
+    expect(server.pageContentRequests).toEqual([article.id]);
+    expect(server.contentRequests).toEqual([article.id]);
+  });
+
+  test("抽出に失敗してもフィード本文を消さず、あとで再取得できる", async () => {
+    const { server, core, feed } = await seeded();
+    server.pageContentEnabled = true;
+    const article = server.deliver(feed.id, { content: "<p>フィード本文</p>" });
+    await core.sync();
+    const original = await core.fetchArticleContent(article.id);
+    expect(await core.fetchArticleContent(article.id, "page")).toBeNull();
+    expect((await core.getArticle(article.id))?.hasContent).toBe(true);
+    expect(await core.fetchArticleContent(article.id)).toEqual(original);
+    server.pageContents.set(article.id, "<p>全文</p>");
+    expect((await core.fetchArticleContent(article.id, "page"))?.source).toBe("page");
+  });
+
+  test("Cloudflare 版や機能一覧のない古い版に対応し、501 は失敗として返す", async () => {
+    const { server, core, feed } = await seeded();
+    expect(await core.pageContentAvailable()).toBe(false);
+    server.featuresStatus = 404;
+    expect(await core.pageContentAvailable()).toBe(false);
+    const article = server.deliver(feed.id, { content: "<p>フィード本文</p>" });
+    await core.sync();
+    await expect(core.fetchArticleContent(article.id, "page")).rejects.toMatchObject({
+      status: 501,
+      code: "feature_unavailable",
+    });
+    expect((await core.getArticle(article.id))?.hasContent).toBe(true);
+  });
+
+  test("全文も安全な木にして返す。抽出した HTML を画面に渡さない", async () => {
+    const { server, core, feed } = await seeded();
+    server.pageContentEnabled = true;
+    const article = server.deliver(feed.id);
+    server.pageContents.set(
+      article.id,
+      '<script>evil()</script><p onclick="evil()">全文<a href="javascript:evil()">リンク</a><img src="https://evil.test/x"></p>',
+    );
+    await core.sync();
+    expect(await core.fetchArticleContent(article.id, "page")).toEqual({
+      source: "page",
+      nodes: [{ tag: "p", children: ["全文リンク"] }],
+    });
+  });
+
+  test.each(["削除", "ログアウト"] as const)("%s で保存済みの全文も消える", async (action) => {
+    const { server, core, feed, db } = await seeded();
+    server.pageContentEnabled = true;
+    const article = server.deliver(feed.id);
+    server.pageContents.set(article.id, "<p>全文</p>");
+    await core.sync();
+    await core.fetchArticleContent(article.id, "page");
+    expect(await db.all("select article_id from article_page_contents")).toHaveLength(1);
+    if (action === "削除") {
+      server.removeFromInbox(article.id);
+      await core.sync();
+    } else {
+      await core.signOut();
+    }
+    expect(await db.all("select article_id from article_page_contents")).toEqual([]);
+  });
+
+  test("取得中にログアウトしたら、全文を置かない", async () => {
+    const { server, core, feed, db } = await seeded();
+    server.pageContentEnabled = true;
+    const article = server.deliver(feed.id);
+    await core.sync();
+    server.failNext("hang");
+    const fetching = core.fetchArticleContent(article.id, "page");
+    await core.signOut();
+    await expect(fetching).rejects.toBeInstanceOf(ApiError);
+    expect(await db.all("select article_id from article_page_contents")).toEqual([]);
+  });
+
+  test("別のユーザーのセッションでは全文を取らない", async () => {
+    const { server, core, feed, db } = await seeded();
+    server.pageContentEnabled = true;
+    const article = server.deliver(feed.id);
+    await core.sync();
+    server.signInAs({ id: "other", email: "other@example.com" });
+    await expect(core.fetchArticleContent(article.id, "page")).rejects.toMatchObject({
+      kind: "unauthorized",
+    });
+    expect(server.pageContentRequests).toEqual([]);
+    expect(await db.all("select article_id from article_page_contents")).toEqual([]);
+  });
+});
+
 describe("手元の本文を消す", () => {
   test("受信箱から消えた記録が届いたら、本文も一緒に消す", async () => {
     const { server, core, feed, db } = await seeded();

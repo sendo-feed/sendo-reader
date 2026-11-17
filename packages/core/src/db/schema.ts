@@ -147,6 +147,19 @@ const migrations: readonly (readonly string[])[] = [
        delete from article_contents where article_id = old.id;
      end`,
   ],
+  // ページから抜いた全文は、フィードの本文を残して別に置く。has_content はフィード本文だけを示す。
+  [
+    `create table article_page_contents (
+      article_id text primary key,
+      html text not null,
+      source text not null,
+      fetched_at integer not null
+    ) strict`,
+    `create trigger articles_delete_page_content after delete on articles
+     begin
+       delete from article_page_contents where article_id = old.id;
+     end`,
+  ],
 ];
 
 export const SCHEMA_VERSION = migrations.length;
