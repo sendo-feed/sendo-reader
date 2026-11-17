@@ -125,6 +125,17 @@ reader のコンテナの設定（環境変数）は、次の 2 つだけです�
 
 手元でイメージを作るときは `docker build -t sendo-reader .` です。
 
+中継するパスのずれは `Sendo paths` ワークフローが検査します。PR・main への push と毎日の実行で、
+sendo の最新 main の実際のルートを、コンテナと Service Worker の中継先に照合します。
+sendo の変更によって reader の検査が落ちる場合は、エラーに出たパスを `apps/web/sendo-paths.ts` に足してください。
+画面のルートと重なる場合は、両方のパスを調整します。
+
+手元では、依存を入れた sendo のディレクトリから、その tsx で同じ検査を実行できます。
+
+```sh
+pnpm --dir ../sendo exec tsx ../sendo-reader/scripts/check-sendo-paths.ts ../sendo
+```
+
 ## ディレクトリ構成
 
 ```text
