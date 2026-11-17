@@ -42,6 +42,8 @@
 <style>
   .settings {
     display: grid;
+    /* 中身の一番広いもの（スワイプの選択肢など）で、列が画面より広がらないようにする */
+    grid-template-columns: minmax(0, 1fr);
     gap: 2rem;
     align-content: start;
     max-width: 48rem;

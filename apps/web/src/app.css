@@ -4,8 +4,8 @@
  * （lib/prefs.svelte.ts）。文字の大きさは data-text-size で変える。
  *
  * 部品の大きさは rem で書き、文字の大きさの設定は、根の文字の大きさ（--text-size）を変えて全体を
- * 一緒に大きくする。中（既定）は、スマホで Feedly の一覧と同じくらいの大きさ（一覧のタイトルが
- * 約 17px）にする。小は中より一段小さく、大は中より一段大きくする。
+ * 一緒に大きくする。5 段で、1px ずつ変える。真ん中（medium、既定）は、スマホで Feedly の一覧と
+ * 同じくらいの大きさ（根が 17px で、一覧のタイトルが約 16px）にする。
  */
 :root {
   color-scheme: light dark;
@@ -30,7 +30,7 @@
 
   --radius: 0.5rem;
   --radius-small: 0.375rem;
-  --text-size: 1.125rem;
+  --text-size: 1.0625rem;
 
   font-family:
     system-ui, -apple-system, "Hiragino Sans", "Noto Sans JP", "Yu Gothic UI", sans-serif;
@@ -41,12 +41,20 @@
   -webkit-text-size-adjust: 100%;
 }
 
+:root[data-text-size="xsmall"] {
+  --text-size: 0.9375rem;
+}
+
 :root[data-text-size="small"] {
   --text-size: 1rem;
 }
 
 :root[data-text-size="large"] {
-  --text-size: 1.25rem;
+  --text-size: 1.125rem;
+}
+
+:root[data-text-size="xlarge"] {
+  --text-size: 1.1875rem;
 }
 
 :root[data-theme="light"] {

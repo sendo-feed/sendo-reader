@@ -81,7 +81,7 @@ test("オフラインで変えた設定は、つながったあとに送る", as
   // sendo に届かない
   server.onRequest = () => Promise.reject(new TypeError("offline"));
   await openSettings(page);
-  await page.getByText("Large", { exact: true }).click();
+  await page.getByRole("slider", { name: "Text size" }).fill("3");
   await expect(page.locator("html")).toHaveAttribute("data-text-size", "large");
   await page.waitForTimeout(1000);
   expect(server.settingsOf("desktop")).toEqual({});
@@ -162,7 +162,7 @@ test.describe("スマホ", () => {
 
     await page.getByRole("button", { name: "Menu", exact: true }).click();
     await openSettings(page);
-    await page.getByText("Small", { exact: true }).click();
+    await page.getByRole("slider", { name: "Text size" }).fill("1");
     await expect
       .poll(() => server.settingsOf("mobile"))
       .toEqual({ "reader.theme": "dark", "reader.textSize": "small" });

@@ -155,12 +155,13 @@ test("一覧の形・並び順・絞り込みは一覧ごとに覚え、表示�
   // テーマと文字の大きさ
   await nav.getByRole("link", { name: "Settings" }).click();
   await page.getByText("Dark", { exact: true }).click();
-  await page.getByText("Large", { exact: true }).click();
+  await page.getByRole("slider", { name: "Text size" }).fill("3");
   await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
 
   await page.reload();
   await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
   await expect(page.locator("html")).toHaveAttribute("data-text-size", "large");
+  await expect(page.getByRole("slider", { name: "Text size" })).toHaveValue("3");
   const oldest = list.getByRole("button", { name: "Oldest first" });
   await page.goto(`/feeds/${blog.id}`);
   await expect(list.locator(".title")).toHaveText(["1 番目"]);
@@ -654,8 +655,8 @@ test("記事の画面から、リンクを共有し、文字の大きさを変�
 
   // 記事を開いたまま、文字の大きさを変える
   await view.getByRole("button", { name: "Appearance" }).click();
-  await page.getByRole("dialog").getByText("Large", { exact: true }).click();
-  await expect(page.locator("html")).toHaveAttribute("data-text-size", "large");
+  await page.getByRole("dialog").getByRole("slider", { name: "Text size" }).fill("4");
+  await expect(page.locator("html")).toHaveAttribute("data-text-size", "xlarge");
   await expect(page.getByRole("dialog")).not.toContainText("記事の一覧");
   await page.keyboard.press("Escape");
 

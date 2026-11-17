@@ -210,6 +210,13 @@
   label {
     display: grid;
     gap: 0.25rem;
+    max-width: 100%;
+  }
+
+  /* 選択肢の文が長くても、画面より広げない（狭い画面では、選んだ文の終わりを省く） */
+  select {
+    min-width: 0;
+    max-width: 100%;
   }
 
   .check {

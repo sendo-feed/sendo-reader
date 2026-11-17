@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { prefs, type TextSize, type Theme } from "../../lib/prefs.svelte";
+  import { prefs, TEXT_SIZES, type Theme } from "../../lib/prefs.svelte";
 
   /** 表示の設定。sendo に預け、同じ種類の端末に引き継ぐ（lib/prefs.svelte.ts） */
   const THEMES: [Theme, string][] = [
@@ -7,11 +7,14 @@
     ["light", "Light"],
     ["dark", "Dark"],
   ];
-  const SIZES: [TextSize, string][] = [
-    ["small", "Small"],
-    ["medium", "Medium"],
-    ["large", "Large"],
-  ];
+  /** 文字の大きさのスライダーの、読み上げる値（真ん中が既定） */
+  const SIZE_LABELS = ["Smallest", "Small", "Medium", "Large", "Largest"];
+  const sizeIndex = $derived(Math.max(0, TEXT_SIZES.indexOf(prefs.value.textSize)));
+
+  function setSize(index: number) {
+    const textSize = TEXT_SIZES[index];
+    if (textSize !== undefined && textSize !== prefs.value.textSize) prefs.set({ textSize });
+  }
   /** reading なら、読むときに変えたいもの（テーマと文字の大きさ）だけを出す。記事の画面から開く */
   let { reading = false }: { reading?: boolean } = $props();
 </script>
@@ -42,18 +45,20 @@
 
   <fieldset>
     <legend>Text size</legend>
-    {#each SIZES as [value, label] (value)}
-      <label>
-        <input
-          type="radio"
-          name="text-size"
-          {value}
-          checked={prefs.value.textSize === value}
-          onchange={() => prefs.set({ textSize: value })}
-        >
-        {label}
-      </label>
-    {/each}
+    <div class="size">
+      <span class="a small" aria-hidden="true">A</span>
+      <input
+        type="range"
+        aria-label="Text size"
+        min="0"
+        max={TEXT_SIZES.length - 1}
+        step="1"
+        value={sizeIndex}
+        aria-valuetext={SIZE_LABELS[sizeIndex]}
+        oninput={(e) => setSize(e.currentTarget.valueAsNumber)}
+      >
+      <span class="a large" aria-hidden="true">A</span>
+    </div>
   </fieldset>
 
   {#if !reading}
@@ -127,6 +132,36 @@
   label:has(input:focus-visible) {
     outline: 2px solid var(--accent);
     outline-offset: 2px;
+  }
+
+  .size {
+    display: flex;
+    flex: 1;
+    align-items: center;
+    gap: 0.75rem;
+    max-width: 22rem;
+  }
+
+  .size input {
+    flex: 1;
+    min-width: 0;
+    min-height: 2.25rem;
+    margin: 0;
+    accent-color: var(--accent);
+  }
+
+  .a {
+    flex: none;
+    color: var(--muted);
+    line-height: 1;
+  }
+
+  .a.small {
+    font-size: 0.8125rem;
+  }
+
+  .a.large {
+    font-size: 1.25rem;
   }
 
   input[type="radio"] {
