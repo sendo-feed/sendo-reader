@@ -20,6 +20,54 @@ function seed() {
   return { server, folder, blog, news };
 }
 
+test("フォルダ名は未読があるときだけ太字になり、既読化と取り消しで切り替わる", async ({
+  page,
+  context,
+}) => {
+  const { server, folder } = seed();
+  const readFolder = server.createFolder("Read folder");
+  const emptyFolder = server.createFolder("Empty folder");
+  const feed = server.subscribe({
+    url: "https://read.example/feed.xml",
+    title: "Read feed",
+    folderId: readFolder.id,
+  });
+  const article = server.deliver(feed.id, { title: "既読の記事" });
+  server.setArticleState(article.id, { read: true });
+  await routeFakeSendo(context, server);
+  await page.goto("/");
+  await signIn(page);
+
+  const nav = page.locator("nav.sidebar");
+  const unread = nav.locator(`a[href="/folders/${folder.id}"]`);
+  const read = nav.locator(`a[href="/folders/${readFolder.id}"]`);
+  const empty = nav.locator(`a[href="/folders/${emptyFolder.id}"]`);
+  await expect(unread).toHaveCSS("font-weight", "600");
+  await expect(read).toHaveCSS("font-weight", "400");
+  await expect(empty).toHaveCSS("font-weight", "400");
+  await read.click();
+  await expect(read).toHaveAttribute("aria-current", "page");
+  await expect(read).toHaveCSS("font-weight", "400");
+  await empty.click();
+  await expect(empty).toHaveAttribute("aria-current", "page");
+  await expect(empty).toHaveCSS("font-weight", "400");
+
+  await unread.click();
+  await nav.getByRole("button", { name: "Collapse Tech" }).click();
+  await expect(unread).toHaveCSS("font-weight", "600");
+  // 通信できなくても、手元の未読件数で更新する
+  await context.setOffline(true);
+  await page.keyboard.press("Shift+A");
+  await page.getByRole("dialog").getByRole("button", { name: "Mark all as read" }).click();
+  await expect(unread.locator(".count")).toHaveCount(0);
+  await expect(unread).toHaveCSS("font-weight", "400");
+  await page.getByRole("status").getByRole("button", { name: "Undo" }).click();
+  await expect(unread.locator(".count")).toHaveText("2");
+  await expect(unread).toHaveCSS("font-weight", "600");
+  await nav.getByRole("button", { name: "Expand Tech" }).click();
+  await expect(unread).toHaveCSS("font-weight", "600");
+});
+
 test("キーボードで、記事を移り、既読とスターを切り替え、まとめて既読にする", async ({
   page,
   context,

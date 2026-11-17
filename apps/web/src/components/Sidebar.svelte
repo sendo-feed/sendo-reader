@@ -72,6 +72,7 @@
   {@const href = viewHref(view)}
   <a
     {href}
+    class:quiet={view.kind === "folder" && count === 0}
     aria-current={currentHref === href ? "page" : undefined}
     onclick={(e) => handleLink(e, href)}
   >
@@ -429,6 +430,10 @@
   .folder a {
     flex: 1;
     padding-left: 0.25rem;
+    font-weight: 400;
+  }
+
+  .folder a:not(.quiet) {
     font-weight: 600;
   }
 
