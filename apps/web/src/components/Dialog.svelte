@@ -7,7 +7,8 @@
     open = $bindable(false),
     title,
     children,
-  }: { open?: boolean; title: string; children: Snippet } = $props();
+    dismissible = true,
+  }: { open?: boolean; title: string; children: Snippet; dismissible?: boolean } = $props();
 
   let element = $state<HTMLDialogElement>();
 
@@ -19,20 +20,29 @@
 
   /** 窓の外側（::backdrop）を押したら閉じる。中身は .body が覆っているので、届くのは外側だけ */
   function onPointerDown(event: PointerEvent) {
-    if (event.target === element) open = false;
+    if (dismissible && event.target === element) open = false;
   }
 </script>
 
 <dialog
   bind:this={element}
   aria-label={title}
+  oncancel={(event) => {
+    if (!dismissible) event.preventDefault();
+  }}
   onclose={() => (open = false)}
   onpointerdown={onPointerDown}
 >
   <div class="body">
     <header>
       <h2>{title}</h2>
-      <button type="button" class="icon-button" aria-label="Close" onclick={() => (open = false)}>
+      <button
+        type="button"
+        class="icon-button"
+        aria-label="Close"
+        disabled={!dismissible}
+        onclick={() => (open = false)}
+      >
         <Icon name="close" />
       </button>
     </header>
