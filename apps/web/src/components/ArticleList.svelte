@@ -507,19 +507,19 @@
   export function anchor(): ListAnchor | null {
     if (scroller === undefined || scrollTopOf(scroller) <= 0) return null;
     const top = visibleTop();
+    let target: HTMLElement | undefined;
+    let offset = 0;
     for (const row of scroller.querySelectorAll<HTMLElement>(".row[data-article]")) {
       const rect = row.getBoundingClientRect();
-      if (rect.height === 0 || rect.bottom <= top) continue;
-      const article = list.find(row.dataset.article ?? null);
-      if (article === null) return null;
-      return {
-        id: article.id,
-        publishedAt: article.publishedAt,
-        readAt: article.readAt,
-        offset: rect.top - top,
-      };
+      if (rect.height === 0) continue;
+      target = row;
+      offset = rect.top - top;
+      if (rect.bottom > top) break;
     }
-    return null;
+    // 末尾の余白では、すべての行が見出しより上にある。最後の記事からの距離で位置を覚える
+    const article = list.find(target?.dataset.article ?? null);
+    if (article === null) return null;
+    return { id: article.id, publishedAt: article.publishedAt, readAt: article.readAt, offset };
   }
 
   /**

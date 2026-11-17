@@ -61,6 +61,59 @@ async function openBelow(page: Page): Promise<string> {
 /** 位置を書くのは、動かし終えて少ししてから */
 const settle = (page: Page) => page.waitForTimeout(500);
 
+for (const width of [1200, 390]) {
+  test(`末尾の余白でも再読み込みと戻るで同じ位置に戻る（幅${width}）`, async ({
+    page,
+    context,
+  }) => {
+    const { server } = seed({ "reader.unreadOnly": false }, 20);
+    await routeFakeSendo(context, server);
+    await page.setViewportSize({ width, height: 700 });
+    await page.goto("/");
+    await signIn(page);
+    const list = page.locator(".article-list");
+    await expect(list.locator(".row")).toHaveCount(20);
+    await list.evaluate((node) => {
+      if (matchMedia("(max-width: 56rem)").matches)
+        window.scrollTo({ top: document.body.scrollHeight });
+      else node.scrollTo({ top: node.scrollHeight });
+    });
+    await settle(page);
+    const top = () =>
+      width === 390 ? page.evaluate(() => window.scrollY) : list.evaluate((node) => node.scrollTop);
+    expect(await top()).toBeGreaterThan(0);
+    // 上にある行の描画の省略で総高さは変わり得るので、最後の記事と見出しの相対位置を比べる
+    const position = () =>
+      list
+        .locator(".row")
+        .last()
+        .evaluate(
+          (node) =>
+            node.getBoundingClientRect().top -
+            (node.closest(".article-list")?.querySelector("header")?.getBoundingClientRect()
+              .bottom ?? 0),
+        );
+    const saved = await position();
+    const last = await list.locator(".row").last().boundingBox();
+    const header = await list.locator("header").boundingBox();
+    expect((last?.y ?? 0) + (last?.height ?? 0)).toBeLessThan(header?.height ?? 0);
+
+    await page.reload();
+    await expect(list.locator(".row")).toHaveCount(20);
+    await expect.poll(async () => Math.abs((await position()) - saved)).toBeLessThan(2);
+    const navigation =
+      width === 390
+        ? page.getByRole("navigation", { name: "Main", exact: true })
+        : page.locator("nav.sidebar");
+    await navigation.getByRole("link", { name: "Saved", exact: true }).click();
+    await expect(page).toHaveURL(/\/starred$/);
+    await page.goBack();
+    await expect(page).toHaveURL(/\/$/);
+    await expect.poll(async () => Math.abs((await position()) - saved)).toBeLessThan(2);
+    await expect(page.locator(".read-celebration")).toHaveCount(0);
+  });
+}
+
 test("狭い画面：読み込み直しても、別の画面から戻っても、一覧と記事の位置に戻る", async ({
   page,
   context,
