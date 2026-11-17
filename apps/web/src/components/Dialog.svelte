@@ -23,7 +23,12 @@
   }
 </script>
 
-<dialog bind:this={element} onclose={() => (open = false)} onpointerdown={onPointerDown}>
+<dialog
+  bind:this={element}
+  aria-label={title}
+  onclose={() => (open = false)}
+  onpointerdown={onPointerDown}
+>
   <div class="body">
     <header>
       <h2>{title}</h2>
@@ -93,7 +98,9 @@
   }
 
   h2 {
+    min-width: 0;
     margin: 0;
     font-size: 1.125rem;
+    overflow-wrap: anywhere;
   }
 </style>

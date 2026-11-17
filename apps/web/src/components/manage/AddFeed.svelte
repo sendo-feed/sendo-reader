@@ -1,8 +1,9 @@
 <script lang="ts">
-  import type { FeedCandidate } from "@sendo-reader/core";
+  import type { Feed, FeedCandidate } from "@sendo-reader/core";
   import { useReader } from "../../lib/context";
   import { describeError } from "../../lib/errors";
-  import { router, viewHref } from "../../lib/router.svelte";
+
+  let { onsubscribed }: { onsubscribed: (feed: Feed) => void } = $props();
 
   const reader = useReader();
   let url = $state("");
@@ -36,7 +37,7 @@
       const feed = await reader.client.subscribe(chosen, folderId === "" ? null : folderId);
       url = "";
       candidates = null;
-      if (feed !== null) router.navigate(viewHref({ kind: "feed", id: feed.id }));
+      if (feed !== null) onsubscribed(feed);
     } catch (error) {
       message = describeError(error);
     } finally {
@@ -46,9 +47,8 @@
 </script>
 
 <section>
-  <h2>フィードを購読する</h2>
   <form onsubmit={discover}>
-    <label for="feed-url">サイトかフィードの URL</label>
+    <label for="feed-url">Website or feed URL</label>
     <div class="row">
       <input
         id="feed-url"
@@ -57,15 +57,19 @@
         placeholder="https://example.com/"
         required
         bind:value={url}
+        oninput={() => {
+          candidates = null;
+          chosen = null;
+        }}
         disabled={busy}
       >
-      <button type="submit" disabled={busy || url.trim() === ""}>探す</button>
+      <button type="submit" disabled={busy || url.trim() === ""}>Find</button>
     </div>
   </form>
 
   {#if candidates !== null && candidates.length > 0}
     <fieldset disabled={busy}>
-      <legend>購読するフィード</legend>
+      <legend>Feeds</legend>
       {#each candidates as candidate (candidate.url)}
         <label class="candidate">
           <input type="radio" name="candidate" value={candidate.url} bind:group={chosen}>
@@ -75,19 +79,22 @@
           </span>
         </label>
       {/each}
-      <label for="feed-folder">フォルダ</label>
+      <label for="feed-folder">Folder</label>
       <select id="feed-folder" bind:value={folderId}>
-        <option value="">フォルダなし</option>
+        <option value="">No folder</option>
         {#each reader.folders as folder (folder.id)}
           <option value={folder.id}>{folder.name}</option>
         {/each}
       </select>
-      <button type="button" onclick={subscribe} disabled={chosen === null}>
-        {busy ? "購読しています…" : "購読する"}
+      <button type="button" class="primary" onclick={subscribe} disabled={chosen === null}>
+        Subscribe
       </button>
     </fieldset>
   {/if}
 
+  {#if busy}
+    <p role="status">処理しています…</p>
+  {/if}
   {#if message !== null}
     <p class="error" role="alert">{message}</p>
   {/if}
@@ -96,6 +103,7 @@
 <style>
   form,
   fieldset {
+    min-width: 0;
     display: grid;
     gap: 0.5rem;
   }
@@ -120,6 +128,10 @@
     display: flex;
     gap: 0.5rem;
     align-items: baseline;
+  }
+
+  .candidate > span {
+    min-width: 0;
   }
 
   .candidate .title {

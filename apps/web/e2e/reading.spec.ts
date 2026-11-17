@@ -71,14 +71,20 @@ test("フィードを探して購読し、フォルダに入れる", async ({ pa
   await page.goto("/");
   await signIn(page);
   await page.getByRole("link", { name: "Manage feeds" }).click();
-  await page.getByLabel("新しいフォルダの名前").fill("Tech");
-  await page.getByRole("button", { name: "作る" }).click();
-  await page.getByLabel("サイトかフィードの URL").fill("https://blog.example/");
-  await page.getByRole("button", { name: "探す" }).click();
-  await page.getByLabel("フォルダ", { exact: true }).selectOption({ label: "Tech" });
-  await page.getByRole("button", { name: "購読する" }).click();
+  await page.getByRole("button", { name: "New folder", exact: true }).click();
+  await page.getByLabel("Folder name", { exact: true }).fill("Tech");
+  await page.getByRole("button", { name: "Create folder", exact: true }).click();
+  await page.getByRole("button", { name: "Add feed", exact: true }).click();
+  await page.getByLabel("Website or feed URL").fill("https://blog.example/");
+  await page.getByRole("button", { name: "Find", exact: true }).click();
+  await page.getByLabel("Folder", { exact: true }).selectOption({ label: "Tech" });
+  await page.getByRole("button", { name: "Subscribe", exact: true }).click();
 
-  await expect(page).toHaveURL(/\/feeds\//);
+  await expect(page.getByRole("dialog", { name: "Add feed", exact: true })).not.toBeVisible();
+  await expect(page).toHaveURL(/\/manage$/);
+  await expect(
+    page.getByRole("region", { name: "Tech", exact: true }).locator(".feed-row"),
+  ).toContainText("Blog");
   await expect.poll(() => [...server.folders.values()].map((f) => f.name)).toEqual(["Tech"]);
   const [created] = [...server.folders.values()];
   await expect.poll(() => [...server.feeds.values()].map((f) => f.folderId)).toEqual([created?.id]);

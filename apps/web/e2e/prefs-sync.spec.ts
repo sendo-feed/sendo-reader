@@ -140,8 +140,9 @@ test("購読をやめると、そのフィードの一覧の設定を消す", as
   await expect.poll(() => Object.keys(server.settingsOf("desktop"))).toEqual([name]);
 
   await page.goto("/manage");
-  await page.getByRole("button", { name: "購読をやめる" }).click();
-  await page.getByRole("button", { name: "本当にやめる" }).click();
+  await page.getByRole("button", { name: "Feed options: Blog", exact: true }).click();
+  await page.getByRole("dialog").getByRole("button", { name: "Unsubscribe…", exact: true }).click();
+  await page.getByRole("dialog").getByRole("button", { name: "Unsubscribe", exact: true }).click();
   await expect.poll(() => server.settingsOf("desktop")).toEqual({});
 });
 

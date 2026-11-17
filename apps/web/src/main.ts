@@ -50,9 +50,9 @@ if (import.meta.env.PROD && "serviceWorker" in navigator) {
     register: () => navigator.serviceWorker.register(trustedScriptUrl("/sw.js"), { scope: "/" }),
     document,
     reload: () => location.reload(),
-    // 設定の画面（発行したアクセストークンを一度だけ出す）と、OAuth の許可の画面では、
-    // 読み込み直さない。ほかの画面に移ってから切り替える
-    canReload: () => location.pathname !== "/settings" && location.pathname !== AUTHORIZE_PATH,
+    // 設定（発行したトークン）、購読の管理（入力中のフォーム・取り込み結果）、OAuth の許可は、
+    // 読み込み直すと消えるものがある。ほかの画面に移ってから切り替える
+    canReload: () => !["/settings", "/manage", AUTHORIZE_PATH].includes(location.pathname),
     setInterval: (fn, ms) => setInterval(fn, ms),
   });
 }
