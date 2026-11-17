@@ -23,7 +23,6 @@
   --accent: #0f766e;
   --accent-strong: #0b5f59;
   --on-accent: #ffffff;
-  --star: #d98b06;
   --danger: #b42318;
   --scrim: rgb(15 20 25 / 45%);
   --shadow: 0 8px 28px rgb(15 20 25 / 16%);
@@ -76,7 +75,6 @@
   --accent: #4fd1c0;
   --accent-strong: #7be0d3;
   --on-accent: #06221f;
-  --star: #f2b23a;
   --danger: #f97066;
   --scrim: rgb(0 0 0 / 60%);
   --shadow: 0 8px 28px rgb(0 0 0 / 50%);
@@ -98,7 +96,6 @@
     --accent: #4fd1c0;
     --accent-strong: #7be0d3;
     --on-accent: #06221f;
-    --star: #f2b23a;
     --danger: #f97066;
     --scrim: rgb(0 0 0 / 60%);
     --shadow: 0 8px 28px rgb(0 0 0 / 50%);

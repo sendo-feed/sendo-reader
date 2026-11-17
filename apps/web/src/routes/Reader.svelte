@@ -56,7 +56,7 @@
 
   /** 狭い画面の下のバーに並べる行き先（メニューのボタンのあとに、この順で並べる） */
   const TABS: { href: string; label: string; icon: IconName }[] = [
-    { href: "/starred", label: "Saved", icon: "star" },
+    { href: "/starred", label: "Saved", icon: "bookmark" },
     { href: "/", label: "All", icon: "inbox" },
     { href: "/manage", label: "Add", icon: "plus" },
     { href: "/search", label: "Search", icon: "search" },
@@ -647,7 +647,7 @@
         aria-current={currentTab === tab.href ? "page" : undefined}
         onclick={(e) => onTab(e, tab.href)}
       >
-        <Icon name={tab.icon} filled={tab.icon === "star" && currentTab === tab.href} />
+        <Icon name={tab.icon} filled={tab.icon === "bookmark" && currentTab === tab.href} />
         <span>{tab.label}</span>
       </a>
     {/each}

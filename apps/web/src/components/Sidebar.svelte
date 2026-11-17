@@ -182,7 +182,7 @@
   <div class="scroll">
     <div class="views">
       {@render item({ kind: "all" }, "All", reader.unread.total, "inbox")}
-      {@render item({ kind: "starred" }, "Saved", 0, "star")}
+      {@render item({ kind: "starred" }, "Saved", 0, "bookmark")}
       {@render item({ kind: "search" }, "Search", 0, "search")}
     </div>
 
