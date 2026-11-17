@@ -87,8 +87,11 @@ test("設定の画面は、sendo に届かなければその旨を出し、読�
   await signIn(page);
   await expect(page.getByRole("button", { name: "Sync now" })).toBeVisible();
 
-  // トークンと許可の読み込みが、どちらも届かない
-  server.failNext("network", "network");
+  // 機能一覧などの裏の通信に左右されないよう、対象の読み込みだけを 1 回ずつ失敗させる
+  const failures = new Set(["GET /tokens", "GET /oauth/grants"]);
+  server.onRequest = async (path) => {
+    if (failures.delete(path)) throw new TypeError("offline");
+  };
   await page.getByRole("link", { name: "Settings" }).click();
   await expect(page.getByRole("alert")).toHaveCount(2);
   await expect(page.getByRole("alert").first()).toContainText("sendo に届きません");
