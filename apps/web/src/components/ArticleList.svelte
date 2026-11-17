@@ -463,9 +463,15 @@
     rewatch(true);
   }
 
-  async function reload() {
-    await list.load();
+  export async function reload() {
+    const loading = list.load();
+    const generation = list.generation;
+    await loading;
+    if (generation !== list.generation) return;
+    list.cursorId = null;
+    passed.clear();
     scrollPage(scroller);
+    rewatch(true);
   }
 
   /** 引いた長さ（px）が、これを超えて指を離したら、更新する */
