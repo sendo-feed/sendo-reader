@@ -83,7 +83,7 @@ const imageCacheGenerationPlugin = {
  * Workers Builds はコミットを環境変数で渡す。コンテナ版のイメージは、CI がビルドの引数で APP_COMMIT_SHA に
  * 渡す（イメージを作るときは .git がない）。手元では git から読む
  */
-function appVersion(): string {
+function appVersion(): { commit: string; builtAt: string } {
   let commit = process.env.WORKERS_CI_COMMIT_SHA || process.env.APP_COMMIT_SHA || "";
   if (commit === "") {
     try {
@@ -92,7 +92,8 @@ function appVersion(): string {
       commit = "unknown";
     }
   }
-  return `${commit.slice(0, 7)} (${new Date().toISOString().slice(0, 16).replace("T", " ")} UTC)`;
+  // 日時は ISO 8601 のまま埋め込み、表示するときに利用者のロケールとタイムゾーンに合わせる。
+  return { commit: commit.slice(0, 7), builtAt: new Date().toISOString() };
 }
 
 export default defineConfig({

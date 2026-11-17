@@ -14,9 +14,7 @@ async function openSettings(page: import("@playwright/test").Page) {
   await page.locator("nav.sidebar").getByRole("link", { name: "Settings" }).click();
   await expect(page.getByRole("heading", { name: "Settings", level: 1 })).toBeVisible();
   // いま動いている版（コミットと、ビルドした時刻）を出す
-  await expect(
-    page.getByText(/^Version [0-9a-f]{7} \(\d{4}-\d{2}-\d{2} \d{2}:\d{2} UTC\)$/),
-  ).toBeVisible();
+  await expect(page.getByText(/^Version [0-9a-f]{7} \(.+\)$/)).toBeVisible();
 }
 
 test("変えた設定を sendo に預け、読み込み直しても残る。既定に戻したら、項目を消す", async ({
