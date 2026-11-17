@@ -463,9 +463,16 @@
     rewatch(true);
   }
 
-  async function reload() {
-    await list.load();
-    scrollPage(scroller);
+  export async function reload() {
+    const loading = list.load();
+    const generation = list.generation;
+    await loading;
+    if (generation !== list.generation) return;
+    list.cursorId = null;
+    passed.clear();
+    // 狭い画面で記事を読んでいる間は、一覧だけを更新し、本文の位置は動かさない
+    if (!layout.pageScroll || router.articleId === null) scrollPage(scroller);
+    rewatch(true);
   }
 
   /** 引いた長さ（px）が、これを超えて指を離したら、更新する */

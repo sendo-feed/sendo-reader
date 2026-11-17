@@ -348,15 +348,24 @@
   const DAY = 86_400_000;
 
   /** 画面の下に少しの間出す知らせ。undo があれば「取り消す」を出す */
-  let toast = $state<{ message: string; undo: string[] | null } | null>(null);
+  let toast = $state<{
+    message: string;
+    undo: string[] | null;
+    /** 一覧の終わりから既読にしたときは、取り消したあとも同じ一覧を読み直す */
+    reloadKey: string | null;
+  } | null>(null);
   let toastTimer: ReturnType<typeof setTimeout> | undefined;
 
   /** 知らせを消している最中（薄くしてから消す） */
   let toastLeaving = $state(false);
 
-  function showToast(message: string, undo: string[] | null = null) {
+  function showToast(
+    message: string,
+    undo: string[] | null = null,
+    reloadKey: string | null = null,
+  ) {
     clearTimeout(toastTimer);
-    toast = { message, undo };
+    toast = { message, undo, reloadKey };
     toastLeaving = false;
     toastTimer = setTimeout(hideToast, undo === null ? 4000 : 10_000);
   }
@@ -376,16 +385,24 @@
   type Range = NonNullable<Parameters<typeof reader.client.markAllRead>[1]>;
 
   /** 開いている一覧の範囲を、まとめて既読にする。range を渡すと、その一部だけ */
-  async function markAll(range: Range = {}) {
+  async function markAll(range: Range = {}, reload = false) {
     confirmOpen = false;
     menuArticle = null;
     if (listing?.scope == null) return;
+    const key = queryKey;
+    const generation = list.generation;
     try {
       const ids = await reader.client.markAllRead(listing.scope, range);
       if (ids.length === 0) showToast("既読にする記事はありませんでした。");
       else {
-        showToast(`${ids.length} 件を既読にしました。`, ids.length <= UNDO_LIMIT ? ids : null);
+        showToast(
+          `${ids.length} 件を既読にしました。`,
+          ids.length <= UNDO_LIMIT ? ids : null,
+          reload ? key : null,
+        );
       }
+      // 手元への書き込みが済んだら読み直す。待っている間に移った一覧は動かさない
+      if (reload && key === queryKey && generation === list.generation) await listView?.reload();
     } catch {
       showToast("既読にできませんでした。");
     }
@@ -453,7 +470,7 @@
     const unread = listing.unread ?? 0;
     const feed = listing.kind === "feed" ? besideFeed(1) : null;
     if (feed === null) {
-      return unread === 0 ? null : { label: "Mark all as read", go: () => void markAll() };
+      return unread === 0 ? null : { label: "Mark all as read", go: () => void markAll({}, true) };
     }
     const title = feed.title ?? feed.url;
     return {
@@ -469,9 +486,14 @@
     if (toast?.undo == null) return;
     // 状態に入れた配列は、そのままではワーカーに渡せない（複製できない）。素の配列にする
     const ids = [...toast.undo];
+    const reloadKey = toast.reloadKey;
+    const generation = list.generation;
     try {
       await reader.client.setReadMany(ids, false);
       showToast(`${ids.length} 件を未読に戻しました。`);
+      if (reloadKey !== null && reloadKey === queryKey && generation === list.generation) {
+        await listView?.reload();
+      }
     } catch {
       showToast("未読に戻せませんでした。");
     }
