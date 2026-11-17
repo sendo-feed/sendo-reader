@@ -72,12 +72,15 @@
   {@const href = viewHref(view)}
   <a
     {href}
+    title={count > 0 ? `${label} (${count} unread)` : label}
     class:quiet={view.kind === "folder" && count === 0}
     aria-current={currentHref === href ? "page" : undefined}
     onclick={(e) => handleLink(e, href)}
   >
     {#if icon !== null}
       <Icon name={icon} />
+    {:else}
+      <span class="folder-icon"><Icon name="folder" /></span>
     {/if}
     <span class="name">{label}</span>
     {#if count > 0}
@@ -92,6 +95,7 @@
   <li>
     <a
       {href}
+      title={count > 0 ? `${feed.title ?? feed.url} (${count} unread)` : (feed.title ?? feed.url)}
       class:quiet={count === 0}
       aria-current={currentHref === href ? "page" : undefined}
       onclick={(e) => handleLink(e, href)}
@@ -111,9 +115,19 @@
   </li>
 {/snippet}
 
-<nav class="sidebar" aria-label="Feeds">
+<nav class="sidebar" class:compact={prefs.value.sidebarCollapsed} aria-label="Feeds">
   <div class="brand">
     <span class="logo">Sendo</span>
+    <button
+      type="button"
+      class="icon-button sidebar-toggle"
+      aria-label={prefs.value.sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+      title={prefs.value.sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+      aria-expanded={!prefs.value.sidebarCollapsed}
+      onclick={() => prefs.set({ sidebarCollapsed: !prefs.value.sidebarCollapsed })}
+    >
+      <Icon name={prefs.value.sidebarCollapsed ? "panelRight" : "panelLeft"} />
+    </button>
     <a
       class="add"
       href="/manage"
@@ -149,6 +163,8 @@
         {/if}
       </svg>
       <span class="percent">{progress.percent}<small>%</small></span>
+    {:else}
+      <span class="progress-icon"><Icon name="inbox" /></span>
     {/if}
     <span class="numbers">
       <strong>{reader.unread.total}</strong>
@@ -228,7 +244,7 @@
   </div>
 
   <footer>
-    <SyncStatus />
+    <SyncStatus compact={prefs.value.sidebarCollapsed} />
     <div class="links">
       {@render item({ kind: "manage" }, "Manage feeds", 0, "rss")}
       {@render item({ kind: "settings" }, "Settings", 0, "sliders")}
@@ -269,6 +285,12 @@
     font-size: 0.9375rem;
   }
 
+  .sidebar-toggle,
+  .folder-icon,
+  .progress-icon {
+    display: none;
+  }
+
   .brand {
     display: flex;
     align-items: center;
@@ -279,6 +301,7 @@
   .logo {
     font-size: 1.125rem;
     font-weight: 700;
+    margin-right: auto;
     letter-spacing: 0.02em;
     color: var(--accent);
   }
@@ -517,5 +540,89 @@
     white-space: nowrap;
     color: var(--muted);
     font-size: 0.8125rem;
+  }
+  @media (width > 56rem) {
+    .sidebar-toggle {
+      display: grid;
+    }
+
+    .compact .brand,
+    .compact .account {
+      flex-direction: column;
+      padding: 0.5rem;
+      gap: 0.25rem;
+    }
+
+    .compact .logo,
+    .compact .heading > span,
+    .compact .user,
+    .compact .empty,
+    .compact .toggle {
+      display: none;
+    }
+
+    /* 名前と件数は、アイコンだけのときも読み上げられるように残す */
+    .compact .name,
+    .compact .count,
+    .compact .numbers {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      padding: 0;
+      overflow: hidden;
+      clip-path: inset(50%);
+      white-space: nowrap;
+    }
+
+    .compact a {
+      position: relative;
+      justify-content: center;
+      min-height: 2.5rem;
+      padding: 0.5rem;
+    }
+
+    .compact .folder-icon,
+    .compact .progress-icon {
+      display: flex;
+    }
+
+    .compact .folder a {
+      padding-left: 0.5rem;
+    }
+
+    .compact ul {
+      padding-left: 0;
+    }
+
+    .compact section,
+    .compact .loose {
+      margin-top: 0.5rem;
+      border-top: 1px solid var(--border);
+    }
+
+    .compact .heading {
+      justify-content: center;
+      padding-left: 0;
+    }
+
+    .compact .today {
+      justify-content: center;
+      height: 3rem;
+      padding: 0;
+    }
+
+    .compact .gauge {
+      width: 2.25rem;
+      height: 2.25rem;
+    }
+
+    .compact .percent {
+      left: 0;
+      width: 100%;
+    }
+
+    .compact .account {
+      padding: 0;
+    }
   }
 </style>

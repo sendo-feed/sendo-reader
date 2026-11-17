@@ -5,6 +5,8 @@
   import { startSignIn } from "../lib/login";
   import Icon from "./Icon.svelte";
 
+  let { compact = false }: { compact?: boolean } = $props();
+
   const reader = useReader();
   let syncing = $state(false);
   let signingIn = $state(false);
@@ -52,19 +54,33 @@
 
 <svelte:window onpageshow={onPageShow} />
 
-<div class="sync" aria-live="polite">
+<div
+  class="sync"
+  class:compact
+  aria-live="polite"
+  title={signInError ?? reader.loginError ?? label}
+>
   {#if reader.status?.error === "unauthorized"}
     <span class="label warn">{label}</span>
-    <button type="button" class="primary" onclick={signInAgain} disabled={signingIn}>
-      Sign in again
+    <button
+      type="button"
+      class="primary sign-in"
+      aria-label="Sign in again"
+      title="Sign in again"
+      onclick={signInAgain}
+      disabled={signingIn}
+    >
+      <span class="sign-in-icon"><Icon name="external" /></span>
+      <span class="sign-in-label">Sign in again</span>
     </button>
   {:else}
     <button
       type="button"
       class="icon-button"
       class:spinning={busy}
+      class:warn={reader.status?.error != null}
       aria-label="Sync now"
-      title="Sync now (r)"
+      title={label ? `Sync now (r): ${label}` : "Sync now (r)"}
       onclick={syncNow}
       disabled={syncing}
     >
@@ -100,6 +116,10 @@
     padding-left: 0;
   }
 
+  .icon-button.warn {
+    color: var(--danger);
+  }
+
   .spinning :global(.icon) {
     animation: spin 1s linear infinite;
   }
@@ -119,5 +139,34 @@
     margin: 0;
     padding-left: 0.5rem;
     color: var(--danger);
+  }
+  .sign-in-icon {
+    display: none;
+  }
+
+  @media (width > 56rem) {
+    .compact {
+      justify-content: center;
+    }
+
+    .compact .label,
+    .compact .pending,
+    .compact .error,
+    .compact .sign-in-label {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      padding: 0;
+      overflow: hidden;
+      clip-path: inset(50%);
+    }
+
+    .compact .sign-in {
+      padding: 0.5rem;
+    }
+
+    .compact .sign-in-icon {
+      display: flex;
+    }
   }
 </style>

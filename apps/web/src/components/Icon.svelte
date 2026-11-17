@@ -1,6 +1,8 @@
 <script lang="ts" module>
   /** 24×24 の線のアイコン。1 つの path で描く（画像を足さず、CSP も緩めない） */
   const PATHS = {
+    panelLeft: "M3 4h18v16H3zM9 4v16M15 9l-3 3 3 3",
+    panelRight: "M3 4h18v16H3zM9 4v16M13 9l3 3-3 3",
     menu: "M4 6h16M4 12h16M4 18h16",
     plus: "M12 5v14M5 12h14",
     close: "M6 6l12 12M18 6L6 18",
