@@ -260,11 +260,10 @@
   }
 
   li {
-    display: flex;
-    flex-wrap: wrap;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
     gap: 0.5rem;
     align-items: center;
-    justify-content: space-between;
   }
 
   .about {
@@ -273,6 +272,10 @@
   }
 
   .name {
+    overflow-wrap: anywhere;
+  }
+
+  .meta {
     overflow-wrap: anywhere;
   }
 
