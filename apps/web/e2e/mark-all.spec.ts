@@ -63,6 +63,39 @@ test("既読も出す一覧では、末尾で既読にしたあとも記事を�
   await expect(list.locator(".row.unread")).toHaveCount(20);
 });
 
+test("スマートフォンで記事を読んでいる間に取り消しても、本文のスクロール位置を保つ", async ({
+  page,
+  context,
+}) => {
+  const { server, feed } = seed();
+  server.deliver(feed.id, {
+    title: "長い記事",
+    summary: "長い本文。".repeat(800),
+    publishedAt: Date.now() + 1000,
+  });
+  await routeFakeSendo(context, server);
+  await page.setViewportSize({ width: 390, height: 700 });
+  await page.goto(`/feeds/${feed.id}`);
+  await signIn(page);
+  const list = page.locator(".article-list");
+  await expect(list.locator(".item")).toHaveCount(21);
+  await list.getByRole("button", { name: "Unread only", exact: true }).click();
+  await list.locator(".end").getByRole("button", { name: "Mark all as read", exact: true }).click();
+  await expect(page.getByRole("status")).toContainText("21 件を既読にしました。");
+  await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(0);
+  await list.locator(".item", { hasText: "長い記事" }).click();
+  await expect(page.locator(".article-view").getByRole("heading", { level: 1 })).toHaveText(
+    "長い記事",
+  );
+  await page.evaluate(() => window.scrollTo({ top: 900 }));
+  const top = await page.evaluate(() => window.scrollY);
+  expect(top).toBeGreaterThan(500);
+  await page.getByRole("status").getByRole("button", { name: "Undo" }).click();
+  await expect(page.getByRole("status")).toContainText("21 件を未読に戻しました。");
+  await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(top);
+  await expect(list).toBeHidden();
+});
+
 declare global {
   interface Window {
     markAllHeld: boolean;

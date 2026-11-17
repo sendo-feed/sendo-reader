@@ -470,7 +470,8 @@
     if (generation !== list.generation) return;
     list.cursorId = null;
     passed.clear();
-    scrollPage(scroller);
+    // 狭い画面で記事を読んでいる間は、一覧だけを更新し、本文の位置は動かさない
+    if (!layout.pageScroll || router.articleId === null) scrollPage(scroller);
     rewatch(true);
   }
 
