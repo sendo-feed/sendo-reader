@@ -199,6 +199,7 @@
       fadeIn = id !== null && !settling && (shownId !== null || !layout.pageScroll);
       shownId = id;
       saveError = null;
+      actionsOpen = false;
       contentRequest += 1;
       content = null;
       contentState = id === null ? "none" : "checking";
@@ -545,6 +546,16 @@
   /** 文字の大きさとテーマの窓を開いている */
   let displayOpen = $state(false);
 
+  /** 本文が読みづらいときなどに使う補助操作 */
+  let actionsOpen = $state(false);
+
+  function showContent(source: "feed" | "page") {
+    actionsOpen = false;
+    if (articleId === null) return;
+    if (source === "feed") void loadContent(articleId, true);
+    else void loadFullText(articleId);
+  }
+
   /** 書き込みに失敗したときの知らせ */
   let saveError = $state<string | null>(null);
 
@@ -673,6 +684,19 @@
           <Icon name="external" />
         </a>
       {/if}
+      {#if (pageAvailable && link !== null) || hasPageContent}
+        <button
+          type="button"
+          class="icon-button"
+          aria-label="More actions"
+          title="More actions"
+          aria-haspopup="dialog"
+          aria-expanded={actionsOpen}
+          onclick={() => (actionsOpen = true)}
+        >
+          <Icon name="more" />
+        </button>
+      {/if}
     </div>
 
     {#key articleId}
@@ -708,25 +732,6 @@
             {/if}
           </p>
         </header>
-        {#if (pageAvailable && link !== null) || hasPageContent}
-          <div class="content-source">
-            <button
-              type="button"
-              aria-pressed={content?.source !== "page"}
-              onclick={() => articleId !== null && loadContent(articleId, true)}
-            >
-              Feed content
-            </button>
-            <button
-              type="button"
-              aria-pressed={content?.source === "page"}
-              disabled={pageLoading || contentState === "checking" || contentState === "loading"}
-              onclick={() => articleId !== null && loadFullText(articleId)}
-            >
-              Full text
-            </button>
-          </div>
-        {/if}
         {#if pageLoading}
           <p class="content-note" role="status">全文を取得しています…</p>
         {:else if pageNote !== null}
@@ -761,31 +766,29 @@
   <Appearance reading />
 </Dialog>
 
+<Dialog bind:open={actionsOpen} title="Article actions">
+  <div class="content-actions">
+    {#if content?.source === "page" || pageLoading}
+      <button type="button" onclick={() => showContent("feed")}>Show feed content</button>
+    {:else}
+      <button
+        type="button"
+        disabled={contentState === "checking" || contentState === "loading"}
+        onclick={() => showContent("page")}
+      >
+        {pageNote === null ? "Show full text" : "Retry full text"}
+      </button>
+    {/if}
+  </div>
+</Dialog>
+
 <style>
-  .content-source {
-    display: flex;
-    gap: 0.5rem;
-    margin-block: 1rem;
+  .content-actions {
+    display: grid;
   }
 
-  .content-source button {
-    padding: 0.5rem 0.75rem;
-    border: 1px solid var(--border);
-    border-radius: 999px;
-    background: var(--background);
-    color: var(--muted);
-    cursor: pointer;
-  }
-
-  .content-source button[aria-pressed="true"] {
-    border-color: var(--accent);
-    background: var(--selected);
-    color: var(--accent);
-  }
-
-  .content-source button:disabled {
-    cursor: wait;
-    opacity: 0.6;
+  .content-actions button {
+    padding-block: 0.6rem;
   }
 
   .article-view {
@@ -1054,7 +1057,7 @@
       max-width: 3.5rem;
     }
 
-    /* 元の記事へは、本文の下のボタンから開く（下のバーには、押しやすい数だけ並べる） */
+    /* 元の記事へはタイトルから開く（下のバーには、押しやすい数だけ並べる） */
     .open,
     .close,
     .hint {

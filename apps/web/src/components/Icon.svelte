@@ -4,6 +4,7 @@
     panelLeft: "M3 4h18v16H3zM9 4v16M15 9l-3 3 3 3",
     panelRight: "M3 4h18v16H3zM9 4v16M13 9l3 3-3 3",
     menu: "M4 6h16M4 12h16M4 18h16",
+    more: "M5 12h.01M12 12h.01M19 12h.01",
     plus: "M12 5v14M5 12h14",
     close: "M6 6l12 12M18 6L6 18",
     chevronRight: "M9 6l6 6-6 6",
