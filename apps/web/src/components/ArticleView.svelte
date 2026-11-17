@@ -52,6 +52,8 @@
   let hasPageContent = $state(false);
   let pageLoading = $state(false);
   let pageNote = $state<string | null>(null);
+  let preferFullText = $state(true);
+  let pageAttempted = $state(false);
   let contentRequest = 0;
 
   /** 使える機能を裏で確かめる。通信できなくても、手元の記事はそのまま読める */
@@ -68,6 +70,7 @@
   });
 
   async function loadContent(id: string, feedOnly = false) {
+    if (feedOnly) preferFullText = false;
     const request = ++contentRequest;
     pageLoading = false;
     pageNote = null;
@@ -112,6 +115,8 @@
 
   /** 元ページの全文を取る。取っている間や失敗したときも、今読んでいる本文・要約を残す */
   async function loadFullText(id: string) {
+    preferFullText = true;
+    pageAttempted = true;
     const request = ++contentRequest;
     pageLoading = true;
     pageNote = null;
@@ -137,6 +142,23 @@
       if (id === articleId && request === contentRequest) pageLoading = false;
     }
   }
+
+  /** 手元の本文・要約を先に出し、使える版では開いた記事の全文を一度だけ自動取得する */
+  $effect(() => {
+    if (
+      articleId === null ||
+      link === null ||
+      !pageAvailable ||
+      !preferFullText ||
+      hasPageContent ||
+      pageAttempted ||
+      contentState === "checking" ||
+      contentState === "loading"
+    )
+      return;
+    const id = articleId;
+    untrack(() => void loadFullText(id));
+  });
 
   /** つながったら、取れなかった本文を取り直す */
   $effect(() => {
@@ -183,6 +205,8 @@
       pageLoading = false;
       pageNote = null;
       hasPageContent = false;
+      preferFullText = true;
+      pageAttempted = false;
       if (id === null) {
         article = null;
         missing = false;
@@ -212,7 +236,13 @@
 
   $effect(() => {
     // 本文を確かめている間・取っている間は、高さが決まらないので待つ（取れなかったら、要約で戻す）
-    if (article === null || contentState === "checking" || contentState === "loading") return;
+    if (
+      article === null ||
+      contentState === "checking" ||
+      contentState === "loading" ||
+      pageLoading
+    )
+      return;
     untrack(() => {
       const top = restoreTop;
       restoreTop = null;
@@ -653,7 +683,22 @@
               {reader.feedTitle(article.feedId)}
             </a>
           </p>
-          <h1>{article.title ?? "(Untitled)"}</h1>
+          <h1>
+            {#if link !== null}
+              <a
+                class="original-title"
+                href={link}
+                target="_blank"
+                rel="noopener noreferrer"
+                title="Open original (v)"
+              >
+                {article.title ?? "(Untitled)"}
+                <Icon name="external" />
+              </a>
+            {:else}
+              {article.title ?? "(Untitled)"}
+            {/if}
+          </h1>
           <p class="meta">
             <time datetime={new Date(article.publishedAt).toISOString()}>
               {formatDateTime(article.publishedAt)}
@@ -698,14 +743,6 @@
               この記事には本文があります。sendo につながったら読めます。
             </p>
           {/if}
-        {/if}
-        {#if link !== null}
-          <p>
-            <a class="read-on" href={link} target="_blank" rel="noopener noreferrer">
-              Open original
-              <Icon name="external" />
-            </a>
-          </p>
         {/if}
       </div>
     {/key}
@@ -897,21 +934,20 @@
     font-size: 0.875rem;
   }
 
-  .read-on {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.5rem;
-    margin-top: 0.75rem;
-    padding: 0.5rem 1rem;
-    border: 1px solid var(--accent);
-    border-radius: 999px;
-    color: var(--accent);
-    font-weight: 600;
+  .original-title {
+    color: inherit;
     text-decoration: none;
   }
 
-  .read-on:hover {
-    background: var(--selected);
+  .original-title:hover {
+    text-decoration: underline;
+  }
+
+  .original-title :global(.icon) {
+    display: inline;
+    width: 0.65em;
+    height: 0.65em;
+    color: var(--muted);
   }
 
   .placeholder {

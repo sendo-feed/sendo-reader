@@ -10,7 +10,7 @@ function seed() {
   return { server, article, feed };
 }
 
-test("要約だけの記事から全文を取得し、切り替え・オフラインの再表示ができる", async ({
+test("記事を開くと全文を自動取得し、切り替え・オフラインの再表示ができる", async ({
   page,
   context,
 }) => {
@@ -18,17 +18,14 @@ test("要約だけの記事から全文を取得し、切り替え・オフラ�
   await routeFakeSendo(context, server);
   await page.goto("/");
   await signIn(page);
-  await page.locator(".article-list .item", { hasText: article.title ?? "" }).click();
   const view = page.locator(".article-view");
-  await expect(view.locator(".summary")).toHaveText("短い要約");
-  expect(server.pageContentRequests).toEqual([]);
 
   let release!: () => void;
   const blocked = new Promise<void>((resolve) => {
     release = resolve;
   });
   server.onRequest = (path) => (path.endsWith("/content") ? blocked : Promise.resolve());
-  await view.getByRole("button", { name: "Full text", exact: true }).click();
+  await page.locator(".article-list .item", { hasText: article.title ?? "" }).click();
   await expect(view.getByRole("status")).toHaveText("全文を取得しています…");
   await expect(view.locator(".summary")).toHaveText("短い要約");
   await expect(view.getByRole("button", { name: "Full text", exact: true })).toBeDisabled();
@@ -71,7 +68,6 @@ test("全文がない・通信できないときもフィード本文を残し�
   await page.locator(".article-list .item", { hasText: article.title ?? "" }).click();
   const view = page.locator(".article-view");
   await expect(view.locator(".body")).toHaveText("残して読むフィード本文");
-  await view.getByRole("button", { name: "Full text", exact: true }).click();
   await expect(view.getByRole("status")).toHaveText(
     "全文を取得できませんでした。元の記事で続きを読めます。",
   );
@@ -97,23 +93,85 @@ test("取得中に記事を替えても、前の記事の全文を出さない",
   await routeFakeSendo(context, server);
   await page.goto("/");
   await signIn(page);
-  await page.locator(".article-list .item", { hasText: article.title ?? "" }).click();
   const view = page.locator(".article-view");
   let release!: () => void;
   const blocked = new Promise<void>((resolve) => {
     release = resolve;
   });
-  server.onRequest = (path) => (path.endsWith("/content") ? blocked : Promise.resolve());
-  await view.getByRole("button", { name: "Full text", exact: true }).click();
+  server.onRequest = (path) =>
+    path.includes(`${article.id}/content`) ? blocked : Promise.resolve();
+  await page.locator(".article-list .item", { hasText: article.title ?? "" }).click();
   await expect(view.getByRole("status")).toHaveText("全文を取得しています…");
   await page.locator(".article-list .item", { hasText: next.title ?? "" }).click();
   await expect(view.locator(".summary")).toHaveText("別の記事の要約");
   release();
   server.onRequest = null;
   // 先に始めた取得が終わっても、今の記事を保つ
-  await expect.poll(() => server.pageContentRequests).toEqual([article.id]);
+  await expect.poll(() => server.pageContentRequests).toContain(article.id);
   await expect(view.locator(".summary")).toHaveText("別の記事の要約");
   await expect(view.locator(".body")).toHaveCount(0);
+});
+
+test("自動取得中にフィードへ切り替えたら、取得後も選んだ本文を保つ", async ({ page, context }) => {
+  const { server, article } = seed();
+  await routeFakeSendo(context, server);
+  await page.goto("/");
+  await signIn(page);
+  let release!: () => void;
+  const blocked = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  server.onRequest = (path) => (path.endsWith("/content") ? blocked : Promise.resolve());
+  await page.locator(".article-list .item", { hasText: article.title ?? "" }).click();
+  const view = page.locator(".article-view");
+  await expect(view.getByRole("status")).toHaveText("全文を取得しています…");
+  await view.getByRole("button", { name: "Feed content" }).click();
+  await expect(view.locator(".summary")).toHaveText("短い要約");
+  release();
+  server.onRequest = null;
+  await expect.poll(() => server.pageContentRequests).toEqual([article.id]);
+  await expect(view.getByRole("button", { name: "Feed content" })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+  await expect(view.locator(".body")).toHaveCount(0);
+  await view.getByRole("button", { name: "Full text", exact: true }).click();
+  await expect(view.locator(".body")).toContainText("要約にない全文の続き");
+  await view.getByRole("button", { name: "Feed content" }).click();
+  await expect(view.locator(".summary")).toHaveText("短い要約");
+  await view.getByRole("button", { name: "Close", exact: true }).click();
+  await page.locator(".article-list .item", { hasText: article.title ?? "" }).click();
+  await expect(view.locator(".body")).toContainText("要約にない全文の続き");
+  expect(server.pageContentRequests).toEqual([article.id]);
+});
+
+test("機能一覧が遅くても要約を先に出し、スマホでも全文と原文への導線を使える", async ({
+  page,
+  context,
+}) => {
+  const { server, article } = seed();
+  let release!: () => void;
+  const blocked = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  server.onRequest = (path) => (path.endsWith("/features") ? blocked : Promise.resolve());
+  await page.setViewportSize({ width: 390, height: 844 });
+  await routeFakeSendo(context, server);
+  await page.goto("/");
+  await signIn(page);
+  await page.locator(".article-list .item", { hasText: article.title ?? "" }).click();
+  const view = page.locator(".article-view");
+  await expect(view.locator(".summary")).toHaveText("短い要約");
+  await expect(view.getByRole("heading", { level: 1 }).getByRole("link")).toBeInViewport();
+  expect(server.pageContentRequests).toEqual([]);
+  release();
+  server.onRequest = null;
+  await expect(view.locator(".body")).toContainText("要約にない全文の続き");
+  await expect(view.getByRole("button", { name: "Full text", exact: true })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+  expect(server.pageContentRequests).toEqual([article.id]);
 });
 
 for (const featuresStatus of [200, 404]) {
