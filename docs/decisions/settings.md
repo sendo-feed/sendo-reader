@@ -23,7 +23,7 @@
    | 名前 | 値 | 既定 |
    |---|---|---|
    | `reader.theme` | `"auto"` ／ `"light"` ／ `"dark"` | `"auto"` |
-   | `reader.textSize` | `"small"` ／ `"medium"` ／ `"large"` | `"medium"` |
+   | `reader.textSize` | `"xsmall"` ／ `"small"` ／ `"medium"` ／ `"large"` ／ `"xlarge"`（小さい順の 5 段） | `"medium"` |
    | `reader.unreadOnly` | 真偽（未読だけを出す、の既定） | `true` |
    | `reader.oldestFirst` | 真偽（古い順に並べる、の既定） | `false` |
    | `reader.markReadOnScroll` | 真偽 | `true` |
