@@ -1,5 +1,6 @@
 <script lang="ts">
   import { prefs, TEXT_SIZES, type Theme } from "../../lib/prefs.svelte";
+  import ArticlePreview from "./ArticlePreview.svelte";
 
   /** 表示の設定。sendo に預け、同じ種類の端末に引き継ぐ（lib/prefs.svelte.ts） */
   const THEMES: [Theme, string][] = [
@@ -22,9 +23,6 @@
 <section aria-label="Appearance">
   {#if !reading}
     <h2>Appearance</h2>
-    <p class="note">
-      スマホと、それ以外（PC・タブレット）で、別々に覚えます。同じ種類の端末には、同期で引き継ぎます。
-    </p>
   {/if}
 
   <fieldset>
@@ -44,7 +42,7 @@
   </fieldset>
 
   <fieldset>
-    <legend>Text size</legend>
+    <legend>Text size · {SIZE_LABELS[sizeIndex]}</legend>
     <div class="size">
       <span class="a small" aria-hidden="true">A</span>
       <input
@@ -62,35 +60,19 @@
   </fieldset>
 
   {#if !reading}
-    <fieldset>
-      <legend>Mark as read</legend>
-      <label class="check">
-        <input
-          type="checkbox"
-          checked={prefs.value.markReadOnScroll}
-          onchange={(e) => prefs.set({ markReadOnScroll: e.currentTarget.checked })}
-        >
-        Mark as read on scroll
-      </label>
-    </fieldset>
+    <ArticlePreview />
   {/if}
 </section>
 
 <style>
   section {
     display: grid;
-    gap: 0.75rem;
+    gap: 1.5rem;
   }
 
   h2 {
     margin: 0;
     font-size: 1.125rem;
-  }
-
-  .note {
-    margin: 0;
-    color: var(--muted);
-    font-size: 0.875rem;
   }
 
   fieldset {
@@ -122,11 +104,6 @@
     border-color: var(--accent);
     background: var(--selected);
     font-weight: 600;
-  }
-
-  label.check {
-    gap: 0.5rem;
-    border-radius: var(--radius-small);
   }
 
   label:has(input:focus-visible) {
