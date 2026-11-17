@@ -1,123 +1,127 @@
 <script lang="ts">
+  import type { Folder } from "@sendo-reader/core";
+  import { untrack } from "svelte";
   import { useReader } from "../../lib/context";
   import { describeError } from "../../lib/errors";
 
+  let {
+    folder,
+    oncomplete,
+    oncancel,
+  }: {
+    folder: Folder | null;
+    oncomplete: (message: string) => void;
+    oncancel: () => void;
+  } = $props();
+
   const reader = useReader();
-  let name = $state("");
-  /** 名前を変えているフォルダと、入力中の名前 */
-  let editing = $state<{ id: string; name: string } | null>(null);
-  /** 消す前に、もう一度押してもらうフォルダ */
-  let confirming = $state<string | null>(null);
+  // 窓を開いたときだけ写す。同期で届く変更で、入力中の名前を上書きしない
+  let name = $state(untrack(() => folder?.name ?? ""));
+  let confirming = $state(false);
+  let busy = $state(false);
   let message = $state<string | null>(null);
 
-  async function run(action: () => Promise<unknown>) {
+  async function save(event: SubmitEvent) {
+    event.preventDefault();
+    busy = true;
     message = null;
     try {
-      await action();
+      if (folder === null) await reader.client.createFolder(name);
+      else await reader.client.renameFolder(folder.id, name);
+      oncomplete(`「${name.trim()}」を保存しました。`);
     } catch (error) {
       message = describeError(error);
+    } finally {
+      busy = false;
     }
   }
 
-  async function create(event: SubmitEvent) {
-    event.preventDefault();
-    await run(async () => {
-      await reader.client.createFolder(name);
-      name = "";
-    });
-  }
-
-  async function rename(event: SubmitEvent) {
-    event.preventDefault();
-    const target = editing;
-    if (target === null) return;
-    await run(async () => {
-      await reader.client.renameFolder(target.id, target.name);
-      editing = null;
-    });
-  }
-
-  async function remove(id: string) {
-    if (confirming !== id) {
-      confirming = id;
-      return;
+  async function remove() {
+    if (folder === null) return;
+    busy = true;
+    message = null;
+    try {
+      await reader.client.deleteFolder(folder.id);
+      oncomplete("フォルダを削除しました。購読はそのまま続きます。");
+    } catch (error) {
+      message = describeError(error);
+    } finally {
+      busy = false;
     }
-    confirming = null;
-    await run(() => reader.client.deleteFolder(id));
   }
 </script>
 
-<section>
-  <h2>フォルダ</h2>
-  <form onsubmit={create} class="row">
-    <label for="new-folder" class="visually-hidden">新しいフォルダの名前</label>
-    <input id="new-folder" placeholder="新しいフォルダの名前" bind:value={name}>
-    <button type="submit" disabled={name.trim() === ""}>作る</button>
+{#if confirming}
+  <p>「{folder?.name}」を削除しますか？ 中のフィードは No folder に移り、購読は続きます。</p>
+  <div class="actions">
+    <button type="button" disabled={busy} onclick={() => (confirming = false)}>Cancel</button>
+    <button type="button" class="danger" disabled={busy} onclick={remove}>Delete folder</button>
+  </div>
+{:else}
+  <form onsubmit={save}>
+    <label for="folder-name">Folder name</label>
+    <input
+      id="folder-name"
+      bind:value={name}
+      placeholder="例：テクノロジー"
+      required
+      disabled={busy}
+    >
+    <div class="actions">
+      <button type="button" disabled={busy} onclick={oncancel}>Cancel</button>
+      <button type="submit" class="primary" disabled={busy || name.trim() === ""}>
+        {folder === null ? "Create folder" : "Save"}
+      </button>
+    </div>
   </form>
-
-  <ul>
-    {#each reader.folders as folder (folder.id)}
-      <li>
-        {#if editing?.id === folder.id}
-          <form onsubmit={rename} class="row">
-            <label for="rename-{folder.id}" class="visually-hidden">フォルダの名前</label>
-            <input id="rename-{folder.id}" bind:value={editing.name}>
-            <button type="submit">保存</button>
-            <button type="button" onclick={() => (editing = null)}>やめる</button>
-          </form>
-        {:else}
-          <span class="name">{folder.name}</span>
-          <button type="button" onclick={() => (editing = { id: folder.id, name: folder.name })}>
-            名前を変える
-          </button>
-          <button type="button" onclick={() => remove(folder.id)}>
-            {confirming === folder.id ? "本当に消す" : "消す"}
-          </button>
-        {/if}
-      </li>
-    {:else}
-      <li class="empty">フォルダはまだありません。</li>
-    {/each}
-  </ul>
-  <p class="hint">フォルダを消しても、入っていたフィードは消えず、フォルダなしに戻ります。</p>
-  {#if message !== null}
-    <p class="error" role="alert">{message}</p>
+  {#if folder !== null}
+    <div class="remove">
+      <button type="button" class="link danger" disabled={busy} onclick={() => (confirming = true)}>
+        Delete folder…
+      </button>
+    </div>
   {/if}
-</section>
+{/if}
+{#if message !== null}
+  <p class="error" role="alert">{message}</p>
+{/if}
 
 <style>
-  ul {
-    list-style: none;
-    margin: 0.5rem 0;
-    padding: 0;
+  form {
     display: grid;
-    gap: 0.25rem;
+    gap: 0.5rem;
   }
 
-  li {
+  input {
+    width: 100%;
+    min-width: 0;
+  }
+
+  p {
+    margin: 0;
+  }
+
+  .actions {
     display: flex;
     flex-wrap: wrap;
+    justify-content: flex-end;
     gap: 0.5rem;
-    align-items: center;
+    margin-top: 1rem;
   }
 
-  .row {
-    display: flex;
-    gap: 0.5rem;
+  .remove {
+    border-top: 1px solid var(--border);
+    margin-top: 1.25rem;
+    padding-top: 1rem;
+    font-size: 0.875rem;
   }
 
-  .name {
-    flex: 1;
-    min-width: 8rem;
-  }
-
-  .empty,
-  .hint {
-    color: var(--muted);
-    font-size: 0.9rem;
+  .danger,
+  .error {
+    color: var(--danger);
   }
 
   .error {
-    color: var(--danger);
+    margin-top: 0.75rem;
   }
 </style>

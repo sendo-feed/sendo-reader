@@ -34,12 +34,11 @@
 </script>
 
 <section>
-  <h2>OPML を取り込む</h2>
   <p class="hint">
     Feedly などから書き出した OPML を選ぶと、フォルダごと取り込みます。sendo
     が順に登録するので、フィードと記事は少しずつ届きます。
   </p>
-  <label for="opml-file">OPML のファイル</label>
+  <label for="opml-file">OPML file</label>
   <input
     id="opml-file"
     type="file"
@@ -84,6 +83,11 @@
     margin: 0;
     color: var(--muted);
     font-size: 0.9rem;
+  }
+
+  input {
+    max-width: 100%;
+    min-width: 0;
   }
 
   .skipped {
