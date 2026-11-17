@@ -1,6 +1,58 @@
 import { expect, test } from "@playwright/test";
 import { FakeSendo, routeFakeSendo, signIn, USER } from "./fake-sendo";
 
+test("トークンの説明が長くても、取り消すボタンは各行の右側にそろう", async ({ page, context }) => {
+  const server = new FakeSendo();
+  for (const [id, name, purpose] of [
+    ["reader", "Reeder", "reader"],
+    ["mcp", "長い名前".repeat(20), "mcp"],
+  ] as const) {
+    server.tokens.set(id, {
+      id,
+      name,
+      purpose,
+      scopes: ["read", "write"],
+      createdAt: server.now,
+      lastUsedAt: server.now,
+      secret: `sendo_fake_${id}`,
+    });
+  }
+  await routeFakeSendo(context, server);
+  await page.goto("/settings");
+  await signIn(page);
+  const rows = page.locator("li", {
+    has: page.getByRole("button", { name: "取り消す", exact: true }),
+  });
+  await expect(rows).toHaveCount(2);
+
+  for (const width of [1600, 390]) {
+    await page.setViewportSize({ width, height: 900 });
+    for (const row of await rows.all()) {
+      const about = row.locator(".about");
+      const button = row.getByRole("button");
+      await expect(button).toBeVisible();
+      const descriptionBox = await about.boundingBox();
+      const buttonBox = await button.boundingBox();
+      const rowBox = await row.boundingBox();
+      if (descriptionBox === null || buttonBox === null || rowBox === null) {
+        throw new Error("トークンの行が表示されていない");
+      }
+      expect(buttonBox.x).toBeGreaterThanOrEqual(descriptionBox.x + descriptionBox.width);
+      expect(buttonBox.x + buttonBox.width).toBeCloseTo(rowBox.x + rowBox.width, 0);
+      expect(buttonBox.y + buttonBox.height / 2).toBeCloseTo(rowBox.y + rowBox.height / 2, 0);
+      expect(buttonBox.x + buttonBox.width).toBeLessThanOrEqual(width);
+    }
+  }
+  // 確認のためボタンの文が長くなっても、説明を押しのけて右側に収まる
+  const row = page.locator("li", { hasText: "長い名前" });
+  await row.getByRole("button").click();
+  const confirm = page.getByRole("button", { name: "本当に取り消す" });
+  await expect(confirm).toBeVisible();
+  const aboutBox = await row.locator(".about").boundingBox();
+  const confirmBox = await confirm.boundingBox();
+  expect(confirmBox?.x).toBeGreaterThanOrEqual((aboutBox?.x ?? 0) + (aboutBox?.width ?? 0));
+});
+
 test("設定の画面で、トークンを発行して一度だけ控え、取り消す", async ({ page, context }) => {
   const server = new FakeSendo();
   await routeFakeSendo(context, server);
