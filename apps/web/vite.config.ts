@@ -115,10 +115,19 @@ export default defineConfig({
         display: "standalone",
         theme_color: "#0f766e",
         background_color: "#ffffff",
-        icons: [{ src: "/favicon.svg", sizes: "any", type: "image/svg+xml", purpose: "any" }],
+        icons: [
+          { src: "/icons/icon-192.png", sizes: "192x192", type: "image/png", purpose: "any" },
+          { src: "/icons/icon-512.png", sizes: "512x512", type: "image/png", purpose: "any" },
+          {
+            src: "/icons/icon-maskable-512.png",
+            sizes: "512x512",
+            type: "image/png",
+            purpose: "maskable",
+          },
+        ],
       },
       workbox: {
-        globPatterns: ["**/*.{js,css,html,svg,wasm,webmanifest}"],
+        globPatterns: ["**/*.{js,css,html,svg,png,wasm,webmanifest}"],
         // sqlite-wasm が一緒に出力するが、使わないワーカーの JS はキャッシュしない
         globIgnores: ["**/sqlite3-worker1-*.js", "**/sqlite3-opfs-async-proxy-*.js"],
         // SPA なので、ないパスには index.html を返す。sendo のパス（/api、コンテナ版で同じオリジンに
