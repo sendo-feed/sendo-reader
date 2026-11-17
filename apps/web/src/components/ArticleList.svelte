@@ -718,7 +718,7 @@
         <Icon name="search" />
         <p>見つかりませんでした。</p>
       {:else if kind === "starred"}
-        <Icon name="star" />
+        <Icon name="bookmark" />
         <p>Save した記事が、ここに並びます。</p>
       {:else}
         <p>記事はありません。</p>
@@ -752,6 +752,12 @@
               <span class="text">
                 <span class="title">{article.title ?? "(Untitled)"}</span>
                 <span class="meta">
+                  <span class="saved-status">
+                    {#if article.starredAt !== null}
+                      <Icon name="bookmark" filled />
+                      <span class="visually-hidden">Saved</span>
+                    {/if}
+                  </span>
                   <span class="feed-icon">
                     <RemoteImage src={reader.feedIcon(article.feedId)} />
                   </span>
@@ -775,13 +781,13 @@
               </button>
               <button
                 type="button"
-                class="icon-button star"
+                class="icon-button save"
                 aria-pressed={article.starredAt !== null}
                 aria-label={article.starredAt === null ? "Save" : "Unsave"}
                 title={article.starredAt === null ? "Save" : "Unsave"}
                 onclick={() => toggle(article, "starredAt")}
               >
-                <Icon name="star" filled={article.starredAt !== null} />
+                <Icon name="bookmark" filled={article.starredAt !== null} />
               </button>
             </span>
           </div>
@@ -1144,6 +1150,23 @@
     color: var(--muted);
   }
 
+  /* 保存の有無でフィード名を動かさず、画像にも重ねない。既読になっても色を保つ */
+  .saved-status {
+    display: inline-flex;
+    flex: none;
+    align-self: center;
+    align-items: center;
+    justify-content: center;
+    width: 1rem;
+    height: 1rem;
+    color: var(--accent);
+  }
+
+  .saved-status :global(.icon) {
+    width: 0.875rem;
+    height: 1rem;
+  }
+
   .feed {
     min-width: 0;
     overflow: hidden;
@@ -1178,7 +1201,7 @@
     font-weight: 600;
   }
 
-  /* 行の操作（既読、スター）。マウスでは、行に乗せたときと、キーボードで入ったときだけ出す */
+  /* 行の操作（既読、保存）。マウスでは、行に乗せたときと、キーボードで入ったときだけ出す */
   .actions {
     position: absolute;
     top: 0.125rem;
@@ -1194,8 +1217,8 @@
     height: 1.875rem;
   }
 
-  .star[aria-pressed="true"] {
-    color: var(--star);
+  .save[aria-pressed="true"] {
+    color: var(--accent);
   }
 
   @media (hover: hover) {
@@ -1211,20 +1234,10 @@
     }
   }
 
-  /* 指で使う画面では、行の操作は出さない（記事を開いて操作する）。スターの印だけ残す */
+  /* 指で使う画面では、操作は記事の画面・長押し・スワイプに任せる */
   @media (hover: none) {
     .actions {
-      background: none;
-      box-shadow: none;
-      pointer-events: none;
-    }
-
-    .actions .icon-button:not(.star[aria-pressed="true"]) {
       display: none;
-    }
-
-    .row:has(.star[aria-pressed="true"]) .time {
-      margin-right: 1.5rem;
     }
   }
 
@@ -1317,8 +1330,8 @@
   }
 
   .row:global([data-swiping][data-armed][data-swipe="star"]) {
-    background: var(--star);
-    color: #ffffff;
+    background: var(--accent);
+    color: var(--on-accent);
   }
 
   .row:global([data-swiping])::after {

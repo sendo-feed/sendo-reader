@@ -650,13 +650,13 @@
       </button>
       <button
         type="button"
-        class="icon-button star"
+        class="icon-button save"
         aria-pressed={article.starredAt !== null}
         aria-label={article.starredAt === null ? "Save" : "Unsave"}
         title={article.starredAt === null ? "Save (s)" : "Unsave (s)"}
         onclick={() => toggle("starredAt")}
       >
-        <Icon name="star" filled={article.starredAt !== null} />
+        <Icon name="bookmark" filled={article.starredAt !== null} />
       </button>
       {#if link !== null}
         <button type="button" class="icon-button" aria-label="Share" title="Share" onclick={share}>
@@ -846,8 +846,8 @@
     text-align: end;
   }
 
-  .star[aria-pressed="true"] {
-    color: var(--star);
+  .save[aria-pressed="true"] {
+    color: var(--accent);
   }
 
   .aa {
