@@ -369,6 +369,11 @@ export class FakeSendo {
 
   /** 本文を取りに来たリクエスト（記事の ID） */
   readonly contentRequests: string[] = [];
+  /** 元ページから抜いた全文と、使える版かどうか */
+  readonly pageContents = new Map<string, string>();
+  readonly pageContentRequests: string[] = [];
+  pageContentEnabled = false;
+  featuresStatus = 200;
   /** hasContent は true のまま、本文だけがなくなったことにする記事（片付けの途中など） */
   readonly contentGone = new Set<string>();
   /** 本文の出どころとして返す値（あとで、記事のページから抜いた本文の値が増える） */
@@ -558,6 +563,11 @@ export class FakeSendo {
     if (request.method === "GET" && path === "/me") {
       return json(200, { user: { id: user.id, email: user.email } });
     }
+    if (request.method === "GET" && path === "/features") {
+      return this.featuresStatus === 200
+        ? json(200, { pageContent: this.pageContentEnabled })
+        : error(this.featuresStatus, "not_found", "features unavailable");
+    }
     if (path === "/tokens" || path.startsWith("/tokens/")) return this.#tokens(request, path);
     if (path === "/oauth/grants" || path.startsWith("/oauth/grants/")) {
       return this.#grants(request, path);
@@ -616,6 +626,16 @@ export class FakeSendo {
     const contentMatch = /^\/articles\/([^/]+)\/content$/.exec(path);
     if (request.method === "GET" && contentMatch !== null) {
       const id = decodeURIComponent(contentMatch[1] ?? "");
+      if (url.searchParams.get("source") === "page") {
+        this.pageContentRequests.push(id);
+        if (!this.pageContentEnabled) return error(501, "feature_unavailable", "not available");
+        if (!this.inbox.has(id)) return error(404, "not_found", "article does not exist");
+        const html = this.pageContents.get(id);
+        if (html === undefined) {
+          return error(404, "page_content_unavailable", "page content unavailable");
+        }
+        return json(200, { html, source: "page" });
+      }
       this.contentRequests.push(id);
       const row = this.inbox.get(id);
       if (row === undefined) return error(404, "not_found", "article does not exist");

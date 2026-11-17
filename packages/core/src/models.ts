@@ -81,14 +81,14 @@ export type ContentNode = string | ContentElement;
 /** 記事の本文 */
 export interface ArticleContent {
   nodes: ContentNode[];
-  /** 出どころ。今は "feed"（フィードに入っていた本文）だけ。知らない値も、本文として出す */
+  /** 出どころ。"feed" はフィードの本文、"page" は元ページの全文。知らない値も本文として出す */
   source: string;
 }
 
 /**
  * 手元の本文の様子。
  * - ready：手元にある
- * - missing：sendo にはあるが、まだ手元にない（つながれば取れる）
+ * - missing：まだ手元にない（ページの全文は、sendo で取れるかを含めて確かめる必要がある）
  * - none：本文がない記事（要約を出す）
  */
 export type LocalArticleContent =

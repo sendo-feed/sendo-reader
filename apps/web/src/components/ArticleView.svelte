@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { type Article, type ArticleContent, toSafeHttpUrl } from "@sendo-reader/core";
+  import { ApiError, type Article, type ArticleContent, toSafeHttpUrl } from "@sendo-reader/core";
   import { tick, untrack } from "svelte";
   import { useReader } from "../lib/context";
   import { formatDateTime } from "../lib/format";
@@ -48,37 +48,102 @@
    */
   let content = $state<ArticleContent | null>(null);
   let contentState = $state<"checking" | "ready" | "loading" | "unavailable" | "none">("none");
+  let pageAvailable = $state(false);
+  let hasPageContent = $state(false);
+  let pageLoading = $state(false);
+  let pageNote = $state<string | null>(null);
+  let contentRequest = 0;
 
-  async function loadContent(id: string) {
-    content = null;
-    contentState = "checking";
+  /** 使える機能を裏で確かめる。通信できなくても、手元の記事はそのまま読める */
+  $effect(() => {
+    const check = () => {
+      void reader.client.pageContentAvailable().then(
+        (available) => (pageAvailable = available),
+        () => {},
+      );
+    };
+    check();
+    window.addEventListener("online", check);
+    return () => window.removeEventListener("online", check);
+  });
+
+  async function loadContent(id: string, feedOnly = false) {
+    const request = ++contentRequest;
+    pageLoading = false;
+    pageNote = null;
     try {
+      // 一度取得した全文は、機能一覧の通信や hasContent によらず、オフラインでも出す
+      if (!feedOnly) {
+        const page = await reader.client.getArticleContent(id, "page");
+        if (id !== articleId || request !== contentRequest) return;
+        if (page.status === "ready") {
+          hasPageContent = true;
+          content = page.content;
+          contentState = "ready";
+          return;
+        }
+      }
       // まず手元だけを読む（ネットワークを待たない）
       const local = await reader.client.getArticleContent(id);
-      if (id !== articleId) return;
+      if (id !== articleId || request !== contentRequest) return;
       if (local.status === "ready") {
         content = local.content;
         contentState = "ready";
         return;
       }
       if (local.status === "none") {
+        content = null;
         contentState = "none";
         return;
       }
+      content = null;
       contentState = "loading";
       const fetched = await reader.client.fetchArticleContent(id);
-      if (id !== articleId) return;
+      if (id !== articleId || request !== contentRequest) return;
       content = fetched;
       contentState = fetched === null ? "none" : "ready";
     } catch {
-      if (id === articleId) contentState = "unavailable";
+      if (id === articleId && request === contentRequest) {
+        content = null;
+        contentState = "unavailable";
+      }
+    }
+  }
+
+  /** 元ページの全文を取る。取っている間や失敗したときも、今読んでいる本文・要約を残す */
+  async function loadFullText(id: string) {
+    const request = ++contentRequest;
+    pageLoading = true;
+    pageNote = null;
+    try {
+      const fetched = await reader.client.fetchArticleContent(id, "page");
+      if (id !== articleId || request !== contentRequest) return;
+      if (fetched === null) {
+        pageNote = "全文を取得できませんでした。元の記事で続きを読めます。";
+      } else {
+        hasPageContent = true;
+        content = fetched;
+        contentState = "ready";
+      }
+    } catch (error) {
+      if (id !== articleId || request !== contentRequest) return;
+      if (error instanceof ApiError && error.code === "feature_unavailable") {
+        pageAvailable = false;
+        pageNote = "この sendo では全文の取得を利用できません。";
+      } else {
+        pageNote = "全文を取得できませんでした。接続を確かめて、もう一度お試しください。";
+      }
+    } finally {
+      if (id === articleId && request === contentRequest) pageLoading = false;
     }
   }
 
   /** つながったら、取れなかった本文を取り直す */
   $effect(() => {
     const retry = () => {
-      if (articleId !== null && contentState === "unavailable") void loadContent(articleId);
+      if (articleId !== null && contentState === "unavailable" && !pageLoading) {
+        void loadContent(articleId);
+      }
     };
     window.addEventListener("online", retry);
     return () => window.removeEventListener("online", retry);
@@ -112,6 +177,12 @@
       fadeIn = id !== null && !settling && (shownId !== null || !layout.pageScroll);
       shownId = id;
       saveError = null;
+      contentRequest += 1;
+      content = null;
+      contentState = id === null ? "none" : "checking";
+      pageLoading = false;
+      pageNote = null;
+      hasPageContent = false;
       if (id === null) {
         article = null;
         missing = false;
@@ -592,6 +663,30 @@
             {/if}
           </p>
         </header>
+        {#if (pageAvailable && link !== null) || hasPageContent}
+          <div class="content-source">
+            <button
+              type="button"
+              aria-pressed={content?.source !== "page"}
+              onclick={() => articleId !== null && loadContent(articleId, true)}
+            >
+              Feed content
+            </button>
+            <button
+              type="button"
+              aria-pressed={content?.source === "page"}
+              disabled={pageLoading || contentState === "checking" || contentState === "loading"}
+              onclick={() => articleId !== null && loadFullText(articleId)}
+            >
+              Full text
+            </button>
+          </div>
+        {/if}
+        {#if pageLoading}
+          <p class="content-note" role="status">全文を取得しています…</p>
+        {:else if pageNote !== null}
+          <p class="content-note" role="status">{pageNote}</p>
+        {/if}
         {#if content !== null}
           <ArticleBody nodes={content.nodes} />
         {:else if showSummary}
@@ -630,6 +725,32 @@
 </Dialog>
 
 <style>
+  .content-source {
+    display: flex;
+    gap: 0.5rem;
+    margin-block: 1rem;
+  }
+
+  .content-source button {
+    padding: 0.5rem 0.75rem;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    background: var(--background);
+    color: var(--muted);
+    cursor: pointer;
+  }
+
+  .content-source button[aria-pressed="true"] {
+    border-color: var(--accent);
+    background: var(--selected);
+    color: var(--accent);
+  }
+
+  .content-source button:disabled {
+    cursor: wait;
+    opacity: 0.6;
+  }
+
   .article-view {
     display: flex;
     flex-direction: column;

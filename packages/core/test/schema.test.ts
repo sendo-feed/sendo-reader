@@ -14,6 +14,7 @@ describe("手元の DB のスキーマ", () => {
     );
     expect(tables.map((t) => t.name)).toEqual([
       "article_contents",
+      "article_page_contents",
       "articles",
       "feeds",
       "folders",

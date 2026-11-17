@@ -1,10 +1,16 @@
 import type { Executor } from "./database";
 
+export type ContentSource = "feed" | "page";
+
+function contentTable(source: ContentSource): string {
+  return source === "page" ? "article_page_contents" : "article_contents";
+}
+
 /**
  * 記事ごとに取った本文の、手元の置き場（sendo の docs/decisions/content.md の 6）。
  *
- * 置くのは、sendo から受け取った HTML（信頼できない）と、出どころ。本文は、記事を取り込んだ
- * あとは変わらないので、一度置いたら取り直さない。記事を手元から消すと、一緒に消える
+ * 置くのは、sendo から受け取った HTML（信頼できない）と、出どころ。一度受け取った本文は
+ * 変わらないので、置いたら取り直さない。記事を手元から消すと、一緒に消える
  * （スキーマのトリガー）。
  */
 
@@ -13,20 +19,24 @@ export interface StoredContent {
   source: string;
 }
 
-/** 記事に本文があるか（sendo の hasContent）と、手元に置いた本文。記事が手元になければ null */
+/**
+ * 本文を取りにいけるかと、手元の本文。フィードは hasContent で決め、ページは記事があれば
+ * 取りにいける（取れるかは sendo の機能による）。記事が手元になければ null
+ */
 export async function getStoredContent(
   db: Executor,
   articleId: string,
+  source: ContentSource = "feed",
 ): Promise<{ hasContent: boolean; stored: StoredContent | null } | null> {
   const [row] = await db.all<{ has_content: number; html: string | null; source: string | null }>(
     `select a.has_content, c.html, c.source
-     from articles a left join article_contents c on c.article_id = a.id
+     from articles a left join ${contentTable(source)} c on c.article_id = a.id
      where a.id = ?`,
     [articleId],
   );
   if (row === undefined) return null;
   return {
-    hasContent: row.has_content !== 0,
+    hasContent: source === "page" || row.has_content !== 0,
     stored:
       row.html === null || row.source === null ? null : { html: row.html, source: row.source },
   };
@@ -38,9 +48,10 @@ export async function putStoredContent(
   articleId: string,
   content: StoredContent,
   now: number,
+  source: ContentSource = "feed",
 ): Promise<boolean> {
   const rows = await tx.all<{ article_id: string }>(
-    `insert into article_contents (article_id, html, source, fetched_at)
+    `insert into ${contentTable(source)} (article_id, html, source, fetched_at)
      select id, ?, ?, ? from articles where id = ?
      on conflict (article_id) do update set
        html = excluded.html, source = excluded.source, fetched_at = excluded.fetched_at
