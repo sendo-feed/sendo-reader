@@ -119,26 +119,21 @@
   let seen = new WeakSet<Element>();
   const passed = new Set<string>();
   let flushTimer: ReturnType<typeof setTimeout> | undefined;
-  /** スクロールで最後の未読を通過し、手元への書き込みも終えた一覧 */
+  /** スクロールで未読を既読にし、手元への書き込みも終えた一覧 */
   let finishedScroll = $state<number | null>(null);
   let completed = $state(false);
 
   async function flushPassed() {
-    const ids = [...passed];
+    const targets = new Set(passed);
+    const ids = [...targets];
     passed.clear();
     const generation = list.generation;
-    const tail = list.articles.at(-1);
-    const finishes = filterable && tail?.readAt === null && ids.includes(tail.id);
+    const readUnread =
+      filterable &&
+      list.articles.some((article) => article.readAt === null && targets.has(article.id));
     try {
       await list.markRead(ids);
-      if (
-        finishes &&
-        generation === list.generation &&
-        !list.hasMore &&
-        list.fresh === 0 &&
-        list.articles.every((article) => article.readAt !== null)
-      )
-        finishedScroll = generation;
+      if (readUnread && generation === list.generation) finishedScroll = generation;
     } catch {
       // 書けなかったら、一覧が手元の DB の状態に戻る。完了にはしない
     }
@@ -152,6 +147,7 @@
       !completed &&
       !list.loading &&
       !list.hasMore &&
+      list.fresh === 0 &&
       router.articleId === null &&
       unread === 0 &&
       list.articles.length > 0 &&
