@@ -13,6 +13,7 @@
   import { prefs, type ViewOptions } from "../lib/prefs.svelte";
   import { handleLink, isPlainClick, type ListAnchor, router } from "../lib/router.svelte";
   import Icon from "./Icon.svelte";
+  import ReadCelebration from "./ReadCelebration.svelte";
   import RemoteImage from "./RemoteImage.svelte";
 
   let {
@@ -118,12 +119,78 @@
   let seen = new WeakSet<Element>();
   const passed = new Set<string>();
   let flushTimer: ReturnType<typeof setTimeout> | undefined;
+  /** スクロールで最後の未読を通過し、手元への書き込みも終えた一覧 */
+  let finishedScroll = $state<number | null>(null);
+  let completed = $state(false);
 
-  function flushPassed() {
+  async function flushPassed() {
     const ids = [...passed];
     passed.clear();
-    // 書けなかったら、一覧が手元の DB の状態に戻る
-    list.markRead(ids).catch(() => {});
+    const generation = list.generation;
+    const tail = list.articles.at(-1);
+    const finishes = filterable && tail?.readAt === null && ids.includes(tail.id);
+    try {
+      await list.markRead(ids);
+      if (
+        finishes &&
+        generation === list.generation &&
+        !list.hasMore &&
+        list.fresh === 0 &&
+        list.articles.every((article) => article.readAt !== null)
+      )
+        finishedScroll = generation;
+    } catch {
+      // 書けなかったら、一覧が手元の DB の状態に戻る。完了にはしない
+    }
+  }
+
+  // 数の読み直しを待ってから祝う。別の端末で既読になっただけ、途中のページ、最初から空の一覧では
+  // 出さない。既読にした行は残るので、戻ってもう一度通っても、同じ一覧では繰り返さない
+  $effect(() => {
+    if (
+      finishedScroll === list.generation &&
+      !completed &&
+      !list.loading &&
+      !list.hasMore &&
+      router.articleId === null &&
+      unread === 0 &&
+      list.articles.length > 0 &&
+      list.articles.every((article) => article.readAt !== null)
+    )
+      completed = true;
+  });
+
+  /** 最後の行も見出しを通過できるだけの余白。表示しただけでは既読にせず、いつもと同じ判定を使う */
+  function endSpace(node: HTMLElement, options: { enabled: boolean; pageScroll: boolean }) {
+    function measure() {
+      const viewport = options.pageScroll ? window.innerHeight : (scroller?.clientHeight ?? 0);
+      const header = scroller?.querySelector("header")?.offsetHeight ?? 0;
+      // 狭い画面ではページ末尾に下のバーの余白もある。その分を引き、完了表示が見出しの裏へ
+      // 行きすぎないようにする（安全領域は --tabs-height に含まれる）
+      node.style.minHeight = options.enabled
+        ? `calc(${Math.max(0, viewport - header + 2)}px - ${options.pageScroll ? "var(--tabs-height, 0px)" : "0px"})`
+        : "";
+    }
+    const resize = new ResizeObserver(measure);
+    const header = scroller?.querySelector("header");
+    if (header !== null && header !== undefined) resize.observe(header);
+    if (!options.pageScroll && scroller !== undefined) resize.observe(scroller);
+    window.addEventListener("resize", measure);
+    measure();
+    return {
+      update(value: typeof options) {
+        options = value;
+        if (scroller !== undefined) {
+          resize.unobserve(scroller);
+          if (!options.pageScroll) resize.observe(scroller);
+        }
+        measure();
+      },
+      destroy() {
+        resize.disconnect();
+        window.removeEventListener("resize", measure);
+      },
+    };
   }
 
   function onPass(entries: IntersectionObserverEntry[]) {
@@ -202,7 +269,10 @@
   $effect(() => {
     void list.opened;
     passed.clear();
+    finishedScroll = null;
+    completed = false;
     scrollPage(scroller);
+    return () => clearTimeout(flushTimer);
   });
 
   /** 探す言葉を打つたびに探す。打っている途中で何度も探さないように、少し待つ */
@@ -478,6 +548,8 @@
   }
 
   export async function reload() {
+    finishedScroll = null;
+    completed = false;
     const loading = list.load();
     const generation = list.generation;
     await loading;
@@ -831,8 +903,20 @@
         {list.loadingMore ? "Loading…" : "Load more"}
       </button>
     {:else}
-      <div class="end">
-        <p>End of list</p>
+      <div
+        class="end"
+        class:completed={completed && unread === 0}
+        use:endSpace={{
+          enabled: prefs.value.markReadOnScroll && kind !== "search" && kind !== "recentlyRead",
+          pageScroll: layout.pageScroll,
+        }}
+      >
+        {#if completed && unread === 0}
+          <Icon name="checkAll" />
+          <p role="status">すべて読み終えました。</p>
+        {:else}
+          <p>End of list</p>
+        {/if}
         {#if next !== null}
           <button type="button" class="primary" onclick={next.go}>{next.label}</button>
         {/if}
@@ -840,6 +924,10 @@
     {/if}
   {/if}
 </section>
+
+{#if completed}
+  <ReadCelebration />
+{/if}
 
 <style>
   .article-list {
@@ -1319,6 +1407,8 @@
 
   .end {
     display: grid;
+    flex: none;
+    align-content: start;
     justify-items: center;
     gap: 0.75rem;
     padding: 1.5rem 1rem calc(2rem + env(safe-area-inset-bottom, 0px));
@@ -1329,6 +1419,10 @@
 
   .end p {
     margin: 0;
+  }
+
+  .end.completed {
+    color: var(--accent);
   }
 
   .end button {
