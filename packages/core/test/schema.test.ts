@@ -4,6 +4,22 @@ import { migrate } from "../src/db/schema";
 import { openMemoryDb } from "./helpers";
 
 describe("手元の DB のスキーマ", () => {
+  test("既存の記事を残したまま既読順の索引を足す", async () => {
+    const db = await openMemoryDb();
+    await migrate(db, 10);
+    await db.run(`insert into articles (id, feed_id, published_at, received_at, read_at)
+      values ('read', 'feed', 1, 2, 3), ('unread', 'feed', 4, 5, null)`);
+    await migrate(db);
+    expect(await db.all("select id, read_at from articles order by id")).toEqual([
+      { id: "read", read_at: 3 },
+      { id: "unread", read_at: null },
+    ]);
+    const plan = await db.all<{ detail: string }>(`explain query plan
+      select id from articles where read_at is not null order by read_at desc, id desc limit 50`);
+    expect(plan.some((row) => row.detail.includes("articles_read_idx"))).toBe(true);
+    expect(plan.some((row) => row.detail.includes("TEMP B-TREE"))).toBe(false);
+  });
+
   test("マイグレーションを当てると、版が最新になり、表ができる", async () => {
     const db = await openMemoryDb();
     await migrate(db);

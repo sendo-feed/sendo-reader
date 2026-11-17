@@ -160,6 +160,10 @@ const migrations: readonly (readonly string[])[] = [
        delete from article_page_contents where article_id = old.id;
      end`,
   ],
+  [
+    // 最近読んだ一覧を、既読にした日時から少しずつ読む。未読は索引に載せない
+    "create index articles_read_idx on articles (read_at, id) where read_at is not null",
+  ],
 ];
 
 export const SCHEMA_VERSION = migrations.length;

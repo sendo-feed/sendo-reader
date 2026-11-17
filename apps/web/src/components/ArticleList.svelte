@@ -33,7 +33,7 @@
     list: ArticleListState;
     title: string;
     /** 開いている一覧の種類。空のときの文と、出す操作を決める */
-    kind: "all" | "starred" | "feed" | "folder" | "search";
+    kind: "all" | "recentlyRead" | "starred" | "feed" | "folder" | "search";
     /** 検索の画面で探している言葉（検索でなければ null） */
     search: string | null;
     onsearch: (query: string) => void;
@@ -65,7 +65,10 @@
     const now = Date.now();
     let previous = "";
     return list.articles.map((article) => {
-      const label = dayLabel(article.publishedAt, now);
+      const label = dayLabel(
+        kind === "recentlyRead" ? (article.readAt ?? article.publishedAt) : article.publishedAt,
+        now,
+      );
       const heading = label === previous ? null : label;
       previous = label;
       return { article, heading };
@@ -137,8 +140,14 @@
       // 監視を始めたときの知らせなど、上の端まで見えたことのない行は、通り過ぎたのではない
       if (!seen.has(entry.target)) continue;
       const id = (entry.target as HTMLElement).dataset.article;
-      // 探した結果は、読み進める一覧ではないので、通り過ぎても既読にしない
-      if (id !== undefined && prefs.value.markReadOnScroll && kind !== "search") passed.add(id);
+      // 検索と最近読んだ一覧では、見返しているだけなので、通り過ぎても既読にしない
+      if (
+        id !== undefined &&
+        prefs.value.markReadOnScroll &&
+        kind !== "search" &&
+        kind !== "recentlyRead"
+      )
+        passed.add(id);
     }
     if (passed.size === 0) return;
     clearTimeout(flushTimer);
@@ -437,7 +446,12 @@
       if (rect.height === 0 || rect.bottom <= top) continue;
       const article = list.find(row.dataset.article ?? null);
       if (article === null) return null;
-      return { id: article.id, publishedAt: article.publishedAt, offset: rect.top - top };
+      return {
+        id: article.id,
+        publishedAt: article.publishedAt,
+        readAt: article.readAt,
+        offset: rect.top - top,
+      };
     }
     return null;
   }
@@ -626,11 +640,12 @@
         </button>
       </h2>
     {/if}
-    {#if filterable}
+    {#if filterable || kind === "recentlyRead"}
       <button
         type="button"
         class="icon-button"
         aria-pressed={options.unreadOnly}
+        disabled={kind === "recentlyRead"}
         aria-label="Unread only"
         title="Unread only"
         onclick={() => onoption({ unreadOnly: !options.unreadOnly })}
@@ -638,16 +653,18 @@
         <Icon name="filter" />
       </button>
     {/if}
-    <button
-      type="button"
-      class="icon-button"
-      aria-pressed={options.oldestFirst}
-      aria-label="Oldest first"
-      title="Oldest first"
-      onclick={() => onoption({ oldestFirst: !options.oldestFirst })}
-    >
-      <Icon name="sort" />
-    </button>
+    {#if kind !== "recentlyRead"}
+      <button
+        type="button"
+        class="icon-button"
+        aria-pressed={options.oldestFirst}
+        aria-label="Oldest first"
+        title="Oldest first"
+        onclick={() => onoption({ oldestFirst: !options.oldestFirst })}
+      >
+        <Icon name="sort" />
+      </button>
+    {/if}
     {#if unread !== null}
       <button
         type="button"
@@ -707,7 +724,10 @@
     <p class="visually-hidden" role="status">Loading…</p>
   {:else if list.articles.length === 0}
     <div class="empty">
-      {#if reader.feeds.length === 0}
+      {#if kind === "recentlyRead"}
+        <Icon name="history" />
+        <p>まだ読んだ記事はありません。</p>
+      {:else if reader.feeds.length === 0}
         <Icon name="rss" />
         <p>まだフィードを購読していません。</p>
         <a href="/manage" onclick={(e) => handleLink(e, "/manage")}>Add a feed</a>
@@ -762,7 +782,13 @@
                     <RemoteImage src={reader.feedIcon(article.feedId)} />
                   </span>
                   <span class="feed">{reader.feedTitle(article.feedId)}</span>
-                  <span class="time">{shortTime(article.publishedAt)}</span>
+                  <span class="time"
+                    >{shortTime(
+                      kind === "recentlyRead"
+                        ? (article.readAt ?? article.publishedAt)
+                        : article.publishedAt,
+                    )}</span
+                  >
                 </span>
               </span>
               {#if article.thumbnailUrl !== null}

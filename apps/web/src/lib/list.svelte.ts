@@ -1,7 +1,22 @@
-import type { Article, ArticleQuery } from "@sendo-reader/core";
+import {
+  type Article,
+  type ArticleCursor,
+  type ArticleQuery,
+  compareArticles,
+} from "@sendo-reader/core";
 import type { ReaderClient } from "@sendo-reader/core/web";
 
 const PAGE = 50;
+
+function cursorOf(article: Article | undefined): ArticleCursor | undefined {
+  return article === undefined
+    ? undefined
+    : {
+        id: article.id,
+        publishedAt: article.publishedAt,
+        readAt: article.readAt,
+      };
+}
 
 /** 開いている一覧の進み具合（一覧の見出しと左のメニューの輪に出す） */
 export interface ListProgress {
@@ -38,6 +53,8 @@ export class ArticleListState {
 
   readonly #client: ReaderClient;
   #query: ArticleQuery = {};
+  /** 読み出した末尾の位置。既読・未読を変えても、続きを読む境界は動かさない */
+  #after: ArticleCursor | undefined;
   /** 何も出さない一覧にしている（show に null を渡した） */
   #empty = false;
   /**
@@ -94,6 +111,7 @@ export class ArticleListState {
   async load(): Promise<void> {
     const current = ++this.#generation;
     if (this.#empty) {
+      this.#after = undefined;
       this.#articles = [];
       this.hasMore = false;
       this.fresh = 0;
@@ -103,6 +121,7 @@ export class ArticleListState {
     this.loading = true;
     const page = await this.#client.listArticles({ ...this.#query, limit: PAGE });
     if (current !== this.#generation) return;
+    this.#after = cursorOf(page.at(-1));
     this.#articles = page;
     this.hasMore = page.length === PAGE;
     this.fresh = 0;
@@ -120,17 +139,18 @@ export class ArticleListState {
   #more: Promise<void> | null = null;
 
   async #loadMore(): Promise<void> {
-    const last = this.articles.at(-1);
-    if (last === undefined || !this.hasMore) return;
+    const after = this.#after;
+    if (after === undefined || !this.hasMore) return;
     const current = this.#generation;
     this.loadingMore = true;
     try {
       const page = await this.#client.listArticles({
         ...this.#query,
         limit: PAGE,
-        after: { publishedAt: last.publishedAt, id: last.id },
+        after,
       });
       if (current !== this.#generation) return;
+      this.#after = cursorOf(page.at(-1)) ?? after;
       const shown = new Set(this.articles.map((article) => article.id));
       this.#articles = [...this.articles, ...page.filter((article) => !shown.has(article.id))];
       this.hasMore = page.length === PAGE;
@@ -152,9 +172,7 @@ export class ArticleListState {
     const current = this.#generation;
     const requested = this.articles.map((article) => article.id);
     const shown = new Set(requested);
-    const last = this.articles.at(-1);
-    const oldest = this.#query.order === "oldest";
-    const after = last === undefined ? undefined : { publishedAt: last.publishedAt, id: last.id };
+    const after = this.#after;
     const [latest, top, beyond] = await Promise.all([
       this.#client.getArticles(requested),
       // 先頭のページ。出している記事の間や前に、条件に合う記事が加わっていないかを見る
@@ -169,21 +187,25 @@ export class ArticleListState {
     // 読み直した記事だけを差し替える（読み直している間に続きとして足した記事は残す。
     // 読み直して見つからなかった記事は、手元から消えたので外す）
     const byId = new Map(latest.map((article) => [article.id, article]));
-    this.#articles = this.articles.flatMap((article) =>
+    let articles = this.articles.flatMap((article) =>
       shown.has(article.id) ? (byId.get(article.id) ?? []) : [article],
     );
+    if (this.#query.order === "recentlyRead") {
+      articles = articles
+        .filter((article) => article.readAt !== null)
+        .sort((a, b) => compareArticles(a, b, this.#query.order));
+    }
+    this.#articles = articles;
     if (beyond.length > 0) this.hasMore = true;
     // 並び順で、出している最後の記事より前に入る記事だけを、新しい記事として数える。最後の
     // 記事より先の記事は、続きとして読む（未読の一覧で記事を読むと、その分だけ先の記事が先頭の
     // ページに繰り上がるが、それは新しく加わったのではない）
-    const direction = oldest ? -1 : 1;
     this.fresh = top.filter((article) => {
       if (shown.has(article.id)) return false;
-      if (last === undefined) return true;
-      const byTime = article.publishedAt - last.publishedAt;
-      const order = byTime !== 0 ? byTime : article.id > last.id ? 1 : -1;
-      return order * direction > 0;
+      if (after === undefined) return true;
+      return compareArticles(article, after, this.#query.order) < 0;
     }).length;
+    if (this.articles.length === 0 && this.hasMore) await this.loadMore();
   }
 
   /**
@@ -191,14 +213,11 @@ export class ArticleListState {
    * 一覧から消えていたら、次の記事に合わせる）。出していなければ、続きを pages ページまで読んで探す。
    * 末尾まで来たら、最後の記事。探している間に一覧が読み直されたら null
    */
-  async seek(anchor: { id: string; publishedAt: number }, pages = 10): Promise<Article | null> {
+  async seek(anchor: ArticleCursor, pages = 10): Promise<Article | null> {
     const current = this.#generation;
-    const direction = this.#query.order === "oldest" ? -1 : 1;
     const before = (article: Article) => {
       if (article.id === anchor.id) return false;
-      const byTime = article.publishedAt - anchor.publishedAt;
-      const order = byTime !== 0 ? byTime : article.id > anchor.id ? 1 : -1;
-      return order * direction > 0;
+      return compareArticles(article, anchor, this.#query.order) < 0;
     };
     for (let page = 0; ; page++) {
       const found = this.articles.find((article) => !before(article));

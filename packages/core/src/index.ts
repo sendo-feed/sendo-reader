@@ -13,7 +13,7 @@ export {
 } from "./account";
 export { ApiError, type ApiErrorKind } from "./api/errors";
 export type { Database, Executor, Row, SqlValue } from "./db/database";
-export type { ArticleQuery } from "./db/queries";
+export { type ArticleCursor, type ArticleQuery, compareArticles } from "./db/queries";
 export { NewerSchemaError, SCHEMA_VERSION } from "./db/schema";
 export { wrapSqliteWasm } from "./db/sqlite-wasm";
 export type {

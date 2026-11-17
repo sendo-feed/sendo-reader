@@ -8,19 +8,38 @@ export interface ArticleQuery {
   feedId?: string;
   /** このフォルダのフィードの記事だけ */
   folderId?: string;
-  /** unread なら未読だけ、starred ならスター付きだけ */
-  state?: "all" | "unread" | "starred";
+  /** unread なら未読だけ、read なら既読だけ、starred なら保存済みだけ */
+  state?: "all" | "unread" | "read" | "starred";
   /**
    * 探す言葉。空白で区切ったすべての言葉が、タイトル・要約・著者のどれかに入っている記事だけ
    * （大文字と小文字は、ASCII の範囲で区別しない）。空なら絞らない
    */
   search?: string;
-  /** 並べる順。newest（既定）は新しい順、oldest は古い順 */
-  order?: "newest" | "oldest";
+  /** 公開日時の新しい順（既定）・古い順、または既読にした日時の新しい順（既読だけ） */
+  order?: "newest" | "oldest" | "recentlyRead";
   /** 1 回に読む数（1〜200、既定は 50） */
   limit?: number;
   /** 前のページの最後の記事。その続き（新しい順ならこれより古いもの、古い順なら新しいもの）を読む */
-  after?: { publishedAt: number; id: string };
+  after?: ArticleCursor;
+}
+
+/** 一覧の続き・位置の復元に使う日時。既読順では readAt も必要 */
+export interface ArticleCursor {
+  id: string;
+  publishedAt: number;
+  readAt?: number | null;
+}
+
+/** SQL の一覧と同じ並び順で比べる。負なら a が先、正なら b が先 */
+export function compareArticles(
+  a: ArticleCursor,
+  b: ArticleCursor,
+  order?: ArticleQuery["order"],
+): number {
+  const time = (article: ArticleCursor) =>
+    order === "recentlyRead" ? (article.readAt ?? 0) : article.publishedAt;
+  const difference = time(a) - time(b) || (a.id === b.id ? 0 : a.id > b.id ? 1 : -1);
+  return order === "oldest" ? difference : -difference;
 }
 
 const DEFAULT_LIMIT = 50;
@@ -44,7 +63,7 @@ type ArticleRow = {
 const ARTICLE_COLUMNS =
   "a.id, a.feed_id, a.url, a.title, a.summary, a.author, a.thumbnail_url, a.has_content, a.published_at, a.received_at, a.read_at, a.starred_at";
 
-/** 記事を新しい順（公開日時、同じなら id の大きい順）か、その逆の古い順に読む */
+/** 公開日時の新しい順・古い順、または既読にした日時の新しい順に読む。同時刻なら id で決める */
 export async function listArticles(db: Executor, query: ArticleQuery = {}): Promise<Article[]> {
   const where: string[] = [];
   const params: SqlValue[] = [];
@@ -57,6 +76,8 @@ export async function listArticles(db: Executor, query: ArticleQuery = {}): Prom
     params.push(query.folderId);
   }
   if (query.state === "unread") where.push("a.read_at is null");
+  const recentlyRead = query.order === "recentlyRead";
+  if (query.state === "read" || recentlyRead) where.push("a.read_at is not null");
   if (query.state === "starred") where.push("a.starred_at is not null");
   for (const term of searchTerms(query.search)) {
     // % と _ は、そのままの文字として探す
@@ -67,10 +88,13 @@ export async function listArticles(db: Executor, query: ArticleQuery = {}): Prom
     params.push(pattern, pattern, pattern);
   }
   const oldest = query.order === "oldest";
+  const column = recentlyRead ? "a.read_at" : "a.published_at";
   if (query.after !== undefined) {
+    const time = recentlyRead ? query.after.readAt : query.after.publishedAt;
+    if (time === undefined || time === null) throw new RangeError("既読順の続きには readAt が必要");
     const than = oldest ? ">" : "<";
-    where.push(`(a.published_at ${than} ? or (a.published_at = ? and a.id ${than} ?))`);
-    params.push(query.after.publishedAt, query.after.publishedAt, query.after.id);
+    where.push(`(${column}, a.id) ${than} (?, ?)`);
+    params.push(time, query.after.id);
   }
   const limit = Math.min(Math.max(Math.trunc(query.limit ?? DEFAULT_LIMIT), 1), MAX_LIMIT);
   params.push(limit);
@@ -78,7 +102,7 @@ export async function listArticles(db: Executor, query: ArticleQuery = {}): Prom
   const rows = await db.all<ArticleRow>(
     `select ${ARTICLE_COLUMNS} from articles a
      ${where.length > 0 ? `where ${where.join(" and ")}` : ""}
-     order by a.published_at ${oldest ? "asc" : "desc"}, a.id ${oldest ? "asc" : "desc"}
+     order by ${column} ${oldest ? "asc" : "desc"}, a.id ${oldest ? "asc" : "desc"}
      limit ?`,
     params,
   );
