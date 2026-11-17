@@ -578,6 +578,7 @@
   class:managing={listing === null}
   class:reading={router.articleId !== null}
   class:menu-open={menuOpen}
+  class:sidebar-collapsed={prefs.value.sidebarCollapsed}
   class:peeking
   class:returning
 >
@@ -742,8 +743,14 @@
 <style>
   .reader {
     display: grid;
-    grid-template-columns: 17rem clamp(20rem, 30vw, 27rem) minmax(0, 1fr);
+    grid-template-columns: var(--sidebar-width, 17rem) clamp(20rem, 30vw, 27rem) minmax(0, 1fr);
     height: 100dvh;
+  }
+
+  @media (width > 56rem) {
+    .reader.sidebar-collapsed {
+      --sidebar-width: 4rem;
+    }
   }
 
   .reader > :global(*) {
@@ -751,7 +758,7 @@
   }
 
   .reader.managing {
-    grid-template-columns: 17rem minmax(0, 1fr);
+    grid-template-columns: var(--sidebar-width, 17rem) minmax(0, 1fr);
   }
 
   .page {

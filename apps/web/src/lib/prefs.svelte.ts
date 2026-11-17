@@ -62,6 +62,8 @@ export interface PrefsValue {
   oldestFirst: boolean;
   /** 左のメニューで、未読のないフィードを隠す */
   hideReadFeeds: boolean;
+  /** 広い画面のサイドバーを、アイコンだけで出す */
+  sidebarCollapsed: boolean;
   /** 左のメニューで、畳んでいるフォルダの ID */
   collapsed: string[];
   /** 指でのスワイプの割り当て */
@@ -85,6 +87,7 @@ const DEFAULTS: PrefsValue = {
   markReadOnScroll: true,
   oldestFirst: false,
   hideReadFeeds: false,
+  sidebarCollapsed: false,
   collapsed: [],
   views: {},
   // 記事を右へスワイプすると、一覧に戻る。一覧の行は、右でスター、左で既読・未読（Feedly と同じ）
@@ -113,6 +116,7 @@ export function parsePrefs(text: string | null): PrefsValue {
     markReadOnScroll: flag("markReadOnScroll"),
     oldestFirst: flag("oldestFirst"),
     hideReadFeeds: flag("hideReadFeeds"),
+    sidebarCollapsed: flag("sidebarCollapsed"),
     collapsed: Array.isArray(raw.collapsed)
       ? raw.collapsed.filter((id): id is string => typeof id === "string").slice(-MAX_COLLAPSED)
       : [],
@@ -161,6 +165,7 @@ const SIMPLE_NAMES = {
   markReadOnScroll: "reader.markReadOnScroll",
   oldestFirst: "reader.oldestFirst",
   hideReadFeeds: "reader.hideReadFeeds",
+  sidebarCollapsed: "reader.sidebarCollapsed",
 } as const;
 
 /**
