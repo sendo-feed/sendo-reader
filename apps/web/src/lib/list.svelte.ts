@@ -55,6 +55,8 @@ export class ArticleListState {
   #query: ArticleQuery = {};
   /** 読み出した末尾の位置。既読・未読を変えても、続きを読む境界は動かさない */
   #after: ArticleCursor | undefined;
+  /** 最近読んだ一覧から外れた記事の前後。開いている記事・選択中の記事から移るときに使う */
+  readonly #removed = new Map<string, { previous: string | null; next: string | null }>();
   /** 何も出さない一覧にしている（show に null を渡した） */
   #empty = false;
   /**
@@ -102,6 +104,7 @@ export class ArticleListState {
     this.#query = query ?? {};
     this.opened += 1;
     this.cursorId = null;
+    this.#removed.clear();
     this.#seenUnread.clear();
     this.#readHere.clear();
     this.done = 0;
@@ -121,6 +124,7 @@ export class ArticleListState {
     this.loading = true;
     const page = await this.#client.listArticles({ ...this.#query, limit: PAGE });
     if (current !== this.#generation) return;
+    this.#removed.clear();
     this.#after = cursorOf(page.at(-1));
     this.#articles = page;
     this.hasMore = page.length === PAGE;
@@ -150,9 +154,14 @@ export class ArticleListState {
         after,
       });
       if (current !== this.#generation) return;
+      // 待っている間に同期で境界の既読日時が変わった。古い境界の結果は使わず読み直す
+      if (after !== this.#after) return await this.#loadMore();
       this.#after = cursorOf(page.at(-1)) ?? after;
       const shown = new Set(this.articles.map((article) => article.id));
-      this.#articles = [...this.articles, ...page.filter((article) => !shown.has(article.id))];
+      const added = page.filter((article) => !shown.has(article.id));
+      const removedTail = this.#removed.get(after.id);
+      if (removedTail?.next === null && added[0] !== undefined) removedTail.next = added[0].id;
+      this.#articles = [...this.articles, ...added];
       this.hasMore = page.length === PAGE;
     } finally {
       this.loadingMore = false;
@@ -172,21 +181,35 @@ export class ArticleListState {
     const current = this.#generation;
     const requested = this.articles.map((article) => article.id);
     const shown = new Set(requested);
-    const after = this.#after;
-    const [latest, top, beyond] = await Promise.all([
-      this.#client.getArticles(requested),
+    const boundaryId = this.#after?.id;
+    const [latest, top] = await Promise.all([
+      this.#client.getArticles(
+        boundaryId !== undefined && !shown.has(boundaryId) ? [...requested, boundaryId] : requested,
+      ),
       // 先頭のページ。出している記事の間や前に、条件に合う記事が加わっていないかを見る
       this.#client.listArticles({ ...this.#query, limit: PAGE }),
-      // 末尾まで出していたら、その先に条件に合う記事が加わっていないかを見る（新しく届いた、
-      // 別のタブでスターを付けた・未読に戻した、公開日時の古い記事が届いた）
+    ]);
+    if (current !== this.#generation) return;
+    const byId = new Map(latest.map((article) => [article.id, article]));
+    const boundary = this.#after === undefined ? undefined : byId.get(this.#after.id);
+    // 同期で手元の既読日時がサーバーの日時に変わったら、続きの境界も合わせる。
+    // 未読に戻った・削除された境界は、既読だったときの日時を保つ
+    if (
+      this.#query.order === "recentlyRead" &&
+      boundary?.readAt != null &&
+      boundary.readAt !== this.#after?.readAt
+    ) {
+      this.#after = cursorOf(boundary);
+    }
+    const after = this.#after;
+    // 末尾まで出していたら、その先に条件に合う記事が加わっていないかを、更新後の境界で見る
+    const beyond =
       this.hasMore || after === undefined
         ? []
-        : this.#client.listArticles({ ...this.#query, limit: 1, after }),
-    ]);
+        : await this.#client.listArticles({ ...this.#query, limit: 1, after });
     if (current !== this.#generation) return;
     // 読み直した記事だけを差し替える（読み直している間に続きとして足した記事は残す。
     // 読み直して見つからなかった記事は、手元から消えたので外す）
-    const byId = new Map(latest.map((article) => [article.id, article]));
     let articles = this.articles.flatMap((article) =>
       shown.has(article.id) ? (byId.get(article.id) ?? []) : [article],
     );
@@ -194,6 +217,14 @@ export class ArticleListState {
       articles = articles
         .filter((article) => article.readAt !== null)
         .sort((a, b) => compareArticles(a, b, this.#query.order));
+      const kept = new Set(articles.map((article) => article.id));
+      for (const [index, article] of this.articles.entries()) {
+        if (!kept.has(article.id))
+          this.#removed.set(article.id, {
+            previous: this.articles[index - 1]?.id ?? null,
+            next: this.articles[index + 1]?.id ?? null,
+          });
+      }
     }
     this.#articles = articles;
     if (beyond.length > 0) this.hasMore = true;
@@ -280,7 +311,27 @@ export class ArticleListState {
   /** from の隣の記事（delta が 1 なら次、-1 なら前）。末尾まで来たら、続きを読んでから答える */
   async step(from: string | null, delta: 1 | -1): Promise<Article | null> {
     const index = from === null ? -1 : this.articles.findIndex((article) => article.id === from);
-    if (index === -1) return delta === 1 ? (this.articles[0] ?? null) : null;
+    if (index === -1) {
+      const removed = from === null ? undefined : this.#removed.get(from);
+      if (removed === undefined) return delta === 1 ? (this.articles[0] ?? null) : null;
+      const side = delta === 1 ? "next" : "previous";
+      let id = removed[side];
+      const seen = new Set<string>();
+      while (id !== null && !seen.has(id)) {
+        seen.add(id);
+        const article = this.find(id);
+        if (article !== null) return article;
+        id = this.#removed.get(id)?.[side] ?? null;
+      }
+      if (delta === 1 && this.hasMore) {
+        const current = this.#generation;
+        const count = this.articles.length;
+        await this.loadMore();
+        if (current !== this.#generation) return null;
+        return this.articles[count] ?? null;
+      }
+      return null;
+    }
     if (delta === 1 && index === this.articles.length - 1 && this.hasMore) await this.loadMore();
     return this.articles[index + delta] ?? null;
   }

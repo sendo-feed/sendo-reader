@@ -179,8 +179,79 @@ test("出しているページがすべて未読に戻っても、その先の�
   const list = page.locator(".article-list");
   await expect(list.locator(".item")).toHaveCount(50);
   for (const article of articles.slice(30)) server.setArticleState(article.id, { read: false });
+  await list.locator(".item").first().click();
   await page.getByRole("button", { name: "Sync now", exact: true }).click();
   await expect(list.locator(".title")).toHaveText(
     Array.from({ length: 30 }, (_, i) => `読んだ記事 ${29 - i}`),
   );
+  await page.locator(".article-view").getByRole("button", { name: "Next", exact: true }).click();
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText("読んだ記事 29");
+});
+
+for (const [direction, expected] of [
+  ["Next", "読んだ記事 0"],
+  ["Previous", "読んだ記事 2"],
+] as const) {
+  test(`未読に戻した位置から ${direction} へ移れる`, async ({ page, context }) => {
+    const { server } = seed();
+    await routeFakeSendo(context, server);
+    await page.goto("/recently-read");
+    await signIn(page);
+    const list = page.locator(".article-list");
+    await list.locator(".item", { hasText: "読んだ記事 1" }).click();
+    const view = page.locator(".article-view");
+    await view.getByRole("button", { name: "Mark as unread", exact: true }).click();
+    await expect(list.locator(".title")).toHaveText(["読んだ記事 2", "読んだ記事 0"]);
+    await view.getByRole("button", { name: direction, exact: true }).click();
+    await expect(view.getByRole("heading", { level: 1 })).toHaveText(expected);
+  });
+}
+
+test("一覧で未読に戻した位置からキーボードで次を選べる", async ({ page, context }) => {
+  const { server } = seed();
+  await routeFakeSendo(context, server);
+  await page.goto("/recently-read");
+  await signIn(page);
+  const list = page.locator(".article-list");
+  await expect(list.locator(".item")).toHaveCount(3);
+  await page.keyboard.press("n");
+  await page.keyboard.press("n");
+  await page.keyboard.press("m");
+  await expect(list.locator(".title")).toHaveText(["読んだ記事 2", "読んだ記事 0"]);
+  await page.keyboard.press("n");
+  await page.keyboard.press("o");
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText("読んだ記事 0");
+});
+
+test("同期で既読日時が更新されても、残りのページを取りこぼさない", async ({ page, context }) => {
+  const { server, articles } = seed(80);
+  // まとめて既読にしたときと同じく、すべて同時刻にする
+  for (const article of articles) {
+    server.setArticleState(article.id, { read: false });
+    server.setArticleState(article.id, { read: true });
+  }
+  await routeFakeSendo(context, server);
+  await page.goto("/recently-read");
+  await signIn(page);
+  const list = page.locator(".article-list");
+  await expect(list.locator(".item")).toHaveCount(50);
+  const ids = await list
+    .locator(".row")
+    .evaluateAll((rows) => rows.map((row) => row.getAttribute("data-article")));
+  // 同期でサーバーの新しい時刻に置き換わっても、先頭ページの ID は変わらない
+  server.advance(86_400_000);
+  for (const article of articles) {
+    server.setArticleState(article.id, { read: false });
+    server.setArticleState(article.id, { read: true });
+  }
+  await page.getByRole("button", { name: "Sync now", exact: true }).click();
+  await expect(list.locator("h3")).toHaveText(["Today"]);
+  expect(
+    await list
+      .locator(".row")
+      .evaluateAll((rows) => rows.map((row) => row.getAttribute("data-article"))),
+  ).toEqual(ids);
+  await list.evaluate((node) => node.scrollTo({ top: node.scrollHeight }));
+  await expect(list.locator(".item")).toHaveCount(80);
+  expect(new Set(await list.locator(".title").allTextContents()).size).toBe(80);
 });
