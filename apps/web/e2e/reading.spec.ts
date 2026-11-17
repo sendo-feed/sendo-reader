@@ -33,6 +33,18 @@ test("Google でログインし、記事を読んで、スターを付ける", a
 
   await list.getByText("最初の記事").click();
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("最初の記事");
+  const titleLink = view.getByRole("heading", { level: 1 }).getByRole("link");
+  await expect(titleLink).toBeVisible();
+  await expect(titleLink).toHaveAttribute("href", "https://blog.example/1");
+  await expect(titleLink).toHaveAttribute("target", "_blank");
+  await expect(titleLink).toHaveAttribute("rel", "noopener noreferrer");
+  await expect(view.locator(".read-on")).toHaveCount(0);
+  await context.route("https://blog.example/1", (route) => route.fulfill({ body: "Original" }));
+  const opened = context.waitForEvent("page");
+  await titleLink.click();
+  const original = await opened;
+  await expect(original).toHaveURL("https://blog.example/1");
+  await original.close();
   await view.getByRole("button", { name: "Save" }).click();
   await expect(view.getByRole("button", { name: "Unsave" })).toBeVisible();
   await page.getByRole("button", { name: "Sync now" }).click();
@@ -45,7 +57,7 @@ test("Google でログインし、記事を読んで、スターを付ける", a
   await expect(page.getByRole("heading", { level: 1 })).toHaveText(evil.title ?? "");
   await expect(page.locator("img")).toHaveCount(0);
   await expect(page.getByRole("link", { name: "Open original" })).toHaveCount(0);
-  await expect(page.getByRole("link", { name: "Open original" })).toHaveCount(0);
+  await expect(view.getByRole("heading", { level: 1 }).getByRole("link")).toHaveCount(0);
 });
 
 test("フィードを探して購読し、フォルダに入れる", async ({ page, context }) => {
