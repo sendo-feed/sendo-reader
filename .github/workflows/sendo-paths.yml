@@ -1,0 +1,42 @@
+name: Sendo paths
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  # sendo だけが変わった場合にも、最新 main とのずれに気づけるようにする
+  schedule:
+    - cron: "43 1 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  paths:
+    name: Sendo path contract
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # reader の pnpm workspace に混ぜず、公開されている main を一時ディレクトリに取る
+      - name: Checkout sendo main
+        run: |
+          git clone --depth 1 --branch main https://github.com/sendo-feed/sendo.git "$RUNNER_TEMP/sendo"
+          git -C "$RUNNER_TEMP/sendo" rev-parse HEAD
+
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .node-version
+
+      # ルーターを組み立てるだけなので、Worker の型生成・DB・Rust のビルドは要らない
+      - name: Install sendo dependencies
+        run: pnpm --dir "$RUNNER_TEMP/sendo" install --frozen-lockfile --ignore-scripts
+
+      - name: Compare actual sendo routes with reader proxy and Service Worker
+        run: pnpm --dir "$RUNNER_TEMP/sendo" exec tsx "$GITHUB_WORKSPACE/scripts/check-sendo-paths.ts" "$RUNNER_TEMP/sendo"
