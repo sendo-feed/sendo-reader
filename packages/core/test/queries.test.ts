@@ -1,4 +1,5 @@
 import { describe, expect, test } from "vitest";
+import { compareArticles } from "../src";
 import { setup } from "./helpers";
 
 async function seeded() {
@@ -30,6 +31,57 @@ async function seeded() {
 }
 
 describe("記事の一覧", () => {
+  test("既読にした日時の新しい順に読み、同時刻の境界をまたいでも漏れや重複がない", async () => {
+    const { core, server, articles, feeds } = await seeded();
+    server.advance(1000);
+    server.setArticleState(articles.a2.id, { read: true });
+    server.setArticleState(articles.c1.id, { read: true });
+    server.advance(1000);
+    server.setArticleState(articles.b1.id, { read: true });
+    await core.sync();
+    const first = await core.listArticles({ state: "read", order: "recentlyRead", limit: 2 });
+    expect(first.map((article) => article.title)).toEqual(["b1", "c1"]);
+    const last = first.at(-1);
+    if (last === undefined) throw new Error("記事がない");
+    const rest = await core.listArticles({ state: "read", order: "recentlyRead", after: last });
+    expect(rest.map((article) => article.title)).toEqual(["a2", "a1"]);
+    const all = [...first, ...rest];
+    for (const order of ["recentlyRead", "newest", "oldest"] as const) {
+      expect([...all].sort((a, b) => compareArticles(a, b, order)).map((a) => a.id)).toEqual(
+        (await core.listArticles({ state: "read", order })).map((a) => a.id),
+      );
+    }
+    expect(
+      (await core.listArticles({ feedId: feeds.a.id, state: "read", order: "recentlyRead" })).map(
+        (a) => a.title,
+      ),
+    ).toEqual(["a2", "a1"]);
+    await core.setRead(articles.b1.id, false);
+    expect(
+      (await core.listArticles({ state: "read", order: "recentlyRead" })).map((a) => a.title),
+    ).toEqual(["c1", "a2", "a1"]);
+    // 境界の記事を未読に戻しても、読んだときのカーソルから続きを取れる
+    await core.setRead(last.id, false);
+    expect(
+      (await core.listArticles({ order: "recentlyRead", after: last })).map((a) => a.title),
+    ).toEqual(["a2", "a1"]);
+    await expect(
+      core.listArticles({
+        order: "recentlyRead",
+        after: { id: last.id, publishedAt: last.publishedAt },
+      }),
+    ).rejects.toThrow("readAt");
+  });
+
+  test("既読順は未読を除外し、保存済みでなくても既読を出す", async () => {
+    const { core, articles } = await seeded();
+    expect((await core.listArticles({ state: "read" })).map((a) => a.id)).toEqual([articles.a1.id]);
+    expect((await core.listArticles({ order: "recentlyRead" })).map((a) => a.id)).toEqual([
+      articles.a1.id,
+    ]);
+    expect(await core.listArticles({ state: "unread", order: "recentlyRead" })).toEqual([]);
+  });
+
   test("新しい順（同じ時刻なら id の大きい順）に並べる", async () => {
     const { core } = await seeded();
     const titles = (await core.listArticles()).map((article) => article.title);

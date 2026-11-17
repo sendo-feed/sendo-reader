@@ -29,6 +29,7 @@
       title: "Go to",
       keys: [
         [["g", "a"], "All"],
+        [["g", "r"], "Recently Read"],
         [["g", "s"], "Saved"],
         [["Shift", "J"], "Next unread feed"],
         [["Shift", "K"], "Previous unread feed"],

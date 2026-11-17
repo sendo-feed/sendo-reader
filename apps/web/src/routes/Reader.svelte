@@ -43,7 +43,7 @@
     menuOpen = false;
   });
 
-  type ListKind = "all" | "starred" | "feed" | "folder" | "search";
+  type ListKind = "all" | "recentlyRead" | "starred" | "feed" | "folder" | "search";
   interface Listing {
     kind: ListKind;
     query: ArticleQuery;
@@ -138,7 +138,11 @@
 
   /** 開いている一覧の表示の設定（画像を出すか、並び順、未読だけ）。一覧ごとに覚える */
   const viewKey = $derived(viewHref(router.view));
-  const options = $derived(prefs.viewOptions(viewKey));
+  const options = $derived(
+    router.view.kind === "recentlyRead"
+      ? { unreadOnly: false, oldestFirst: false }
+      : prefs.viewOptions(viewKey),
+  );
 
   /** 開いている一覧（購読の管理と設定の画面では null） */
   const listing = $derived.by((): Listing | null => {
@@ -162,6 +166,14 @@
           kind: "starred",
           query: { state: "starred", ...order },
           title: "Saved",
+          scope: null,
+          unread: null,
+        };
+      case "recentlyRead":
+        return {
+          kind: "recentlyRead",
+          query: { state: "read", order: "recentlyRead" },
+          title: "Recently Read",
           scope: null,
           unread: null,
         };
@@ -524,6 +536,7 @@
       clearTimeout(chordTimer);
       const views: Record<string, View> = {
         a: { kind: "all" },
+        r: { kind: "recentlyRead" },
         s: { kind: "starred" },
         m: { kind: "manage" },
       };

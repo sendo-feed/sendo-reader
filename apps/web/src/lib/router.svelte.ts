@@ -2,7 +2,8 @@
  * 小さな自前のルーター（History API。docs/decisions/ui.md）。
  *
  * - /                All（すべてのフィードの記事。未読だけにするかは、一覧の絞り込みで選ぶ）
- * - /starred         スター
+ * - /recently-read   最近既読にした記事
+ * - /starred         保存済み
  * - /search?q=<言葉> 検索（手元の記事を探す）
  * - /feeds/:id       フィード
  * - /folders/:id     フォルダ
@@ -18,6 +19,7 @@
  */
 export type View =
   | { kind: "all" }
+  | { kind: "recentlyRead" }
   | { kind: "starred" }
   | { kind: "search" }
   | { kind: "feed"; id: string }
@@ -29,6 +31,7 @@ export type View =
 export interface ListAnchor {
   id: string;
   publishedAt: number;
+  readAt?: number | null;
   offset: number;
 }
 
@@ -118,6 +121,7 @@ class Router {
 
   get view(): View {
     const path = this.url.pathname;
+    if (path === "/recently-read") return { kind: "recentlyRead" };
     if (path === "/starred") return { kind: "starred" };
     if (path === "/search") return { kind: "search" };
     if (path === "/manage") return { kind: "manage" };
@@ -197,9 +201,12 @@ export function positionOf(state: unknown): Position {
   const position: Position = {};
   const list = state.list;
   if (isRecord(list) && typeof list.key === "string" && isRecord(list.anchor)) {
-    const { id, publishedAt, offset } = list.anchor;
+    const { id, publishedAt, readAt, offset } = list.anchor;
     if (typeof id === "string" && typeof publishedAt === "number" && typeof offset === "number") {
-      position.list = { key: list.key, anchor: { id, publishedAt, offset } };
+      position.list = {
+        key: list.key,
+        anchor: { id, publishedAt, offset, ...(typeof readAt === "number" ? { readAt } : {}) },
+      };
     }
   }
   const article = state.article;
@@ -213,6 +220,8 @@ export function viewHref(view: View): string {
   switch (view.kind) {
     case "all":
       return "/";
+    case "recentlyRead":
+      return "/recently-read";
     case "starred":
       return "/starred";
     case "search":

@@ -16,6 +16,7 @@
     checkAll: "M2 12.5l4.5 4.5L15 8M11.5 16.5l1 1L22 8",
     circle: "M12 7a5 5 0 1 0 0 10a5 5 0 1 0 0-10z",
     bookmark: "M6 4h12v17l-6-4-6 4z",
+    history: "M3 4v5h5M3 9a9 9 0 1 1 .6 8M12 7v5l3 2",
     inbox: "M3 13l3-8h12l3 8v6H3zM3 13h5l1.5 3h5l1.5-3h5",
     layers: "M12 3l9 5-9 5-9-5zM3 13l9 5 9-5",
     folder: "M3 6h6l2 2.5h10V19H3z",
