@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { FakeSendo, routeFakeSendo, signIn } from "./fake-sendo";
+import { FakeSendo, routeFakeSendo, signIn, USER } from "./fake-sendo";
 
 test("Chrome のブックマークレットから候補を見つけてフィードを購読する", async ({
   page,
@@ -41,6 +41,11 @@ test("未ログインでも長い投稿 URL を引き継ぎ、確認して Saved
   const post = `https://x.com/example/status/123?view=${"a".repeat(1450)}#text`;
   await routeFakeSendo(context, server);
   await page.goto(`/add#url=${encodeURIComponent(post)}`);
+  server.loginUser = null;
+  await signIn(page);
+  await expect(page.getByRole("alert")).toContainText("このメールアドレスでは使えません。");
+  await expect(page).toHaveURL(/\/add\?capture=[0-9a-f-]+$/);
+  server.loginUser = USER;
   await signIn(page);
   await expect(page).toHaveURL(/\/add\?capture=[0-9a-f-]+$/);
   await expect(page.getByRole("heading", { name: "Add to Sendo" })).toBeVisible();

@@ -157,6 +157,14 @@ class Router {
     return this.url.searchParams.get("article");
   }
 
+  /** ログインのエラーから戻るときなど、今の履歴だけを書き換える。 */
+  replace(href: string): void {
+    const next = new URL(href, location.href);
+    if (next.origin !== location.origin) return;
+    history.replaceState(history.state, "", next);
+    this.url = next;
+  }
+
   navigate(href: string): void {
     const next = new URL(href, location.href);
     if (next.origin !== location.origin) return;

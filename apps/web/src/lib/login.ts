@@ -1,5 +1,6 @@
 import type { ReaderClient } from "@sendo-reader/core/web";
-import { bookmarkletReturnTo } from "./bookmarklet";
+import { bookmarkletLoginRetryPath, bookmarkletReturnTo } from "./bookmarklet";
+import { router } from "./router.svelte";
 
 /**
  * Google でのログイン（docs/decisions/local-first.md の 6）。sendo のログインの入口へページごと
@@ -62,6 +63,7 @@ export function takeLoginError(): string | null {
   const code = url.searchParams.get("login_error");
   if (code === null) return null;
   url.searchParams.delete("login_error");
-  history.replaceState(history.state, "", url);
+  const capture = url.pathname === "/" ? bookmarkletLoginRetryPath() : null;
+  router.replace(capture ?? url.href);
   return LOGIN_ERRORS[code] ?? "ログインできませんでした。";
 }
