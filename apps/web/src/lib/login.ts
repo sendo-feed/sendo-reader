@@ -1,4 +1,5 @@
 import type { ReaderClient } from "@sendo-reader/core/web";
+import { bookmarkletReturnTo } from "./bookmarklet";
 
 /**
  * Google でのログイン（docs/decisions/local-first.md の 6）。sendo のログインの入口へページごと
@@ -13,6 +14,8 @@ const MAX_RETURN_TO = 1024;
 /** ログインのあとに戻るパス。今の場所から、ログインの失敗の印を除いたもの */
 export function currentReturnTo(): string {
   const url = new URL(location.href);
+  const captured = bookmarkletReturnTo(url);
+  if (captured !== null) return captured;
   url.searchParams.delete("login_error");
   const path = url.pathname + url.search;
   return path.length <= MAX_RETURN_TO ? path : "/";

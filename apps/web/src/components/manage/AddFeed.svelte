@@ -1,12 +1,19 @@
 <script lang="ts">
   import type { Feed, FeedCandidate } from "@sendo-reader/core";
+  import { untrack } from "svelte";
   import { useReader } from "../../lib/context";
   import { describeError } from "../../lib/errors";
 
-  let { onsubscribed }: { onsubscribed: (feed: Feed) => void } = $props();
+  let {
+    onsubscribed,
+    initialUrl = "",
+  }: {
+    onsubscribed: (feed: Feed) => void;
+    initialUrl?: string;
+  } = $props();
 
   const reader = useReader();
-  let url = $state("");
+  let url = $state(untrack(() => initialUrl));
   let candidates = $state<FeedCandidate[] | null>(null);
   let chosen = $state<string | null>(null);
   let folderId = $state<string>("");
