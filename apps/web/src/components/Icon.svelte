@@ -6,6 +6,8 @@
     menu: "M4 6h16M4 12h16M4 18h16",
     more: "M5 12h.01M12 12h.01M19 12h.01",
     plus: "M12 5v14M5 12h14",
+    pencil: "m4 20 1-5L16 4a2.8 2.8 0 0 1 4 4L9 19l-5 1zM14 6l4 4",
+    reset: "M3 4v6h6M3.5 10a8.5 8.5 0 1 1 1 7",
     close: "M6 6l12 12M18 6L6 18",
     chevronRight: "M9 6l6 6-6 6",
     chevronDown: "M6 9l6 6 6-6",

@@ -2,6 +2,7 @@
   import {
     type Article,
     type ArticleQuery,
+    feedName,
     type MarkReadScope,
     toSafeHttpUrl,
   } from "@sendo-reader/core";
@@ -519,7 +520,7 @@
     if (feed === null) {
       return unread === 0 ? null : { label: "Mark all as read", go: () => void markAll({}, true) };
     }
-    const title = feed.title ?? feed.url;
+    const title = feedName(feed);
     return {
       label: unread === 0 ? `Next: ${title}` : `Mark all as read, next: ${title}`,
       go: () => {

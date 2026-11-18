@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { Folder } from "@sendo-reader/core";
+  import { type Folder, feedName } from "@sendo-reader/core";
   import Dialog from "../components/Dialog.svelte";
   import Icon from "../components/Icon.svelte";
   import AddFeed from "../components/manage/AddFeed.svelte";
@@ -63,7 +63,7 @@
       addOpen = false;
       query = "";
       feedsView?.reveal(feed.folderId);
-      notice = `${feed.title ?? feed.url} を購読しました。`;
+      notice = `${feedName(feed)} を購読しました。`;
     }}
   />
   <div class="import-link">

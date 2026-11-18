@@ -124,6 +124,72 @@ test("移動・フォルダの作成と名前変更・削除・購読解除は�
   await expect.poll(() => server.feeds.get(news.id)?.folderId).toBeNull();
 });
 
+test("表示名をその場で編集し、オフラインの再起動にも残り、元の名前に戻せる", async ({
+  page,
+  context,
+}) => {
+  const server = new FakeSendo();
+  const title = "Google Alert: Sendo -無関係";
+  const feed = server.subscribe({ url: "https://example.org/alert", title });
+  server.deliver(feed.id, { title: "Latest" });
+  await routeFakeSendo(context, server);
+  await page.setViewportSize({ width: 320, height: 740 });
+  await page.goto("/manage");
+  await signIn(page);
+
+  const manage = page.getByRole("main");
+  const row = manage.locator(".feed-row");
+  const edit = (name: string) =>
+    row.getByRole("button", { name: `Edit display name: ${name}`, exact: true });
+  const reset = row.getByRole("button", { name: /^Reset display name:/ });
+  const input = row.getByRole("textbox", { name: "Feed display name", exact: true });
+  await expect(edit(title)).toBeVisible();
+  await expect(reset).toHaveCount(0);
+
+  await context.setOffline(true);
+  await edit(title).click();
+  await expect(input).toBeFocused();
+  await expect(input).toHaveValue(title);
+  await input.fill("取消");
+  await input.press("Escape");
+  await expect(edit(title)).toBeFocused();
+  await edit(title).click();
+  await input.fill("Sendo のニュース");
+  await input.press("Enter");
+  await expect(row.getByText("Sendo のニュース", { exact: true })).toBeVisible();
+  await expect(row.getByText(title, { exact: true })).toHaveCount(0);
+  await expect(reset).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  expect(feed.displayName).toBeNull();
+
+  await page.reload();
+  await expect(reset).toBeVisible();
+  await manage.getByRole("searchbox", { name: "Find a feed" }).fill("Sendo のニュース");
+  await expect(row).toHaveCount(1);
+  await context.setOffline(false);
+  const menu = page.getByRole("button", { name: "Menu", exact: true });
+  const sync = page.getByRole("button", { name: "Sync now", exact: true });
+  await menu.click();
+  await sync.click();
+  await expect.poll(() => feed.displayName).toBe("Sendo のニュース");
+
+  const feedLink = page
+    .getByRole("navigation", { name: "Feeds", exact: true })
+    .getByRole("link", { name: /^Sendo のニュース/ });
+  await feedLink.click();
+  await expect(
+    page.getByRole("heading", { name: "Sendo のニュース", exact: true }).first(),
+  ).toBeVisible();
+  await page.goto("/manage");
+  await reset.click();
+  await expect(edit(title)).toBeVisible();
+  await expect(reset).toHaveCount(0);
+  await menu.click();
+  await sync.click();
+  await expect.poll(() => feed.displayName).toBeNull();
+  expect(feed.title).toBe(title);
+});
+
 test("追加の候補は URL を変えたら消し、購読したフィードを管理画面に表示する。OPML は必要なときに開く", async ({
   page,
   context,

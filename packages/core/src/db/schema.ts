@@ -186,6 +186,7 @@ const migrations: readonly (readonly string[])[] = [
        from latest join pending_ops on pending_ops.id = latest.id
        where json_type(payload, '$.page') = 'object'`,
   ],
+  ["alter table feeds add column display_name text"],
 ];
 
 export const SCHEMA_VERSION = migrations.length;

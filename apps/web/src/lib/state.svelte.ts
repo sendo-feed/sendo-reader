@@ -2,6 +2,7 @@ import {
   ApiError,
   type Feed,
   type Folder,
+  feedName,
   type SyncStatus,
   type UnreadCounts,
   type User,
@@ -84,7 +85,7 @@ export class ReaderState {
 
   feedTitle(feedId: string): string {
     const feed = this.feeds.find((f) => f.id === feedId);
-    return feed === undefined ? "（購読していないフィード）" : (feed.title ?? feed.url);
+    return feed === undefined ? "（購読していないフィード）" : feedName(feed);
   }
 
   /** フィードのアイコンの URL（sendo が中継する画像。なければ null） */

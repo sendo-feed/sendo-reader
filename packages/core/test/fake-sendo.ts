@@ -62,6 +62,7 @@ interface FeedRow {
   id: string;
   url: string;
   title: string | null;
+  displayName: string | null;
   siteUrl: string | null;
   folderId: string | null;
   iconUrl: string | null;
@@ -307,6 +308,7 @@ export class FakeSendo {
       id: input.id ?? this.#id("feed"),
       url: input.url,
       title: input.title ?? null,
+      displayName: null,
       siteUrl: null,
       folderId: input.folderId ?? null,
       iconUrl: input.iconUrl ?? null,
@@ -321,6 +323,12 @@ export class FakeSendo {
   moveFeed(feedId: string, folderId: string | null): void {
     const feed = this.#mustGet(this.feeds, feedId);
     feed.folderId = folderId;
+    feed.seq = this.#bump("feeds");
+  }
+
+  renameFeed(feedId: string, displayName: string | null): void {
+    const feed = this.#mustGet(this.feeds, feedId);
+    feed.displayName = displayName;
     feed.seq = this.#bump("feeds");
   }
 
@@ -787,11 +795,23 @@ export class FakeSendo {
         return error(404, "not_found", "feed does not exist");
       }
       if (request.method === "PATCH") {
-        const folderId = body.folderId as string | null;
-        if (folderId !== null && this.folders.get(folderId)?.deletedAt !== null) {
+        const folderId = body.folderId as string | null | undefined;
+        const displayName = body.displayName;
+        if (typeof folderId === "string" && this.folders.get(folderId)?.deletedAt !== null) {
           return error(400, "folder_not_found", "folder does not exist");
         }
-        this.moveFeed(feed.id, folderId);
+        const name = typeof displayName === "string" ? displayName.trim() : displayName;
+        if (
+          (folderId === undefined && name === undefined) ||
+          (name !== undefined &&
+            name !== null &&
+            (typeof name !== "string" || name.length === 0 || name.length > 200))
+        ) {
+          return error(400, "invalid_request", "invalid subscription update");
+        }
+        if (folderId !== undefined) feed.folderId = folderId;
+        if (name !== undefined) feed.displayName = name;
+        feed.seq = this.#bump("feeds");
         return json(200, { feed: feedJson(feed) });
       }
       if (request.method === "DELETE") {
@@ -1158,6 +1178,7 @@ export class FakeSendo {
         id: row.id,
         url: row.url,
         title: row.title,
+        displayName: row.displayName,
         siteUrl: row.siteUrl,
         folderId: row.folderId,
         iconUrl: row.iconUrl,
@@ -1213,6 +1234,7 @@ function feedJson(row: FeedRow) {
     id: row.id,
     url: row.url,
     title: row.title,
+    displayName: row.displayName,
     siteUrl: row.siteUrl,
     folderId: row.folderId,
     iconUrl: row.iconUrl,

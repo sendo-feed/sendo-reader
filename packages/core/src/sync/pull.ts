@@ -225,13 +225,23 @@ async function applyFeed(tx: Executor, feed: SyncPage["feeds"][number]): Promise
     return;
   }
   await tx.run(
-    `insert into feeds (id, url, title, site_url, folder_id, icon_url, created_at)
-     values (?, ?, ?, ?, ?, ?, ?)
+    `insert into feeds (id, url, title, display_name, site_url, folder_id, icon_url, created_at)
+     values (?, ?, ?, ?, ?, ?, ?, ?)
      on conflict (id) do update set
-       url = excluded.url, title = excluded.title, site_url = excluded.site_url,
+       url = excluded.url, title = excluded.title, display_name = excluded.display_name,
+       site_url = excluded.site_url,
        folder_id = excluded.folder_id, icon_url = excluded.icon_url,
        created_at = excluded.created_at`,
-    [feed.id, feed.url, feed.title, feed.siteUrl, feed.folderId, feed.iconUrl, feed.createdAt],
+    [
+      feed.id,
+      feed.url,
+      feed.title,
+      feed.displayName,
+      feed.siteUrl,
+      feed.folderId,
+      feed.iconUrl,
+      feed.createdAt,
+    ],
   );
 }
 

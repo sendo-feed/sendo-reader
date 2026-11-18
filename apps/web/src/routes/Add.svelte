@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { feedName } from "@sendo-reader/core";
   import AddFeed from "../components/manage/AddFeed.svelte";
   import { capturedPageUrl, clearCapturedPage } from "../lib/bookmarklet";
   import { useReader } from "../lib/context";
@@ -51,7 +52,7 @@
           <AddFeed
             initialUrl={url}
             onsubscribed={(feed) => {
-              subscribed = feed.title ?? feed.url;
+              subscribed = feedName(feed);
               clearCapturedPage();
             }}
           />

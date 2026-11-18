@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { Feed } from "@sendo-reader/core";
+  import { type Feed, feedName } from "@sendo-reader/core";
   import { useReader } from "../lib/context";
   import type { ListProgress } from "../lib/list.svelte";
   import { prefs } from "../lib/prefs.svelte";
@@ -59,7 +59,11 @@
   }
 
   function initialOf(feed: Feed): string {
-    const [first] = (feed.title ?? new URL(feed.url, location.href).hostname).trim();
+    const [first] = (
+      feed.displayName ??
+      feed.title ??
+      new URL(feed.url, location.href).hostname
+    ).trim();
     return (first ?? "?").toUpperCase();
   }
 
@@ -92,10 +96,11 @@
 {#snippet feedItem(feed: Feed)}
   {@const href = viewHref({ kind: "feed", id: feed.id })}
   {@const count = unreadOf(feed)}
+  {@const label = feedName(feed)}
   <li>
     <a
       {href}
-      title={count > 0 ? `${feed.title ?? feed.url} (${count} unread)` : (feed.title ?? feed.url)}
+      title={count > 0 ? `${label} (${count} unread)` : label}
       class:quiet={count === 0}
       aria-current={currentHref === href ? "page" : undefined}
       onclick={(e) => handleLink(e, href)}
@@ -107,7 +112,7 @@
           {/snippet}
         </RemoteImage>
       </span>
-      <span class="name">{feed.title ?? feed.url}</span>
+      <span class="name">{label}</span>
       {#if count > 0}
         <span class="count">{count}</span>
       {/if}

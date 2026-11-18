@@ -33,9 +33,11 @@ export type {
   UnreadCounts,
   User,
 } from "./models";
+export { feedName } from "./models";
 export type { FeedCandidate, OpmlImportResult } from "./online";
 export {
   type ChangeListener,
+  MAX_FEED_DISPLAY_NAME_LENGTH,
   MAX_FOLDER_NAME_LENGTH,
   ReaderCore,
   type ReaderCoreOptions,
