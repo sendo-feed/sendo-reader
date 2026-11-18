@@ -128,8 +128,6 @@
     grid-template-columns: minmax(0, 1fr);
     gap: 1.5rem;
     align-content: start;
-    width: 100%;
-    max-width: 48rem;
     padding: 1rem 1.5rem 3rem;
     overflow-y: auto;
   }

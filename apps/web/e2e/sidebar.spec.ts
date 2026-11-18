@@ -64,6 +64,38 @@ test("PC のサイドバーをアイコンに畳み、オフラインでも操�
   await expect.poll(() => server.settingsOf("desktop")).toEqual({});
 });
 
+test("PC の設定と購読管理はサイドバーの横幅とウィンドウの変化に追従する", async ({
+  page,
+  context,
+}) => {
+  const { server } = seed();
+  await routeFakeSendo(context, server);
+  await page.setViewportSize({ width: 1280, height: 720 });
+  await page.goto("/settings");
+  await signIn(page);
+
+  const nav = page.getByRole("navigation", { name: "Feeds", exact: true });
+  const main = page.getByRole("main");
+  for (const name of ["Settings", "Manage feeds"]) {
+    await nav.getByRole("link", { name, exact: true }).click();
+    await expect(main.getByRole("heading", { name, level: 1 })).toBeVisible();
+
+    for (const toggle of ["Collapse sidebar", "Expand sidebar"]) {
+      for (const width of [1280, 1600]) {
+        await page.setViewportSize({ width, height: 720 });
+        const navRight = await nav.evaluate((element) => element.getBoundingClientRect().right);
+        const { left, right } = await main.evaluate((element) => {
+          const rect = element.getBoundingClientRect();
+          return { left: rect.left, right: rect.right };
+        });
+        expect.soft(left).toBeCloseTo(navRight);
+        expect.soft(right, `${name} (${width}px, ${toggle})`).toBeCloseTo(width);
+      }
+      await nav.getByRole("button", { name: toggle, exact: true }).click();
+    }
+  }
+});
+
 test("同期した折りたたみ状態は PC に当たり、狭い画面では通常のメニューを使う", async ({
   page,
   context,
