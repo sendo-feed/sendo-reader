@@ -3,6 +3,7 @@
   import Dialog from "../components/Dialog.svelte";
   import Icon from "../components/Icon.svelte";
   import AddFeed from "../components/manage/AddFeed.svelte";
+  import Bookmarklet from "../components/manage/Bookmarklet.svelte";
   import Feeds from "../components/manage/Feeds.svelte";
   import Folders from "../components/manage/Folders.svelte";
   import ImportOpml from "../components/manage/ImportOpml.svelte";
@@ -51,6 +52,7 @@
 
   <footer>
     <button type="button" class="link" onclick={() => (importOpen = true)}>Import OPML</button>
+    <Bookmarklet />
   </footer>
   <p class="notice" role="status">{notice}</p>
 </main>

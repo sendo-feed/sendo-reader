@@ -1,3 +1,5 @@
+import { CAPTURE_PATH } from "./bookmarklet";
+
 /**
  * 小さな自前のルーター（History API。docs/decisions/ui.md）。
  *
@@ -8,6 +10,7 @@
  * - /feeds/:id       フィード
  * - /folders/:id     フォルダ
  * - /manage          購読の管理（追加、フォルダ、OPML の取り込み）
+ * - /add             ブックマークレットから渡されたページを追加
  * - /settings        設定（アクセストークンと OAuth の許可。docs/decisions/account.md）
  * 開いている記事は ?article=<id> に持つ。
  *
@@ -25,6 +28,7 @@ export type View =
   | { kind: "feed"; id: string }
   | { kind: "folder"; id: string }
   | { kind: "manage" }
+  | { kind: "add" }
   | { kind: "settings" };
 
 /** 一覧のどこを見ていたか。見出しのすぐ下に出ていた行の記事と、その行の上の端のずれ（px） */
@@ -125,6 +129,7 @@ class Router {
     if (path === "/starred") return { kind: "starred" };
     if (path === "/search") return { kind: "search" };
     if (path === "/manage") return { kind: "manage" };
+    if (path === CAPTURE_PATH) return { kind: "add" };
     if (path === "/settings") return { kind: "settings" };
     const feed = /^\/feeds\/([^/]+)$/.exec(path);
     if (feed?.[1] !== undefined) return { kind: "feed", id: decodeURIComponent(feed[1]) };
@@ -150,6 +155,14 @@ class Router {
 
   get articleId(): string | null {
     return this.url.searchParams.get("article");
+  }
+
+  /** ログインのエラーから戻るときなど、今の履歴だけを書き換える。 */
+  replace(href: string): void {
+    const next = new URL(href, location.href);
+    if (next.origin !== location.origin) return;
+    history.replaceState(history.state, "", next);
+    this.url = next;
   }
 
   navigate(href: string): void {
@@ -232,6 +245,8 @@ export function viewHref(view: View): string {
       return `/folders/${encodeURIComponent(view.id)}`;
     case "manage":
       return "/manage";
+    case "add":
+      return CAPTURE_PATH;
     case "settings":
       return "/settings";
   }

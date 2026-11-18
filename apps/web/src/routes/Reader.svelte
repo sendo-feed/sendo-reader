@@ -25,6 +25,7 @@
     type View,
     viewHref,
   } from "../lib/router.svelte";
+  import Add from "./Add.svelte";
   import Manage from "./Manage.svelte";
   import Settings from "./Settings.svelte";
 
@@ -152,6 +153,7 @@
     const state: ArticleQuery = options.unreadOnly ? { state: "unread" } : {};
     switch (view.kind) {
       case "manage":
+      case "add":
       case "settings":
         return null;
       case "search":
@@ -222,7 +224,12 @@
   });
 
   const pageTitle = $derived(
-    listing?.title ?? (router.view.kind === "manage" ? "Manage feeds" : "Settings"),
+    listing?.title ??
+      (router.view.kind === "add"
+        ? "Add to Sendo"
+        : router.view.kind === "manage"
+          ? "Manage feeds"
+          : "Settings"),
   );
 
   // タブの名前に、未読の数を出す
@@ -636,6 +643,8 @@
       <div class="bar">{pageTitle}</div>
       {#if router.view.kind === "manage"}
         <Manage />
+      {:else if router.view.kind === "add"}
+        <Add />
       {:else}
         <Settings />
       {/if}
