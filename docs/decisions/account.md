@@ -3,7 +3,7 @@
 - 状態：提案中
 - 関連：[ローカルファースト](local-first.md)（6 のログインと「ページの守り」）、[UI とツール](ui.md)、sendo の[ユーザーと認証](https://github.com/sendo-feed/sendo/blob/main/docs/decisions/accounts.md)（7 のアクセストークン）・[MCP サーバー](https://github.com/sendo-feed/sendo/blob/main/docs/decisions/mcp.md)（4〜7 の OAuth と許可の画面）
 
-ブラウザでログインした人（sendo のセッション）だけが使える sendo の API がある。アクセストークンの発行・一覧・取り消し、OAuth で出した許可の一覧・取り消し、OAuth の許可の画面のための API。reader はトークンを貼る形をなくしたので、Reeder などのリーダーアプリや MCP のクライアントに入れるトークンを発行できる場所は、reader の画面だけになる。
+ブラウザでログインした人（sendo のセッション）だけが使える sendo の API がある。アクセストークンの発行・一覧・取り消し、OAuth で出した許可の一覧・取り消し、OAuth の許可の画面のための API。reader の設定画面では、ログインした利用者が Reeder などのリーダーアプリや MCP クライアント用のトークンを発行・管理できる。
 
 ## 決定
 
