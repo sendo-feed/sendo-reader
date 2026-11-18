@@ -241,8 +241,17 @@ test("設定をキーボードで切り替え、通信できなくてもプレ�
   offline = true;
   await expect(page.getByText("PC・タブレット向けの設定です。", { exact: false })).toBeVisible();
   const preview = page.getByRole("article", { name: "記事のプレビュー" });
+  const listCard = page.getByRole("region", { name: "List card", exact: true });
   const body = preview.locator(".body");
+  const cardTitle = listCard.locator(".title");
+  const title = "毎日の読む時間を、心地よく";
+  await expect(cardTitle).toHaveText(title);
+  await expect(preview.getByRole("heading", { name: title, exact: true })).toBeVisible();
+  await expect(listCard.getByRole("link")).toHaveCount(0);
   const before = await body.evaluate((element) =>
+    Number.parseFloat(getComputedStyle(element).fontSize),
+  );
+  const cardBefore = await cardTitle.evaluate((element) =>
     Number.parseFloat(getComputedStyle(element).fontSize),
   );
   await page.getByText("Dark", { exact: true }).click();
@@ -251,6 +260,12 @@ test("設定をキーボードで切り替え、通信できなくてもプレ�
   await expect
     .poll(() => body.evaluate((element) => Number.parseFloat(getComputedStyle(element).fontSize)))
     .toBeGreaterThan(before);
+  await expect
+    .poll(() =>
+      cardTitle.evaluate((element) => Number.parseFloat(getComputedStyle(element).fontSize)),
+    )
+    .toBeGreaterThan(cardBefore);
+  expect((await preview.boundingBox())?.x).toBeGreaterThan((await listCard.boundingBox())?.x ?? 0);
   await expect(page.getByRole("slider", { name: "Text size" })).toHaveAttribute(
     "aria-valuetext",
     "Largest",
@@ -263,6 +278,7 @@ test("設定をキーボードで切り替え、通信できなくてもプレ�
   await expect(reading).toBeFocused();
   await expect(reading).toHaveAttribute("aria-selected", "true");
   await expect(preview).toHaveCount(0);
+  await expect(listCard).toHaveCount(0);
   await page.getByLabel("Mark as read on scroll").uncheck();
   await page.getByLabel("List: swipe left").selectOption("none");
   expect(accountRequests).toEqual([]);
@@ -328,7 +344,14 @@ test("幅 320px の画面でも各カテゴリを選べ、プレビューの文�
       320,
     );
   }
-  await expect(page.getByRole("article", { name: "記事のプレビュー" })).toBeVisible();
+  const preview = page.getByRole("article", { name: "記事のプレビュー" });
+  const listCard = page.getByRole("region", { name: "List card", exact: true });
+  await expect(preview).toBeVisible();
+  await expect(listCard).toBeVisible();
+  const cardBox = await listCard.boundingBox();
+  expect((await preview.boundingBox())?.y).toBeGreaterThan(
+    (cardBox?.y ?? 0) + (cardBox?.height ?? 0),
+  );
 });
 
 test("選択した複数のトークンだけを取り消し、一部失敗した分は選択を残して再試行する", async ({
