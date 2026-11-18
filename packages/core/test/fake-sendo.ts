@@ -102,6 +102,12 @@ interface Cursor {
   done: boolean;
 }
 
+interface ActivityEvent {
+  id: string;
+  articleId: string;
+  occurredAt: string;
+}
+
 type Failure = "network" | number | "hang" | "hang-body" | null;
 
 const DAY = 24 * 60 * 60 * 1000;
@@ -183,6 +189,8 @@ export class FakeSendo {
   readonly requests: string[] = [];
   /** 受けた「まとめて既読」の本文 */
   readonly markReadRequests: Record<string, unknown>[] = [];
+  readonly activityRequests: ActivityEvent[][] = [];
+  readonly articleOpens = new Map<string, ActivityEvent>();
   /** サイトの URL ごとの、フィードの候補（GET /feeds/discover） */
   readonly discoverable = new Map<string, { url: string; title: string | null }[]>();
   /** 購読できるフィードの URL と、そのタイトル（POST /feeds で取得できたことにする） */
@@ -604,6 +612,19 @@ export class FakeSendo {
         this.savedPagesSupported && url.searchParams.get("includeSaved") === "true",
         user.id,
       );
+    }
+    if (request.method === "POST" && path === "/activity") {
+      const { events } = (await request.json()) as { events: ActivityEvent[] };
+      if (events.length > 50) return error(400, "invalid_request", "at most 50 events");
+      this.activityRequests.push(events);
+      let recorded = 0;
+      for (const event of events) {
+        const key = `${user.id}:${event.id}`;
+        if (this.articleOpens.has(key) || !this.inbox.has(event.articleId)) continue;
+        this.articleOpens.set(key, event);
+        recorded += 1;
+      }
+      return json(200, { recorded });
     }
     if (this.savedPagesSupported && (path === "/saved" || path.startsWith("/saved/"))) {
       const pages = this.#savedPages.get(user.id) ?? new Map<string, SavedPageRow>();

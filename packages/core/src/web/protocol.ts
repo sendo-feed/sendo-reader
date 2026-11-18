@@ -26,6 +26,7 @@ export const READER_METHODS = [
   "getSavedPageForUrl",
   "savePage",
   "unsavePage",
+  "recordArticleOpen",
   "getArticle",
   "getArticles",
   "getArticleContent",
@@ -67,6 +68,7 @@ export function isMethod(value: unknown): value is Method {
 export const WRITE_METHODS = new Set<Method>([
   "savePage",
   "unsavePage",
+  "recordArticleOpen",
   "setRead",
   "setReadMany",
   "setStarred",

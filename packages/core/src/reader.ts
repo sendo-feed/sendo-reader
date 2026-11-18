@@ -535,6 +535,21 @@ export class ReaderCore {
     return this.#write({ kind: "setSavedPage", id, page: null }, ["savedPages"]);
   }
 
+  /** 記事の開封の記録を積む。既読の状態やフィード記事の同期とは独立して送る。 */
+  recordArticleOpen(
+    articleId: string,
+    id: string = crypto.randomUUID(),
+    openedAt = this.#now(),
+  ): Promise<void> {
+    return this.#write(
+      {
+        kind: "recordArticleOpens",
+        events: [{ id, articleId, occurredAt: new Date(openedAt).toISOString() }],
+      },
+      [],
+    );
+  }
+
   /** 記事を既読（true）／未読（false）にする */
   setRead(articleId: string, read: boolean): Promise<void> {
     return this.#write({ kind: "setArticleState", articleId, read, at: this.#now() }, ["articles"]);
@@ -864,7 +879,7 @@ export class ReaderCore {
       throwIfSessionEnded(session);
       await this.#enqueue(tx, op);
     });
-    this.#emit(new Set(tables));
+    if (tables.length > 0) this.#emit(new Set(tables));
   }
 
   // --- 読み出し（手元の DB だけ） ---

@@ -239,15 +239,17 @@ export async function push(
         // 戻したところに、残りの操作を重ね直す（このあと届かなくても、手元は最新の操作のまま）
         await reapplyPending(tx);
       });
-      options.onChange?.(
-        new Set<Table>(
-          op.kind === "setSavedPage"
-            ? ["savedPages"]
-            : op.kind === "setSettings"
-              ? ["settings"]
-              : ["folders", "feeds", "articles"],
-        ),
-      );
+      if (op.kind !== "recordArticleOpens") {
+        options.onChange?.(
+          new Set<Table>(
+            op.kind === "setSavedPage"
+              ? ["savedPages"]
+              : op.kind === "setSettings"
+                ? ["settings"]
+                : ["folders", "feeds", "articles"],
+          ),
+        );
+      }
       const rejection = { op, error };
       result.rejected.push(rejection);
       options.onReject?.(rejection);

@@ -75,6 +75,8 @@ export function connectReader(worker: Worker): ReaderClient {
   }
   // 代表が入れ替わると呼び出しを送り直すので、二重に作らないよう、フォルダの ID はこちらで決める
   client.createFolder = (name: string) => call("createFolder", [name, crypto.randomUUID()]);
+  client.recordArticleOpen = (articleId: string) =>
+    call("recordArticleOpen", [articleId, crypto.randomUUID(), Date.now()]);
   client.syncNow = () => call("syncNow", []);
   client.status = () => call("status", []);
   client.onChange = (listener: (tables: ReadonlySet<Table>) => void) => {
