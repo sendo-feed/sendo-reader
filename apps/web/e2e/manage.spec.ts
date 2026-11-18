@@ -157,6 +157,7 @@ test("表示名をその場で編集し、オフラインの再起動にも残�
   await input.fill("Sendo のニュース");
   await input.press("Enter");
   await expect(row.getByText("Sendo のニュース", { exact: true })).toBeVisible();
+  await expect(edit("Sendo のニュース")).toBeFocused();
   await expect(row.getByText(title, { exact: true })).toHaveCount(0);
   await expect(reset).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
@@ -182,7 +183,7 @@ test("表示名をその場で編集し、オフラインの再起動にも残�
   ).toBeVisible();
   await page.goto("/manage");
   await reset.click();
-  await expect(edit(title)).toBeVisible();
+  await expect(edit(title)).toBeFocused();
   await expect(reset).toHaveCount(0);
   await menu.click();
   await sync.click();

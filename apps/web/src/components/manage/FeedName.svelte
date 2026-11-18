@@ -36,12 +36,13 @@
     error = null;
     try {
       if (displayName !== name) await reader.client.renameFeed(feed.id, displayName);
-      await finish();
     } catch (failure) {
       error = describeError(failure);
+      return;
     } finally {
       saving = false;
     }
+    await finish();
   }
 </script>
 
