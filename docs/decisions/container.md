@@ -3,9 +3,7 @@
 - 状態：提案中
 - 関連：[UI とツール](ui.md)（4。配信と中継）、[デプロイ](deploy.md)（Cloudflare 版）、[ローカルファースト](local-first.md)（6 のログイン、「ページの守り」）、[アカウントの画面](account.md)（5 の OAuth の許可の画面）、sendo の[コンテナ版](https://github.com/sendo-feed/sendo/blob/main/docs/decisions/container.md)・[MCP サーバー](https://github.com/sendo-feed/sendo/blob/main/docs/decisions/mcp.md)（3・4）
 
-sendo には、Cloudflare 版のほかに、自分のサーバーで Docker で動かすコンテナ版がある（sendo の[コンテナ版](https://github.com/sendo-feed/sendo/blob/main/docs/decisions/container.md)）。reader は、これまで Cloudflare 版の sendo としかつなげなかった。reader Worker は、同じアカウントの `sendo` Worker に Service binding で中継するので、ほかの場所の sendo を呼べない。
-
-コンテナ版の sendo には、公式の画面がない。OAuth（Claude.ai などのコネクタから MCP につなぐ）も使えない。許可の画面は reader にあり、reader のログイン（セッション）で動くからだ（sendo の mcp.md の 4）。ここでは、コンテナ版の sendo と組んで使う reader の配り方と動かし方を決める。
+コンテナ版の reader は、同じサーバーで動く [sendo のコンテナ版](https://github.com/sendo-feed/sendo/blob/main/docs/decisions/container.md) と組み合わせて使う。reader が公式の画面と中継を提供し、ログインや MCP の OAuth の許可も同じオリジンで扱う。
 
 ## 決定
 
@@ -39,7 +37,7 @@ sendo には、Cloudflare 版のほかに、自分のサーバーで Docker で�
    - JS、CSS、wasm などは圧縮して返す（Workers Static Assets と同じ）
 6. **reader のコンテナのヘルスチェック（イメージの `HEALTHCHECK`）は、reader 自身が返す `/`（`index.html`）を見る。** `/healthz` は sendo に中継するので、reader のコンテナで見ると sendo の生死を見ることになる。reader のためだけのパスは足さない（sendo のパスと重なるおそれを増やさない）。
 7. **サーバーは Node で書く。** HTTP は Hono と `@hono/node-server`（sendo のコンテナ版と同じ）で受ける。コードは `apps/web/server/` に置き、ここだけ `node:*` を使ってよい。イメージには、Cloudflare 版と同じ画面のビルド（`vite build` の `dist`）を入れる。
-8. **Cloudflare 版は変えない。** reader Worker は、これまでどおり `/api` だけを Service binding で中継する。画面のビルドは、2 つの版で同じものを使う。
+8. **Cloudflare 版の reader Worker は、`/api` だけを Service binding で中継する。**画面のビルドは、2 つの版で同じものを使う。
    - 支える組み合わせは、Cloudflare 版どうしと、コンテナ版どうしの 2 つだけにする。Cloudflare 版の reader とコンテナ版の sendo のような、版をまたぐ組み合わせは支えない
 9. **テストは Node で動かす。** 中継するパスの振り分け、中継（ヘッダー、`Set-Cookie`、リダイレクト、ストリーム）、静的なファイルのヘッダーを、偽の sendo を相手に Vitest で確かめる。CI では、PR でイメージが作れることを確かめ、`main` に入ったらイメージを出す（sendo と同じ形）。
 
@@ -65,8 +63,8 @@ sendo には、Cloudflare 版のほかに、自分のサーバーで Docker で�
   - `security-headers.ts` をそのまま読み込めて、ヘッダーを 1 か所で保てる
   - 振り分けと中継を、ほかのテストと同じ Vitest で確かめられる
   - sendo のコンテナ版と同じ道具（Node、Hono）で、2 つのコンテナの作りがそろう
-- **Cloudflare 版を変えない**：Cloudflare 版では、MCP のクライアントやリーダーアプリは sendo のオリジンに直接つなぐ（sendo の mcp.md の「理由」）。reader Worker が `/api` のほかを中継する理由がない
-- **版をまたぐ組み合わせを支えない**：下の代替案のとおり、どちらも Cloudflare 版の動きを変えるか、sendo を外に出すことになる。今は使いたい人がいない
+- **Cloudflare 版は `/api` を中継する**：Cloudflare 版では、MCP のクライアントやリーダーアプリは sendo のオリジンに直接つなぐ（sendo の mcp.md の「理由」）。reader Worker が `/api` のほかを中継する理由がない
+- **版をまたぐ組み合わせを支えない**：下の代替案のとおり、どちらも Cloudflare 版の動きを変えるか、sendo を外に出すことになる。
 
 ## 検討した代替案
 
