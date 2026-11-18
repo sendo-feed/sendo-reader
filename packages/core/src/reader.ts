@@ -130,6 +130,9 @@ export interface SyncResult {
 /** フォルダ名の長さの上限（sendo と同じ） */
 export const MAX_FOLDER_NAME_LENGTH = 200;
 
+/** Sendo の購読更新 API に合わせた表示名の上限（UTF-16） */
+export const MAX_FEED_DISPLAY_NAME_LENGTH = 200;
+
 /** まとめて既読にする記事を、範囲の一部に絞る（どれも渡さなければ、範囲のすべて） */
 export interface MarkAllReadOptions {
   /** この時刻（ミリ秒）より前に公開された記事だけ */
@@ -677,6 +680,15 @@ export class ReaderCore {
   moveFeed(feedId: string, folderId: string | null): Promise<void> {
     const resolved = folderId === null ? null : (this.#folderIds.get(folderId) ?? folderId);
     return this.#write({ kind: "moveFeed", feedId, folderId: resolved }, ["feeds"]);
+  }
+
+  /** 購読の表示名を変える。null なら配信元の名前に戻す */
+  async renameFeed(feedId: string, displayName: string | null): Promise<void> {
+    const name = displayName === null ? null : displayName.trim();
+    if (name !== null && (name.length === 0 || name.length > MAX_FEED_DISPLAY_NAME_LENGTH)) {
+      throw new RangeError("表示名は1〜200文字で入力してください。");
+    }
+    await this.#write({ kind: "renameFeed", feedId, displayName: name }, ["feeds"]);
   }
 
   /** 購読をやめる。記事はスターを付けたものだけが残る。そのフィードの一覧の設定も消す */

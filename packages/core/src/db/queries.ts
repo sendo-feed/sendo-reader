@@ -154,18 +154,20 @@ export async function listFeeds(db: Executor): Promise<Feed[]> {
     id: string;
     url: string;
     title: string | null;
+    display_name: string | null;
     site_url: string | null;
     folder_id: string | null;
     icon_url: string | null;
     created_at: number;
   }>(
-    `select id, url, title, site_url, folder_id, icon_url, created_at from feeds
-     order by coalesce(title, url) collate nocase, id`,
+    `select id, url, title, display_name, site_url, folder_id, icon_url, created_at from feeds
+     order by coalesce(display_name, title, url) collate nocase, id`,
   );
   return rows.map((row) => ({
     id: row.id,
     url: row.url,
     title: row.title,
+    displayName: row.display_name,
     siteUrl: row.site_url,
     folderId: row.folder_id,
     iconUrl: row.icon_url,

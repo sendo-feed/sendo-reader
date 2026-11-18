@@ -23,6 +23,50 @@ async function pullOnly(context: Awaited<ReturnType<typeof setup>>) {
   return pull(context.db, api, {});
 }
 
+describe("購読の表示名", () => {
+  test("手元で名前を変更し、同期を重ねても保ち、あとで送る。解除も同期する", async () => {
+    const context = await setup();
+    const { server, core } = context;
+    const feed = server.subscribe({ url: "https://example.com/feed", title: "ニュース -除外" });
+    await core.sync();
+    await core.renameFeed(feed.id, "仮の名前");
+    await core.renameFeed(feed.id, "  ニュース  ");
+    expect(await core.countPending()).toBe(1);
+    expect(await core.listFeeds()).toMatchObject([
+      { title: "ニュース -除外", displayName: "ニュース" },
+    ]);
+    expect(feed.displayName).toBeNull();
+
+    server.renameFeed(feed.id, "別の端末");
+    await pullOnly(context);
+    expect(await core.listFeeds()).toMatchObject([{ displayName: "ニュース" }]);
+    await core.sync();
+    expect(feed.displayName).toBe("ニュース");
+
+    await core.renameFeed(feed.id, null);
+    expect(await core.listFeeds()).toMatchObject([{ title: "ニュース -除外", displayName: null }]);
+    await core.sync();
+    expect(feed.displayName).toBeNull();
+
+    server.renameFeed(feed.id, "MCP から変更");
+    await core.sync();
+    expect(await core.listFeeds()).toMatchObject([{ displayName: "MCP から変更" }]);
+  });
+
+  test("サーバーが表示名の変更を断ったらサーバーの名前に戻す", async () => {
+    const { server, core, feed } = await withArticle();
+    server.renameFeed(feed.id, "配信トピック");
+    await core.sync();
+    await core.renameFeed(feed.id, "手元だけの名前");
+    server.onRequest = async (path) => {
+      if (path === `PATCH /feeds/${feed.id}`) server.failNext(400);
+    };
+    const result = await core.sync();
+    expect(result.push.rejected).toHaveLength(1);
+    expect(await core.listFeeds()).toMatchObject([{ displayName: "配信トピック" }]);
+  });
+});
+
 describe("既読とスター", () => {
   test("手元にすぐ反映し、同期で sendo に送る", async () => {
     const { server, core, article } = await withArticle();

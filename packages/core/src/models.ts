@@ -21,6 +21,7 @@ export interface Feed {
   id: string;
   url: string;
   title: string | null;
+  displayName: string | null;
   siteUrl: string | null;
   folderId: string | null;
   /**
@@ -29,6 +30,11 @@ export interface Feed {
    */
   iconUrl: string | null;
   createdAt: number;
+}
+
+/** 購読の表示名。未設定なら配信元の名前か URL */
+export function feedName(feed: Feed): string {
+  return feed.displayName ?? feed.title ?? feed.url;
 }
 
 export interface Article {

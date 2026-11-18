@@ -469,7 +469,7 @@ export interface paths {
         };
         options?: never;
         head?: never;
-        /** 購読を変える（フォルダの移動） */
+        /** 購読を変える（フォルダと表示名） */
         patch: {
             parameters: {
                 query?: never;
@@ -1965,6 +1965,8 @@ export interface components {
             /** @example https://example.com/feed.xml */
             url: string;
             title: string | null;
+            /** @description この購読の表示名。null なら配信元の title（なければ URL）を使う */
+            displayName: string | null;
             siteUrl: string | null;
             /**
              * @description フィードのアイコン。中継を通る画像の URL（/api/v1/images?url=…&sig=… の形のパス。オリジンは付かない）で、そのまま <img src> に入れる。クライアントは組み立てたり書き換えたりしない。なければ null
@@ -1994,7 +1996,9 @@ export interface components {
         };
         UpdateFeedRequest: {
             /** @description null ならフォルダなしにする */
-            folderId: string | null;
+            folderId?: string | null;
+            /** @description 前後の空白を除いた購読の表示名。null なら配信元の名前に戻す */
+            displayName?: string | null;
         };
         ArticleContent: {
             /** @description サニタイズした HTML */
@@ -2144,6 +2148,8 @@ export interface components {
             id: string;
             url: string;
             title: string | null;
+            /** @description この購読の表示名。null なら配信元の title（なければ URL）を使う */
+            displayName: string | null;
             siteUrl: string | null;
             /**
              * @description フィードのアイコン。中継を通る画像の URL（/api/v1/images?url=…&sig=… の形のパス。オリジンは付かない）で、そのまま <img src> に入れる。クライアントは組み立てたり書き換えたりしない。なければ null

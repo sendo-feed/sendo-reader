@@ -39,6 +39,7 @@ export type Operation =
   | { kind: "renameFolder"; folderId: string; name: string }
   | { kind: "deleteFolder"; folderId: string }
   | { kind: "moveFeed"; feedId: string; folderId: string | null }
+  | { kind: "renameFeed"; feedId: string; displayName: string | null }
   | { kind: "unsubscribe"; feedId: string }
   | { kind: "setSavedPage"; id: string; page: SavedPage | null }
   | { kind: "recordArticleOpens"; events: ArticleOpenEvent[] }
@@ -91,6 +92,7 @@ export function keyOf(op: Operation): string {
     case "deleteFolder":
       return op.folderId;
     case "moveFeed":
+    case "renameFeed":
     case "unsubscribe":
       return op.feedId;
     case "setSavedPage":
@@ -117,7 +119,10 @@ export function merge(previous: Operation, next: Operation): Operation | null {
   if (previous.kind === "renameFolder" && next.kind === "renameFolder") {
     return previous.folderId === next.folderId ? next : null;
   }
-  if (previous.kind === "moveFeed" && next.kind === "moveFeed") {
+  if (
+    (previous.kind === "moveFeed" && next.kind === "moveFeed") ||
+    (previous.kind === "renameFeed" && next.kind === "renameFeed")
+  ) {
     return previous.feedId === next.feedId ? next : null;
   }
   if (previous.kind === "recordArticleOpens" && next.kind === "recordArticleOpens") {
@@ -185,6 +190,9 @@ export async function applyLocally(tx: Executor, op: Operation): Promise<void> {
       return;
     case "moveFeed":
       await tx.run("update feeds set folder_id = ? where id = ?", [op.folderId, op.feedId]);
+      return;
+    case "renameFeed":
+      await tx.run("update feeds set display_name = ? where id = ?", [op.displayName, op.feedId]);
       return;
     case "unsubscribe":
       await tx.run("delete from feeds where id = ?", [op.feedId]);
@@ -299,6 +307,14 @@ export async function send(api: SendoApi, op: Operation, signal: AbortSignal): P
         }),
       );
       return {};
+    case "renameFeed":
+      check(
+        await client.PATCH("/feeds/{id}", {
+          params: { path: { id: op.feedId } },
+          body: { displayName: op.displayName },
+        }),
+      );
+      return {};
     case "unsubscribe":
       try {
         check(await client.DELETE("/feeds/{id}", { params: { path: { id: op.feedId } } }));
@@ -392,7 +408,8 @@ export async function undo(
       });
       return;
     }
-    case "moveFeed": {
+    case "moveFeed":
+    case "renameFeed": {
       const feed = check(await api.client(signal).GET("/feeds")).items.find(
         (item) => item.id === op.feedId,
       );
@@ -401,8 +418,13 @@ export async function undo(
           // sendo でもう購読をやめている。記事は消さない（受信箱から消えた記事は、記事ごとの
           // 消した記録が同期で届く。docs/decisions/local-first.md）
           await tx.run("delete from feeds where id = ?", [op.feedId]);
-        } else {
+        } else if (op.kind === "moveFeed") {
           await tx.run("update feeds set folder_id = ? where id = ?", [feed.folderId, feed.id]);
+        } else {
+          await tx.run("update feeds set display_name = ? where id = ?", [
+            feed.displayName ?? null,
+            feed.id,
+          ]);
         }
       });
       return;

@@ -54,6 +54,7 @@ export async function subscribe(
     id: feed.id,
     url: feed.url,
     title: feed.title,
+    displayName: feed.displayName ?? null,
     siteUrl: feed.siteUrl,
     folderId: feed.folderId,
     // 購読したばかりのフィードには、まだアイコンがないことが多い（あとから、同期で届く）
@@ -63,15 +64,17 @@ export async function subscribe(
   return db.transaction(async (tx) => {
     signal.throwIfAborted();
     await tx.run(
-      `insert into feeds (id, url, title, site_url, folder_id, icon_url, created_at)
-       values (?, ?, ?, ?, ?, ?, ?)
+      `insert into feeds (id, url, title, display_name, site_url, folder_id, icon_url, created_at)
+       values (?, ?, ?, ?, ?, ?, ?, ?)
        on conflict (id) do update set
-         url = excluded.url, title = excluded.title, site_url = excluded.site_url,
+         url = excluded.url, title = excluded.title, display_name = excluded.display_name,
+         site_url = excluded.site_url,
          folder_id = excluded.folder_id, icon_url = excluded.icon_url`,
       [
         received.id,
         received.url,
         received.title,
+        received.displayName,
         received.siteUrl,
         received.folderId,
         received.iconUrl,

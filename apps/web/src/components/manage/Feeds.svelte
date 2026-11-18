@@ -1,10 +1,11 @@
 <script lang="ts">
-  import type { Feed, Folder } from "@sendo-reader/core";
+  import { type Feed, type Folder, feedName } from "@sendo-reader/core";
   import { useReader } from "../../lib/context";
   import { describeError } from "../../lib/errors";
   import Dialog from "../Dialog.svelte";
   import Icon from "../Icon.svelte";
   import RemoteImage from "../RemoteImage.svelte";
+  import FeedName from "./FeedName.svelte";
 
   let {
     query,
@@ -26,7 +27,9 @@
   const selected = $derived(reader.feeds.find((feed) => feed.id === selectedId));
   const term = $derived(query.trim().toLowerCase());
   const matches = $derived(
-    reader.feeds.filter((feed) => `${feed.title ?? ""} ${feed.url}`.toLowerCase().includes(term)),
+    reader.feeds.filter((feed) =>
+      `${feed.displayName ?? ""} ${feed.title ?? ""} ${feed.url}`.toLowerCase().includes(term),
+    ),
   );
   const groups = $derived([
     ...reader.folders.map((folder) => ({
@@ -78,7 +81,7 @@
     try {
       await reader.client.moveFeed(feed.id, value === "" ? null : value);
       collapsed = collapsed.filter((id) => id !== value);
-      notice = `${feed.title ?? hostOf(feed)} を ${reader.folders.find((folder) => folder.id === value)?.name ?? "No folder"} に移動しました。`;
+      notice = `${feedName(feed)} を ${reader.folders.find((folder) => folder.id === value)?.name ?? "No folder"} に移動しました。`;
       menuOpen = false;
     } catch (error) {
       message = describeError(error);
@@ -154,17 +157,20 @@
                   <span class="avatar" aria-hidden="true">
                     <RemoteImage src={feed.iconUrl}>
                       {#snippet fallback()}
-                        {(feed.title ?? hostOf(feed)).trim().slice(0, 1).toUpperCase() || "?"}
+                        {(feed.displayName ?? feed.title ?? hostOf(feed))
+                          .trim()
+                          .slice(0, 1)
+                          .toUpperCase() || "?"}
                       {/snippet}
                     </RemoteImage>
                   </span>
-                  <span class="name">
-                    <span class="title">{feed.title ?? feed.url}</span>
+                  <div class="name">
+                    <FeedName {feed} />
                     <span class="host">{hostOf(feed)}</span>
-                  </span>
+                  </div>
                   <select
                     class="move"
-                    aria-label="Move {feed.title ?? feed.url} to folder"
+                    aria-label="Move {feedName(feed)} to folder"
                     value={feed.folderId ?? ""}
                     onchange={(event) => move(feed, event)}
                   >
@@ -173,7 +179,7 @@
                   <button
                     type="button"
                     class="icon-button feed-menu"
-                    aria-label="Feed options: {feed.title ?? feed.url}"
+                    aria-label="Feed options: {feedName(feed)}"
                     title="Feed options"
                     onclick={() => openMenu(feed)}
                   >
@@ -196,7 +202,7 @@
   <p class="error" role="alert">{message}</p>
 {/if}
 
-<Dialog bind:open={menuOpen} title={selected?.title ?? selected?.url ?? "Feed options"}>
+<Dialog bind:open={menuOpen} title={selected === undefined ? "Feed options" : feedName(selected)}>
   {#if selected !== undefined}
     {#if confirming}
       <p>このフィードの購読をやめますか？ スターを付けた記事だけが残ります。</p>
@@ -299,15 +305,9 @@
     min-width: 0;
   }
 
-  .title,
   .host {
     display: block;
     overflow-wrap: anywhere;
-  }
-
-  .title {
-    font-size: 0.875rem;
-    font-weight: 500;
   }
 
   .host,

@@ -42,6 +42,7 @@ export const READER_METHODS = [
   "renameFolder",
   "deleteFolder",
   "moveFeed",
+  "renameFeed",
   "unsubscribe",
   "listSettings",
   "changeSettings",
@@ -77,6 +78,7 @@ export const WRITE_METHODS = new Set<Method>([
   "renameFolder",
   "deleteFolder",
   "moveFeed",
+  "renameFeed",
   "unsubscribe",
   "changeSettings",
 ]);
