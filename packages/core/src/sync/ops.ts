@@ -41,11 +41,20 @@ export type Operation =
   | { kind: "moveFeed"; feedId: string; folderId: string | null }
   | { kind: "unsubscribe"; feedId: string }
   | { kind: "setSavedPage"; id: string; page: SavedPage | null }
+  | { kind: "recordArticleOpens"; events: ArticleOpenEvent[] }
   /**
    * 設定を置く ／ 消す（docs/decisions/settings.md）。同じ名前は、put と remove のどちらか一方に
    * 1 度だけ入れる
    */
   | { kind: "setSettings"; deviceType: DeviceType; put: SettingItem[]; remove: string[] };
+
+interface ArticleOpenEvent {
+  id: string;
+  articleId: string;
+  occurredAt: string;
+}
+
+const MAX_ARTICLE_OPEN_EVENTS = 50;
 
 /** まとめて既読の範囲 */
 export type MarkReadScope = { all: true } | { feedId: string } | { folderId: string };
@@ -86,6 +95,8 @@ export function keyOf(op: Operation): string {
       return op.feedId;
     case "setSavedPage":
       return op.id;
+    case "recordArticleOpens":
+      return "articleOpens";
     case "setSettings":
       return `settings:${op.deviceType}`;
   }
@@ -108,6 +119,17 @@ export function merge(previous: Operation, next: Operation): Operation | null {
   }
   if (previous.kind === "moveFeed" && next.kind === "moveFeed") {
     return previous.feedId === next.feedId ? next : null;
+  }
+  if (previous.kind === "recordArticleOpens" && next.kind === "recordArticleOpens") {
+    const events = [...previous.events];
+    const ids = new Set(events.map(({ id }) => id));
+    for (const event of next.events) {
+      if (ids.has(event.id)) continue;
+      if (events.length === MAX_ARTICLE_OPEN_EVENTS) return null;
+      ids.add(event.id);
+      events.push(event);
+    }
+    return { kind: "recordArticleOpens", events };
   }
   if (previous.kind === "setSettings" && next.kind === "setSettings") {
     if (previous.deviceType !== next.deviceType) return null;
@@ -173,6 +195,8 @@ export async function applyLocally(tx: Executor, op: Operation): Promise<void> {
       return;
     case "setSavedPage":
       // 操作キューの行を visible_saved_pages が読む。同期で届いた行は上書きしない。
+      return;
+    case "recordArticleOpens":
       return;
     case "setSettings":
       for (const name of op.remove) await removeSyncedSetting(tx, op.deviceType, name);
@@ -281,6 +305,9 @@ export async function send(api: SendoApi, op: Operation, signal: AbortSignal): P
       } catch (error) {
         if (!(error instanceof ApiError && error.kind === "not_found")) throw error;
       }
+      return {};
+    case "recordArticleOpens":
+      check(await client.POST("/activity", { body: { events: op.events } }));
       return {};
     case "setSavedPage": {
       if (op.page === null) {
@@ -414,6 +441,7 @@ export async function undo(
       return;
     }
     case "setSavedPage":
+    case "recordArticleOpens":
       return;
     case "markRead":
     case "deleteFolder":

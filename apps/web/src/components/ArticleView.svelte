@@ -192,12 +192,15 @@
    */
   let fadeIn = $state(false);
   let shownId: string | null = null;
+  let recordedOpen: string | null = null;
+  let visible = $state(document.visibilityState === "visible");
 
   $effect(() => {
     const id = articleId;
     untrack(() => {
       fadeIn = id !== null && !settling && (shownId !== null || !layout.pageScroll);
       shownId = id;
+      recordedOpen = null;
       saveError = null;
       actionsOpen = false;
       contentRequest += 1;
@@ -230,6 +233,14 @@
         void loadContent(id);
       }
     });
+  });
+
+  // 実際に表示された記事だけを一度記録する。先読み、一覧の既読操作、本文の再取得では記録しない。
+  $effect(() => {
+    const id = articleId;
+    if (!visible || id === null || article?.id !== id || recordedOpen === id) return;
+    recordedOpen = id;
+    void reader.client.recordArticleOpen(id).catch(() => {});
   });
 
   /** 本文が出たら戻す、前に見ていた位置（px） */
@@ -582,6 +593,8 @@
       .filter((text) => text !== ""),
   );
 </script>
+
+<svelte:document onvisibilitychange={() => (visible = document.visibilityState === "visible")} />
 
 <article
   class="article-view"
