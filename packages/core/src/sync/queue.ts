@@ -130,11 +130,16 @@ export async function widenPendingMarkRead(
   }
 }
 
+export interface RejectedOperation {
+  op: Operation;
+  error: ApiError;
+}
+
 export interface PushResult {
   /** sendo が受け付けた操作の数 */
   sent: number;
   /** sendo が受け付けなかった（やり直しても変わらない）ので捨てた操作 */
-  rejected: { op: Operation; error: ApiError }[];
+  rejected: RejectedOperation[];
   /** 手元で作ったフォルダの ID と、まとめた先（sendo にあった、同じ名前のフォルダ）の ID */
   remapped: { from: string; to: string }[];
 }
@@ -149,6 +154,8 @@ export interface PushOptions {
    * あとの操作が届かずに push が投げても、確定した変更は知らせる
    */
   onChange?: (tables: ReadonlySet<Table>) => void;
+  /** 拒否が確定した時点で呼ぶ。後続の通信が失敗しても失敗理由を知らせられる */
+  onReject?: (rejection: RejectedOperation) => void;
   /** フォルダをまとめて ID を付け替えたら、確定したその時点で呼ぶ（あとの操作が失敗しても失わない） */
   onRemap?: (remap: { from: string; to: string }) => void;
   /**
@@ -241,7 +248,9 @@ export async function push(
               : ["folders", "feeds", "articles"],
         ),
       );
-      result.rejected.push({ op, error });
+      const rejection = { op, error };
+      result.rejected.push(rejection);
+      options.onReject?.(rejection);
     }
   }
 }

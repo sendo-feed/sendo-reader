@@ -51,6 +51,7 @@ export class SyncScheduler {
   readonly #setTimeout: (fn: () => void, ms: number) => unknown;
   readonly #clearTimeout: (handle: unknown) => void;
   readonly #onStatus: (status: SyncStatus) => void;
+  readonly #offReject: () => void;
 
   #timer: { handle: unknown; at: number } | null = null;
   #running: Promise<void> | null = null;
@@ -78,6 +79,16 @@ export class SyncScheduler {
       logoutPending: false,
       savedPageError: null,
     };
+    this.#offReject = core.onReject(({ op, error }) => {
+      if (op.kind !== "setSavedPage") return;
+      const savedPageError =
+        error.code === "saved_limit_reached"
+          ? "limit"
+          : error.kind === "not_found"
+            ? "unsupported"
+            : "rejected";
+      this.#update({ user: core.currentUser(), savedPageError });
+    });
   }
 
   get status(): SyncStatus {
@@ -91,7 +102,8 @@ export class SyncScheduler {
   }
 
   /** 少し待ってから同期する（書き込んだあと） */
-  requestSoon(): void {
+  requestSoon(savedPageChanged = false): void {
+    if (savedPageChanged) this.#update({ savedPageError: null });
     this.#schedule(WRITE_DEBOUNCE_MS);
     void this.#refreshPending();
   }
@@ -112,6 +124,7 @@ export class SyncScheduler {
   stop(): void {
     this.#stopped = true;
     this.#cancelTimer();
+    this.#offReject();
   }
 
   #schedule(delayMs: number): void {
@@ -178,18 +191,9 @@ export class SyncScheduler {
       logoutPending: false,
     });
     try {
-      const { push } = await this.#core.sync();
+      await this.#core.sync();
       this.#failures = 0;
-      const rejected = push.rejected.findLast(({ op }) => op.kind === "setSavedPage");
-      const savedPageError =
-        rejected === undefined
-          ? null
-          : rejected.error.code === "saved_limit_reached"
-            ? "limit"
-            : rejected.error.kind === "not_found"
-              ? "unsupported"
-              : "rejected";
-      this.#update({ syncing: false, lastSyncedAt: this.#now(), error: null, savedPageError });
+      this.#update({ syncing: false, lastSyncedAt: this.#now(), error: null });
       this.#schedule(PERIODIC_SYNC_MS);
     } catch (error) {
       const kind = error instanceof ApiError ? error.kind : null;
@@ -227,6 +231,9 @@ export class SyncScheduler {
 
   #update(patch: Partial<SyncStatus>): void {
     const next = { ...this.#status, ...patch };
+    if (next.user?.id !== this.#status.user?.id && patch.savedPageError === undefined) {
+      next.savedPageError = null;
+    }
     const changed = (Object.keys(next) as (keyof SyncStatus)[]).some((key) =>
       key === "user" ? !sameUser(next.user, this.#status.user) : next[key] !== this.#status[key],
     );

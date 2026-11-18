@@ -241,7 +241,9 @@ async function dispatch(
       value = leader.scheduler.status;
     } else {
       value = await callCore(leader.core, method, args);
-      if (WRITE_METHODS.has(method)) leader.scheduler.requestSoon();
+      if (WRITE_METHODS.has(method)) {
+        leader.scheduler.requestSoon(method === "savePage" || method === "unsavePage");
+      }
       if (SYNC_NOW_METHODS.has(method)) leader.scheduler.requestNow();
     }
     return { ok: true, value };

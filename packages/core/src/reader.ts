@@ -66,7 +66,14 @@ import {
   scopeCondition,
 } from "./sync/ops";
 import { getCompleteCursor, type PullResult, pull } from "./sync/pull";
-import { countPending, enqueue, lastPendingId, type PushResult, push } from "./sync/queue";
+import {
+  countPending,
+  enqueue,
+  lastPendingId,
+  type PushResult,
+  push,
+  type RejectedOperation,
+} from "./sync/queue";
 
 /** ログインしたユーザー（JSON）を置く設定の鍵 */
 const USER_KEY = "auth.user";
@@ -146,6 +153,7 @@ export class ReaderCore {
   readonly #now: () => number;
   readonly #onDataCleared: (() => Promise<void>) | undefined;
   readonly #listeners = new Set<ChangeListener>();
+  readonly #rejectionListeners = new Set<(rejection: RejectedOperation) => void>();
   /** 手元に置いた、ログインしたユーザー。毎回 DB を読まずに済むように持っておく */
   #user: User | null = null;
   /**
@@ -443,6 +451,15 @@ export class ReaderCore {
   #push(signal: AbortSignal, allow: (id: number) => boolean): Promise<PushResult> {
     return push(this.#db, this.#api, signal, {
       onChange: (tables) => this.#emit(tables),
+      onReject: (rejection) => {
+        for (const listener of this.#rejectionListeners) {
+          try {
+            listener(rejection);
+          } catch (error) {
+            console.error("操作の拒否の通知で失敗した", error);
+          }
+        }
+      },
       onRemap: ({ from, to }) => this.#folderIds.set(from, to),
       allow,
     });
@@ -1025,6 +1042,12 @@ export class ReaderCore {
   onChange(listener: ChangeListener): () => void {
     this.#listeners.add(listener);
     return () => this.#listeners.delete(listener);
+  }
+
+  /** sendo が操作を断り、手元の反映を戻したときに呼ぶ。 */
+  onReject(listener: (rejection: RejectedOperation) => void): () => void {
+    this.#rejectionListeners.add(listener);
+    return () => this.#rejectionListeners.delete(listener);
   }
 
   #emit(tables: ReadonlySet<Table>): void {
