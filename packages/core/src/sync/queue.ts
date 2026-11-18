@@ -1,5 +1,6 @@
 import { ApiError, type SendoApi } from "../api/client";
 import type { Database, Executor } from "../db/database";
+import { putSavedPage, removeSavedPage } from "../db/saved-pages";
 import type { Table } from "../models";
 import {
   applyLocally,
@@ -129,11 +130,16 @@ export async function widenPendingMarkRead(
   }
 }
 
+export interface RejectedOperation {
+  op: Operation;
+  error: ApiError;
+}
+
 export interface PushResult {
   /** sendo が受け付けた操作の数 */
   sent: number;
   /** sendo が受け付けなかった（やり直しても変わらない）ので捨てた操作 */
-  rejected: { op: Operation; error: ApiError }[];
+  rejected: RejectedOperation[];
   /** 手元で作ったフォルダの ID と、まとめた先（sendo にあった、同じ名前のフォルダ）の ID */
   remapped: { from: string; to: string }[];
 }
@@ -148,6 +154,8 @@ export interface PushOptions {
    * あとの操作が届かずに push が投げても、確定した変更は知らせる
    */
   onChange?: (tables: ReadonlySet<Table>) => void;
+  /** 拒否が確定した時点で呼ぶ。後続の通信が失敗しても失敗理由を知らせられる */
+  onReject?: (rejection: RejectedOperation) => void;
   /** フォルダをまとめて ID を付け替えたら、確定したその時点で呼ぶ（あとの操作が失敗しても失わない） */
   onRemap?: (remap: { from: string; to: string }) => void;
   /**
@@ -178,6 +186,10 @@ export async function push(
       await db.transaction(async (tx) => {
         // 送っている間にログアウトしていたら、手元には書かない
         signal.throwIfAborted();
+        if (op.kind === "setSavedPage") {
+          if (sent.savedPage === undefined) await removeSavedPage(tx, op.id);
+          else await putSavedPage(tx, sent.savedPage);
+        }
         await complete(tx, next.id, next.rev);
         if (sent.remap !== undefined) {
           await remapFolderId(tx, sent.remap.from, sent.remap.to);
@@ -187,6 +199,7 @@ export async function push(
         }
       });
       result.sent += 1;
+      if (op.kind === "setSavedPage") options.onChange?.(new Set<Table>(["savedPages"]));
       if (sent.remap !== undefined) {
         result.remapped.push(sent.remap);
         options.onRemap?.(sent.remap);
@@ -227,9 +240,17 @@ export async function push(
         await reapplyPending(tx);
       });
       options.onChange?.(
-        new Set<Table>(op.kind === "setSettings" ? ["settings"] : ["folders", "feeds", "articles"]),
+        new Set<Table>(
+          op.kind === "setSavedPage"
+            ? ["savedPages"]
+            : op.kind === "setSettings"
+              ? ["settings"]
+              : ["folders", "feeds", "articles"],
+        ),
       );
-      result.rejected.push({ op, error });
+      const rejection = { op, error };
+      result.rejected.push(rejection);
+      options.onReject?.(rejection);
     }
   }
 }

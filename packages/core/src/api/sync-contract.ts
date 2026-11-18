@@ -13,7 +13,8 @@
  * （SyncChanges）として組み立てるので、sendo が形を変えたら、ここが型チェックで止まる。
  */
 
-import { DEVICE_TYPES, type JsonValue } from "../models";
+import { DEVICE_TYPES, type JsonValue, type SavedPage } from "../models";
+import { normalizeSavedUrl, SAVED_ID_PATTERN } from "../saved";
 import type { SyncArticle, SyncPage, SyncSetting } from "../sync/page";
 import { toSameOriginUrl } from "../url";
 import { ApiError } from "./errors";
@@ -44,6 +45,10 @@ export function toSyncPage(body: unknown): SyncPage {
                   },
                 ];
           }),
+    savedPages:
+      changes.savedPages?.map((page) =>
+        page.deleted ? page : { ...page, savedAt: Date.parse(page.savedAt) },
+      ) ?? null,
     cursor: changes.cursor,
     hasMore: changes.hasMore,
     folders: changes.folders.map((folder) => ({
@@ -90,9 +95,10 @@ export function toSyncPage(body: unknown): SyncPage {
  * 確かめる（画面では HTML として出さない）。時刻は読める形であることを確かめる。画像の URL
  * （thumbnailUrl、iconUrl）は、core の中の形にするときに、同じオリジンを指すものだけを残す。
  */
-function parseSyncChanges(
-  body: unknown,
-): Omit<SyncChanges, "settings"> & { settings: SyncChanges["settings"] | undefined } {
+function parseSyncChanges(body: unknown): Omit<SyncChanges, "settings" | "savedPages"> & {
+  settings: SyncChanges["settings"] | undefined;
+  savedPages: SyncChanges["savedPages"];
+} {
   const root = record(body, "(root)");
   return {
     // あとから足された項目。設定を配る前の版の sendo が相手でも、同期を止めない
@@ -107,6 +113,17 @@ function parseSyncChanges(
             if (boolean(row.deleted, at("deleted"))) return { deviceType, name, deleted: true };
             // 値は JSON の値なら何でもよい（JSON として届いているので、形は確かめない）
             return { deviceType, name, value: row.value, deleted: false };
+          }),
+    savedPages:
+      root.savedPages === undefined
+        ? undefined
+        : array(root.savedPages, "savedPages").map((value, i): Schemas["SyncSavedPage"] => {
+            const field = `savedPages[${i}]`;
+            const row = record(value, field);
+            if (boolean(row.deleted, `${field}.deleted`)) {
+              return { id: savedId(row.id, `${field}.id`), deleted: true };
+            }
+            return { ...parseSavedPage(row, field), deleted: false };
           }),
     cursor: string(root.cursor, "cursor"),
     hasMore: boolean(root.hasMore, "hasMore"),
@@ -159,6 +176,29 @@ function parseSyncChanges(
       };
     }),
   };
+}
+
+/** 保存 API の応答にも、差分同期と同じ境界の検証を使う。 */
+export function toSavedPage(body: unknown): SavedPage {
+  const page = parseSavedPage(record(body, "page"), "page");
+  return { ...page, savedAt: Date.parse(page.savedAt) };
+}
+
+function parseSavedPage(row: Record<string, unknown>, field: string): Schemas["SavedPage"] {
+  const url = normalizeSavedUrl(string(row.url, `${field}.url`));
+  if (url === null) throw invalid(`${field}.url`);
+  return {
+    id: savedId(row.id, `${field}.id`),
+    url,
+    title: nullableString(row.title, `${field}.title`),
+    savedAt: time(row.savedAt, `${field}.savedAt`),
+  };
+}
+
+function savedId(value: unknown, field: string): string {
+  const id = string(value, field);
+  if (!SAVED_ID_PATTERN.test(id)) throw invalid(field);
+  return id;
 }
 
 function invalid(field: string): ApiError {

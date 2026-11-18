@@ -13,6 +13,7 @@
   import ShortcutHelp from "../components/ShortcutHelp.svelte";
   import Sidebar from "../components/Sidebar.svelte";
   import { useReader } from "../lib/context";
+  import { describeError } from "../lib/errors";
   import { layout, reducedMotion } from "../lib/layout.svelte";
   import { ArticleListState, type ListProgress } from "../lib/list.svelte";
   import { prefs } from "../lib/prefs.svelte";
@@ -423,10 +424,37 @@
   /** 行を長く押して（右クリックして）操作を出している記事 */
   let menuArticle = $state<Article | null>(null);
   let menuOpenFor = $state(false);
+  let menuSavedPageId = $state<string | null>(null);
 
   function openArticleMenu(article: Article) {
     menuArticle = article;
     menuOpenFor = true;
+  }
+
+  $effect(() => {
+    const url = menuArticle?.url;
+    menuSavedPageId = null;
+    if (!menuOpenFor || router.view.kind !== "starred" || url == null) return;
+    let active = true;
+    void reader.client
+      .getSavedPageForUrl(url)
+      .then((page) => {
+        if (active) menuSavedPageId = page?.id ?? null;
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  });
+
+  async function menuUnsavePage(id: string) {
+    menuOpenFor = false;
+    try {
+      await reader.client.unsavePage(id);
+      showToast("リンクの保存を解除しました。");
+    } catch (error) {
+      showToast(describeError(error));
+    }
   }
 
   // 窓を閉じたら、記事も外す
@@ -725,6 +753,14 @@
       <button type="button" onclick={() => menuToggle("starredAt")}>
         {menuArticle.starredAt === null ? "Save" : "Unsave"}
       </button>
+      {#if menuSavedPageId !== null}
+        <button
+          type="button"
+          onclick={() => menuSavedPageId !== null && menuUnsavePage(menuSavedPageId)}
+        >
+          Remove saved link
+        </button>
+      {/if}
       {#if listing?.scope != null}
         <button type="button" onclick={() => markBeside(true)}>Mark above as read</button>
         <button type="button" onclick={() => markBeside(false)}>Mark below as read</button>

@@ -26,6 +26,7 @@ export type {
   Folder,
   JsonValue,
   LocalArticleContent,
+  SavedPage,
   SettingItem,
   SettingsChange,
   Table,
@@ -40,6 +41,7 @@ export {
   type ReaderCoreOptions,
   type SyncResult,
 } from "./reader";
+export { normalizeSavedUrl } from "./saved";
 export { isSettingName, listSettingName, listSettingPath } from "./settings";
 export type { MarkReadScope } from "./sync/ops";
 export type { PullResult } from "./sync/pull";

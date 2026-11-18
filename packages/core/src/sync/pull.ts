@@ -1,5 +1,6 @@
 import { ApiError, type SendoApi } from "../api/client";
 import type { Database, Executor, SqlValue } from "../db/database";
+import { clearSavedPages, putSavedPage, removeSavedPage } from "../db/saved-pages";
 import { deleteSetting, getSetting, setSetting } from "../db/settings";
 import {
   COMPLETE_CURSOR_KEY,
@@ -136,6 +137,7 @@ async function resync(
     // 設定も、届いたもので置き換える（設定を配る前の版の sendo が相手なら、手元のまま残す）
     const settings = pages.some((page) => page.settings !== null);
     if (settings) await clearSyncedSettings(tx);
+    if (pages.some((page) => page.savedPages !== null)) await clearSavedPages(tx);
     for (const page of pages) {
       await applyPage(tx, page);
       await widenPendingMarkRead(tx, deliveredIds(page));
@@ -158,7 +160,7 @@ async function resync(
   });
   result.pages += pages.length;
   result.reset = true;
-  const all = new Set<Table>(["folders", "feeds", "articles", "settings"]);
+  const all = new Set<Table>(["folders", "feeds", "articles", "settings", "savedPages"]);
   for (const table of all) result.changed.add(table);
   options.onPage?.(all);
 }
@@ -188,6 +190,11 @@ async function applyPage(tx: Executor, page: SyncPage): Promise<Set<Table>> {
     else await putSyncedSetting(tx, setting.deviceType, setting.name, setting.value);
   }
   if ((page.settings?.length ?? 0) > 0) changed.add("settings");
+  for (const saved of page.savedPages ?? []) {
+    if (saved.deleted) await removeSavedPage(tx, saved.id);
+    else await putSavedPage(tx, saved);
+  }
+  if ((page.savedPages?.length ?? 0) > 0) changed.add("savedPages");
   return changed;
 }
 

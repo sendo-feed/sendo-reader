@@ -144,6 +144,42 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/mcp-icon.png": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** MCP サーバーのアイコン */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Sendo のアイコン */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "image/png": string;
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/me": {
         parameters: {
             query?: never;
@@ -728,6 +764,10 @@ export interface paths {
                     limit?: number;
                     /** @description 前のページの nextCursor。最初のページでは付けない */
                     cursor?: string;
+                    /** @description 公開日時の下限（この日時を含む）。タイムゾーン付きの ISO 8601 日時 */
+                    since?: string;
+                    /** @description 公開日時の上限（この日時を含まない）。続きのページでも同じ期間を指定する */
+                    until?: string;
                 };
                 header?: never;
                 path?: never;
@@ -765,6 +805,68 @@ export interface paths {
         };
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/activity": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * reader で記事を開いた記録を受け取る
+         * @description イベント ID は、同じ開封を送り直すときも同じ値を使う。応答はこのリクエストで新しく記録した件数を返す。
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        events: {
+                            /** Format: uuid */
+                            id: string;
+                            articleId: string;
+                            /** Format: date-time */
+                            occurredAt: string;
+                        }[];
+                    };
+                };
+            };
+            responses: {
+                /** @description このリクエストで新しく記録した件数 */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            recorded: number;
+                        };
+                    };
+                };
+                /** @description 入力が正しくない */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
         delete?: never;
         options?: never;
         head?: never;
@@ -1116,6 +1218,140 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/saved": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** あとで読むページの一覧（保存した日時の新しい順） */
+        get: {
+            parameters: {
+                query?: {
+                    limit?: number;
+                    cursor?: string;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description 保存したページ。続きがあれば nextCursor を返す */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            items: components["schemas"]["SavedPage"][];
+                            nextCursor: string | null;
+                        };
+                    };
+                };
+                /** @description カーソルが正しくない */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        /** ページをあとで読むために保存する */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        url: string;
+                        title?: string;
+                    };
+                };
+            };
+            responses: {
+                /** @description 保存したページ */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            page: components["schemas"]["SavedPage"];
+                        };
+                    };
+                };
+                /** @description URL が正しくない */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description 保存できる数の上限に達している */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/saved/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** ページの保存を解除する */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description 保存を解除した */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/settings/{deviceType}": {
         parameters: {
             query?: never;
@@ -1242,11 +1478,13 @@ export interface paths {
          *     配列は変更番号の順に並んでいる。同じ id が続けて来たら、後のものを採る。
          *     deleted が true のものは手元から消す。手元の行を消すのは、その行の deleted が届いたときだけにする。購読をやめた（feeds の deleted）からといって、そのフィードの記事を消さない（配列ごとにページを送るので、配列をまたいだ順序は保証されない）。
          *     settings には、どの端末の種類の項目も届く。クライアントは、自分の種類の分だけを使えばよい。
+         *     includeSaved=true なら、あとで読むページの新規保存と解除も savedPages に載せる。
          *     cursor の中身には意味を持たせていないので、クライアントはそのまま送り返すだけにする。
          */
         get: {
             parameters: {
                 query?: {
+                    includeSaved?: "true" | "false";
                     /** @description 前回の応答の cursor */
                     cursor?: string;
                 };
@@ -1717,6 +1955,8 @@ export interface components {
             email: string;
         };
         Features: {
+            /** @description 記事の主言語を背景で判定・保存できるか。コンテナ版だけ */
+            languageDetection: boolean;
             /** @description 記事のページから本文を抜けるか（GET /articles/{id}/content?source=page）。コンテナ版だけ */
             pageContent: boolean;
         };
@@ -1856,6 +2096,13 @@ export interface components {
                 reason: "url_not_allowed" | "url_too_long" | "duplicate" | "too_many";
             }[];
         };
+        SavedPage: {
+            id: string;
+            url: string;
+            title: string | null;
+            /** Format: date-time */
+            savedAt: string;
+        };
         Setting: {
             name: string;
             /** @description JSON の値（オブジェクト、配列、文字列、数、真偽、null）。Sendo は中身を解釈しない */
@@ -1882,6 +2129,7 @@ export interface components {
             feeds: components["schemas"]["SyncFeed"][];
             articles: components["schemas"]["SyncArticle"][];
             settings: components["schemas"]["SyncSetting"][];
+            savedPages?: components["schemas"]["SyncSavedPage"][];
         };
         SyncFolder: {
             id: string;
@@ -1949,6 +2197,16 @@ export interface components {
              * @description 消した項目。手元から消す（既定に戻す）
              * @enum {boolean}
              */
+            deleted: true;
+        };
+        SyncSavedPage: components["schemas"]["SyncActiveSavedPage"] | components["schemas"]["SyncRemovedSavedPage"];
+        SyncActiveSavedPage: components["schemas"]["SavedPage"] & {
+            /** @enum {boolean} */
+            deleted: false;
+        };
+        SyncRemovedSavedPage: {
+            id: string;
+            /** @enum {boolean} */
             deleted: true;
         };
         AccessToken: {

@@ -35,6 +35,7 @@ describe("手元の DB のスキーマ", () => {
       "feeds",
       "folders",
       "pending_ops",
+      "saved_pages",
       "settings",
       "sqlite_sequence",
       "synced_settings",

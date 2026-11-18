@@ -15,6 +15,7 @@
   import ArticleListItem from "./ArticleListItem.svelte";
   import Icon from "./Icon.svelte";
   import ReadCelebration from "./ReadCelebration.svelte";
+  import SavedPages from "./SavedPages.svelte";
 
   let {
     list,
@@ -857,6 +858,10 @@
     <button type="button" class="fresh" onclick={reload}>{list.fresh} new</button>
   {/if}
 
+  {#if kind === "starred"}
+    <SavedPages />
+  {/if}
+
   {#if search !== null && search.trim() === ""}
     <div class="empty">
       <Icon name="search" />
@@ -875,6 +880,9 @@
       {#if kind === "recentlyRead"}
         <Icon name="history" />
         <p>まだ読んだ記事はありません。</p>
+      {:else if kind === "starred"}
+        <Icon name="bookmark" />
+        <p>スターを付けた記事が、ここに並びます。</p>
       {:else if reader.feeds.length === 0}
         <Icon name="rss" />
         <p>まだフィードを購読していません。</p>
@@ -885,9 +893,6 @@
       {:else if kind === "search"}
         <Icon name="search" />
         <p>見つかりませんでした。</p>
-      {:else if kind === "starred"}
-        <Icon name="bookmark" />
-        <p>Save した記事が、ここに並びます。</p>
       {:else}
         <p>記事はありません。</p>
       {/if}
