@@ -30,6 +30,69 @@ async function readToEnd(page: Page) {
   }
 }
 
+for (const width of [390, 1200]) {
+  test(`一覧の末尾を越えて指を動かした分だけ完了欄がついてきて、離すと戻る（幅${width}）`, async ({
+    page,
+    context,
+  }) => {
+    const { server } = seed(20);
+    await routeFakeSendo(context, server);
+    const cdp = await context.newCDPSession(page);
+    await cdp.send("Emulation.setTouchEmulationEnabled", { enabled: true });
+    await page.setViewportSize({ width, height: 700 });
+    await page.goto("/");
+    await signIn(page);
+    const list = page.locator(".article-list");
+    await expect(list.locator(".row")).toHaveCount(20);
+    await scroll(page, 100_000);
+    await scroll(page, -120);
+
+    const footer = list.locator(".end-content");
+    const remaining = () =>
+      list.evaluate((node, narrow) => {
+        const root = narrow ? (document.scrollingElement ?? node) : node;
+        return root.scrollHeight - root.clientHeight - root.scrollTop;
+      }, width === 390);
+    const offset = () =>
+      footer.evaluate((node) => new DOMMatrix(getComputedStyle(node).transform).m42);
+    const x = await list.evaluate((node) => {
+      const rect = node.getBoundingClientRect();
+      return Math.round(rect.left + rect.width / 2);
+    });
+    const touch = (type: "touchStart" | "touchMove" | "touchEnd", y?: number) =>
+      cdp.send("Input.dispatchTouchEvent", {
+        type,
+        touchPoints: y === undefined ? [] : [{ x, y }],
+      });
+
+    expect(await remaining()).toBeGreaterThan(100);
+    await touch("touchStart", 520);
+    await touch("touchMove", 460);
+    await expect.poll(remaining).toBeLessThan(100);
+    expect(await remaining()).toBeGreaterThan(1);
+    expect(await offset()).toBe(0);
+
+    const endY = 460 - Math.ceil(await remaining()) - 16;
+    await touch("touchMove", endY);
+    await expect.poll(remaining).toBeLessThanOrEqual(1);
+    expect(await offset()).toBeGreaterThan(-7);
+    await touch("touchMove", endY - 120);
+    await expect.poll(offset).toBeLessThan(-5);
+    expect(await offset()).toBeGreaterThanOrEqual(-24);
+    expect(await remaining()).toBeLessThanOrEqual(1);
+
+    await touch("touchEnd");
+    await expect.poll(offset).toBe(0);
+    expect(await remaining()).toBeLessThanOrEqual(1);
+
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    await touch("touchStart", 520);
+    await touch("touchMove", 300);
+    expect(await offset()).toBe(0);
+    await touch("touchEnd");
+  });
+}
+
 for (const [width, count] of [
   [1200, 1],
   [390, 1],

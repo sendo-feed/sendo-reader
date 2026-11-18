@@ -657,6 +657,83 @@
     };
   }
 
+  /** 一覧の末尾へ着いてからも指を上へ動かしたら、末尾の表示だけを少し引き上げる */
+  function pullPastEnd(footer: HTMLElement, _opened: number) {
+    const listNode = footer.closest<HTMLElement>(".article-list");
+    if (listNode === null) return;
+
+    let start: Touch | undefined;
+    let scrollRoot: Element | null = null;
+    let lastY = 0;
+    let remaining = 0;
+    let upward = false;
+    let distance = 0;
+
+    function release() {
+      start = undefined;
+      scrollRoot = null;
+      distance = 0;
+      footer.removeAttribute("data-end-dragging");
+      footer.style.removeProperty("--end-pull");
+    }
+
+    function onStart(event: TouchEvent) {
+      release();
+      const touch = event.touches[0];
+      if (event.touches.length !== 1 || touch === undefined || reducedMotion()) return;
+      scrollRoot = layout.pageScroll ? document.scrollingElement : listNode;
+      if (scrollRoot === null) return;
+      remaining = scrollRoot.scrollHeight - scrollRoot.clientHeight - scrollRoot.scrollTop;
+      start = touch;
+      lastY = touch.clientY;
+      upward = false;
+    }
+
+    function onMove(event: TouchEvent) {
+      if (start === undefined || scrollRoot === null) return;
+      const touch = event.touches.length === 1 ? event.touches[0] : undefined;
+      if (touch === undefined || touch.identifier !== start.identifier) return release();
+      const dy = lastY - touch.clientY;
+      lastY = touch.clientY;
+      if (!upward) {
+        const x = Math.abs(touch.clientX - start.clientX);
+        const y = start.clientY - touch.clientY;
+        if (x < 10 && Math.abs(y) < 10) return;
+        if (y <= x) return release();
+        upward = true;
+      }
+
+      const before = remaining;
+      const limit = scrollRoot.scrollHeight - scrollRoot.clientHeight;
+      remaining = limit - scrollRoot.scrollTop;
+      if (limit <= 0 || remaining > 1) {
+        if (distance > 0) release();
+        return;
+      }
+
+      // 末尾へ着いたタッチイベントは、通常のスクロールで使った分を引く
+      const pastEnd = dy > 0 && before > 1 ? Math.max(0, dy - before) : dy;
+      distance = Math.max(0, distance + pastEnd);
+      footer.toggleAttribute("data-end-dragging", distance > 0);
+      // 最初は指に付いていき、引くほど抵抗を強くする。見出しに隠れないように 24px まで
+      footer.style.setProperty("--end-pull", `${(-24 * distance) / (64 + distance)}px`);
+    }
+
+    listNode.addEventListener("touchstart", onStart, { passive: true });
+    listNode.addEventListener("touchmove", onMove, { passive: true });
+    listNode.addEventListener("touchend", release);
+    listNode.addEventListener("touchcancel", release);
+    return {
+      update: release,
+      destroy() {
+        listNode.removeEventListener("touchstart", onStart);
+        listNode.removeEventListener("touchmove", onMove);
+        listNode.removeEventListener("touchend", release);
+        listNode.removeEventListener("touchcancel", release);
+      },
+    };
+  }
+
   function toggle(article: Article, field: "readAt" | "starredAt") {
     // 書けなかったら、一覧が手元の DB の状態に戻る
     list.toggle(article, field).catch(() => {});
@@ -910,15 +987,17 @@
           pageScroll: layout.pageScroll,
         }}
       >
-        {#if completed && unread === 0}
-          <Icon name="checkAll" />
-          <p role="status">すべて読み終えました。</p>
-        {:else}
-          <p>End of list</p>
-        {/if}
-        {#if next !== null}
-          <button type="button" class="primary" onclick={next.go}>{next.label}</button>
-        {/if}
+        <div class="end-content" use:pullPastEnd={list.opened}>
+          {#if completed && unread === 0}
+            <Icon name="checkAll" />
+            <p role="status">すべて読み終えました。</p>
+          {:else}
+            <p>End of list</p>
+          {/if}
+          {#if next !== null}
+            <button type="button" class="primary" onclick={next.go}>{next.label}</button>
+          {/if}
+        </div>
       </div>
     {/if}
   {/if}
@@ -1409,11 +1488,30 @@
     flex: none;
     align-content: start;
     justify-items: center;
-    gap: 0.75rem;
     padding: 1.5rem 1rem calc(2rem + env(safe-area-inset-bottom, 0px));
     color: var(--faint);
     font-size: 0.8125rem;
     text-align: center;
+  }
+
+  .end-content {
+    display: grid;
+    justify-items: center;
+    gap: 0.75rem;
+    min-width: 0;
+    transform: translateY(var(--end-pull, 0px));
+    transition: transform 280ms ease-out;
+  }
+
+  .end-content:global([data-end-dragging]) {
+    transition: none;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .end-content {
+      transform: none;
+      transition: none;
+    }
   }
 
   .end p {
