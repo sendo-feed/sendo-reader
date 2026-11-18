@@ -1,4 +1,4 @@
-import { ApiError } from "@sendo-reader/core";
+import { ApiError, type SyncStatus } from "@sendo-reader/core";
 import { AccountChangedError } from "./account";
 
 /** 失敗を、画面に出す文にする */
@@ -34,4 +34,11 @@ export function describeError(error: unknown): string {
   }
   if (error instanceof RangeError) return "名前を入れてください。";
   return "うまくいきませんでした。";
+}
+
+export function describeSavedPageError(error: SyncStatus["savedPageError"] | undefined): string {
+  if (error === "limit")
+    return "Sendo の保存上限に達しました。ページの保存を解除してからやり直してください。";
+  if (error === "unsupported") return "接続先の Sendo はページの保存に対応していません。";
+  return "保存ページの変更を同期できませんでした。";
 }

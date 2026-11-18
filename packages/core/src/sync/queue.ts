@@ -1,5 +1,6 @@
 import { ApiError, type SendoApi } from "../api/client";
 import type { Database, Executor } from "../db/database";
+import { putSavedPage, removeSavedPage } from "../db/saved-pages";
 import type { Table } from "../models";
 import {
   applyLocally,
@@ -178,6 +179,10 @@ export async function push(
       await db.transaction(async (tx) => {
         // 送っている間にログアウトしていたら、手元には書かない
         signal.throwIfAborted();
+        if (op.kind === "setSavedPage") {
+          if (sent.savedPage === undefined) await removeSavedPage(tx, op.id);
+          else await putSavedPage(tx, sent.savedPage);
+        }
         await complete(tx, next.id, next.rev);
         if (sent.remap !== undefined) {
           await remapFolderId(tx, sent.remap.from, sent.remap.to);
@@ -187,6 +192,7 @@ export async function push(
         }
       });
       result.sent += 1;
+      if (op.kind === "setSavedPage") options.onChange?.(new Set<Table>(["savedPages"]));
       if (sent.remap !== undefined) {
         result.remapped.push(sent.remap);
         options.onRemap?.(sent.remap);
@@ -227,7 +233,13 @@ export async function push(
         await reapplyPending(tx);
       });
       options.onChange?.(
-        new Set<Table>(op.kind === "setSettings" ? ["settings"] : ["folders", "feeds", "articles"]),
+        new Set<Table>(
+          op.kind === "setSavedPage"
+            ? ["savedPages"]
+            : op.kind === "setSettings"
+              ? ["settings"]
+              : ["folders", "feeds", "articles"],
+        ),
       );
       result.rejected.push({ op, error });
     }

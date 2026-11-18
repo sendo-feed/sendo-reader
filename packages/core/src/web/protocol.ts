@@ -22,6 +22,10 @@ export const READER_METHODS = [
   "listFolders",
   "listFeeds",
   "listArticles",
+  "listSavedPages",
+  "getSavedPageForUrl",
+  "savePage",
+  "unsavePage",
   "getArticle",
   "getArticles",
   "getArticleContent",
@@ -61,6 +65,8 @@ export function isMethod(value: unknown): value is Method {
 
 /** 手元にすぐ反映する書き込み。あとで送るので、少し待ってから同期する */
 export const WRITE_METHODS = new Set<Method>([
+  "savePage",
+  "unsavePage",
   "setRead",
   "setReadMany",
   "setStarred",

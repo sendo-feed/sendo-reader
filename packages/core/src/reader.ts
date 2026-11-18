@@ -19,6 +19,7 @@ import {
   listFeeds,
   listFolders,
 } from "./db/queries";
+import { clearSavedPages, countSavedPages, getSavedPage, listSavedPages } from "./db/saved-pages";
 import { migrate } from "./db/schema";
 import { deleteSetting, getSetting, setSetting } from "./db/settings";
 import {
@@ -35,6 +36,7 @@ import {
   type Feed,
   type Folder,
   type LocalArticleContent,
+  type SavedPage,
   type SettingItem,
   type SettingsChange,
   type Table,
@@ -48,6 +50,13 @@ import {
   type OpmlImportResult,
   subscribe,
 } from "./online";
+import {
+  normalizeSavedUrl,
+  SAVED_ID_PATTERN,
+  SAVED_PAGE_LIMIT,
+  SAVED_TITLE_LIMIT,
+  savedPageId,
+} from "./saved";
 import { feedListPath, folderListPath, listSettingName, normalizeSettingsChange } from "./settings";
 import {
   FOLDER_ID_PATTERN,
@@ -68,7 +77,13 @@ const USER_KEY = "auth.user";
  */
 const LOGOUT_PENDING_KEY = "auth.logoutPending";
 
-const ALL_TABLES: ReadonlySet<Table> = new Set<Table>(["folders", "feeds", "articles", "settings"]);
+const ALL_TABLES: ReadonlySet<Table> = new Set<Table>([
+  "folders",
+  "feeds",
+  "articles",
+  "settings",
+  "savedPages",
+]);
 
 export interface ReaderCoreOptions {
   db: Database;
@@ -471,6 +486,38 @@ export class ReaderCore {
 
   // --- 書き込み（手元にすぐ反映し、操作キューに積む。送るのは sync()） ---
 
+  /** 購読していないページも、URL から手元に保存してあとで同期する。 */
+  async savePage(rawUrl: string, rawTitle?: string): Promise<SavedPage> {
+    this.#requireSignedIn();
+    const session = this.#session.signal;
+    const url = normalizeSavedUrl(rawUrl);
+    if (url === null)
+      throw new ApiError("invalid", "保存には HTTP または HTTPS の URL を入れてください。");
+    const title = rawTitle?.trim() || null;
+    if (title !== null && title.length > SAVED_TITLE_LIMIT) {
+      throw new ApiError("invalid", `タイトルは ${SAVED_TITLE_LIMIT} 文字までです。`);
+    }
+    const id = await savedPageId(url);
+    const page = await this.#db.transaction(async (tx) => {
+      throwIfSessionEnded(session);
+      const existing = await getSavedPage(tx, id);
+      if (existing !== null) return existing;
+      if ((await countSavedPages(tx)) >= SAVED_PAGE_LIMIT) {
+        throw new ApiError("invalid", `保存できるページは ${SAVED_PAGE_LIMIT} 件までです。`);
+      }
+      const saved = { id, url, title, savedAt: this.#now() };
+      await this.#enqueue(tx, { kind: "setSavedPage", id, page: saved });
+      return saved;
+    });
+    this.#emit(new Set<Table>(["savedPages"]));
+    return page;
+  }
+
+  unsavePage(id: string): Promise<void> {
+    if (!SAVED_ID_PATTERN.test(id)) throw new RangeError("保存ページの ID が正しくありません。");
+    return this.#write({ kind: "setSavedPage", id, page: null }, ["savedPages"]);
+  }
+
   /** 記事を既読（true）／未読（false）にする */
   setRead(articleId: string, read: boolean): Promise<void> {
     return this.#write({ kind: "setArticleState", articleId, read, at: this.#now() }, ["articles"]);
@@ -813,6 +860,19 @@ export class ReaderCore {
     return listFeeds(this.#db);
   }
 
+  listSavedPages(hideStarred = false): Promise<SavedPage[]> {
+    return listSavedPages(this.#db, hideStarred);
+  }
+
+  async getSavedPageForUrl(raw: string): Promise<SavedPage | null> {
+    const session = this.#session.signal;
+    const url = normalizeSavedUrl(raw);
+    if (url === null) return null;
+    const id = await savedPageId(url);
+    throwIfSessionEnded(session);
+    return getSavedPage(this.#db, id);
+  }
+
   listArticles(query?: ArticleQuery): Promise<Article[]> {
     return listArticles(this.#db, query);
   }
@@ -989,6 +1049,7 @@ async function clearAll(tx: Executor): Promise<void> {
   await tx.run("delete from feeds");
   await tx.run("delete from folders");
   await tx.run("delete from synced_settings");
+  await clearSavedPages(tx);
   await tx.run("delete from settings");
 }
 

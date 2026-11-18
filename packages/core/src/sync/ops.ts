@@ -1,9 +1,10 @@
 import { ApiError, errorFromBody, type SendoApi } from "../api/client";
+import { toSavedPage } from "../api/sync-contract";
 import type { Executor } from "../db/database";
 import { getSetting, setSetting } from "../db/settings";
 import { requestResync } from "../db/synced";
 import { putSyncedSetting, removeSyncedSetting } from "../db/synced-settings";
-import type { DeviceType, JsonValue, SettingItem } from "../models";
+import type { DeviceType, JsonValue, SavedPage, SettingItem } from "../models";
 import { MAX_SETTINGS_PER_REQUEST } from "../settings";
 
 /**
@@ -39,6 +40,7 @@ export type Operation =
   | { kind: "deleteFolder"; folderId: string }
   | { kind: "moveFeed"; feedId: string; folderId: string | null }
   | { kind: "unsubscribe"; feedId: string }
+  | { kind: "setSavedPage"; id: string; page: SavedPage | null }
   /**
    * 設定を置く ／ 消す（docs/decisions/settings.md）。同じ名前は、put と remove のどちらか一方に
    * 1 度だけ入れる
@@ -82,6 +84,8 @@ export function keyOf(op: Operation): string {
     case "moveFeed":
     case "unsubscribe":
       return op.feedId;
+    case "setSavedPage":
+      return op.id;
     case "setSettings":
       return `settings:${op.deviceType}`;
   }
@@ -167,6 +171,9 @@ export async function applyLocally(tx: Executor, op: Operation): Promise<void> {
       // ときにだけ消す。docs/decisions/local-first.md）
       await tx.run("delete from articles where feed_id = ? and starred_at is null", [op.feedId]);
       return;
+    case "setSavedPage":
+      // 操作キューの行を visible_saved_pages が読む。同期で届いた行は上書きしない。
+      return;
     case "setSettings":
       for (const name of op.remove) await removeSyncedSetting(tx, op.deviceType, name);
       for (const item of op.put) await putSyncedSetting(tx, op.deviceType, item.name, item.value);
@@ -184,7 +191,7 @@ export function scopeCondition(scope: MarkReadScope): [string, string[]] {
 }
 
 /** 送った結果。手元で作ったフォルダを、sendo にあった同じ名前のフォルダにまとめたら remap を返す */
-export type SendResult = { remap?: { from: string; to: string } };
+export type SendResult = { remap?: { from: string; to: string }; savedPage?: SavedPage };
 
 /** 操作を sendo に送る。失敗したら ApiError を投げる。signal で中断する（ログアウトなど） */
 export async function send(api: SendoApi, op: Operation, signal: AbortSignal): Promise<SendResult> {
@@ -275,6 +282,21 @@ export async function send(api: SendoApi, op: Operation, signal: AbortSignal): P
         if (!(error instanceof ApiError && error.kind === "not_found")) throw error;
       }
       return {};
+    case "setSavedPage": {
+      if (op.page === null) {
+        check(await client.DELETE("/saved/{id}", { params: { path: { id: op.id } } }));
+        return {};
+      }
+      const body = {
+        url: op.page.url,
+        ...(op.page.title === null ? {} : { title: op.page.title }),
+      };
+      const savedPage = toSavedPage(check(await client.PUT("/saved", { body }))?.page);
+      if (savedPage.id !== op.id || savedPage.url !== op.page.url) {
+        throw new ApiError("server", "sendo が別の保存ページを返しました");
+      }
+      return { savedPage };
+    }
     case "setSettings": {
       // 1 回に送れる数（100 項目）ごとに分ける。何度送っても同じ結果になるので、途中で届かなく
       // なったら、次は最初から送り直す
@@ -391,6 +413,8 @@ export async function undo(
       });
       return;
     }
+    case "setSavedPage":
+      return;
     case "markRead":
     case "deleteFolder":
     case "unsubscribe":

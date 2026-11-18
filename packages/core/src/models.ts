@@ -51,6 +51,13 @@ export interface Article {
   starredAt: number | null;
 }
 
+export type SavedPage = {
+  id: string;
+  url: string;
+  title: string | null;
+  savedAt: number;
+};
+
 /**
  * 記事の本文の中の要素。本文の HTML（信頼できない）を、通すと決めたタグと属性だけの木にしたもの
  * （content/parse.ts）。画面は、この木から要素を組み立てる。HTML の文字列は、画面に渡さない。
@@ -105,7 +112,7 @@ export interface UnreadCounts {
 }
 
 /** 手元の DB の表。変わったことを画面に知らせるときに使う */
-export type Table = "folders" | "feeds" | "articles" | "settings";
+export type Table = "folders" | "feeds" | "articles" | "settings" | "savedPages";
 
 /**
  * 端末の種類。設定は、この種類ごとに sendo に預ける（docs/decisions/settings.md）。どちらとして

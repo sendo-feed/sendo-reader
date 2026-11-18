@@ -164,6 +164,28 @@ const migrations: readonly (readonly string[])[] = [
     // 最近読んだ一覧を、既読にした日時から少しずつ読む。未読は索引に載せない
     "create index articles_read_idx on articles (read_at, id) where read_at is not null",
   ],
+  [
+    `create table saved_pages (
+      id text primary key,
+      url text not null,
+      title text,
+      saved_at integer not null
+    ) strict, without rowid`,
+    // 保存は、同期で届いた正の行の上に未送信の操作を重ねて読む。断られた操作を消すだけで正に戻る。
+    `create index pending_saved_pages_idx on pending_ops (key, id)
+       where kind = 'setSavedPage'`,
+    `create view visible_saved_pages as
+     with latest as (
+       select key, max(id) as id from pending_ops where kind = 'setSavedPage' group by key
+     )
+     select id, url, title, saved_at from saved_pages
+       where id not in (select key from latest)
+     union all
+     select latest.key, json_extract(payload, '$.page.url'), json_extract(payload, '$.page.title'),
+       json_extract(payload, '$.page.savedAt')
+       from latest join pending_ops on pending_ops.id = latest.id
+       where json_type(payload, '$.page') = 'object'`,
+  ],
 ];
 
 export const SCHEMA_VERSION = migrations.length;
