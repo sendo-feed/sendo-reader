@@ -16,6 +16,8 @@ export interface SyncStatus {
   pending: number;
   /** ログアウトを sendo に送れていない（送り直している） */
   logoutPending: boolean;
+  /** Sendo が受け付けなかった保存操作の理由 */
+  savedPageError: "limit" | "unsupported" | "rejected" | null;
 }
 
 export interface SchedulerOptions {
@@ -49,6 +51,7 @@ export class SyncScheduler {
   readonly #setTimeout: (fn: () => void, ms: number) => unknown;
   readonly #clearTimeout: (handle: unknown) => void;
   readonly #onStatus: (status: SyncStatus) => void;
+  readonly #offReject: () => void;
 
   #timer: { handle: unknown; at: number } | null = null;
   #running: Promise<void> | null = null;
@@ -74,7 +77,18 @@ export class SyncScheduler {
       error: null,
       pending: 0,
       logoutPending: false,
+      savedPageError: null,
     };
+    this.#offReject = core.onReject(({ op, error }) => {
+      if (op.kind !== "setSavedPage") return;
+      const savedPageError =
+        error.code === "saved_limit_reached"
+          ? "limit"
+          : error.kind === "not_found"
+            ? "unsupported"
+            : "rejected";
+      this.#update({ user: core.currentUser(), savedPageError });
+    });
   }
 
   get status(): SyncStatus {
@@ -88,7 +102,8 @@ export class SyncScheduler {
   }
 
   /** 少し待ってから同期する（書き込んだあと） */
-  requestSoon(): void {
+  requestSoon(savedPageChanged = false): void {
+    if (savedPageChanged) this.#update({ savedPageError: null });
     this.#schedule(WRITE_DEBOUNCE_MS);
     void this.#refreshPending();
   }
@@ -109,6 +124,7 @@ export class SyncScheduler {
   stop(): void {
     this.#stopped = true;
     this.#cancelTimer();
+    this.#offReject();
   }
 
   #schedule(delayMs: number): void {
@@ -148,7 +164,13 @@ export class SyncScheduler {
 
   async #runOnce(): Promise<void> {
     if (!this.#core.isSignedIn()) {
-      this.#update({ signedIn: false, user: null, syncing: false, error: null });
+      this.#update({
+        signedIn: false,
+        user: null,
+        syncing: false,
+        error: null,
+        savedPageError: null,
+      });
       // ログアウトを sendo に送れていなければ送る。届かなければ、間隔を延ばしながら送り直す
       // （docs/decisions/local-first.md の 6。オンラインに戻ったときは、すぐ試す）
       const sent = await this.#core.sendPendingSignOut();
@@ -209,6 +231,9 @@ export class SyncScheduler {
 
   #update(patch: Partial<SyncStatus>): void {
     const next = { ...this.#status, ...patch };
+    if (next.user?.id !== this.#status.user?.id && patch.savedPageError === undefined) {
+      next.savedPageError = null;
+    }
     const changed = (Object.keys(next) as (keyof SyncStatus)[]).some((key) =>
       key === "user" ? !sameUser(next.user, this.#status.user) : next[key] !== this.#status[key],
     );

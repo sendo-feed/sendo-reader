@@ -82,6 +82,29 @@ describe("同期の予定", () => {
     expect(statuses.at(-1)?.error).toBeNull();
   });
 
+  test("保存の拒否を、後続の同期が失敗しても通知して保持する", async () => {
+    const { server, core, scheduler } = await scheduled();
+    server.maxSavedPages = 0;
+    await core.savePage("https://example.com/page");
+    server.onRequest = async (path) => {
+      if (path !== "GET /sync") return;
+      server.onRequest = null;
+      server.failNext("network");
+    };
+
+    await scheduler.syncNow();
+    expect(scheduler.status).toMatchObject({ error: "network", savedPageError: "limit" });
+    expect(await core.listSavedPages()).toEqual([]);
+    await scheduler.syncNow();
+    expect(scheduler.status).toMatchObject({ error: null, savedPageError: "limit" });
+
+    server.maxSavedPages = 1;
+    await core.savePage("https://example.com/page");
+    scheduler.requestSoon(true);
+    expect(scheduler.status.savedPageError).toBeNull();
+    scheduler.stop();
+  });
+
   test("セッションが切れたら止め、ログインし直したら再開する", async () => {
     const { server, core, scheduler, statuses } = await scheduled();
     server.expireSession();

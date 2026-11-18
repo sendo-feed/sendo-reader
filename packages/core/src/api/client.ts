@@ -103,6 +103,7 @@ export function createSendoApi(options: SendoApiOptions) {
     async sync(cursor: string | null, signal?: AbortSignal): Promise<SyncPage> {
       const url = new URL(`${baseUrl}/sync`);
       if (cursor !== null) url.searchParams.set("cursor", cursor);
+      url.searchParams.set("includeSaved", "true");
       const response = await send(new Request(url), signal);
       if (!response.ok) throw await toApiError(response);
       let body: unknown;

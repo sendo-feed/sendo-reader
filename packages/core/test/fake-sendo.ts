@@ -27,7 +27,16 @@
  * client_id、redirect_uri、response_type、scope、state だけを見る（PKCE などは見ない）。
  */
 
-type TableName = "folders" | "feeds" | "articles" | "settings";
+type TableName = "folders" | "feeds" | "articles" | "settings" | "savedPages";
+
+interface SavedPageRow {
+  id: string;
+  url: string;
+  title: string | null;
+  savedAt: number;
+  deleted: boolean;
+  seq: number;
+}
 
 /** 設定の項目（sendo の docs/decisions/settings.md）。消すと、行を残して消した印を付け、値を捨てる */
 export interface SettingRow {
@@ -86,6 +95,7 @@ interface Cursor {
   articles: number;
   /** 設定の位置。設定を配る前の版が出したカーソルには、ない */
   settings?: number;
+  savedPages?: number;
   /** 最初の同期の途中なら、その範囲の起点（直近 30 日の始まり） */
   initialSince?: number;
   /** 最後まで送り終えた（この応答の hasMore が false だった） */
@@ -190,14 +200,24 @@ export class FakeSendo {
   settingsSupported = true;
   /** 端末の種類ごとの、項目の数の上限（超えると 409 の settings_full） */
   maxSettings = 1000;
+  savedPagesSupported = true;
+  maxSavedPages = 2000;
+  readonly #savedPages = new Map<string, Map<string, SavedPageRow>>();
 
-  readonly #maxSeq: Record<TableName, number> = { folders: 0, feeds: 0, articles: 0, settings: 0 };
+  readonly #maxSeq: Record<TableName, number> = {
+    folders: 0,
+    feeds: 0,
+    articles: 0,
+    settings: 0,
+    savedPages: 0,
+  };
   /** 消した印を回収した範囲。これより古いカーソルでは差分を出せない */
   readonly #purgedUpTo: Record<TableName, number> = {
     folders: 0,
     feeds: 0,
     articles: 0,
     settings: 0,
+    savedPages: 0,
   };
   readonly #failures: Failure[] = [];
   /** "hang-body" で止めた本文のうち、読み手に取り消されたものの数 */
@@ -579,7 +599,45 @@ export class FakeSendo {
       return this.#authorize(request, path);
     }
     if (request.method === "GET" && path === "/sync") {
-      return this.#sync(url.searchParams.get("cursor"));
+      return this.#sync(
+        url.searchParams.get("cursor"),
+        this.savedPagesSupported && url.searchParams.get("includeSaved") === "true",
+        user.id,
+      );
+    }
+    if (this.savedPagesSupported && (path === "/saved" || path.startsWith("/saved/"))) {
+      const pages = this.#savedPages.get(user.id) ?? new Map<string, SavedPageRow>();
+      this.#savedPages.set(user.id, pages);
+      if (request.method === "PUT" && path === "/saved") {
+        const body = (await request.json()) as { url: string; title?: string };
+        const url = new URL(body.url).href;
+        const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(url));
+        const id = [...new Uint8Array(digest)].map((n) => n.toString(16).padStart(2, "0")).join("");
+        let row = pages.get(id);
+        if (row === undefined || row.deleted) {
+          if ([...pages.values()].filter((page) => !page.deleted).length >= this.maxSavedPages) {
+            return error(409, "saved_limit_reached", "Saved pages limit reached");
+          }
+          row = {
+            id,
+            url,
+            title: body.title ?? null,
+            savedAt: this.now,
+            deleted: false,
+            seq: ++this.#maxSeq.savedPages,
+          };
+          pages.set(id, row);
+        }
+        return json(200, { page: savedPageJson(row) });
+      }
+      if (request.method === "DELETE") {
+        const row = pages.get(path.slice("/saved/".length));
+        if (row !== undefined && !row.deleted) {
+          row.deleted = true;
+          row.seq = ++this.#maxSeq.savedPages;
+        }
+        return new Response(null, { status: 204 });
+      }
     }
     if (request.method === "GET" && path === "/folders") {
       const items = [...this.folders.values()].filter((row) => row.deletedAt === null);
@@ -953,7 +1011,7 @@ export class FakeSendo {
     return new Response(null, { status: 204 });
   }
 
-  #sync(rawCursor: string | null): Response {
+  #sync(rawCursor: string | null, includeSaved: boolean, userId: string): Response {
     const cursor = rawCursor === null ? null : decodeCursor(rawCursor);
     if (
       (rawCursor !== null && cursor === null) ||
@@ -961,7 +1019,10 @@ export class FakeSendo {
         (cursor.folders < this.#purgedUpTo.folders ||
           cursor.feeds < this.#purgedUpTo.feeds ||
           cursor.articles < this.#purgedUpTo.articles ||
-          (cursor.settings !== undefined && cursor.settings < this.#purgedUpTo.settings)))
+          (cursor.settings !== undefined && cursor.settings < this.#purgedUpTo.settings) ||
+          (includeSaved &&
+            cursor.savedPages !== undefined &&
+            cursor.savedPages < this.#purgedUpTo.savedPages)))
     ) {
       return error(400, "invalid_cursor", "cursor is invalid; start over without it");
     }
@@ -969,9 +1030,11 @@ export class FakeSendo {
     // 設定の位置を持たない古いカーソルには、設定だけを最初から送る（全体の同期し直しはさせない）
     const since: Required<Pick<Cursor, TableName>> & Cursor = {
       settings: 0,
+      savedPages: 0,
       ...(cursor ?? { folders: 0, feeds: 0, articles: 0, done: false }),
     };
     const settingsInitial = cursor === null || cursor.settings === undefined;
+    const savedInitial = cursor === null || cursor.savedPages === undefined;
     const initialSince = cursor === null ? this.now - 30 * DAY : cursor.initialSince;
     const initial = initialSince !== undefined;
 
@@ -1000,6 +1063,11 @@ export class FakeSendo {
               .filter(([, seq]) => seq > since.articles)
               .map(([id, seq]) => ({ seq, removed: id }))),
       ].sort(bySeq),
+      savedPages: includeSaved
+        ? [...(this.#savedPages.get(userId)?.values() ?? [])]
+            .filter((row) => row.seq > since.savedPages && !(savedInitial && row.deleted))
+            .sort(bySeq)
+        : [],
       settings: this.settingsSupported
         ? [...this.settings.values()]
             .filter((row) => row.seq > since.settings && !(settingsInitial && row.deleted))
@@ -1015,8 +1083,9 @@ export class FakeSendo {
       feeds: [] as FeedRow[],
       articles: [] as (typeof pending)["articles"],
       settings: [] as SettingRow[],
+      savedPages: [] as SavedPageRow[],
     };
-    for (const table of ["folders", "feeds", "articles", "settings"] as const) {
+    for (const table of ["folders", "feeds", "articles", "settings", "savedPages"] as const) {
       const rows = pending[table];
       const taken = rows.slice(0, room);
       room -= taken.length;
@@ -1034,7 +1103,8 @@ export class FakeSendo {
     else delete next.initialSince;
     next.done = !hasMore;
 
-    if (!this.settingsSupported) delete (next as Cursor).settings;
+    if (!this.settingsSupported) delete next.settings;
+    if (!includeSaved) delete next.savedPages;
 
     return json(200, {
       cursor: encodeCursor(next),
@@ -1045,6 +1115,15 @@ export class FakeSendo {
               row.deleted
                 ? { deviceType: row.deviceType, name: row.name, deleted: true }
                 : { deviceType: row.deviceType, name: row.name, value: row.value, deleted: false },
+            ),
+          }
+        : {}),
+      ...(includeSaved
+        ? {
+            savedPages: page.savedPages.map((row) =>
+              row.deleted
+                ? { id: row.id, deleted: true }
+                : { ...savedPageJson(row), deleted: false },
             ),
           }
         : {}),
@@ -1126,6 +1205,10 @@ function feedJson(row: FeedRow) {
 
 function bySeq(a: { seq: number }, b: { seq: number }): number {
   return a.seq - b.seq;
+}
+
+function savedPageJson(row: SavedPageRow) {
+  return { id: row.id, url: row.url, title: row.title, savedAt: iso(row.savedAt) };
 }
 
 function iso(ms: number): string {
