@@ -213,12 +213,12 @@ export function runReaderWorker(options: ReaderWorkerOptions = {}): void {
             stop: startSyncUpdates({
               baseUrl,
               session,
-              verifiedUserId: async (signal) => {
-                const userId = await core.syncUpdatesUserId(signal);
-                if (userId === null && !signal.aborted) {
+              sessionProtocol: async (signal) => {
+                const protocol = await core.syncUpdatesProtocol(signal);
+                if (protocol === null && !signal.aborted) {
                   scheduler.requestForUpdate();
                 }
-                return userId;
+                return protocol;
               },
               onOpen: () => scheduler.requestForUpdate(),
               onUpdate: () => scheduler.requestForUpdate(),

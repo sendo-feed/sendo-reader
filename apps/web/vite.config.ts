@@ -1,12 +1,13 @@
 import { execSync } from "node:child_process";
 import { svelte } from "@sveltejs/vite-plugin-svelte";
-import { defineConfig, type Plugin } from "vite";
+import { defineConfig, type Plugin, type ProxyOptions } from "vite";
 import { VitePWA } from "vite-plugin-pwa";
 import {
   IMAGE_CACHE_MAX_AGE_SECONDS,
   IMAGE_CACHE_NAME,
   IMAGE_CACHE_URL_PATTERN,
 } from "../../packages/core/src/web/image-cache.ts";
+import { SYNC_UPDATES_PROTOCOL_HEADER } from "../../packages/core/src/web/sync-updates-protocol.ts";
 import { securityHeaders } from "./security-headers.ts";
 import { SENDO_NAVIGATION_DENYLIST, SYNC_UPDATES_PATH } from "./sendo-paths.ts";
 import { createSyncUpdatesProxy } from "./server/sync-updates.ts";
@@ -37,21 +38,36 @@ function securityHeadersPlugin(): Plugin {
 
 /** 手元で動かす sendo（sendo の pnpm dev） */
 const SENDO_DEV_URL = "http://localhost:8787";
+// PUBLIC_URL を設定していない手元の Sendo は Host と Origin を照合する。
+const devSyncUpdates = createSyncUpdatesProxy(SENDO_DEV_URL, { preserveHost: true });
+
+const devSendoProxy: ProxyOptions = {
+  target: SENDO_DEV_URL,
+  configure(proxy) {
+    proxy.on("proxyRes", (response, request) => {
+      if (request.method !== "GET" || request.url?.split("?", 1)[0] !== "/api/v1/me") return;
+      delete response.headers[SYNC_UPDATES_PROTOCOL_HEADER];
+      if (response.statusCode !== 200 || request.headers.authorization !== undefined) return;
+      const protocol = devSyncUpdates.sessionProtocol(request.headers.cookie);
+      if (protocol === undefined) return;
+      response.headers[SYNC_UPDATES_PROTOCOL_HEADER] = protocol;
+      response.headers["cache-control"] = "private, no-store";
+    });
+  },
+};
 
 function syncUpdatesProxyPlugin(): Plugin {
   return {
     name: "sendo-reader:sync-updates-proxy",
     configureServer({ httpServer }) {
       if (!httpServer) return;
-      // PUBLIC_URL を設定していない手元の Sendo は Host と Origin を照合する。
-      const proxy = createSyncUpdatesProxy(SENDO_DEV_URL, { preserveHost: true });
-      httpServer.prependListener("request", proxy.trackRequest);
+      httpServer.prependListener("request", devSyncUpdates.trackRequest);
       httpServer.on("upgrade", (request, socket, head) => {
         if (request.url?.split("?", 1)[0] !== SYNC_UPDATES_PATH) return;
-        if (proxy.shouldUpgrade(request)) proxy.handle(request, socket, head);
+        if (devSyncUpdates.shouldUpgrade(request)) devSyncUpdates.handle(request, socket, head);
         else socket.destroy();
       });
-      httpServer.once("close", proxy.stop);
+      httpServer.once("close", devSyncUpdates.stop);
     },
   };
 }
@@ -191,7 +207,7 @@ export default defineConfig({
     // （ポート 8787）に中継する（docs/decisions/ui.md の 4）。^ で始まるキーは、Vite が正規表現として
     // パスとクエリに当てる
     proxy: Object.fromEntries(
-      SENDO_NAVIGATION_DENYLIST.map((pattern) => [pattern.source, { target: SENDO_DEV_URL }]),
+      SENDO_NAVIGATION_DENYLIST.map((pattern) => [pattern.source, devSendoProxy]),
     ),
   },
 });

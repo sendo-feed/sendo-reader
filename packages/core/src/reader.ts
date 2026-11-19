@@ -236,10 +236,10 @@ export class ReaderCore {
   }
 
   /** 通知につなぐ直前に、クッキーの持ち主が手元のユーザーと同じかを確かめる。 */
-  async syncUpdatesUserId(signal: AbortSignal): Promise<string | null> {
+  async syncUpdatesProtocol(signal: AbortSignal): Promise<string | null | undefined> {
     try {
-      const user = await this.#api.me(signal);
-      return user.id === this.#user?.id ? user.id : null;
+      const { user, protocol } = await this.#api.session(signal);
+      return user.id === this.#user?.id ? protocol : null;
     } catch (error) {
       if (error instanceof ApiError && error.kind === "unauthorized") return null;
       throw error;

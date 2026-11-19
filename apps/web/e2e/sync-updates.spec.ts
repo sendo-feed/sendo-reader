@@ -5,6 +5,7 @@ import { request as httpRequest } from "node:http";
 import { createServer } from "node:https";
 import type { Duplex } from "node:stream";
 import { expect, test } from "@playwright/test";
+import { SYNC_UPDATES_PROTOCOL_HEADER } from "../../../packages/core/src/web/sync-updates-protocol";
 import { SYNC_UPDATES_PATH } from "../sendo-paths";
 import { FakeSendo, routeFakeSendo, USER } from "./fake-sendo";
 
@@ -17,6 +18,7 @@ test("本番の CSP でワーカーが WSS を開き、通知で差分同期す�
 }) => {
   if (!baseURL) throw new Error("missing Vite preview origin");
   const preview = new URL(baseURL);
+  const sessionProtocol = "sendo-sync.playwright";
   // この証明書と鍵は、ループバック上のテストでだけ使う。
   const [key, cert] = await Promise.all([
     readFile(new URL("./certs/localhost.key.pem", import.meta.url)),
@@ -41,7 +43,7 @@ test("本番の CSP でワーカーが WSS を開き、通知で差分同期す�
     if (
       request.url !== SYNC_UPDATES_PATH ||
       typeof key !== "string" ||
-      typeof protocol !== "string"
+      protocol !== sessionProtocol
     ) {
       socket.destroy();
       return;
@@ -69,6 +71,17 @@ test("本番の CSP でワーカーが WSS を開き、通知で差分同期す�
       { name: "__Host-sendo_session", value: session, url: origin, secure: true },
     ]);
     await routeFakeSendo(context, sendo);
+    await context.route("**/api/v1/me", async (route) => {
+      const request = route.request();
+      const me = await sendo.fetch(
+        new Request(request.url(), { headers: await request.allHeaders() }),
+      );
+      const headers = {
+        ...Object.fromEntries(me.headers),
+        [SYNC_UPDATES_PROTOCOL_HEADER]: sessionProtocol,
+      };
+      await route.fulfill({ status: me.status, headers, body: await me.text() });
+    });
     const response = await page.goto(origin);
     expect(response?.headers()["content-security-policy"]).toMatch(/connect-src 'self'(?:;|$)/);
     await expect

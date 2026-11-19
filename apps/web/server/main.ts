@@ -26,8 +26,12 @@ async function main(env: Env): Promise<void> {
   const sendoOrigin = parseSendoUrl(env.SENDO_URL);
   const port = parsePort(env.PORT);
   const assets = await loadAssets(distDirectory(env));
-  const app = createReaderServer({ assets, sendoOrigin });
   const updates = createSyncUpdatesProxy(sendoOrigin);
+  const app = createReaderServer({
+    assets,
+    sendoOrigin,
+    syncSessionProtocol: updates.sessionProtocol,
+  });
 
   const server = serve(
     {

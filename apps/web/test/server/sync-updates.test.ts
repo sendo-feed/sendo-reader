@@ -4,6 +4,7 @@ import { createConnection, Socket } from "node:net";
 import type { Duplex } from "node:stream";
 import { afterEach, expect, test } from "vitest";
 import { SYNC_UPDATES_PATH } from "../../sendo-paths";
+import { createReaderServer } from "../../server/app";
 import { createSyncUpdatesProxy } from "../../server/sync-updates";
 
 const stops: Array<() => Promise<void>> = [];
@@ -27,20 +28,13 @@ const headers = {
   origin: "https://reader.example",
   cookie: "__Host-sendo_session=example",
   "sec-websocket-key": "dGhlIHNhbXBsZSBub25jZQ==",
-  "sec-websocket-protocol": "sendo-sync.dXNlci0x",
   "sec-websocket-version": "13",
   "sec-fetch-mode": "websocket",
   "x-forwarded-host": "ignored.example",
 };
 
-function mockSendo(userId = "user-1") {
-  return createServer((req, res) => {
-    expect(req.url).toBe("/api/v1/me");
-    expect(req.headers.cookie).toBe(headers.cookie);
-    expect(req.headers.authorization).toBeUndefined();
-    res.setHeader("content-type", "application/json");
-    res.end(JSON.stringify({ user: { id: userId } }));
-  });
+function handshakeHeaders(protocol: string | undefined) {
+  return protocol === undefined ? headers : { ...headers, "sec-websocket-protocol": protocol };
 }
 
 async function startReader(sendoOrigin: string, preserveHost = false) {
@@ -55,9 +49,12 @@ async function startReader(sendoOrigin: string, preserveHost = false) {
   return { url, proxy };
 }
 
-function connect(url: string): Promise<{ response: IncomingMessage; socket?: Duplex }> {
+function connect(
+  url: string,
+  protocol?: string,
+): Promise<{ response: IncomingMessage; socket?: Duplex }> {
   return new Promise((resolve, reject) => {
-    const outgoing = request(url, { headers });
+    const outgoing = request(url, { headers: handshakeHeaders(protocol) });
     outgoing.on("error", reject);
     outgoing.on("upgrade", (response, socket) => {
       stops.push(async () => {
@@ -77,7 +74,7 @@ function connect(url: string): Promise<{ response: IncomingMessage; socket?: Dup
 test.each([false, true])(
   "通知先だけで 101 と双方向のデータを中継する（Host を保つ: %s）",
   async (preserveHost) => {
-    const sendo = mockSendo();
+    const sendo = createServer();
     const received = new Promise<IncomingMessage>((resolve) => {
       sendo.on("upgrade", (incoming, socket) => {
         resolve(incoming);
@@ -94,10 +91,11 @@ test.each([false, true])(
     const sendoOrigin = await listen(sendo);
     const { url, proxy } = await startReader(sendoOrigin, preserveHost);
 
-    const { response, socket } = await connect(`${url}${SYNC_UPDATES_PATH}?x=%2F`);
+    const protocol = proxy.sessionProtocol(headers.cookie);
+    const { response, socket } = await connect(`${url}${SYNC_UPDATES_PATH}?x=%2F`, protocol);
     expect(response.statusCode).toBe(101);
     expect(response.headers["sec-websocket-accept"]).toBe("test");
-    expect(response.headers["sec-websocket-protocol"]).toBe(headers["sec-websocket-protocol"]);
+    expect(response.headers["sec-websocket-protocol"]).toBe(protocol);
     expect(response.headers["set-cookie"]).toEqual(["first=1", "second=2"]);
     expect(response.headers["x-label"]).toBe("café");
     expect(response.headers["x-hop"]).toBeUndefined();
@@ -126,16 +124,39 @@ test.each([false, true])(
 );
 
 test("同期したユーザーと Upgrade のクッキーの持ち主が違えば中継しない", async () => {
-  const sendo = mockSendo("user-2");
+  const sendo = createServer();
   let upgrades = 0;
   sendo.on("upgrade", (_request, socket) => {
     upgrades += 1;
     socket.destroy();
   });
-  const { url } = await startReader(await listen(sendo));
-  const result = await connect(`${url}${SYNC_UPDATES_PATH}`);
+  const { url, proxy } = await startReader(await listen(sendo));
+  const protocol = proxy.sessionProtocol("__Host-sendo_session=other-session");
+  const result = await connect(`${url}${SYNC_UPDATES_PATH}`, protocol);
   expect(result.response.statusCode).toBe(403);
   expect(upgrades).toBe(0);
+});
+
+test("ブラウザのユーザー確認で発行した照合値と、Sendo のクッキー更新を一緒に返す", async () => {
+  const cookie = "__Host-sendo_session=example; Path=/; Secure; HttpOnly; Max-Age=3600";
+  const sendo = createServer((_request, response) => {
+    response.setHeader("set-cookie", cookie);
+    response.setHeader("content-type", "application/json");
+    response.end('{"user":{"id":"user-1"}}');
+  });
+  const sendoOrigin = await listen(sendo);
+  const proxy = createSyncUpdatesProxy(sendoOrigin);
+  const app = createReaderServer({
+    assets: new Map(),
+    sendoOrigin,
+    syncSessionProtocol: proxy.sessionProtocol,
+  });
+  const reply = await app.request("/api/v1/me", { headers: { cookie: headers.cookie } });
+  expect(reply.headers.getSetCookie()).toEqual([cookie]);
+  expect(reply.headers.get("cache-control")).toBe("private, no-store");
+  expect(reply.headers.get("x-sendo-reader-sync-protocol")).toBe(
+    proxy.sessionProtocol(headers.cookie),
+  );
 });
 
 test("ソケットに通常の HTTP 応答が残っている間は Upgrade しない", () => {
@@ -158,7 +179,7 @@ test("ソケットに通常の HTTP 応答が残っている間は Upgrade し�
 });
 
 test("Sendo のハンドシェイク拒否は HTTP の状態コードで返す", async () => {
-  const sendo = mockSendo();
+  const sendo = createServer();
   const body = Buffer.alloc(256 * 1024, "x");
   const upstream = new Promise<Duplex>((resolve) => {
     sendo.on("upgrade", (_incoming, socket) => {
@@ -171,9 +192,13 @@ test("Sendo のハンドシェイク拒否は HTTP の状態コードで返す",
       resolve(socket);
     });
   });
-  const { url } = await startReader(await listen(sendo));
+  const { url, proxy } = await startReader(await listen(sendo));
   const response = await new Promise<IncomingMessage>((resolve, reject) => {
-    const outgoing = request(`${url}${SYNC_UPDATES_PATH}`, { headers }, resolve);
+    const outgoing = request(
+      `${url}${SYNC_UPDATES_PATH}`,
+      { headers: handshakeHeaders(proxy.sessionProtocol(headers.cookie)) },
+      resolve,
+    );
     outgoing.on("error", reject);
     outgoing.end();
   });
@@ -189,7 +214,7 @@ test("Sendo のハンドシェイク拒否は HTTP の状態コードで返す",
 });
 
 test("Sendo の応答を待つ間も、下流が送信を終えたら上流を切断する", async () => {
-  const sendo = mockSendo();
+  const sendo = createServer();
   const incoming = new Promise<Duplex>((resolve) => {
     sendo.on("upgrade", (_incoming, socket) => {
       stops.push(async () => {
@@ -199,14 +224,16 @@ test("Sendo の応答を待つ間も、下流が送信を終えたら上流を�
       resolve(socket);
     });
   });
-  const { url } = await startReader(await listen(sendo));
+  const { url, proxy } = await startReader(await listen(sendo));
   const address = new URL(url);
   const client = createConnection({ host: address.hostname, port: Number(address.port) });
   stops.push(async () => {
     client.destroy();
   });
   await once(client, "connect");
-  const fields = Object.entries(headers).map(([name, value]) => `${name}: ${value}`);
+  const fields = Object.entries(handshakeHeaders(proxy.sessionProtocol(headers.cookie))).map(
+    ([name, value]) => `${name}: ${value}`,
+  );
   client.write(
     `GET ${SYNC_UPDATES_PATH} HTTP/1.1\r\nHost: ${address.host}\r\n${fields.join("\r\n")}\r\n\r\n`,
   );

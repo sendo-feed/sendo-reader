@@ -1,6 +1,7 @@
 import createClient from "openapi-fetch";
 import type { User } from "../models";
 import type { SyncPage } from "../sync/page";
+import { SYNC_UPDATES_PROTOCOL_HEADER } from "../web/sync-updates-protocol";
 import { ApiError, errorFromBody, toApiError } from "./errors";
 import type { paths } from "./schema.gen";
 import { toSyncPage } from "./sync-contract";
@@ -85,6 +86,14 @@ export function createSendoApi(options: SendoApiOptions) {
     return createClient<paths>({ baseUrl, fetch: (request) => send(request, signal) });
   }
 
+  async function session(signal?: AbortSignal): Promise<{ user: User; protocol?: string }> {
+    const { data, error, response } = await client(signal).GET("/me");
+    if (data === undefined) throw errorFromBody(response.status, error);
+    const user = toUser(data);
+    const protocol = response.headers.get(SYNC_UPDATES_PROTOCOL_HEADER);
+    return protocol === null ? { user } : { user, protocol };
+  }
+
   return {
     client,
 
@@ -130,10 +139,9 @@ export function createSendoApi(options: SendoApiOptions) {
 
     /** セッションのユーザー（GET /me）。ログインしていなければ ApiError("unauthorized") */
     async me(signal?: AbortSignal): Promise<User> {
-      const { data, error, response } = await client(signal).GET("/me");
-      if (data === undefined) throw errorFromBody(response.status, error);
-      return toUser(data);
+      return (await session(signal)).user;
     },
+    session,
 
     /** sendo のセッションを消す（POST /auth/logout）。セッションがなくても成功する */
     async logout(signal?: AbortSignal): Promise<void> {

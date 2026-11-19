@@ -1,3 +1,4 @@
+import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import {
   type ClientRequest,
   request as httpRequest,
@@ -8,16 +9,15 @@ import {
 import { request as httpsRequest } from "node:https";
 import type { Socket } from "node:net";
 import type { Duplex } from "node:stream";
-import {
-  SYNC_UPDATES_PROTOCOL_PREFIX,
-  syncUpdatesProtocol,
-} from "../../../packages/core/src/web/sync-updates-protocol.ts";
+import { parse as parseCookie } from "hono/utils/cookie";
+import { SYNC_UPDATES_PROTOCOL_PREFIX } from "../../../packages/core/src/web/sync-updates-protocol.ts";
 import { SYNC_UPDATES_PATH } from "../sendo-paths.ts";
 import { forwardedRequestHeaders, forwardedResponseHeaders } from "./proxy.ts";
 
 const HANDSHAKE_TIMEOUT_MS = 10_000;
 const REJECTION_IDLE_TIMEOUT_MS = 30_000;
 const MAX_PENDING_BYTES = 64 * 1024;
+const SESSION_COOKIE = "__Host-sendo_session";
 
 function writeResponseHead(
   socket: Duplex,
@@ -38,6 +38,15 @@ export function createSyncUpdatesProxy(
 ) {
   const sockets = new Set<Duplex>();
   const pendingHttp = new WeakMap<Socket, number>();
+  const sessionKey = randomBytes(32);
+
+  /** /me と Upgrade に同じセッションのクッキーが付いたことを、クッキーを公開せずに確かめる。 */
+  function sessionProtocol(cookieHeader: string | null | undefined): string | undefined {
+    const cookie = cookieHeader ? parseCookie(cookieHeader, SESSION_COOKIE)[SESSION_COOKIE] : null;
+    if (!cookie) return undefined;
+    const proof = createHmac("sha256", sessionKey).update(cookie).digest("base64url");
+    return `${SYNC_UPDATES_PROTOCOL_PREFIX}${proof}`;
+  }
 
   // HTTP 応答が残っているソケットは、応答の順番を管理する Node に任せる。
   function trackRequest(request: IncomingMessage, response: ServerResponse): void {
@@ -88,14 +97,12 @@ export function createSyncUpdatesProxy(
     let upstream: Duplex | undefined;
     let outgoing: ClientRequest | undefined;
     let settled = false;
-    const verification = new AbortController();
     const deadline = setTimeout(() => reject(504), HANDSHAKE_TIMEOUT_MS).unref();
 
     function reject(status: number): void {
       if (settled) return;
       settled = true;
       clearTimeout(deadline);
-      verification.abort();
       outgoing?.destroy();
       if (!downstream.destroyed) {
         downstream.end(
@@ -118,7 +125,6 @@ export function createSyncUpdatesProxy(
     downstream.once("close", () => {
       sockets.delete(downstream);
       clearTimeout(deadline);
-      verification.abort();
       outgoing?.destroy();
       upstream?.destroy();
     });
@@ -185,39 +191,30 @@ export function createSyncUpdatesProxy(
       response.pipe(downstream);
     }
 
-    async function confirmAndConnect(): Promise<void> {
-      if (typeof protocol !== "string" || !protocol.startsWith(SYNC_UPDATES_PROTOCOL_PREFIX)) {
-        reject(400);
-        return;
-      }
-      if (typeof cookie !== "string") {
-        reject(401);
-        return;
-      }
-      // 同じクッキーを使うことで、ブラウザの別タブでセッションが替わっても照合がずれない。
-      const response = await fetch(new URL("/api/v1/me", target), {
-        headers: { cookie },
-        redirect: "manual",
-        signal: verification.signal,
-      });
-      if (!response.ok) {
-        void response.body?.cancel().catch(() => undefined);
-        reject(response.status === 401 ? 401 : 502);
-        return;
-      }
-      const body = (await response.json()) as { user?: { id?: unknown } } | null;
-      if (settled || downstream.destroyed) return;
-      const id = body?.user?.id;
-      if (typeof id !== "string" || id === "") reject(502);
-      else if (syncUpdatesProtocol(id) !== protocol) reject(403);
-      else forwardUpgrade(protocol);
+    if (typeof protocol !== "string" || !protocol.startsWith(SYNC_UPDATES_PROTOCOL_PREFIX)) {
+      reject(400);
+      return;
     }
-
-    void confirmAndConnect().catch(() => reject(502));
+    const expected = sessionProtocol(typeof cookie === "string" ? cookie : undefined);
+    if (expected === undefined) {
+      reject(401);
+      return;
+    }
+    const offeredBytes = Buffer.from(protocol);
+    const expectedBytes = Buffer.from(expected);
+    if (
+      offeredBytes.length !== expectedBytes.length ||
+      !timingSafeEqual(offeredBytes, expectedBytes)
+    ) {
+      reject(403);
+      return;
+    }
+    forwardUpgrade(protocol);
   }
 
   return {
     handle,
+    sessionProtocol,
     shouldUpgrade,
     trackRequest,
     stop() {
