@@ -124,6 +124,31 @@ test("移動・フォルダの作成と名前変更・削除・購読解除は�
   await expect.poll(() => server.feeds.get(news.id)?.folderId).toBeNull();
 });
 
+test.describe("タッチ操作での表示名編集", () => {
+  const size = { width: 320, height: 740 };
+  test.use({ hasTouch: true, isMobile: true, screen: size, viewport: size });
+
+  test("文字サイズが最小でも、入力欄は 16px 以上で画面幅に収まる", async ({ page, context }) => {
+    const { server } = seed();
+    server.putSetting("mobile", "reader.textSize", "xsmall");
+    await routeFakeSendo(context, server);
+    await page.goto("/manage");
+    await signIn(page);
+    await expect(page.locator("html")).toHaveAttribute("data-text-size", "xsmall");
+
+    await page.getByRole("button", { name: "Edit display name: Blog", exact: true }).tap();
+    const input = page.getByRole("textbox", { name: "Feed display name", exact: true });
+    await expect(input).toBeFocused();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(
+      320,
+    );
+    // iOS のフォーカス拡大は Chromium で起きないので、入力欄の実際の文字サイズで確かめる。
+    expect(
+      await input.evaluate((element) => Number.parseFloat(getComputedStyle(element).fontSize)),
+    ).toBeGreaterThanOrEqual(16);
+  });
+});
+
 test("表示名をその場で編集し、オフラインの再起動にも残り、元の名前に戻せる", async ({
   page,
   context,

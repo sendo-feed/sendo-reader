@@ -137,7 +137,8 @@
   input {
     flex: 1;
     min-width: 0;
-    font-size: 0.875rem;
+    /* iOS Safari が入力欄へのフォーカスでページを拡大しないよう、16px を下限にする。 */
+    font-size: max(16px, 0.875rem);
   }
 
   button {
