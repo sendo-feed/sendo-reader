@@ -22,13 +22,16 @@ COPY packages/core packages/core
 COPY apps/web apps/web
 # 設定の画面に出す版の印（vite.config.ts の appVersion）。CI がコミットを渡す
 ARG APP_COMMIT_SHA=unknown
-RUN APP_COMMIT_SHA="$APP_COMMIT_SHA" pnpm --filter @sendo-reader/web exec vite build \
+ARG SENDO_X_EMBED_ORIGIN=""
+RUN APP_COMMIT_SHA="$APP_COMMIT_SHA" SENDO_X_EMBED_ORIGIN="$SENDO_X_EMBED_ORIGIN" pnpm --filter @sendo-reader/web exec vite build \
   && pnpm --filter @sendo-reader/web run build:server
 
 # 動かすイメージ。画面のビルドと、依存まで含めたサーバーのバンドルだけを入れる（node_modules は要らない）
 FROM node:24-bookworm-slim@sha256:dc26ae92c9fb15cf6b1d63e20f0944b2efe0f115b20e00be48fb23fceb061c54 AS runtime
+ARG SENDO_X_EMBED_ORIGIN=""
 ENV NODE_ENV=production \
-    PORT=8080
+    PORT=8080 \
+    SENDO_X_EMBED_ORIGIN=$SENDO_X_EMBED_ORIGIN
 WORKDIR /app
 COPY --from=build /app/apps/web/dist ./dist
 COPY --from=build /app/apps/web/dist-server ./dist-server

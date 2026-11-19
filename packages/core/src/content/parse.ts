@@ -64,9 +64,25 @@ const NAMED: Record<string, string> = {
   nbsp: " ",
 };
 
+function xPostUrl(href: string): string | undefined {
+  const url = new URL(href);
+  if (
+    url.protocol !== "https:" ||
+    url.port !== "" ||
+    url.username !== "" ||
+    url.password !== "" ||
+    !["x.com", "www.x.com", "twitter.com", "www.twitter.com"].includes(url.hostname) ||
+    !/^\/[A-Za-z0-9_]{1,15}\/status\/[0-9]{1,20}\/?$/.test(url.pathname)
+  ) {
+    return undefined;
+  }
+  return `https://x.com${url.pathname.replace(/\/$/, "")}`;
+}
+
 /** 本文の HTML を木にする */
 export function parseContent(html: string): ContentNode[] {
   const root: ContentNode[] = [];
+  const postQuotes = new Set<ContentElement>();
   /** 開いている要素（外から内へ） */
   const open: ContentElement[] = [];
   /** 中身ごと落としている要素と、その入れ子の数 */
@@ -180,6 +196,11 @@ export function parseContent(html: string): ContentNode[] {
       // 行き先のないリンクは、タグを落として中身だけ残す
       if (href === null) continue;
       element.href = href;
+      const quote = open.findLast((parent) => postQuotes.has(parent));
+      const post = quote === undefined ? undefined : xPostUrl(href);
+      if (quote !== undefined && post !== undefined) quote.xPost = post;
+    } else if (name === "blockquote" && read.get("data-embed") === "x") {
+      postQuotes.add(element);
     } else if (name === "td" || name === "th") {
       const colspan = toCount(read.get("colspan"));
       const rowspan = toCount(read.get("rowspan"));
@@ -202,7 +223,7 @@ export function hasVisibleContent(nodes: readonly ContentNode[]): boolean {
   return nodes.some((node) =>
     typeof node === "string"
       ? node.trim() !== ""
-      : node.tag === "img" || hasVisibleContent(node.children),
+      : node.tag === "img" || node.xPost !== undefined || hasVisibleContent(node.children),
   );
 }
 

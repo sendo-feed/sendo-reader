@@ -7,29 +7,35 @@ import {
   IMAGE_CACHE_NAME,
   IMAGE_CACHE_URL_PATTERN,
 } from "../../packages/core/src/web/image-cache.ts";
-import { renderHeadersFile, securityHeaders } from "./security-headers.ts";
+import { renderHeadersFile, securityHeaders, xEmbedOrigin } from "./security-headers.ts";
 import { SENDO_NAVIGATION_DENYLIST } from "./sendo-paths.ts";
+
+const embedOrigin = xEmbedOrigin(process.env.SENDO_X_EMBED_ORIGIN);
 
 /** 手元のサーバーにはヘッダーを付け、本番のビルドには _headers を書き出す */
 function securityHeadersPlugin(): Plugin {
   return {
     name: "sendo-reader:security-headers",
     configureServer(server) {
-      const headers = securityHeaders("development");
+      const headers = securityHeaders("development", embedOrigin);
       server.middlewares.use((_req, res, next) => {
         for (const [name, value] of Object.entries(headers)) res.setHeader(name, value);
         next();
       });
     },
     configurePreviewServer(server) {
-      const headers = securityHeaders("production");
+      const headers = securityHeaders("production", embedOrigin);
       server.middlewares.use((_req, res, next) => {
         for (const [name, value] of Object.entries(headers)) res.setHeader(name, value);
         next();
       });
     },
     generateBundle() {
-      this.emitFile({ type: "asset", fileName: "_headers", source: renderHeadersFile() });
+      this.emitFile({
+        type: "asset",
+        fileName: "_headers",
+        source: renderHeadersFile(embedOrigin),
+      });
     },
   };
 }
@@ -97,7 +103,10 @@ function appVersion(): { commit: string; builtAt: string } {
 }
 
 export default defineConfig({
-  define: { __APP_VERSION__: JSON.stringify(appVersion()) },
+  define: {
+    __APP_VERSION__: JSON.stringify(appVersion()),
+    __X_EMBED_ORIGIN__: JSON.stringify(embedOrigin),
+  },
   plugins: [
     svelte(),
     securityHeadersPlugin(),

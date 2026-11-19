@@ -74,6 +74,8 @@ export interface ContentElement {
   children: ContentNode[];
   /** a だけ。http ／ https だと確かめた、絶対の URL */
   href?: string;
+  /** blockquote だけ。形式を確かめた X の投稿 URL */
+  xPost?: string;
   /** img だけ。sendo の中継を通る、同じオリジンの URL（受け取ったまま） */
   src?: string;
   /** img だけ */

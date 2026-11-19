@@ -1,6 +1,7 @@
 <script lang="ts">
   import type { ContentNode } from "@sendo-reader/core";
   import RemoteImage from "./RemoteImage.svelte";
+  import XPost from "./XPost.svelte";
 
   /**
    * 記事の本文を出す（sendo の docs/decisions/content.md の 6）。本文を出すところは、この部品だけ。
@@ -34,6 +35,10 @@
         height={node.height}
         inline
       />
+    {:else if node.xPost !== undefined}
+      {#key node.xPost}
+        <XPost href={node.xPost}> {@render render(node.children)} </XPost>
+      {/key}
     {:else if node.tag === "a"}
       <a href={node.href} target="_blank" rel="noopener noreferrer nofollow"
         >{@render render(node.children)}</a

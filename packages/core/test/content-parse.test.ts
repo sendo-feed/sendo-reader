@@ -29,6 +29,36 @@ const ELEMENT_KEYS = new Set([
 ]);
 
 describe("sendo が配る形の本文", () => {
+  test("X の埋め込みは本文が空でも投稿 URL を持つ", () => {
+    const nodes = parseContent(
+      '<blockquote data-embed="x"><a href="https://twitter.com/user/status/123456789?ref=foo"></a></blockquote>',
+    );
+    expect(nodes[0]).toMatchObject({
+      tag: "blockquote",
+      xPost: "https://x.com/user/status/123456789",
+    });
+    expect(hasVisibleContent(nodes)).toBe(true);
+  });
+
+  test("X 以外の URL や通常の投稿リンクからは埋め込みを作らない", () => {
+    for (const href of [
+      "https://x.com.example/user/status/123",
+      "https://example.com@x.com/user/status/123",
+      "https://x.com:444/user/status/123",
+      "https://x.com/user/status/123/photo/1",
+      "https://x.com/intent/post",
+    ]) {
+      const [quote] = parseContent(
+        `<blockquote data-embed="x"><a href="${href}">リンク</a></blockquote>`,
+      );
+      expect(quote).not.toHaveProperty("xPost");
+    }
+    const [quote] = parseContent(
+      '<blockquote><a href="https://x.com/user/status/123">通常のリンク</a></blockquote>',
+    );
+    expect(quote).not.toHaveProperty("xPost");
+  });
+
   test("段落、見出し、リスト、引用、コード、表を、入れ子のまま木にする", () => {
     const nodes = parseContent(
       "<h2>見出し</h2><p>本文 <strong>強い</strong> と <em>斜め</em></p>" +

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { contentSecurityPolicy, renderHeadersFile } from "../security-headers";
+import { contentSecurityPolicy, renderHeadersFile, xEmbedOrigin } from "../security-headers";
 
 describe("CSP", () => {
   test("本番では、ほかのオリジンへの通信とインラインのスクリプトを許さない", () => {
@@ -25,4 +25,14 @@ describe("CSP", () => {
     expect(file).toContain(`  Content-Security-Policy: ${contentSecurityPolicy("production")}\n`);
     expect(file).toContain("  X-Content-Type-Options: nosniff\n");
   });
+});
+
+test("X の埋め込みのオリジンだけをフレームの CSP に追加する", () => {
+  const embed = xEmbedOrigin("https://embed.example/");
+  const csp = contentSecurityPolicy("production", embed);
+  expect(csp).toContain("frame-src https://embed.example");
+  expect(csp).toContain("script-src 'self' 'wasm-unsafe-eval'");
+  expect(renderHeadersFile(embed)).toContain("frame-src https://embed.example");
+  expect(contentSecurityPolicy("production")).not.toContain("frame-src");
+  expect(() => xEmbedOrigin("https://embed.example/path")).toThrow();
 });

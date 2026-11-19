@@ -148,6 +148,49 @@ test("全文のある記事は、本文を出す。画像、リンク、コー�
   expect(await violations()).toEqual([]);
 });
 
+test("X の引用は投稿リンクを表示し、設定した隔離フレームを自動で開く", async ({
+  page,
+  context,
+}) => {
+  const { server, blog } = seed();
+  server.deliver(blog.id, {
+    title: "X の投稿を引用した記事",
+    summary: "記事の要約",
+    content:
+      '<p>投稿の紹介</p><blockquote data-embed="x"><a href="https://twitter.com/user/status/123"></a></blockquote><p>記事の続き</p>',
+  });
+  await routeFakeSendo(context, server);
+  const setting = process.env.SENDO_X_EMBED_ORIGIN;
+  if (setting) {
+    await context.route(`${new URL(setting).origin}/**`, (route) =>
+      route.fulfill({
+        contentType: "text/html",
+        body: `<p>公式埋め込みの代わり</p><script>
+        parent.postMessage({type: "sendo:x-post-height", height: 240}, "*");
+        </script>`,
+      }),
+    );
+  }
+  await page.goto("/");
+  await signIn(page);
+  await open(page, "X の投稿を引用した記事");
+
+  const view = page.locator(".article-view");
+  await expect(view.getByRole("link", { name: "X で開く" })).toHaveAttribute(
+    "href",
+    "https://x.com/user/status/123",
+  );
+  const frame = view.locator("iframe");
+  if (setting) {
+    await expect(frame).toHaveAttribute("src", `${new URL(setting).origin}/#123`);
+    await expect(frame).toHaveAttribute("sandbox", "allow-scripts allow-same-origin");
+    await expect(frame).toHaveAttribute("referrerpolicy", "no-referrer");
+    await expect(frame).toHaveAttribute("height", "240");
+  } else {
+    await expect(frame).toHaveCount(0);
+  }
+});
+
 test("要約だけの記事と、本文が配られる前からある記事は、今までどおり要約を出す", async ({
   page,
   context,
