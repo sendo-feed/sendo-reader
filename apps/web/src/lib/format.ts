@@ -23,15 +23,36 @@ export function shortTime(ms: number, now = Date.now()): string {
 
 const weekday = new Intl.DateTimeFormat("ja", { month: "long", day: "numeric", weekday: "short" });
 const month = new Intl.DateTimeFormat("ja", { year: "numeric", month: "long" });
+const startOfDay = (time: number) => new Date(time).setHours(0, 0, 0, 0);
 
 /** 一覧を日付で区切るときの見出し。今日、昨日、この 1 週間は日付、それより前は月 */
 export function dayLabel(ms: number, now = Date.now()): string {
-  const startOfDay = (time: number) => new Date(time).setHours(0, 0, 0, 0);
   const days = Math.round((startOfDay(now) - startOfDay(ms)) / 86_400_000);
   if (days <= 0) return "Today";
   if (days === 1) return "Yesterday";
   if (days < 7) return weekday.format(ms);
   return month.format(ms);
+}
+
+export function formatDate(ms: number): string {
+  return longDate.format(ms);
+}
+
+/** 公開日から過ぎた日数、月数、年数。未来の公開日には経過期間を出さない */
+export function formatArticleAge(ms: number, now = Date.now()): string | null {
+  const days = Math.round((startOfDay(now) - startOfDay(ms)) / 86_400_000);
+  if (days < 0) return null;
+  if (days === 0) return "今日";
+  const today = new Date(now);
+  const published = new Date(ms);
+  const months =
+    (today.getFullYear() - published.getFullYear()) * 12 +
+    today.getMonth() -
+    published.getMonth() -
+    (today.getDate() < published.getDate() ? 1 : 0);
+  if (months >= 12) return `${Math.floor(months / 12)}年以上前`;
+  if (months > 0) return `${months}か月前`;
+  return `${days}日前`;
 }
 
 export function formatDateTime(ms: number): string {

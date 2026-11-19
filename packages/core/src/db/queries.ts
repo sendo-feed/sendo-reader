@@ -175,6 +175,21 @@ export async function listFeeds(db: Executor): Promise<Feed[]> {
   }));
 }
 
+/** 購読ごとに、手元の記事の最新の公開日時を読む。フィード別の公開日時の索引を使う */
+export async function listLatestArticleDates(db: Executor): Promise<Map<string, number>> {
+  const rows = await db.all<{ id: string; published_at: number | null }>(
+    `select f.id, (
+       select a.published_at from articles a where a.feed_id = f.id
+       order by a.published_at desc limit 1
+     ) as published_at from feeds f`,
+  );
+  const dates = new Map<string, number>();
+  for (const row of rows) {
+    if (row.published_at !== null) dates.set(row.id, row.published_at);
+  }
+  return dates;
+}
+
 /** 未読の数。全体、フィードごと、フォルダごと（未読のないものは含まない） */
 export async function countUnread(db: Executor): Promise<UnreadCounts> {
   const rows = await db.all<{ feed_id: string; folder_id: string | null; unread: number }>(
