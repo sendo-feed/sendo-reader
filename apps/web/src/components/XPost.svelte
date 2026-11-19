@@ -43,6 +43,7 @@
   );
 
   function updateRequest() {
+    if (settled || !navigator.onLine) return;
     const forRestore = restoreSignal !== undefined && !restoreSignal.aborted;
     if (request !== undefined) {
       if (inView) request.prioritize();
@@ -59,8 +60,10 @@
       },
       inView,
       () => {
-        if (restoreSignal !== undefined && !restoreSignal.aborted) return true;
-        if (inView && isVisibleNow()) return true;
+        if (navigator.onLine) {
+          if (restoreSignal !== undefined && !restoreSignal.aborted) return true;
+          if (inView && isVisibleNow()) return true;
+        }
         skipped = true;
         inView = false;
         request = undefined;
@@ -82,6 +85,10 @@
   }
 
   function finish(value: number) {
+    if (!navigator.onLine && value === 0 && !settled) {
+      suspendRequest();
+      return;
+    }
     const quote = fallback;
     const scroller = scrollRoot ?? document.scrollingElement;
     const quoteBounds = quote?.getBoundingClientRect();
@@ -124,6 +131,14 @@
     settled = true;
     clearTimeout(timer);
     request?.cancel();
+  }
+
+  function suspendRequest() {
+    if (settled) return;
+    clearTimeout(timer);
+    request?.cancel();
+    request = undefined;
+    active = false;
   }
 
   $effect(() => {
@@ -176,9 +191,13 @@
     };
     element.addEventListener("sendo:open-x-post", loadForRestore);
     element.addEventListener("sendo:restore-x-quote", keepQuoteOpen);
+    window.addEventListener("online", updateRequest);
+    window.addEventListener("offline", suspendRequest);
     return () => {
       element.removeEventListener("sendo:open-x-post", loadForRestore);
       element.removeEventListener("sendo:restore-x-quote", keepQuoteOpen);
+      window.removeEventListener("online", updateRequest);
+      window.removeEventListener("offline", suspendRequest);
       clearTimeout(timer);
       request?.cancel();
     };

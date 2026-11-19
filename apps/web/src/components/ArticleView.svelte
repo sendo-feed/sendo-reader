@@ -352,7 +352,7 @@
         } else {
           const node = body?.querySelector(`[data-content-node="${path.join(".")}"]`) ?? undefined;
           target = node;
-          if (kind === "content" && node === undefined) {
+          if ((kind === "content" || kind === "content-bottom") && node === undefined) {
             // 読み込めず消えた画像などは、残っている最も近い親へ戻す。
             for (let length = path.length - 1; length > 0 && target === undefined; length -= 1) {
               target =
@@ -401,10 +401,9 @@
               target = post ?? quote;
             }
           }
-          top = Math.max(
-            0,
-            scrollTopOf(scroller) + target.getBoundingClientRect().top - viewportTop - anchorOffset,
-          );
+          const rect = target.getBoundingClientRect();
+          const edge = kind === "content-bottom" ? rect.bottom : rect.top;
+          top = Math.max(0, scrollTopOf(scroller) + edge - viewportTop - anchorOffset);
         }
       }
       scrollToTop(scroller, top);
@@ -434,9 +433,6 @@
       }
       if (preceding.length === 0 && (posts.length === 0 || !clamped)) {
         stop();
-      } else if (pending.length === 0 && restoreTimer === undefined) {
-        // 最初の高さの通知のあとに画像などが展開する間も、同じ段落を追う。
-        restoreTimer = setTimeout(stop, 15_000);
       }
     };
 
@@ -450,6 +446,8 @@
       awaitingPosition = false;
       // 保存位置より手前の埋め込みが展開したあと、同じ座標をもう一度適用する。
       if (cancel.signal.aborted) return;
+      // オフラインなどで高さの通知が来ない場合も、復元を終える。
+      restoreTimer = setTimeout(stop, 15_000);
       resizeObserver = new ResizeObserver(restore);
       resizeObserver.observe(element);
       embedObserver = new MutationObserver(restore);
@@ -521,7 +519,7 @@
     const bounds = body.getBoundingClientRect();
     const x = bounds.left + bounds.width / 2;
     const y = Math.max(viewportTop + 1, bounds.top + 1);
-    // 余白を指した場合は少し下も調べ、本文の要素が見つからなければ px の位置を使う。
+    let gapContainer: Element | undefined;
     for (const dy of [0, 16, 32]) {
       if (y + dy >= bounds.bottom) break;
       const at = y + dy;
@@ -537,7 +535,10 @@
           break;
         }
       }
-      if (hit === body) continue;
+      if (hit === body) {
+        gapContainer ??= body;
+        continue;
+      }
       const summary = hit.closest("details[data-x-quote] > summary");
       const node = (summary ?? hit).closest<HTMLElement>("[data-content-node]");
       if (node === null || node.dataset.contentNode === undefined) continue;
@@ -566,11 +567,31 @@
       };
       if (hit === target && hit.matches("div") && hit.querySelector("[data-content-node]")) {
         // 段落間の余白に当たったら、下を調べて段落が見つかった場合はそちらを使う。
-        position.anchor ??= anchor;
+        if (gapContainer === undefined || gapContainer.contains(hit)) gapContainer = hit;
         continue;
       }
       position.anchor = anchor;
       break;
+    }
+    if (position.anchor === undefined && gapContainer !== undefined) {
+      // 余白が広い場合は、隣の本文要素の近い方の端を記録する。
+      let distance = Infinity;
+      for (const child of gapContainer.children) {
+        const path = child.getAttribute("data-content-node");
+        if (path === null) continue;
+        const { top, bottom, height } = child.getBoundingClientRect();
+        if (height === 0) continue;
+        const fromBottom = Math.abs(bottom - y) < Math.abs(top - y);
+        const offset = (fromBottom ? bottom : top) - viewportTop;
+        if (Math.abs(offset) >= distance) continue;
+        distance = Math.abs(offset);
+        position.anchor = {
+          source: content.source,
+          path: path.split(".").map(Number),
+          kind: fromBottom ? "content-bottom" : "content",
+          offset,
+        };
+      }
     }
     return position;
   }

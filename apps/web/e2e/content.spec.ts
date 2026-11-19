@@ -178,7 +178,11 @@ for (const long of [false, true]) {
         `<p>投稿の紹介</p><blockquote data-embed="x"><p><a href="https://example.com">引用内リンク</a></p>${quotedParagraphs} — (@user) <a href="https://twitter.com/user/status/123"></a></blockquote><p>記事の続き</p>${image}` +
         (long
           ? Array.from({ length: 50 }, (_, i) =>
-              i === 12 ? "長い記事の段落 12<br>" : `<p>長い記事の段落 ${i}</p>`,
+              i === 12
+                ? "長い記事の段落 12<br>"
+                : i === 23
+                  ? "<div><br><br><br><br></div><h2>余白の次の見出し</h2>"
+                  : `<p>長い記事の段落 ${i}</p>`,
             ).join("")
           : "") +
         "</div>",
@@ -563,6 +567,41 @@ for (const long of [false, true]) {
             }),
           )
           .toBeLessThan(2);
+
+        const heading = view.getByRole("heading", { name: "余白の次の見出し" });
+        await view.dispatchEvent("wheel", { deltaY: 100 });
+        const savedGap = await heading.evaluate((element) => {
+          const pane = element.closest<HTMLElement>(".article-view");
+          const toolbar = pane?.querySelector(".toolbar");
+          if (!pane || !toolbar) throw new Error("記事のスクロール領域がない");
+          pane.scrollTop +=
+            element.getBoundingClientRect().top - toolbar.getBoundingClientRect().bottom - 70;
+          return pane.scrollTop;
+        });
+        await page.waitForFunction(
+          (top) =>
+            history.state?.article?.top === top && history.state.article.anchor !== undefined,
+          savedGap,
+        );
+        await context.setOffline(true);
+        await page.reload({ waitUntil: "domcontentloaded" });
+        await expect
+          .poll(() =>
+            heading.evaluate((element) => {
+              const toolbar = element.closest(".article-view")?.querySelector(".toolbar");
+              if (!toolbar) throw new Error("記事のツールバーがない");
+              return Math.abs(
+                element.getBoundingClientRect().top - toolbar.getBoundingClientRect().bottom - 70,
+              );
+            }),
+          )
+          .toBeLessThan(2);
+        await view.dispatchEvent("wheel", { deltaY: -100 });
+        await view.evaluate((element) => element.scrollTo({ top: 0 }));
+        await expect(view.getByRole("link", { name: "引用内リンク" })).toBeInViewport();
+        await expect(frame).toHaveCount(0);
+        await context.setOffline(false);
+        await expect(frame).toHaveAttribute("height", "1216");
       } else {
         const fallbackLink = view.getByRole("link", { name: "引用内リンク" });
         await fallbackLink.focus();
