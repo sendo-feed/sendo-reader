@@ -12,7 +12,7 @@ Cloudflare 版の sendo-reader も、使う人がそれぞれ自分の Cloudflar
 1. **sendo と同じく、各自が GitHub で fork し、Cloudflare の Workers Builds でつなぐ。** fork の `main` に push すると、Cloudflare がビルドしてデプロイする。
    - 上流の更新は、GitHub の「Sync fork」で取り込む。取り込んだ push で、そのままデプロイされる。自動で取り込むなら、sendo の 7 の sendo-updater が reader の fork も受け持つ
    - Cloudflare の GitHub App の「Repository access」に、reader の fork も入れる。入れていないと、push でビルドが始まらない
-   - 手元からも `pnpm run deploy` でデプロイできる
+   - 手元からも `pnpm run deploy` でデプロイできる。X の隔離フレームを有効にした構成では、同じ `SENDO_X_EMBED_ORIGIN` を手元のビルド環境にも渡す
 2. **Worker の名前は `sendo-reader` のままにする。**
    - `wrangler.jsonc` の `name` と違うと、ビルドが失敗する
    - sendo の `READER_URL` と、Google の OAuth クライアントのリダイレクト URI は、この名前の `workers.dev` の URL を前提にしている（sendo の README）
@@ -53,5 +53,5 @@ Cloudflare 版の sendo-reader も、使う人がそれぞれ自分の Cloudflar
 ## 見直す条件
 
 - sendo のデプロイの決定が変わったとき。こちらもそろえる。
-- reader に、人ごとの設定や秘密が要るようになったとき。sendo と同じく、画面の変数（`keep_vars`）とシークレットに置く形で決め直す（sendo の 4・5）。
+- reader に、実行時に読む設定や秘密が要るようになったとき。sendo と同じく、画面の変数（`keep_vars`）とシークレットに置く形で決め直す（sendo の 4・5）。
 - `apps/mobile` など、リポジトリから出すものが増えたとき。Workers Builds のビルドを始めるパス（build watch paths）を絞るかを決める。
