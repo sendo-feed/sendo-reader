@@ -36,6 +36,11 @@ test("本番の CSP でワーカーが WSS を開き、通知で差分同期す�
     upstream.on("error", () => response.destroy());
     upstream.end();
   });
+  const connections = new Set<Duplex>();
+  https.on("connection", (socket) => {
+    connections.add(socket);
+    socket.once("close", () => connections.delete(socket));
+  });
   let peer: Duplex | undefined;
   https.on("upgrade", (request, socket) => {
     const key = request.headers["sec-websocket-key"];
@@ -95,7 +100,8 @@ test("本番の CSP でワーカーが WSS を開き、通知で差分同期す�
     peer?.write(Buffer.concat([Buffer.from([0x81, payload.length]), payload]));
     await expect(page.getByText("通知を受け取った記事", { exact: true })).toBeVisible();
   } finally {
-    peer?.destroy();
-    await new Promise<void>((resolve) => https.close(() => resolve()));
+    const closed = new Promise<void>((resolve) => https.close(() => resolve()));
+    for (const socket of connections) socket.destroy();
+    await closed;
   }
 });
