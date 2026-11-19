@@ -27,10 +27,10 @@ export const TEXT_SIZES: readonly TextSize[] = ["xsmall", "small", "medium", "la
 /** 一覧の行を、横にスワイプしたときにすること */
 export type ListSwipe = "none" | "read" | "star";
 /** 記事を、横にスワイプしたときにすること */
-export type ArticleSwipe = "none" | "back" | "next" | "previous";
+export type ArticleSwipe = "none" | "back" | "next" | "previous" | "star";
 
 export const LIST_SWIPES: readonly ListSwipe[] = ["none", "read", "star"];
-export const ARTICLE_SWIPES: readonly ArticleSwipe[] = ["none", "back", "next", "previous"];
+export const ARTICLE_SWIPES: readonly ArticleSwipe[] = ["none", "back", "next", "previous", "star"];
 
 /** 指でのスワイプの割り当て（left は左へ、right は右へ動かしたとき） */
 export interface Swipes {

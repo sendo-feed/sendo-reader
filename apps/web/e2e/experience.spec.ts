@@ -421,6 +421,34 @@ test("狭い画面では、メニューを左から開き、一覧と記事を�
   await expect(page).not.toHaveURL(/article=/);
   await expect(list).toBeVisible();
 
+  // 記事を左へスワイプしたら保存を切り替える、に変える。記事は外へ流さず、少しだけ動かして、
+  // 空いたところに印を出す。離したら切り替えて、元の位置に戻す
+  await page.getByRole("button", { name: "Menu", exact: true }).click();
+  await nav.getByRole("link", { name: "Settings" }).click();
+  await page.getByRole("tab", { name: "Reading", exact: true }).click();
+  await page.getByLabel("Article: swipe left").selectOption({ label: "Save / Unsave" });
+  await page.getByRole("button", { name: "Menu", exact: true }).click();
+  await nav.getByRole("link", { name: "All" }).click();
+  await list.getByText("2 番目").click();
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText("2 番目");
+  await expect(page.getByRole("button", { name: "Save", exact: true })).toBeVisible();
+  await touchArticle("touchmove", -140);
+  await expect(page.locator(".star-hint")).toHaveText("Save");
+  await expect(page.locator(".star-hint")).toHaveClass(/armed/);
+  // 記事の画面はそのまま（後ろに一覧を見せない）
+  await expect(list).toBeHidden();
+  await touchArticle("touchend", -140);
+  await expect(page.getByRole("button", { name: "Unsave" })).toBeVisible();
+  await expect(page.getByRole("status").filter({ hasText: "Saved に入れました。" })).toBeVisible();
+  await expect(view).not.toHaveClass(/moved/);
+  await expect(page.locator(".star-hint")).toHaveCount(0);
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText("2 番目");
+  // もう一度スワイプすると、保存をやめる
+  await flickArticle(-140, 10);
+  await expect(page.getByRole("button", { name: "Save", exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Back" }).click();
+  await expect(list).toBeVisible();
+
   // 広い画面では、左のメニューを出したままにして、下のバーは出さない
   await page.setViewportSize({ width: 1100, height: 780 });
   await expect(tabs).toBeHidden();
