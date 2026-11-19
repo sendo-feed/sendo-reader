@@ -18,7 +18,8 @@
    - 「すべて既読」の境界は、同期済みの範囲（カーソル）にする。手元に届いていない記事を、見ないまま既読にしない
 4. **Web の SQLite は、公式の `@sqlite.org/sqlite-wasm` と `opfs-sahpool` の VFS にする。** 専用のワーカー（Dedicated Worker）の中で動かし、データは OPFS に置く。COOP ／ COEP のヘッダーは要らないので付けない。
 5. **どのタブでも使えるようにする。** タブごとにワーカーを持ち、Web Locks で代表のタブを 1 つ決める。
-   - 代表のタブのワーカーだけが DB を開き、同期と操作キューの送信を回す
+   - 代表のタブのワーカーだけが DB を開き、同期と操作キューの送信を回す。更新通知の接続もこのワーカーが持つ。差分同期のきっかけとして使い、接続を失っても定期同期を続ける
+   - ログアウトやユーザーの切り替えで、前のセッションの通知接続を閉じる。新しいセッションで同期が通ってから、そのセッションで通知に接続する
    - ほかのタブのワーカーは、読み書きを BroadcastChannel で代表に頼む（SQLite の wasm は読み込まない）
    - 代表が書き込んだら、変わった表をすべてのタブに知らせ、各タブは画面に出している読み出しをやり直す
    - 代表のタブが閉じたら、待っていたタブが代表を引き継ぎ、DB を開き直す。引き継ぎの間に頼んだ読み書きは、新しい代表にやり直す（操作は冪等にしておく）
@@ -50,6 +51,7 @@
   - `default-src 'none'`、`script-src 'self' 'wasm-unsafe-eval'`（wasm のため）、`worker-src 'self'`、`connect-src 'self'`、`img-src 'self' data:`、`style-src 'self'`、`manifest-src 'self'`、`base-uri 'none'`、`form-action 'none'`、`frame-ancestors 'none'`、`object-src 'none'`
   - インラインのスクリプトと `eval` を許さない。ほかのオリジンへの通信を許さないので、手元のデータを `fetch` で外に送れない
   - 記事のサムネイルやフィードのアイコンのために、`img-src` は緩めない。画像は sendo が中継し、同じオリジン（`/api/v1/images`）から読む（[画像](images.md)）
+  - 更新通知の WebSocket は、reader と同じホストとポートに接続する。本番の `connect-src 'self'` で接続を確かめ、ブラウザが接続できない間は定期同期で追いつく
   - ほかに緩める必要が出たら、そのときに範囲を決めてこのファイルを直す
   - 手元の dev サーバーだけは、2 つ緩める。Vite が開発中の CSS を `<style>` で差し込むので `style-src` に `'unsafe-inline'` を足し、Vite のエラーの表示が `innerHTML` を使うので Trusted Types を強制しない。それ以外（ほかのオリジンへの通信、インラインのスクリプト、`eval` を許さない）は本番と同じにする。本番と同じヘッダーは、本番のビルドを `vite preview` と Playwright で開いて確かめる
 - **Trusted Types を強制する**（`require-trusted-types-for 'script'`）。許すポリシーは、Svelte が作るもの（`svelte-trusted-html`）と、ワーカーの URL を自分のオリジンに限るものだけにする。対応していないブラウザでは効かないので、ほかの対策と重ねる。

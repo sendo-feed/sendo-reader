@@ -13,7 +13,7 @@ sendo-reader は、[sendo のコンテナ版](https://github.com/sendo-feed/send
    - イメージは公開する（sendo のイメージと同じ）。使う人は `docker login` せずに取ってこられる
    - sendo の `compose.yaml` に reader のサービスを並べ、`docker compose pull && docker compose up -d` で sendo と一緒に更新する。reader は、sendo のヘルスチェックが通ってから始める（`depends_on` の `condition: service_healthy`）
 2. **外からは、reader のオリジン 1 つに見せる。**
-   - 外に出すのは reader のコンテナのポート（`compose.yaml` では `127.0.0.1:8080:8080`）だけにする。TLS は、sendo と同じく、手前に置くリバースプロキシ（Caddy など）や Cloudflare Tunnel で終える。コンテナは HTTP だけを受ける
+   - 外に出すのは reader のコンテナのポート（`compose.yaml` では `127.0.0.1:8080:8080`）だけにする。TLS は、sendo と同じく、手前に置くリバースプロキシ（Caddy など）や Cloudflare Tunnel で終える。`/api/v1/sync/updates` の WebSocket Upgrade も reader に通す。コンテナは HTTP だけを受ける
    - sendo のコンテナは、ポートを外に出さない。reader のコンテナが、compose の中のネットワークで呼ぶ
    - sendo の `PUBLIC_URL` と `READER_URL` には、どちらも reader のオリジン（例：`https://reader.example.com`）を入れる。`PUBLIC_URL` は欠かせない。コンテナは HTTP だけを受けるので、ないと sendo から見える URL は、中継の先の URL（`http://sendo:8787`）か、ホスト名は合っていても `http` のままのオリジンになり、ログインの戻り先や `__Host-` のクッキーが合わない
    - Google のリダイレクト URI、リーダーアプリ（Google Reader API）のサーバー、MCP の URL も、このオリジンにする
@@ -31,6 +31,7 @@ sendo-reader は、[sendo のコンテナ版](https://github.com/sendo-feed/send
    - リダイレクトは追わずに、そのまま返す（ログインの 302 など）
    - 応答の状態、ヘッダー（複数の `Set-Cookie` を含む）、本文をそのまま返す。本文は溜めずに流す（MCP、OPML の書き出しなど）
    - sendo の応答には、画面のセキュリティのヘッダーを足さない
+   - 通知用の `GET /api/v1/sync/updates` だけは WebSocket Upgrade を中継する。ブラウザの `Origin` とクッキーを Sendo に渡し、Sendo が `101` を返してからブラウザにも `101` を返して両方向に流す。Sendo が拒否したら、その HTTP 応答を返す。接続の片側が閉じたときと reader が停止するときは残りの接続も閉じる（sendo の[差分同期](https://github.com/sendo-feed/sendo/blob/main/docs/decisions/sync.md)の 9）
    - 中継の先は設定 `SENDO_URL` で変えられる（既定は compose の中の `http://sendo:8787`）。reader のコンテナに、ほかの設定は要らない（自分のオリジンも知らなくてよい）
 5. **静的なファイルは、次のように返す。**
    - `apps/web/security-headers.ts` のヘッダーを、静的なファイルのすべての応答に付ける。手元の Vite の dev サーバー・preview も同じところから付け、別に書き写さない
@@ -38,10 +39,10 @@ sendo-reader は、[sendo のコンテナ版](https://github.com/sendo-feed/send
    - JS、CSS、wasm などは、ブラウザが受けられれば圧縮して返す（brotli か gzip）
 6. **reader のコンテナのヘルスチェック（イメージの `HEALTHCHECK`）は、reader 自身が返す `/`（`index.html`）を見る。** `/healthz` は sendo に中継するので、reader のコンテナで見ると sendo の生死を見ることになる。reader のためだけのパスは足さない（sendo のパスと重なるおそれを増やさない）。
 7. **サーバーは Node で書く。** HTTP は Hono と `@hono/node-server`（sendo と同じ）で受ける。コードは `apps/web/server/` に置き、ここだけ `node:*` を使ってよい。イメージには、画面のビルド（`vite build` の `dist`）と、依存ごと 1 つのファイルにまとめたサーバーを入れる。
-8. **sendo の機能は、すべて使える前提で作る。`GET /api/v1/features` は見ない。**
+8. **本文の抽出と言語判定は使える前提で作る。通知の対応は `GET /api/v1/features` で確かめる。**
    - sendo は、ページ本文の抽出と言語判定を常に動かし、欠いたままでは起動しない（sendo の[コンテナ版](https://github.com/sendo-feed/sendo/blob/main/docs/decisions/container.md)の 1〜3）。reader は、全文の取得を、いつでも使える機能として出す
-   - `/features` は、この決定を実装する PR で使わなくする。その PR を含む reader のイメージが GHCR の `main` に出たら、sendo は `/features` を消してよい（sendo の[コンテナ版](https://github.com/sendo-feed/sendo/blob/main/docs/decisions/container.md)の 3）
-   - 消したあとに、古い版の画面（Service Worker に残った版）が `/features` を呼んでも、404 を「全文を使えない」と受けて、全文の取得の操作を出さないだけで動き続ける。新しい版に切り替われば（[UI とツール](ui.md)の 5）、出る
+   - sendo が機能一覧に `syncUpdates: true` を返したら、画面と同じオリジンの `/api/v1/sync/updates` に WebSocket の接続を試す（sendo の[差分同期](https://github.com/sendo-feed/sendo/blob/main/docs/decisions/sync.md)の 9）。実際に接続が開けば、その時点で動いている reader が中継できることを確かめられる。初回接続や再接続が開いたあとと通知を受けたときに、手元のカーソルから差分同期を始める。同期の失敗後は、決まった再試行の間隔を守る。接続中も定期同期を続け、どちらかが未対応でつながらない間も定期同期で動く
+   - 通知接続に失敗したときや切断されたときは、5 秒、15 秒、1 分、5 分と間隔を延ばしてつなぎ直す。つながれば間隔を元に戻す。Sendo が機能一覧で未対応を返したときは、5 分後に対応を確かめ直す
 9. **テストは Node で動かす。** 中継するパスの振り分け、中継（ヘッダー、`Set-Cookie`、リダイレクト、ストリーム）、静的なファイルのヘッダーを、偽の sendo を相手に Vitest で確かめる。CI では、PR でイメージが作れて動くことを確かめ、`main` に入ったらイメージを出す（sendo と同じ形）。
 
 ## 理由
@@ -69,9 +70,11 @@ sendo-reader は、[sendo のコンテナ版](https://github.com/sendo-feed/send
   - `security-headers.ts` をそのまま読み込めて、ヘッダーを 1 か所で保てる
   - 振り分けと中継を、ほかのテストと同じ Vitest で確かめられる
   - sendo と同じ道具（Node、Hono）で、2 つのコンテナの作りがそろう
-- **すべての機能を使える前提にする**
-  - sendo は機能を欠いたまま起動しないので、出し分けても、欠けた sendo を相手にすることがない。分岐とそのテストを残すと、使われないまま保つことになり、記事を開くたびに `/features` を呼ぶ
-  - reader が先に使わなくなれば、sendo はいつ消しても reader を壊さない。sendo が先に消しても、古い画面は 404 を「使えない」と受けるので壊れないが、新しい版に替わるまで全文の取得が出なくなる。reader から先に外す
+- **記事を開いたときは全文の取得をすぐ試す**
+  - sendo は本文の抽出を欠いたまま起動しないので、記事ごとに機能一覧を問い合わせる必要がなくなる
+- **更新通知の対応を確かめてからつなぐ**
+  - sendo と reader のイメージは別々に更新される。古い sendo が稼働している間も、定期同期で使い続けられる
+
 
 ## 検討した代替案
 
@@ -83,7 +86,7 @@ sendo-reader は、[sendo のコンテナ版](https://github.com/sendo-feed/send
   - sendo の `PUBLIC_URL` を reader のオリジンにすれば、sendo を変えずに動く。ただ、OAuth の発行者と MCP の宛先も reader のオリジンになるので、reader Worker が `/mcp`、OAuth、Google Reader API もすべて中継することになる。sendo のコンテナも外に出す必要があり、使う人が置くものが 2 か所（Cloudflare とサーバー）に分かれ、配り方と中継を 2 組保つことになる
 - **静的な配信のサーバー（Caddy、nginx）で返し、中継する**：配信と中継はよくこなれていて、イメージも小さい。ただ、設定の言語が 1 つ増え、ヘッダーを `security-headers.ts` とは別の形で書き出すことになる。振り分けを確かめるにも、サーバーを動かす必要がある。
 - **中継するパスを、`/` 以外は全部 sendo にする、ページの移動かどうかで分ける**：上の「許す一覧で中継する」の理由で採らない。
-- **`/features` を見た出し分けを残す**：sendo が機能を欠いた形で動くようになっても、そのまま対応できる。ただ、sendo は欠いたまま起動しないと決めていて、使われない分岐とテストが残る。
+- **本文の抽出を機能一覧で出し分ける**：sendo が機能を欠いた形で動くようになっても、そのまま対応できる。ただ、sendo は欠いたまま起動しないと決めていて、使われない分岐とテストが残る。
 
 ## 見直す条件
 

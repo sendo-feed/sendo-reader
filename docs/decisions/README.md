@@ -13,7 +13,7 @@ sendo-reader で決めたことを、テーマごとに1ファイルで置く。
 | [設定の同期](settings.md) | 提案中 | 表示の設定を sendo に預け、端末の種類（スマホは `mobile`、ほかは `desktop`）ごとに引き継ぐ。項目ごとに手元の DB に置いて操作キューで送り、既定と同じ値は預けない。「未読」は一覧の絞り込みの状態で、別の画面にはしない。前の localStorage の設定は、同期してから sendo にない項目だけを送る |
 | [アカウントの画面](account.md) | 提案中 | 設定の画面でアクセストークンと OAuth の許可を管理し、OAuth の許可の画面を置く。どちらもネットワークが要る画面で、発行したトークンは一度だけ出して保存しない。許可は毎回、利用者が押して決める |
 | [速さの予算](performance.md) | 提案中 | 画面のスレッドの JS は gzip 後 100KB 以下、ワーカーは JS と wasm で 550KB 以下。キャッシュ済みの起動から記事まで 1 秒、操作の反応は 100ms |
-| [コンテナ版](container.md) | 提案中 | sendo と並べて、コンテナだけで配る（`ghcr.io/sendo-feed/sendo-reader`）。Cloudflare では動かさない。外からは reader のオリジン 1 つに見せ、sendo の `PUBLIC_URL` と `READER_URL` をそのオリジンにする。sendo のパスは許す一覧で中継し、書き換えない。サーバーは Node（Hono）。sendo の機能はすべて使える前提にし、`/api/v1/features` は見ない |
+| [コンテナ版](container.md) | 提案中 | sendo と並べて、コンテナだけで配る（`ghcr.io/sendo-feed/sendo-reader`）。Cloudflare では動かさない。外からは reader のオリジン 1 つに見せ、sendo の `PUBLIC_URL` と `READER_URL` をそのオリジンにする。sendo のパスは許す一覧で中継し、書き換えない。サーバーは Node（Hono）。本文の抽出と言語判定は使える前提にする。更新通知は対応を確かめ、同じオリジンで WebSocket を中継する |
 
 経緯を知りたいとき：
 
