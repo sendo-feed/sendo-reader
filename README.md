@@ -112,7 +112,7 @@ pnpm run deploy
 
 上流の CI が作ったイメージ（`ghcr.io/sendo-feed/sendo-reader`）を、Sendo のコンテナ版と同じ `compose.yaml` で動かします。標準構成では fork もビルドも要りません。標準構成の手順は [Sendo の README](https://github.com/sendo-feed/sendo#動かす) にあります（[決定](docs/decisions/container.md)）。
 
-X の公式埋め込みを有効にするときは、別の HTTPS ホストを用意して reader のイメージをビルドします。有効化と更新は [コンテナ版の決定の 2](docs/decisions/container.md#決定)を参照してください。
+X の公式埋め込みを有効にするには、Sendo と reader の両方で対応版が必要です。対応版の reader は、別の HTTPS ホストを用意し、その配信元を指定してイメージをビルドします。有効化と更新は [コンテナ版の決定の 2](docs/decisions/container.md#決定)を参照してください。
 
 - Compose では reader のコンテナのポートを公開します。reader のコンテナが画面を返し、Sendo のパス（`/api`、`/mcp`、OAuth、Google Reader API など）を、compose の中の Sendo に中継します。画面・API・認証は同じ reader のオリジンを使います
 - Sendo の `PUBLIC_URL` と `READER_URL` には、どちらも reader のオリジン（例：`https://reader.example.com`）を入れます。Google のリダイレクト URI、リーダーアプリのサーバー、MCP の URL も、このオリジンにします
