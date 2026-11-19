@@ -53,3 +53,21 @@ test("画面外に出た投稿は、復元に必要な場合だけ待ち行列�
   finish.get("visible")?.();
   expect(started).toEqual(["active", "second", "third", "restore"]);
 });
+
+test("表示条件が変わった投稿は、開始直前に読み込みを取り消す", () => {
+  const enqueue = createXEmbedQueue();
+  const finish: Array<() => void> = [];
+  for (let i = 0; i < 4; i += 1) enqueue((done) => finish.push(done), true);
+  const started: string[] = [];
+  let visible = true;
+  enqueue(
+    () => started.push("画面外"),
+    true,
+    () => visible,
+  );
+  enqueue(() => started.push("画面内"), true);
+
+  visible = false;
+  finish[0]?.();
+  expect(started).toEqual(["画面内"]);
+});

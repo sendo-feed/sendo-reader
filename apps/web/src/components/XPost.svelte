@@ -51,10 +51,34 @@
       return;
     }
     if (!inView && !forRestore) return;
-    request = enqueue(() => {
-      active = true;
-      timer = setTimeout(() => finish(0), 15_000);
-    }, inView);
+    let skipped = false;
+    const queued = enqueue(
+      () => {
+        active = true;
+        timer = setTimeout(() => finish(0), 15_000);
+      },
+      inView,
+      () => {
+        if (restoreSignal !== undefined && !restoreSignal.aborted) return true;
+        if (inView && isVisibleNow()) return true;
+        skipped = true;
+        inView = false;
+        request = undefined;
+        return false;
+      },
+    );
+    if (!skipped) request = queued;
+  }
+
+  function isVisibleNow() {
+    const bounds = block?.getBoundingClientRect();
+    if (awaitingPosition || !bounds || bounds.width === 0 || bounds.height === 0) return false;
+    const root = scrollRoot?.getBoundingClientRect();
+    const top = Math.max(0, root ? root.top + toolbarHeight : 0);
+    const bottom = Math.min(window.innerHeight, root?.bottom ?? window.innerHeight - toolbarHeight);
+    const left = Math.max(0, root?.left ?? 0);
+    const right = Math.min(window.innerWidth, root?.right ?? window.innerWidth);
+    return bounds.bottom > top && bounds.top < bottom && bounds.right > left && bounds.left < right;
   }
 
   function finish(value: number) {

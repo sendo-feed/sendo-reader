@@ -21,7 +21,11 @@ export function createXEmbedQueue() {
     }
   }
 
-  return function enqueue(load: (done: () => void) => void, inView: boolean): XEmbedRequest {
+  return function enqueue(
+    load: (done: () => void) => void,
+    inView: boolean,
+    canStart: () => boolean = () => true,
+  ): XEmbedRequest {
     let active = false;
     function done() {
       if (!active) return;
@@ -32,6 +36,7 @@ export function createXEmbedQueue() {
     function start() {
       visible.delete(start);
       restoring.delete(start);
+      if (!canStart()) return;
       active = true;
       loading += 1;
       load(done);

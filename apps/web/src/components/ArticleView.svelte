@@ -298,7 +298,6 @@
     const restore = () => {
       const viewportTop = articleViewportTop();
       let top = saved.top;
-      let matchedAnchor = false;
       const anchorPosts = new Set<Element>();
       const requiredPosts = new Set<Element>();
       if (saved.anchor !== undefined && saved.anchor.source === content?.source) {
@@ -344,7 +343,6 @@
           }
         }
         if (target !== undefined) {
-          matchedAnchor = true;
           const summary = target.closest<HTMLElement>("details[data-x-quote] > summary");
           for (
             let quote = target.closest<HTMLDetailsElement>("details[data-x-quote]");
@@ -379,9 +377,7 @@
         return rect.width > 0 && rect.height > 0 && rect.top - viewportTop + offset < top;
       });
       const pending = preceding.filter(
-        (post) =>
-          post.getAttribute("data-x-embed") === "waiting" &&
-          (requiredPosts.has(post) || (clamped && !matchedAnchor)),
+        (post) => post.getAttribute("data-x-embed") === "waiting" && requiredPosts.has(post),
       );
       const wanted = new Set(pending);
       for (const [post, queued] of queuedPosts) {
@@ -498,11 +494,13 @@
       const at = y + dy;
       let hit = document.elementFromPoint(x, at);
       if (hit === null || !body.contains(hit)) continue;
-      // 改行で区切った短い文字列の横では、文字列と同じ高さの行を探す。
-      for (const text of hit.querySelectorAll(":scope > [data-content-text]")) {
-        const bounds = text.getBoundingClientRect();
+      // 本文の中央から外れた文字や画像も、その行のアンカーになる。
+      for (const candidate of hit.querySelectorAll(
+        ":scope > [data-content-text], :scope > img[data-content-node], :scope > a > img[data-content-node]",
+      )) {
+        const bounds = candidate.getBoundingClientRect();
         if (bounds.top <= at && at < bounds.bottom) {
-          hit = text;
+          hit = candidate;
           break;
         }
       }

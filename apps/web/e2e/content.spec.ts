@@ -166,7 +166,7 @@ for (const long of [false, true]) {
           i === 6
             ? "記事中の引用の段落 6<br>"
             : i === 8
-              ? `<img src="${escapeHtml(server.imageUrl(quotedImage))}" alt="引用内画像" width="600" height="64">`
+              ? `<img src="${escapeHtml(server.imageUrl(quotedImage))}" alt="引用内画像" width="64" height="64">`
               : `<p>記事中の引用の段落 ${i}</p>`,
         ).join("")
       : "";
