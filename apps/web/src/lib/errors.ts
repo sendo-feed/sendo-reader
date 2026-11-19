@@ -1,6 +1,27 @@
 import { ApiError, type SyncStatus } from "@sendo-reader/core";
 import { AccountChangedError } from "./account";
 
+export const DISCORD_UNAVAILABLE =
+  "Sendo サーバーに Discord 連携の設定がないため、利用できません。";
+
+export function describeDiscordError(error: unknown): string {
+  if (error instanceof ApiError) {
+    switch (error.code) {
+      case "feature_unavailable":
+        return DISCORD_UNAVAILABLE;
+      case "invalid_channel_url":
+        return "Discord のチャンネル URL（https://discord.com/channels/…）を入力してください。";
+      case "channel_not_found":
+        return "チャンネルを読めません。チャンネルが存在し、接続したアカウントと Bot の両方にチャンネルの閲覧とメッセージ履歴の読み取りが許可されているか確認してください。購読できるのは年齢制限のないテキスト・アナウンスチャンネルです。";
+      case "discord_not_connected":
+        return "Discord との接続がありません。Discord を接続してからやり直してください。";
+      case "discord_unavailable":
+        return "Discord が応答しませんでした。少し待ってからやり直してください。";
+    }
+  }
+  return describeError(error);
+}
+
 /** 失敗を、画面に出す文にする */
 export function describeError(error: unknown): string {
   if (error instanceof AccountChangedError) {
