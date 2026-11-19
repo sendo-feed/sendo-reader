@@ -42,7 +42,7 @@ sendo-reader は、[sendo のコンテナ版](https://github.com/sendo-feed/send
 7. **サーバーは Node で書く。** HTTP は Hono と `@hono/node-server`（sendo と同じ）で受ける。コードは `apps/web/server/` に置き、ここだけ `node:*` を使ってよい。イメージには、画面のビルド（`vite build` の `dist`）と、依存ごと 1 つのファイルにまとめたサーバーを入れる。
 8. **sendo の機能は、すべて使える前提で作る。`GET /api/v1/features` は見ない。**
    - sendo は、ページ本文の抽出と言語判定を常に動かし、欠いたままでは起動しない（sendo の[コンテナ版](https://github.com/sendo-feed/sendo/blob/main/docs/decisions/container.md)の 1〜3）。reader は、全文の取得を、いつでも使える機能として出す
-   - `/features` は、この決定を実装する PR で使わなくする。その PR を含む reader のイメージが GHCR の `main` に出たら、sendo は `/features` を消してよい（sendo の[コンテナ版](https://github.com/sendo-feed/sendo/blob/main/docs/decisions/container.md)の 3）
+   - `/features` は、現行 reader は参照しない。参照を廃止した reader のイメージが GHCR の `main` に出たら、sendo は `/features` を消してよい（sendo の[コンテナ版](https://github.com/sendo-feed/sendo/blob/main/docs/decisions/container.md)の 3）
    - 消したあとに、古い版の画面（Service Worker に残った版）が `/features` を呼んでも、404 を「全文を使えない」と受けて、全文の取得の操作を出さないだけで動き続ける。新しい版に切り替われば（[UI とツール](ui.md)の 5）、出る
 9. **テストは Node で動かす。** 中継するパスの振り分け、中継（ヘッダー、`Set-Cookie`、リダイレクト、ストリーム）、静的なファイルのヘッダーを、偽の sendo を相手に Vitest で確かめる。CI では、PR でイメージが作れて動くことを確かめ、`main` に入ったらイメージを出す（sendo と同じ形）。
 
@@ -73,7 +73,7 @@ sendo-reader は、[sendo のコンテナ版](https://github.com/sendo-feed/send
   - sendo と同じ道具（Node、Hono）で、2 つのコンテナの作りがそろう
 - **すべての機能を使える前提にする**
   - sendo は機能を欠いたまま起動しないので、出し分けても、欠けた sendo を相手にすることがない。分岐とそのテストを残すと、使われないまま保つことになり、記事を開くたびに `/features` を呼ぶ
-  - reader が先に使わなくなれば、sendo はいつ消しても reader を壊さない。sendo が先に消しても、古い画面は 404 を「使えない」と受けるので壊れないが、新しい版に替わるまで全文の取得が出なくなる。reader から先に外す
+  - 現行 reader は `/features` を参照しない。削除した場合、キャッシュ済みの旧 reader は 404 を「使えない」と受け、新しい版へ切り替わるまで全文の取得を表示しない
 
 ## 検討した代替案
 
