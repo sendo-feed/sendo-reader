@@ -27,7 +27,13 @@ function world(updates = false) {
     channel.onmessage = ({ data }: MessageEvent<string>) => connections.push(data);
     cleanups.push(() => channel.close());
   }
-  cleanups.push(serveFakeSendo(server, `${namespace}:fake-sendo`));
+  cleanups.push(
+    serveFakeSendo(
+      server,
+      `${namespace}:fake-sendo`,
+      updates ? "sendo-sync.worker-test" : undefined,
+    ),
+  );
   /** タブを開く。"failing" なら、DB を開けないワーカーにする */
   const open = (kind: "ok" | "failing" = "ok"): Tab => {
     // Vite はワーカーのオプションを、その場に書いた値からしか読めない

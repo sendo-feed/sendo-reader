@@ -1,3 +1,4 @@
+import { SYNC_UPDATES_PROTOCOL_HEADER } from "../../src/web/sync-updates-protocol";
 import type { FakeSendo } from "../fake-sendo";
 
 /**
@@ -18,7 +19,11 @@ type BridgeResponse =
   | { kind: "error"; id: string; message: string };
 
 /** テストのページで、偽の sendo を答えさせる。やめるときは返した関数を呼ぶ */
-export function serveFakeSendo(server: FakeSendo, channelName: string): () => void {
+export function serveFakeSendo(
+  server: FakeSendo,
+  channelName: string,
+  syncProtocol?: string,
+): () => void {
   const channel = new BroadcastChannel(channelName);
   // テストが終わってチャンネルを閉じたあとに、遅れて届いた頼み（裏の同期など）に答えない
   let closed = false;
@@ -32,6 +37,9 @@ export function serveFakeSendo(server: FakeSendo, channelName: string): () => vo
       const init: RequestInit = { method: message.method, headers: message.headers };
       if (message.body !== null) init.body = message.body;
       const response = await server.fetch(new Request(message.url, init));
+      if (syncProtocol && response.ok && new URL(message.url).pathname === "/api/v1/me") {
+        response.headers.set(SYNC_UPDATES_PROTOCOL_HEADER, syncProtocol);
+      }
       reply({
         kind: "response",
         id: message.id,

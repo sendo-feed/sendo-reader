@@ -80,8 +80,8 @@ test("初回と再接続で同期し、通知を読む。停止したら再接�
   expect(onUpdate).toHaveBeenCalledTimes(1);
 });
 
-test("旧版の中継が接続を受けなければ、間隔を延ばしてつなぎ直す", async () => {
-  const sessionProtocol = vi.fn().mockResolvedValue(undefined);
+test("中継が接続を受けなければ、間隔を延ばしてつなぎ直す", async () => {
+  const sessionProtocol = vi.fn().mockResolvedValue("sendo-sync.test");
   stop = startSyncUpdates({
     baseUrl: "/api/v1",
     session: session.signal,
@@ -101,6 +101,22 @@ test("旧版の中継が接続を受けなければ、間隔を延ばしてつ�
   expect(TestSocket.sockets).toHaveLength(2);
   await vi.advanceTimersByTimeAsync(1);
   expect(TestSocket.sockets).toHaveLength(3);
+});
+
+test("照合値が届くまで WebSocket を開かない", async () => {
+  const sessionProtocol = vi.fn().mockResolvedValueOnce(undefined);
+  sessionProtocol.mockResolvedValue("sendo-sync.test");
+  stop = startSyncUpdates({
+    baseUrl: "/api/v1",
+    session: session.signal,
+    sessionProtocol,
+    onOpen: vi.fn(),
+    onUpdate: vi.fn(),
+  });
+  await vi.advanceTimersByTimeAsync(RETRY_DELAYS_MS[0] - 1);
+  expect(TestSocket.sockets).toHaveLength(0);
+  await vi.advanceTimersByTimeAsync(1);
+  expect(TestSocket.sockets[0]?.protocol).toBe("sendo-sync.test");
 });
 
 test("ユーザーの確認に一時的に失敗したら、再試行の間隔を待って確認し直す", async () => {

@@ -45,7 +45,7 @@ export function startSyncUpdates(options: SyncUpdatesOptions): () => void {
     try {
       const protocol = await options.sessionProtocol(lifetime.signal);
       if (lifetime.signal.aborted) return;
-      if (protocol === null) {
+      if (!protocol) {
         retryAfterFailure();
         return;
       }
