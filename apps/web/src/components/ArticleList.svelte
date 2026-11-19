@@ -123,6 +123,17 @@
   /** スクロールで残りの未読を読み切り、手元への書き込みも終えた一覧 */
   let finishedScroll = $state<number | null>(null);
   let completed = $state(false);
+  const endCompleted = $derived(
+    completed &&
+      !list.loading &&
+      !list.hasMore &&
+      (unread === 0 || list.fresh > 0) &&
+      list.articles.every((article) => article.readAt !== null),
+  );
+  const showNewAtEnd = $derived(endCompleted && list.fresh > 0);
+  // 最後の行が見出しを通り過ぎても、そのままブラウザの慣性で進める距離（px）
+  const endScrollSpace = $derived(filterable && prefs.value.markReadOnScroll ? 72 : 0);
+  const END_SWIPE_THRESHOLD = 64;
 
   async function flushPassed() {
     const targets = new Set(passed);
@@ -132,7 +143,6 @@
     const finishes =
       filterable &&
       !list.hasMore &&
-      list.fresh === 0 &&
       list.articles.some((article) => article.readAt === null && targets.has(article.id)) &&
       list.articles.every((article) => article.readAt !== null || targets.has(article.id));
     try {
@@ -143,17 +153,16 @@
     }
   }
 
-  // 数の読み直しを待ってから祝う。別の端末で既読になっただけ、途中のページ、最初から空の一覧では
-  // 出さない。既読にした行は残るので、戻ってもう一度通っても、同じ一覧では繰り返さない
+  // 新着を取り込む前も、表示中の最後の未読をスクロールで読み切ったら祝う。
+  // 既読にした行は残るので、戻ってもう一度通っても、同じ一覧では繰り返さない
   $effect(() => {
     if (
       finishedScroll === list.generation &&
       !completed &&
       !list.loading &&
       !list.hasMore &&
-      list.fresh === 0 &&
       router.articleId === null &&
-      unread === 0 &&
+      (unread === 0 || list.fresh > 0) &&
       list.articles.length > 0 &&
       list.articles.every((article) => article.readAt !== null)
     )
@@ -161,14 +170,17 @@
   });
 
   /** 最後の行も見出しを通過できるだけの余白。表示しただけでは既読にせず、いつもと同じ判定を使う */
-  function endSpace(node: HTMLElement, options: { enabled: boolean; pageScroll: boolean }) {
+  function endSpace(
+    node: HTMLElement,
+    options: { enabled: boolean; pageScroll: boolean; extra: number },
+  ) {
     function measure() {
       const viewport = options.pageScroll ? window.innerHeight : (scroller?.clientHeight ?? 0);
       const header = scroller?.querySelector("header")?.offsetHeight ?? 0;
       // 狭い画面ではページ末尾に下のバーの余白もある。その分を引き、完了表示が見出しの裏へ
       // 行きすぎないようにする（安全領域は --tabs-height に含まれる）
       node.style.minHeight = options.enabled
-        ? `calc(${Math.max(0, viewport - header + 2)}px - ${options.pageScroll ? "var(--tabs-height, 0px)" : "0px"})`
+        ? `calc(${Math.max(0, viewport - header + 2 + options.extra)}px - ${options.pageScroll ? "var(--tabs-height, 0px)" : "0px"})`
         : "";
     }
     const resize = new ResizeObserver(measure);
@@ -194,6 +206,7 @@
   }
 
   function onPass(entries: IntersectionObserverEntry[]) {
+    if (list.loading) return;
     for (const entry of entries) {
       const bounds = entry.rootBounds;
       const rect = entry.boundingClientRect;
@@ -548,6 +561,9 @@
   }
 
   export async function reload() {
+    // 読み直す直前までに通り過ぎた行も、まとめて既読にする
+    clearTimeout(flushTimer);
+    if (passed.size > 0) void flushPassed();
     finishedScroll = null;
     completed = false;
     const loading = list.load();
@@ -658,7 +674,7 @@
     };
   }
 
-  /** 一覧の末尾へ着いてからも指を上へ動かしたら、末尾の表示だけを少し引き上げる */
+  /** 末尾で指を上に動かした分だけ完了欄を引く。読み切った後のスワイプで新着を開く */
   function pullPastEnd(footer: HTMLElement, _opened: number) {
     const listNode = footer.closest<HTMLElement>(".article-list");
     if (listNode === null) return;
@@ -669,11 +685,13 @@
     let remaining = 0;
     let upward = false;
     let distance = 0;
+    let canContinue = false;
 
     function release() {
       start = undefined;
       scrollRoot = null;
       distance = 0;
+      canContinue = false;
       footer.removeAttribute("data-end-dragging");
       footer.style.removeProperty("--end-pull");
     }
@@ -681,10 +699,13 @@
     function onStart(event: TouchEvent) {
       release();
       const touch = event.touches[0];
-      if (event.touches.length !== 1 || touch === undefined || reducedMotion()) return;
+      if (event.touches.length !== 1 || touch === undefined) return;
       scrollRoot = layout.pageScroll ? document.scrollingElement : listNode;
       if (scrollRoot === null) return;
       remaining = scrollRoot.scrollHeight - scrollRoot.clientHeight - scrollRoot.scrollTop;
+      // 読み切った指の動きがそのまま続いても開かず、末尾で始めた次のスワイプを待つ
+      canContinue = layout.pageScroll && showNewAtEnd && remaining <= endScrollSpace + 2;
+      if (!canContinue && reducedMotion()) return;
       start = touch;
       lastY = touch.clientY;
       upward = false;
@@ -715,21 +736,29 @@
       // 末尾へ着いたタッチイベントは、通常のスクロールで使った分を引く
       const pastEnd = dy > 0 && before > 1 ? Math.max(0, dy - before) : dy;
       distance = Math.max(0, distance + pastEnd);
+      if (reducedMotion()) return;
       footer.toggleAttribute("data-end-dragging", distance > 0);
       // 最初は指に付いていき、引くほど抵抗を強くする。見出しに隠れないように 24px まで
       footer.style.setProperty("--end-pull", `${(-24 * distance) / (64 + distance)}px`);
     }
 
+    function onEnd() {
+      const loadNew = canContinue && distance >= END_SWIPE_THRESHOLD && showNewAtEnd;
+      release();
+      if (loadNew) void reload();
+    }
+
     listNode.addEventListener("touchstart", onStart, { passive: true });
     listNode.addEventListener("touchmove", onMove, { passive: true });
-    listNode.addEventListener("touchend", release);
+    listNode.addEventListener("touchend", onEnd);
     listNode.addEventListener("touchcancel", release);
     return {
       update: release,
       destroy() {
+        release();
         listNode.removeEventListener("touchstart", onStart);
         listNode.removeEventListener("touchmove", onMove);
-        listNode.removeEventListener("touchend", release);
+        listNode.removeEventListener("touchend", onEnd);
         listNode.removeEventListener("touchcancel", release);
       },
     };
@@ -969,20 +998,26 @@
     {:else}
       <div
         class="end"
-        class:completed={completed && unread === 0}
+        class:completed={endCompleted}
+        style:padding-top={endScrollSpace > 0 ? `calc(1.5rem + ${endScrollSpace}px)` : undefined}
         use:endSpace={{
           enabled: prefs.value.markReadOnScroll && kind !== "search" && kind !== "recentlyRead",
           pageScroll: layout.pageScroll,
+          extra: endScrollSpace,
         }}
       >
         <div class="end-content" use:pullPastEnd={list.opened}>
-          {#if completed && unread === 0}
+          {#if endCompleted}
             <Icon name="checkAll" />
-            <p role="status">すべて読み終えました。</p>
+            <p role="status">
+              {showNewAtEnd ? "表示中の記事を読み終えました。" : "すべて読み終えました。"}
+            </p>
           {:else}
             <p>End of list</p>
           {/if}
-          {#if next !== null}
+          {#if showNewAtEnd}
+            <button type="button" class="primary" onclick={reload}>Load new articles</button>
+          {:else if next !== null}
             <button type="button" class="primary" onclick={next.go}>{next.label}</button>
           {/if}
         </div>

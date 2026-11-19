@@ -129,11 +129,12 @@
     listView?.peekAt(listScrollY ?? 0);
   }
 
-  /** 下のバーを押した。いまいる画面をもう一度押したら、一覧の先頭に戻る（移らない） */
+  /** All をもう一度押したら一覧を開き直す。ほかの一覧では先頭に戻る */
   function onTab(event: MouseEvent, href: string) {
     if (currentTab === href && isPlainClick(event)) {
       event.preventDefault();
-      listView?.scrollToTop();
+      if (href === "/") void listView?.reload();
+      else listView?.scrollToTop();
       return;
     }
     handleLink(event, href);
