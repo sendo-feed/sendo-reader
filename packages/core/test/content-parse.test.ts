@@ -71,6 +71,13 @@ describe("sendo が配る形の本文", () => {
     expect(quote).toMatchObject({ xPost: "https://x.com/user/status/123" });
   });
 
+  test("引用本文がダッシュで始まっても末尾の出典を照合する", () => {
+    const [quote] = parseContent(
+      '<blockquote data-embed="x">— ここからが引用です。 — 投稿者 (@user) <a href="https://x.com/user/status/123">投稿日</a></blockquote>',
+    );
+    expect(quote).toMatchObject({ xPost: "https://x.com/user/status/123" });
+  });
+
   test("引用本文にある X リンクは投稿元と見なさない", () => {
     for (const contents of [
       '<p>引用文 <a href="https://x.com/other/status/998">本文のリンク</a></p>',

@@ -22,9 +22,10 @@ if (/^[0-9]{1,20}$/.test(postId) && container && window.parent !== window) {
           conversation: "none",
         });
         if (post) {
-          let previousHeight = 0;
+          let previousHeight;
           const measure = () => {
-            const height = Math.ceil(container.getBoundingClientRect().height) + 16;
+            const measured = Math.ceil(container.getBoundingClientRect().height) + 16;
+            const height = measured > 4000 ? 0 : measured;
             if (height === previousHeight) return;
             previousHeight = height;
             notify(height);

@@ -274,8 +274,8 @@ export function parseContent(html: string): ContentNode[] {
         parts.push(part);
       }
       const text = parts.reverse().join("");
-      const start = text.indexOf("—");
       const attribution = /\(@([A-Za-z0-9_]{1,15})\)\s*$/.exec(text);
+      const start = attribution === null ? -1 : text.lastIndexOf("—", attribution.index);
       const handle = attribution?.[1];
       if (
         start === -1 ||

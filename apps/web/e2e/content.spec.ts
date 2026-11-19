@@ -626,6 +626,14 @@ for (const long of [false, true]) {
         await context.setOffline(true);
         await expect(view.getByRole("link", { name: "引用内リンク" })).toBeVisible();
         await context.setOffline(false);
+        await frame
+          .contentFrame()
+          .locator("section")
+          .evaluate((element) => {
+            element.style.height = "5000px";
+          });
+        await expect(frame).toHaveCount(0);
+        await expect(view.getByRole("link", { name: "引用内リンク" })).toBeVisible();
       } else {
         const fallbackLink = view.getByRole("link", { name: "引用内リンク" });
         await fallbackLink.focus();
