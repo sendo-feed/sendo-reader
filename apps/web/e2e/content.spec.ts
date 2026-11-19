@@ -150,42 +150,45 @@ test("全文のある記事は、本文を出す。画像、リンク、コー�
   expect(await violations()).toEqual([]);
 });
 
-test("X の引用は投稿リンクを表示し、設定した隔離フレームを自動で開く", async ({
-  page,
-  context,
-}) => {
-  const { server, blog } = seed();
-  server.deliver(blog.id, {
-    title: "X の投稿を引用した記事",
-    summary: "記事の要約",
-    content:
-      '<p>投稿の紹介</p><blockquote data-embed="x"><a href="https://twitter.com/user/status/123"></a></blockquote><p>記事の続き</p>',
-  });
-  await routeFakeSendo(context, server);
-  const headers = await readFile(new URL("../dist/_headers", import.meta.url), "utf8");
-  const setting = embedOriginFromHeaders(headers);
-  if (process.env.SENDO_EXPECT_X_EMBED_ORIGIN !== undefined) {
-    expect(setting).toBe(process.env.SENDO_EXPECT_X_EMBED_ORIGIN);
-  }
-  const embed = setting ? new URL(setting) : null;
-  let waitForWidget: Promise<void> | undefined;
-  if (embed) {
-    const assets = new URL("../x-embed/", import.meta.url);
-    const rawHeaders = await readFile(new URL("_headers", assets), "utf8");
-    const csp = /^ {2}Content-Security-Policy: (.+)$/m.exec(rawHeaders)?.[1] ?? "";
-    await context.route(`${embed.origin}/**`, async (route) => {
-      const script = new URL(route.request().url()).pathname === "/embed.js";
-      await route.fulfill({
-        contentType: script ? "text/javascript" : "text/html",
-        body: await readFile(new URL(script ? "embed.js" : "index.html", assets), "utf8"),
-        headers: { "content-security-policy": csp },
-      });
+for (const long of [false, true]) {
+  test(`X の引用を自動で開き、遅れて表示されても読書位置を保つ（${long ? "長い記事" : "短い記事"}）`, async ({
+    page,
+    context,
+  }) => {
+    const { server, blog } = seed();
+    server.deliver(blog.id, {
+      title: "X の投稿を引用した記事",
+      summary: "記事の要約",
+      content:
+        '<p>投稿の紹介</p><blockquote data-embed="x"><p></p> — (@user) <a href="https://twitter.com/user/status/123"></a></blockquote><p>記事の続き</p>' +
+        (long ? Array.from({ length: 50 }, (_, i) => `<p>長い記事の段落 ${i}</p>`).join("") : ""),
     });
-    await context.route("https://platform.twitter.com/widgets.js", async (route) => {
-      await waitForWidget;
-      await route.fulfill({
-        contentType: "text/javascript",
-        body: `window.twttr = {
+    await routeFakeSendo(context, server);
+    const headers = await readFile(new URL("../dist/_headers", import.meta.url), "utf8");
+    const setting = embedOriginFromHeaders(headers);
+    if (process.env.SENDO_EXPECT_X_EMBED_ORIGIN !== undefined) {
+      expect(setting).toBe(process.env.SENDO_EXPECT_X_EMBED_ORIGIN);
+    }
+    const embed = setting ? new URL(setting) : null;
+    const skippedWidget = long && embed ? Promise.withResolvers<void>() : undefined;
+    let waitForWidget = skippedWidget?.promise;
+    if (embed) {
+      const assets = new URL("../x-embed/", import.meta.url);
+      const rawHeaders = await readFile(new URL("_headers", assets), "utf8");
+      const csp = /^ {2}Content-Security-Policy: (.+)$/m.exec(rawHeaders)?.[1] ?? "";
+      await context.route(`${embed.origin}/**`, async (route) => {
+        const script = new URL(route.request().url()).pathname === "/embed.js";
+        await route.fulfill({
+          contentType: script ? "text/javascript" : "text/html",
+          body: await readFile(new URL(script ? "embed.js" : "index.html", assets), "utf8"),
+          headers: { "content-security-policy": csp },
+        });
+      });
+      await context.route("https://platform.twitter.com/widgets.js", async (route) => {
+        await waitForWidget;
+        await route.fulfill({
+          contentType: "text/javascript",
+          body: `window.twttr = {
           ready: async (callback) => callback({
             widgets: { createTweet: async (id, container, options) => {
               if (id !== "123" || options.dnt !== true) return;
@@ -198,43 +201,82 @@ test("X の引用は投稿リンクを表示し、設定した隔離フレーム
             } }
           })
         };`,
+        });
       });
-    });
-  }
-  await page.goto("/");
-  await signIn(page);
-  await open(page, "X の投稿を引用した記事");
-
-  const view = page.locator(".article-view");
-  await expect(view.getByRole("link", { name: "X で開く" })).toHaveAttribute(
-    "href",
-    "https://x.com/user/status/123",
-  );
-  const frame = view.locator("iframe");
-  if (embed && embed.hostname !== new URL(page.url()).hostname) {
-    await expect(frame).toHaveAttribute("src", `${embed.origin}/#123`);
-    await expect(frame).toHaveAttribute("sandbox", "allow-scripts allow-same-origin");
-    await expect(frame).toHaveAttribute("referrerpolicy", "no-referrer");
-    await expect(frame).toHaveAttribute("height", "1216");
-    await expect(frame.contentFrame().getByText("公式埋め込みの代わり")).toBeVisible();
-
-    const top = 300;
-    await view.evaluate((element, offset) => element.scrollTo({ top: offset }), top);
-    await page.waitForFunction((offset) => history.state?.article?.top === offset, top);
-    const widget = Promise.withResolvers<void>();
-    waitForWidget = widget.promise;
-    try {
-      await page.reload({ waitUntil: "domcontentloaded" });
-      await expect(frame).toHaveAttribute("height", "0");
-      expect(await view.evaluate((element) => element.scrollTop)).toBeLessThan(top);
-    } finally {
-      widget.resolve();
     }
-    await expect.poll(() => view.evaluate((element) => element.scrollTop)).toBe(top);
-  } else {
-    await expect(frame).toHaveCount(0);
-  }
-});
+    await page.goto("/");
+    await signIn(page);
+    await open(page, "X の投稿を引用した記事");
+
+    const view = page.locator(".article-view");
+    await expect(view.getByRole("link", { name: "X で開く" })).toHaveAttribute(
+      "href",
+      "https://x.com/user/status/123",
+    );
+    await expect(view.locator("blockquote a")).toHaveCount(1);
+    const frame = view.locator("iframe");
+    if (embed && embed.hostname !== new URL(page.url()).hostname) {
+      await expect(frame).toHaveAttribute("src", `${embed.origin}/#123`);
+      await expect(frame).toHaveAttribute("sandbox", "allow-scripts allow-same-origin");
+      await expect(frame).toHaveAttribute("referrerpolicy", "no-referrer");
+      if (skippedWidget) {
+        const paragraph = view.getByText("長い記事の段落 12", { exact: true });
+        try {
+          await expect(frame).toHaveAttribute("height", "0");
+          const saved = await paragraph.evaluate((element) => {
+            const pane = element.closest<HTMLElement>(".article-view");
+            const toolbar = pane?.querySelector(".toolbar");
+            if (!pane || !toolbar) throw new Error("記事のスクロール領域がない");
+            pane.scrollTop +=
+              element.getBoundingClientRect().top - toolbar.getBoundingClientRect().bottom + 4;
+            return pane.scrollTop;
+          });
+          await page.waitForFunction(
+            (top) =>
+              history.state?.article?.top === top && history.state.article.anchor !== undefined,
+            saved,
+          );
+          await page.reload({ waitUntil: "domcontentloaded" });
+          await expect(frame).toHaveAttribute("height", "0");
+        } finally {
+          skippedWidget.resolve();
+        }
+        await expect(frame).toHaveAttribute("height", "1216");
+        await expect
+          .poll(() =>
+            paragraph.evaluate((element) => {
+              const toolbar = element.closest(".article-view")?.querySelector(".toolbar");
+              if (!toolbar) throw new Error("記事のツールバーがない");
+              return Math.abs(
+                element.getBoundingClientRect().top - toolbar.getBoundingClientRect().bottom + 4,
+              );
+            }),
+          )
+          .toBeLessThan(2);
+      } else {
+        await expect(frame).toHaveAttribute("height", "1216");
+        await expect(frame.contentFrame().getByText("公式埋め込みの代わり")).toBeVisible();
+        const top = 300;
+        await view.evaluate((element, offset) => element.scrollTo({ top: offset }), top);
+        await page.waitForFunction((offset) => history.state?.article?.top === offset, top);
+        const widget = Promise.withResolvers<void>();
+        waitForWidget = widget.promise;
+        try {
+          await page.reload({ waitUntil: "domcontentloaded" });
+          await expect(frame).toHaveAttribute("height", "0");
+          expect(await view.evaluate((element) => element.scrollTop)).toBeLessThan(top);
+        } finally {
+          widget.resolve();
+        }
+        await expect(frame).toHaveAttribute("height", "1216");
+        await expect.poll(() => view.evaluate((element) => element.scrollTop)).toBe(top);
+      }
+    } else {
+      skippedWidget?.resolve();
+      await expect(frame).toHaveCount(0);
+    }
+  });
+}
 
 test("要約だけの記事と、本文が配られる前からある記事は、今までどおり要約を出す", async ({
   page,

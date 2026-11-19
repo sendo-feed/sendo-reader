@@ -6,7 +6,7 @@
   import { layout, reducedMotion, scrollTopOf, scrollToTop } from "../lib/layout.svelte";
   import type { ArticleListState } from "../lib/list.svelte";
   import { type ArticleSwipe, prefs } from "../lib/prefs.svelte";
-  import { handleLink, router, viewHref } from "../lib/router.svelte";
+  import { type ArticlePosition, handleLink, router, viewHref } from "../lib/router.svelte";
   import ArticleBody from "./ArticleBody.svelte";
   import Dialog from "./Dialog.svelte";
   import Icon from "./Icon.svelte";
@@ -226,7 +226,7 @@
         // 記事は先頭から出す（狭い画面では、ページ全体を動かしている）。読み込み直したときや、
         // 戻る・進むで来たときは、本文が出てから、前に見ていた位置に戻す
         scrollToTop(scroller);
-        restoreTop = router.takeArticle(id);
+        restorePosition = router.takeArticle(id);
         // 書けなかったら、次に手元が変わったときの読み直しで、手元の DB の状態に戻る
         markOnOpen(id).catch(() => void list.refresh());
         void load(id);
@@ -244,9 +244,9 @@
     void reader.client.recordArticleOpen(id).catch(() => {});
   });
 
-  /** 本文が出たら戻す、前に見ていた位置（px） */
-  let restoreTop: number | null = null;
-  let pendingHistoryTop: number | null = null;
+  /** 本文が出たら戻す、前に見ていた位置。 */
+  let restorePosition: ArticlePosition | null = null;
+  let pendingHistoryPosition: ArticlePosition | null = null;
   let restoringScroll = $state(false);
   let cancelRestore: (() => void) | undefined;
   let articleContent = $state<HTMLDivElement>();
@@ -262,9 +262,9 @@
       return;
     const element = articleContent;
     if (element === undefined) return;
-    const top = restoreTop;
-    restoreTop = null;
-    if (top === null) return;
+    const saved = restorePosition;
+    restorePosition = null;
+    if (saved === null) return;
 
     let resizeObserver: ResizeObserver | undefined;
     let embedObserver: MutationObserver | undefined;
@@ -278,32 +278,45 @@
       cancel.abort();
       if (cancelRestore === stop) {
         cancelRestore = undefined;
-        pendingHistoryTop = null;
+        pendingHistoryPosition = null;
         restoringScroll = false;
       }
     };
     cancelRestore = stop;
-    pendingHistoryTop = top;
+    pendingHistoryPosition = saved;
     restoringScroll = true;
 
     const restore = () => {
+      const viewportTop = articleViewportTop();
+      let top = saved.top;
+      if (saved.anchor !== undefined && saved.anchor.source === content?.source) {
+        let target: Element | undefined = element.querySelector(".body") ?? undefined;
+        for (const index of saved.anchor.path) target = target?.children[index];
+        if (target !== undefined) {
+          top = Math.max(
+            0,
+            scrollTopOf(scroller) +
+              target.getBoundingClientRect().top -
+              viewportTop -
+              saved.anchor.offset,
+          );
+        }
+      }
       scrollToTop(scroller, top);
       const offset = scrollTopOf(scroller);
       appliedTop = offset;
-      const viewportTop = layout.pageScroll ? 0 : (scroller?.getBoundingClientRect().top ?? 0);
       const preceding = Array.from(element.querySelectorAll("[data-x-embed]")).filter(
         (post) => post.getBoundingClientRect().top - viewportTop + offset < top,
       );
       const pending = preceding.filter((post) => post.getAttribute("data-x-embed") === "waiting");
       for (const post of pending) post.dispatchEvent(new Event("sendo:open-x-post"));
-      if (preceding.length === 0 || (pending.length === 0 && offset >= top - 1)) {
+      clearTimeout(restoreTimer);
+      restoreTimer = undefined;
+      if (preceding.length === 0) {
         stop();
       } else if (pending.length === 0) {
-        // すべての読み込みが終わっても、メディアであとから高さが変わることがある。
-        restoreTimer ??= setTimeout(stop, 15_000);
-      } else {
-        clearTimeout(restoreTimer);
-        restoreTimer = undefined;
+        // 座標が合ったあとも、画像などが展開する間は高さの変化を追う。
+        restoreTimer = setTimeout(stop, offset >= top - 1 ? 600 : 15_000);
       }
     };
 
@@ -360,9 +373,49 @@
     return scrollTopOf(scroller);
   }
 
+  function articleViewportTop(): number {
+    if (layout.pageScroll || scroller === undefined) return 0;
+    return (
+      scroller.querySelector(".toolbar")?.getBoundingClientRect().bottom ??
+      scroller.getBoundingClientRect().top
+    );
+  }
+
   /** 復元が済むまでは、フレームの途中の高さで履歴を書き換えない。 */
-  export function historyTop(): number {
-    return pendingHistoryTop ?? restoreTop ?? scrollTopOf(scroller);
+  export function historyPosition(id: string): ArticlePosition {
+    if (pendingHistoryPosition?.id === id) return pendingHistoryPosition;
+    if (restorePosition?.id === id) return restorePosition;
+
+    const position: ArticlePosition = { id, top: scrollTopOf(scroller) };
+    const body = articleContent?.querySelector(".body");
+    if (!body?.querySelector("[data-x-embed]") || content === null) return position;
+
+    const viewportTop = articleViewportTop();
+    const bounds = body.getBoundingClientRect();
+    const x = bounds.left + bounds.width / 2;
+    const y = Math.max(viewportTop + 1, bounds.top + 1);
+    // 余白を指した場合は少し下も調べ、本文の要素が見つからなければ px の位置を使う。
+    for (const dy of [0, 16, 32]) {
+      if (y + dy >= bounds.bottom) break;
+      const hit = document.elementFromPoint(x, y + dy);
+      if (hit === null || hit === body || !body.contains(hit)) continue;
+      const target = hit.closest("[data-x-embed]") ?? hit;
+      const path: number[] = [];
+      for (
+        let node = target;
+        node !== body && node.parentElement !== null;
+        node = node.parentElement
+      ) {
+        path.push(Array.prototype.indexOf.call(node.parentElement.children, node));
+      }
+      position.anchor = {
+        source: content.source,
+        path: path.reverse(),
+        offset: target.getBoundingClientRect().top - viewportTop,
+      };
+      break;
+    }
+    return position;
   }
 
   $effect(() => {

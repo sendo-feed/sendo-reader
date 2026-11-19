@@ -22,10 +22,20 @@ if (/^[0-9]{1,20}$/.test(postId) && container && window.parent !== window) {
           conversation: "none",
         });
         if (post) {
-          new ResizeObserver(() => {
+          let previousHeight = 0;
+          const measure = () => {
             const height = Math.ceil(container.getBoundingClientRect().height) + 16;
+            if (height === previousHeight) return;
+            previousHeight = height;
             notify(height);
-          }).observe(container);
+          };
+          new ResizeObserver(measure).observe(container);
+          // 画面外では描画が間引かれる。ウィジェットが枠の高さを変えたときはその場で測る。
+          new MutationObserver(measure).observe(post, {
+            attributes: true,
+            attributeFilter: ["height", "style"],
+          });
+          measure();
         } else {
           notify(0);
         }

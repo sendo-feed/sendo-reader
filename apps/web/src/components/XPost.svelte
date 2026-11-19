@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { Snippet } from "svelte";
+  import type { createXEmbedQueue, XEmbedRequest } from "../lib/x-embed-queue";
 
   let {
     href,
@@ -8,7 +9,7 @@
   }: {
     href: string;
     children: Snippet;
-    enqueue: (load: (done: () => void) => void) => () => void;
+    enqueue: ReturnType<typeof createXEmbedQueue>;
   } = $props();
   const origin = __X_EMBED_ORIGIN__;
   // セッションのクッキーはポートで分かれないため、同じホスト名は使えない。
@@ -19,19 +20,22 @@
   let frame = $state<HTMLIFrameElement>();
   let active = $state(false);
   let settled = $state(false);
-  let cancelLoad: (() => void) | undefined;
+  let request: XEmbedRequest | undefined;
   let timer: ReturnType<typeof setTimeout> | undefined;
   let height = $state(0);
   const src = $derived(
     active && separateHost ? `${origin}/#${new URL(href).pathname.split("/").at(-1)}` : "",
   );
 
-  function requestLoad() {
-    if (cancelLoad !== undefined) return;
-    cancelLoad = enqueue(() => {
+  function requestLoad(inView: boolean) {
+    if (request !== undefined) {
+      if (inView) request.prioritize();
+      return;
+    }
+    request = enqueue(() => {
       active = true;
       timer = setTimeout(() => finish(0), 15_000);
-    });
+    }, inView);
   }
 
   function finish(value: number) {
@@ -40,28 +44,26 @@
     if (settled) return;
     settled = true;
     clearTimeout(timer);
-    cancelLoad?.();
+    request?.cancel();
   }
 
   $effect(() => {
     const element = block;
     if (element === undefined || !separateHost) return;
-    const observer = new IntersectionObserver(
-      (entries) => {
-        if (entries.some((entry) => entry.isIntersecting)) {
-          observer.disconnect();
-          requestLoad();
-        }
-      },
-      { rootMargin: "240px" },
-    );
+    const observer = new IntersectionObserver((entries) => {
+      if (entries.some((entry) => entry.isIntersecting)) {
+        observer.disconnect();
+        requestLoad(true);
+      }
+    });
+    const loadForRestore = () => requestLoad(false);
     observer.observe(element);
-    element.addEventListener("sendo:open-x-post", requestLoad);
+    element.addEventListener("sendo:open-x-post", loadForRestore);
     return () => {
       observer.disconnect();
-      element.removeEventListener("sendo:open-x-post", requestLoad);
+      element.removeEventListener("sendo:open-x-post", loadForRestore);
       clearTimeout(timer);
-      cancelLoad?.();
+      request?.cancel();
     };
   });
 

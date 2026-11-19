@@ -211,12 +211,35 @@ export function parseContent(html: string): ContentNode[] {
     append(element);
     open.push(element);
   }
-  // 公式の引用では、引用本文のあとに投稿元のリンクを置く。本文中の他の投稿は展開しない。
+  // 公式の引用は、本文のあとに出典のユーザー名と投稿元へのリンクを置く。
   for (const quote of postQuotes) {
-    for (const child of quote.children) {
+    const posts = new Map<string, ContentElement[]>();
+    for (const [index, child] of quote.children.entries()) {
       if (typeof child === "string" || child.tag !== "a" || child.href === undefined) continue;
+      const attribution = quote.children[index - 1];
+      const handle =
+        typeof attribution === "string"
+          ? /—[^—\r\n]*\(@([A-Za-z0-9_]{1,15})\)\s*$/.exec(attribution)?.[1]
+          : undefined;
+      if (handle === undefined) continue;
       const post = xPostUrl(child.href);
-      if (post !== undefined) quote.xPost = post;
+      if (!post) continue;
+      const [, , , user, kind] = post.split("/");
+      if (kind !== "web" && user?.toLowerCase() !== handle.toLowerCase()) continue;
+
+      const links = posts.get(post) ?? [];
+      links.push(child);
+      posts.set(post, links);
+    }
+    const candidate = posts.size === 1 ? posts.entries().next().value : undefined;
+    if (candidate !== undefined) {
+      const [post, links] = candidate;
+      quote.xPost = post;
+      // 空の出典リンクだけは別に「X で開く」を出すため、Tab の操作対象を重ねない。
+      const unnamed = new Set<ContentNode>(
+        links.filter((link) => !hasVisibleContent(link.children)),
+      );
+      quote.children = quote.children.filter((node) => !unnamed.has(node));
     }
   }
   return root;

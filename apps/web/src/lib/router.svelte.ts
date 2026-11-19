@@ -39,12 +39,24 @@ export interface ListAnchor {
   offset: number;
 }
 
+/** 本文を読む位置。埋め込みで高さが変わっても同じ本文の要素を探す。 */
+export interface ArticleAnchor {
+  source: string;
+  path: number[];
+  offset: number;
+}
+
+export interface ArticlePosition {
+  id: string;
+  top: number;
+  anchor?: ArticleAnchor;
+}
+
 /** 履歴の項目に持つ、その画面のどこを見ていたか */
 export interface Position {
   /** 一覧の位置。key は一覧の条件（条件が替わったら、前の位置には戻さない） */
   list?: { key: string; anchor: ListAnchor } | undefined;
-  /** 記事の位置（px） */
-  article?: { id: string; top: number } | undefined;
+  article?: ArticlePosition | undefined;
 }
 
 class Router {
@@ -117,10 +129,10 @@ class Router {
   }
 
   /** この項目に入ったときの記事の位置（同じ記事のときだけ）。一度だけ返す */
-  takeArticle(id: string): number | null {
+  takeArticle(id: string): ArticlePosition | null {
     const article = this.#entered.article;
     this.#entered.article = undefined;
-    return article?.id === id ? article.top : null;
+    return article?.id === id ? article : null;
   }
 
   get view(): View {
@@ -225,6 +237,19 @@ export function positionOf(state: unknown): Position {
   const article = state.article;
   if (isRecord(article) && typeof article.id === "string" && typeof article.top === "number") {
     position.article = { id: article.id, top: article.top };
+    const anchor = article.anchor;
+    if (
+      isRecord(anchor) &&
+      typeof anchor.source === "string" &&
+      Array.isArray(anchor.path) &&
+      anchor.path.length > 0 &&
+      anchor.path.length <= 100 &&
+      anchor.path.every((index) => Number.isSafeInteger(index) && index >= 0) &&
+      typeof anchor.offset === "number" &&
+      Number.isFinite(anchor.offset)
+    ) {
+      position.article.anchor = { source: anchor.source, path: anchor.path, offset: anchor.offset };
+    }
   }
   return position;
 }

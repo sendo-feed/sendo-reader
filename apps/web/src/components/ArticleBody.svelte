@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { ContentNode } from "@sendo-reader/core";
+  import { createXEmbedQueue } from "../lib/x-embed-queue";
   import RemoteImage from "./RemoteImage.svelte";
   import XPost from "./XPost.svelte";
 
@@ -18,31 +19,7 @@
    */
   let { nodes }: { nodes: readonly ContentNode[] } = $props();
 
-  const waiting = new Set<() => void>();
-  let loading = 0;
-
-  // 見えてきた投稿から読み込み、同時に初期化する公式ウィジェットを抑える。
-  function enqueue(load: (done: () => void) => void): () => void {
-    let active = false;
-    const done = () => {
-      if (!active) return;
-      active = false;
-      loading -= 1;
-      waiting.values().next().value?.();
-    };
-    const start = () => {
-      waiting.delete(start);
-      active = true;
-      loading += 1;
-      load(done);
-    };
-    if (loading < 4) start();
-    else waiting.add(start);
-    return () => {
-      waiting.delete(start);
-      done();
-    };
-  }
+  const enqueue = createXEmbedQueue();
 </script>
 
 {#snippet render(children: readonly ContentNode[])}
