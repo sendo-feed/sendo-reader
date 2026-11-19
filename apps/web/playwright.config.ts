@@ -1,8 +1,11 @@
 import { defineConfig, devices } from "@playwright/test";
+import { FAKE_UPDATES_PORT } from "./e2e/fake-updates";
 
 /**
  * 画面を通したテスト（docs/decisions/performance.md の関所を含む）。本番のビルド（pnpm build）を
  * vite preview（本番と同じヘッダー）で開く。sendo の API は、テストの中で偽の sendo が答える。
+ * 通知（WebSocket）は、ワーカーから開くので Playwright では横取りできない。vite preview の中継の先を
+ * 偽の通知のサーバー（e2e/fake-updates.ts）に向ける
  */
 export default defineConfig({
   testDir: "e2e",
@@ -19,7 +22,7 @@ export default defineConfig({
   webServer: {
     command: "pnpm exec vite preview --port 4173 --strictPort",
     port: 4173,
-    env: { SENDO_X_EMBED_ORIGIN: "" },
     reuseExistingServer: !process.env.CI,
+    env: { SENDO_DEV_URL: `http://127.0.0.1:${FAKE_UPDATES_PORT}`, SENDO_X_EMBED_ORIGIN: "" },
   },
 });

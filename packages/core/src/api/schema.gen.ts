@@ -144,6 +144,88 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/sync/updates": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 受信箱の更新を WebSocket で受け取る
+         * @description 同じオリジンからセッションのクッキーで接続する。人ごとの同期の対象が変わると {"type":"sync_required"} が届くので、最後のカーソルから差分を取る。初回の接続時と再接続時にも差分を取る。クライアントからはメッセージを送らない（docs/decisions/sync.md の 9）。
+         *
+         *     Sendo は次のコードで接続を閉じる。クライアントは、コードで次の動きを分ける。
+         *     - 1001（going away）：Sendo が止まる、または入れ替わる。数秒待ってつなぎ直す
+         *     - 1008（session ended）：セッションが切れた。すぐにはつなぎ直さず、同期を 1 回して確かめる。401 ならログインし直し、通れば間を延ばしながらつなぎ直す。クライアントからメッセージが届いたとき（client messages are not supported）も 1008 で閉じる
+         *     - 1013（try again later）：接続数の上限に達した。1 分以上空けてつなぎ直す
+         *     - そのほか（1006 など）：ネットワークの都合や、応答しない接続を切ったとき。上限を置いて間を延ばしながらつなぎ直す
+         *
+         *     101 を返す前に断ったとき（下の 401、403、429、503）は、ブラウザの WebSocket からは状態コードが見えず、1006 で閉じたように見える。ほかの 1006 と同じく、間を延ばしてつなぎ直す。
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description WebSocket 接続を開始した */
+                101: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description 切り替えが必要か、ハンドシェイクの形式が不正。通常の HTTP で受けた場合は本文なし */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/html": string;
+                    };
+                };
+                /** @description 有効なブラウザのセッションが必要 */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description 公開オリジンと一致しないか、公開オリジンの設定が不正 */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description WebSocket の接続数の上限に達した */
+                429: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description サーバーは終了処理中 */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/mcp-icon.png": {
         parameters: {
             query?: never;
@@ -209,46 +291,6 @@ export interface paths {
                         "application/json": {
                             user: components["schemas"]["User"];
                         };
-                    };
-                };
-            };
-        };
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/features": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * この Sendo で使える機能
-         * @description 使える機能を返す。今はどの機能も常に使えるので、すべて true を返す。
-         *     sendo-reader の互換のために残している。sendo-reader が使わなくなったら消す（docs/decisions/container.md の 3）。
-         */
-        get: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description 使える機能 */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Features"];
                     };
                 };
             };
@@ -2258,12 +2300,6 @@ export interface components {
             id: string;
             /** @example you@example.com */
             email: string;
-        };
-        Features: {
-            /** @description 記事の主言語を背景で判定・保存できるか。常に true */
-            languageDetection: boolean;
-            /** @description 記事のページから本文を抜けるか（GET /articles/{id}/content?source=page）。常に true */
-            pageContent: boolean;
         };
         DiscordIntegration: {
             available: boolean;

@@ -49,6 +49,12 @@ function securityHeadersPlugin(): Plugin {
   };
 }
 
+/**
+ * 手元で動かす sendo（sendo の pnpm dev）。e2e は、偽の通知のサーバーに向ける（SENDO_DEV_URL。
+ * playwright.config.ts）
+ */
+const SENDO_DEV_URL = process.env.SENDO_DEV_URL || "http://localhost:8787";
+
 /** Workbox が、1 回の取得の間、プラグインの呼び出しに渡して回す入れ物 */
 type GenerationState = { state?: { generation?: string } };
 
@@ -184,9 +190,10 @@ export default defineConfig({
   server: {
     // 手元では、本番と同じパスを sendo の pnpm dev（ポート 8787）に中継する。
     proxy: Object.fromEntries(
+      // ws: true で、sendo の通知（WebSocket の Upgrade）も中継する
       SENDO_NAVIGATION_DENYLIST.map((pattern) => [
         pattern.source,
-        { target: "http://localhost:8787" },
+        { target: SENDO_DEV_URL, ws: true },
       ]),
     ),
   },
