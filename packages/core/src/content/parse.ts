@@ -104,6 +104,7 @@ const ATTRIBUTION_INLINE_TAGS = new Set([
 
 function attributionText(node: ContentNode): string | null {
   if (typeof node === "string") return node;
+  if (node.tag === "br") return " ";
   if (!ATTRIBUTION_INLINE_TAGS.has(node.tag)) return null;
   const parts: string[] = [];
   for (const child of node.children) {

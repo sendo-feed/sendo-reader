@@ -190,6 +190,7 @@ for (const long of [false, true]) {
     const embed = setting ? new URL(setting) : null;
     const initialWidget = embed ? Promise.withResolvers<void>() : undefined;
     let waitForWidget = initialWidget?.promise;
+    let widgetRequests = 0;
     if (embed) {
       const assets = new URL("../x-embed/", import.meta.url);
       const rawHeaders = await readFile(new URL("_headers", assets), "utf8");
@@ -203,6 +204,7 @@ for (const long of [false, true]) {
         });
       });
       await context.route("https://platform.twitter.com/widgets.js", async (route) => {
+        widgetRequests += 1;
         await waitForWidget;
         await route.fulfill({
           contentType: "text/javascript",
@@ -264,27 +266,30 @@ for (const long of [false, true]) {
             for (const key of await caches.keys()) await (await caches.open(key)).delete(url);
           }, imageUrl);
           server.imageStatusFor.set(precedingImage, 502);
+          const requestsBeforeReload = widgetRequests;
           await page.reload({ waitUntil: "domcontentloaded" });
-          await expect(frame).toHaveAttribute("height", "0");
           await page.locator(".article-list").dispatchEvent("wheel", { deltaY: 100 });
+          await expect(view.getByRole("img", { name: "前の画像" })).toHaveCount(0);
+          await expect
+            .poll(() =>
+              paragraph.evaluate((element) => {
+                const toolbar = element.closest(".article-view")?.querySelector(".toolbar");
+                if (!toolbar) throw new Error("記事のツールバーがない");
+                return Math.abs(
+                  element.getBoundingClientRect().top - toolbar.getBoundingClientRect().bottom + 4,
+                );
+              }),
+            )
+            .toBeLessThan(2);
+          await expect(frame).toHaveCount(0);
+          expect(widgetRequests).toBe(requestsBeforeReload);
         } finally {
           initialWidget?.resolve();
         }
+        await view.evaluate((element) => element.scrollTo({ top: 0 }));
         await expect(frame).toHaveAttribute("height", "1216");
-        await expect(view.getByRole("img", { name: "前の画像" })).toHaveCount(0);
         await expect(view.getByText("記事中の引用", { exact: true })).toBeVisible();
         await expect(view.getByRole("link", { name: "引用内リンク" })).toBeHidden();
-        await expect
-          .poll(() =>
-            paragraph.evaluate((element) => {
-              const toolbar = element.closest(".article-view")?.querySelector(".toolbar");
-              if (!toolbar) throw new Error("記事のツールバーがない");
-              return Math.abs(
-                element.getBoundingClientRect().top - toolbar.getBoundingClientRect().bottom + 4,
-              );
-            }),
-          )
-          .toBeLessThan(2);
 
         const summary = view.getByText("記事中の引用", { exact: true });
         const summaryTop = await summary.evaluate((element) => {

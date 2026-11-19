@@ -17,7 +17,10 @@
    * - 見た目は、ここの CSS だけで決まる（本文は class も style も持たない）。表とコードは、
    *   横にあふれたら、その中で動かす
    */
-  let { nodes }: { nodes: readonly ContentNode[] } = $props();
+  let {
+    nodes,
+    awaitingPosition = false,
+  }: { nodes: readonly ContentNode[]; awaitingPosition?: boolean } = $props();
 
   const enqueue = createXEmbedQueue();
 
@@ -55,7 +58,7 @@
       />
     {:else if node.xPost !== undefined}
       {#key node.xPost}
-        <XPost href={node.xPost} {enqueue} {nodePath}>
+        <XPost href={node.xPost} {enqueue} {nodePath} {awaitingPosition}>
           {@render render(node.children, childPath, trackText)}
         </XPost>
       {/key}

@@ -7,11 +7,13 @@
     children,
     enqueue,
     nodePath,
+    awaitingPosition,
   }: {
     href: string;
     children: Snippet;
     enqueue: ReturnType<typeof createXEmbedQueue>;
     nodePath: string;
+    awaitingPosition: boolean;
   } = $props();
   const origin = __X_EMBED_ORIGIN__;
   // セッションのクッキーはポートで分かれないため、同じホスト名は使えない。
@@ -68,24 +70,30 @@
 
   $effect(() => {
     const element = block;
-    if (element === undefined || !separateHost) return;
+    // 履歴から開き直すときは、先頭に一瞬見える投稿を読み込まない。
+    if (element === undefined || !separateHost || awaitingPosition) return;
     const observer = new IntersectionObserver((entries) => {
-      if (entries.some((entry) => entry.isIntersecting)) {
+      if (!awaitingPosition && entries.some((entry) => entry.isIntersecting)) {
         observer.disconnect();
         requestLoad(true);
       }
     });
+    observer.observe(element);
+    return () => observer.disconnect();
+  });
+
+  $effect(() => {
+    const element = block;
+    if (element === undefined || !separateHost) return;
     const loadForRestore = (event: Event) =>
       requestLoad(false, (event as CustomEvent<AbortSignal>).detail);
     const keepQuoteOpen = () => {
       preserveQuote = height === 0;
       quoteOpen = true;
     };
-    observer.observe(element);
     element.addEventListener("sendo:open-x-post", loadForRestore);
     element.addEventListener("sendo:restore-x-quote", keepQuoteOpen);
     return () => {
-      observer.disconnect();
       element.removeEventListener("sendo:open-x-post", loadForRestore);
       element.removeEventListener("sendo:restore-x-quote", keepQuoteOpen);
       clearTimeout(timer);

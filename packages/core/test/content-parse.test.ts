@@ -88,6 +88,7 @@ describe("sendo が配る形の本文", () => {
       '<a href="https://x.com/user/status/123">言及した投稿</a>',
       '<p>引用</p> — (@other) <a href="https://x.com/user/status/123">別の投稿</a>',
       '<p>引用</p> — (@user) <a href="https://x.com/user/status/123">一つめ</a> — (@user) <a href="https://x.com/user/status/456">二つめ</a>',
+      '<p>引用</p> — 表示名<br>(@user) <a href="https://x.com/user/status/123">一つめ</a> — (@user) <a href="https://x.com/user/status/456">二つめ</a>',
       '<p>引用</p> <cite>— 表示名 (@user)</cite> <a href="https://x.com/user/status/123">一つめ</a> — (@user) <a href="https://x.com/user/status/456">二つめ</a>',
       '<p>引用</p> — <strong>表示名 <em>(@user)</em></strong> <a href="https://x.com/user/status/123">一つめ</a> — (@user) <a href="https://x.com/user/status/456">二つめ</a>',
       '<p>引用</p> — (@user) <a href="https://x.com/user/status/123">一つめ</a> — 表示名 — 肩書 (@user) <a href="https://x.com/user/status/456">二つめ</a>',

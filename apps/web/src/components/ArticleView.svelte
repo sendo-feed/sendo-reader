@@ -211,6 +211,7 @@
       preferFullText = true;
       pageAttempted = false;
       autoPageFailed = false;
+      awaitingPosition = false;
       if (id === null) {
         article = null;
         missing = false;
@@ -227,6 +228,7 @@
         // 戻る・進むで来たときは、本文が出てから、前に見ていた位置に戻す
         scrollToTop(scroller);
         restorePosition = router.takeArticle(id);
+        awaitingPosition = restorePosition !== null;
         // 書けなかったら、次に手元が変わったときの読み直しで、手元の DB の状態に戻る
         markOnOpen(id).catch(() => void list.refresh());
         void load(id);
@@ -246,6 +248,7 @@
 
   /** 本文が出たら戻す、前に見ていた位置。 */
   let restorePosition: ArticlePosition | null = null;
+  let awaitingPosition = $state(false);
   let pendingHistoryPosition: ArticlePosition | null = null;
   let restoringScroll = $state(false);
   let cancelRestore: (() => void) | undefined;
@@ -282,6 +285,7 @@
       if (cancelRestore === stop) {
         cancelRestore = undefined;
         pendingHistoryPosition = null;
+        awaitingPosition = false;
         restoringScroll = false;
       }
     };
@@ -293,6 +297,7 @@
       const viewportTop = articleViewportTop();
       let top = saved.top;
       const anchorPosts = new Set<Element>();
+      const requiredSummaries = new Set<Element>();
       if (saved.anchor !== undefined && saved.anchor.source === content?.source) {
         const body = element.querySelector(".body");
         const { kind, path } = saved.anchor;
@@ -324,6 +329,7 @@
               if (!quote.open) quote.open = true;
               post?.dispatchEvent(new Event("sendo:restore-x-quote"));
             } else if (summary.hidden) {
+              if (post !== null) requiredSummaries.add(post);
               target = post ?? quote;
             }
           }
@@ -339,13 +345,18 @@
       scrollToTop(scroller, top);
       const offset = scrollTopOf(scroller);
       appliedTop = offset;
+      const clamped = offset < top - 1;
       const posts = Array.from(element.querySelectorAll("[data-x-embed]"));
       const preceding = posts.filter((post) => {
         if (anchorPosts.has(post)) return true;
         const rect = post.getBoundingClientRect();
         return rect.width > 0 && rect.height > 0 && rect.top - viewportTop + offset < top;
       });
-      const pending = preceding.filter((post) => post.getAttribute("data-x-embed") === "waiting");
+      const pending = preceding.filter(
+        (post) =>
+          post.getAttribute("data-x-embed") === "waiting" &&
+          (clamped || requiredSummaries.has(post)),
+      );
       const wanted = new Set(pending);
       for (const [post, queued] of queuedPosts) {
         if (wanted.has(post)) continue;
@@ -358,7 +369,7 @@
         queuedPosts.set(post, queued);
         post.dispatchEvent(new CustomEvent("sendo:open-x-post", { detail: queued.signal }));
       }
-      if (preceding.length === 0 && (posts.length === 0 || offset >= top - 1)) {
+      if (preceding.length === 0 && (posts.length === 0 || !clamped)) {
         stop();
       } else if (pending.length === 0 && restoreTimer === undefined) {
         // 最初の高さの通知のあとに画像などが展開する間も、同じ段落を追う。
@@ -373,6 +384,7 @@
         return;
       }
       restore();
+      awaitingPosition = false;
       // 保存位置より手前の埋め込みが展開したあと、同じ座標をもう一度適用する。
       if (cancel.signal.aborted) return;
       resizeObserver = new ResizeObserver(restore);
@@ -1024,7 +1036,7 @@
           <p class="content-note" role="status">{pageNote}</p>
         {/if}
         {#if content !== null}
-          <ArticleBody nodes={content.nodes} />
+          <ArticleBody nodes={content.nodes} {awaitingPosition} />
         {:else if showSummary}
           {#each paragraphs as text, index (index)}
             <p class="summary">{text}</p>
