@@ -288,7 +288,7 @@
       position.list = anchor === null ? undefined : { key: queryKey, anchor };
     }
     if (articleId !== null && articleView !== undefined) {
-      position.article = { id: articleId, top: articleView.scrollTop() };
+      position.article = { id: articleId, top: articleView.historyTop() };
     }
     return Object.keys(position).length > 0 ? position : null;
   }

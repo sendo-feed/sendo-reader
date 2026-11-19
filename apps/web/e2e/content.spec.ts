@@ -1,5 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { type BrowserContext, expect, type Page, test } from "@playwright/test";
+import { embedOriginFromHeaders } from "../security-headers";
 import { FakeSendo, routeFakeSendo, signIn } from "./fake-sendo";
 
 /**
@@ -161,7 +162,8 @@ test("X の引用は投稿リンクを表示し、設定した隔離フレーム
       '<p>投稿の紹介</p><blockquote data-embed="x"><a href="https://twitter.com/user/status/123"></a></blockquote><p>記事の続き</p>',
   });
   await routeFakeSendo(context, server);
-  const setting = process.env.SENDO_X_EMBED_ORIGIN;
+  const headers = await readFile(new URL("../dist/_headers", import.meta.url), "utf8");
+  const setting = embedOriginFromHeaders(headers);
   const embed = setting ? new URL(setting) : null;
   let waitForWidget: Promise<void> | undefined;
   if (embed) {

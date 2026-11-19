@@ -47,6 +47,16 @@ describe("sendo が配る形の本文", () => {
     expect(quote).toMatchObject({ xPost: "https://x.com/i/web/status/123" });
   });
 
+  test("引用本文にある X リンクは投稿元と見なさない", () => {
+    for (const contents of [
+      '<p>引用文 <a href="https://x.com/other/status/998">本文のリンク</a></p>',
+      '<a href="https://x.com/other/status/998">本文のリンク</a><p>引用文の続き</p>',
+    ]) {
+      const [quote] = parseContent(`<blockquote data-embed="x">${contents}</blockquote>`);
+      expect(quote).not.toHaveProperty("xPost");
+    }
+  });
+
   test("X 以外の URL や通常の投稿リンクからは埋め込みを作らない", () => {
     for (const href of [
       "https://x.com.example/user/status/123",

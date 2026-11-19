@@ -74,8 +74,6 @@ jobs:
       # 画面を通したテストと、起動から記事が出るまでの時間・操作の反応の関所
       # （docs/decisions/performance.md）
       - name: End-to-end tests
-        env:
-          SENDO_X_EMBED_ORIGIN: https://embed.example
         run: pnpm e2e
 
       - name: Upload Playwright results

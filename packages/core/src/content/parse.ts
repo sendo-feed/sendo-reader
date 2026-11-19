@@ -196,9 +196,6 @@ export function parseContent(html: string): ContentNode[] {
       // 行き先のないリンクは、タグを落として中身だけ残す
       if (href === null) continue;
       element.href = href;
-      const quote = open.findLast((parent) => postQuotes.has(parent));
-      const post = quote === undefined ? undefined : xPostUrl(href);
-      if (quote !== undefined && post !== undefined) quote.xPost = post;
     } else if (name === "blockquote" && read.get("data-embed") === "x") {
       postQuotes.add(element);
     } else if (name === "td" || name === "th") {
@@ -213,6 +210,14 @@ export function parseContent(html: string): ContentNode[] {
     elements += 1;
     append(element);
     open.push(element);
+  }
+  // 公式の引用では、引用本文のあとに投稿元のリンクを置く。本文中の他の投稿は展開しない。
+  for (const quote of postQuotes) {
+    const footer = quote.children.findLast((child) => typeof child !== "string" || child.trim());
+    if (typeof footer === "object" && footer.tag === "a" && footer.href !== undefined) {
+      const post = xPostUrl(footer.href);
+      if (post !== undefined) quote.xPost = post;
+    }
   }
   return root;
 }

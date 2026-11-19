@@ -246,6 +246,7 @@
 
   /** 本文が出たら戻す、前に見ていた位置（px） */
   let restoreTop: number | null = null;
+  let pendingHistoryTop: number | null = null;
   let cancelRestore: (() => void) | undefined;
   let articleContent = $state<HTMLDivElement>();
 
@@ -264,17 +265,30 @@
     restoreTop = null;
     if (top === null) return;
 
-    let observer: ResizeObserver | undefined;
+    let resizeObserver: ResizeObserver | undefined;
+    let embedObserver: MutationObserver | undefined;
     const cancel = new AbortController();
     const stop = () => {
-      observer?.disconnect();
+      resizeObserver?.disconnect();
+      embedObserver?.disconnect();
       cancel.abort();
-      if (cancelRestore === stop) cancelRestore = undefined;
+      if (cancelRestore === stop) {
+        cancelRestore = undefined;
+        pendingHistoryTop = null;
+      }
     };
     cancelRestore = stop;
+    pendingHistoryTop = top;
+
     const restore = () => {
       scrollToTop(scroller, top);
-      if (scrollTopOf(scroller) >= top - 1) stop();
+      const offset = scrollTopOf(scroller);
+      const viewportTop = layout.pageScroll ? 0 : (scroller?.getBoundingClientRect().top ?? 0);
+      const pending = Array.from(element.querySelectorAll('[data-x-embed="waiting"]')).filter(
+        (post) => post.getBoundingClientRect().top - viewportTop + offset < top,
+      );
+      for (const post of pending) post.dispatchEvent(new Event("sendo:open-x-post"));
+      if (pending.length === 0) stop();
     };
 
     void tick().then(() => {
@@ -284,22 +298,41 @@
         return;
       }
       restore();
-      // 埋め込みの高さがまだ届かず、保存した位置まで動けなければ、高さが変わるたびに試す。
-      if (cancel.signal.aborted || !element.querySelector("iframe[title='X の投稿']")) {
-        stop();
-        return;
-      }
-      observer = new ResizeObserver(restore);
-      observer.observe(element);
-      for (const event of ["wheel", "touchstart", "pointerdown", "keydown"]) {
+      // 保存位置より手前の埋め込みが展開したあと、同じ座標をもう一度適用する。
+      if (cancel.signal.aborted) return;
+      resizeObserver = new ResizeObserver(restore);
+      resizeObserver.observe(element);
+      embedObserver = new MutationObserver(restore);
+      embedObserver.observe(element, {
+        subtree: true,
+        attributes: true,
+        attributeFilter: ["data-x-embed"],
+      });
+      for (const event of ["wheel", "touchmove"]) {
         window.addEventListener(event, stop, { capture: true, signal: cancel.signal });
       }
+      window.addEventListener(
+        "keydown",
+        (event) => {
+          if (
+            ["ArrowDown", "ArrowUp", "PageDown", "PageUp", "Home", "End", " "].includes(event.key)
+          ) {
+            stop();
+          }
+        },
+        { capture: true, signal: cancel.signal },
+      );
     });
   });
 
   /** いま見ている位置（px） */
   export function scrollTop(): number {
     return scrollTopOf(scroller);
+  }
+
+  /** 復元が済むまでは、フレームの途中の高さで履歴を書き換えない。 */
+  export function historyTop(): number {
+    return pendingHistoryTop ?? restoreTop ?? scrollTopOf(scroller);
   }
 
   $effect(() => {

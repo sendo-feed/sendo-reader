@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { ContentElement, ContentNode } from "@sendo-reader/core";
+  import type { ContentNode } from "@sendo-reader/core";
   import RemoteImage from "./RemoteImage.svelte";
   import XPost from "./XPost.svelte";
 
@@ -18,17 +18,31 @@
    */
   let { nodes }: { nodes: readonly ContentNode[] } = $props();
 
-  // 投稿の多い記事でも一度に大量のウィジェットを起動しない。
-  function automaticEmbeds(children: readonly ContentNode[], embeds = new Set<ContentElement>()) {
-    for (const node of children) {
-      if (embeds.size >= 8) break;
-      if (typeof node === "string") continue;
-      if (node.xPost !== undefined) embeds.add(node);
-      else automaticEmbeds(node.children, embeds);
-    }
-    return embeds;
+  const waiting = new Set<() => void>();
+  let loading = 0;
+
+  // 見えてきた投稿から読み込み、同時に初期化する公式ウィジェットを抑える。
+  function enqueue(load: (done: () => void) => void): () => void {
+    let active = false;
+    const done = () => {
+      if (!active) return;
+      active = false;
+      loading -= 1;
+      waiting.values().next().value?.();
+    };
+    const start = () => {
+      waiting.delete(start);
+      active = true;
+      loading += 1;
+      load(done);
+    };
+    if (loading < 4) start();
+    else waiting.add(start);
+    return () => {
+      waiting.delete(start);
+      done();
+    };
   }
-  const embeds = $derived(automaticEmbeds(nodes));
 </script>
 
 {#snippet render(children: readonly ContentNode[])}
@@ -49,9 +63,7 @@
       />
     {:else if node.xPost !== undefined}
       {#key node.xPost}
-        <XPost href={node.xPost} automatic={embeds.has(node)}>
-          {@render render(node.children)}
-        </XPost>
+        <XPost href={node.xPost} {enqueue}> {@render render(node.children)} </XPost>
       {/key}
     {:else if node.tag === "a"}
       <a href={node.href} target="_blank" rel="noopener noreferrer nofollow"
