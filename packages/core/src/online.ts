@@ -1,7 +1,7 @@
 import { errorFromBody, type SendoApi } from "./api/client";
 import type { Database, Executor } from "./db/database";
 import { listFeeds } from "./db/queries";
-import type { Feed } from "./models";
+import type { Feed, FeedFetchTimes } from "./models";
 import { reapplyPending } from "./sync/queue";
 import { toSameOriginUrl } from "./url";
 
@@ -15,13 +15,6 @@ import { toSameOriginUrl } from "./url";
 export interface FeedCandidate {
   url: string;
   title: string | null;
-}
-
-export interface FeedFetchTimes {
-  /** 失敗も含む、最後の取得試行の時刻 */
-  lastFetchedAt: number | null;
-  /** 304 も含む、最後に取得に成功した時刻 */
-  lastSuccessfulFetchAt: number | null;
 }
 
 /** 差分同期に載らない取得時刻を REST API から読む。購読がなければ null */

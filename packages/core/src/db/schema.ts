@@ -6,14 +6,13 @@ import type { Database } from "./database";
  * マイグレーションは足すだけにし、出したものは書き換えない（手元の DB はユーザーの端末にあり、
  * 作り直せない）。版は PRAGMA user_version に持つ。時刻はミリ秒の整数。
  *
- * 手元に置くのは sendo の同期で届く行だけ（docs/decisions/sync.md）。sendo の表とは次のように
- * 対応する。
+ * 同期で届いた行（docs/decisions/sync.md）は、sendo の表と次のように対応する。
  * - folders：ユーザーのフォルダ
  * - feeds：ユーザーが購読しているフィード（id は REST API の /feeds/{id} の id）
  * - articles：ユーザーの受信箱の記事（記事の本体と、既読・スター）
  * - synced_settings：ユーザーが預けた設定の項目（端末の種類ごと）
  *
- * article_contents だけは、同期では届かない。記事ごとに取った本文を置く（db/content.ts）。
+ * 本文とフィードの取得時刻は、必要になったときに REST API から取って置く。
  */
 const migrations: readonly (readonly string[])[] = [
   [
@@ -187,6 +186,18 @@ const migrations: readonly (readonly string[])[] = [
        where json_type(payload, '$.page') = 'object'`,
   ],
   ["alter table feeds add column display_name text"],
+  [
+    // 行がなければ未取得。両方 null の行は、時刻の記録がないことを sendo に確認済み。
+    `create table feed_fetch_times (
+      feed_id text primary key,
+      last_fetched_at integer,
+      last_successful_fetch_at integer
+    ) strict, without rowid`,
+    `create trigger feeds_delete_fetch_times after delete on feeds
+     begin
+       delete from feed_fetch_times where feed_id = old.id;
+     end`,
+  ],
 ];
 
 export const SCHEMA_VERSION = migrations.length;

@@ -9,6 +9,7 @@ import {
   type StoredContent,
 } from "./db/content";
 import type { Database, Executor } from "./db/database";
+import { getStoredFeedFetchTimes, putStoredFeedFetchTimes } from "./db/feed-fetch-times";
 import {
   type ArticleQuery,
   countReadSince,
@@ -34,6 +35,7 @@ import {
   DEVICE_TYPES,
   type DeviceType,
   type Feed,
+  type FeedFetchTimes,
   type Folder,
   type LocalArticleContent,
   type SavedPage,
@@ -46,7 +48,6 @@ import {
 import {
   discoverFeeds,
   type FeedCandidate,
-  type FeedFetchTimes,
   fetchFeedTimes,
   importOpml,
   type OpmlImportResult,
@@ -187,6 +188,7 @@ export class ReaderCore {
   readonly #folderIds = new Map<string, string>();
   /** 取りにいっている本文（出どころと記事の ID ごと）。同じ本文を同時に 2 回取らない */
   readonly #contentFetches = new Map<string, Promise<StoredContent | null>>();
+  readonly #feedTimesRefreshes = new Map<string, Promise<FeedFetchTimes | null>>();
   readonly #prefetchContents: number;
   #prefetching: Promise<number> | null = null;
 
@@ -355,6 +357,7 @@ export class ReaderCore {
     this.#folderIds.clear();
     this.#onlineOps.clear();
     this.#contentFetches.clear();
+    this.#feedTimesRefreshes.clear();
     this.#prefetching = null;
     return this.#session.signal;
   }
@@ -784,12 +787,25 @@ export class ReaderCore {
 
   // --- 通信が要る操作（画面では待っている間の表示を出す） ---
 
-  /** 購読詳細に出す取得時刻を読む */
-  async fetchFeedTimes(feedId: string): Promise<FeedFetchTimes | null> {
+  /** 購読詳細に出す取得時刻を更新する。同じフィードの更新が並んだら、応答を共有する */
+  async refreshFeedFetchTimes(feedId: string): Promise<FeedFetchTimes | null> {
     this.#requireSignedIn();
+    const existing = this.#feedTimesRefreshes.get(feedId);
+    if (existing !== undefined) return existing;
     const session = this.#session.signal;
-    await this.#confirmSameUser(session);
-    return fetchFeedTimes(this.#api, feedId, session);
+    const running = (async () => {
+      await this.#confirmSameUser(session);
+      const times = await fetchFeedTimes(this.#api, feedId, session);
+      if (times === null) return null;
+      return this.#db.transaction(async (tx) => {
+        throwIfSessionEnded(session);
+        return (await putStoredFeedFetchTimes(tx, feedId, times)) ? times : null;
+      });
+    })().finally(() => {
+      if (this.#feedTimesRefreshes.get(feedId) === running) this.#feedTimesRefreshes.delete(feedId);
+    });
+    this.#feedTimesRefreshes.set(feedId, running);
+    return running;
   }
 
   /** サイトの URL から、購読できるフィードの候補を探す */
@@ -912,6 +928,11 @@ export class ReaderCore {
 
   listFeeds(): Promise<Feed[]> {
     return listFeeds(this.#db);
+  }
+
+  /** 保存済みの取得時刻。まだ時刻を確認していなければ null */
+  getFeedFetchTimes(feedId: string): Promise<FeedFetchTimes | null> {
+    return getStoredFeedFetchTimes(this.#db, feedId);
   }
 
   listSavedPages(hideStarred = false): Promise<SavedPage[]> {

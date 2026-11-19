@@ -49,7 +49,7 @@ test("フォルダと中身を一緒に表示し、検索中は畳んだフィ�
   expect(server.requests.length).toBe(requests);
 });
 
-test("購読詳細を開いたときに、フィードごとの最終試行と最終成功の時刻を読む", async ({
+test("購読詳細の時刻は、再取得を待つ間も通信できないときも手元から表示する", async ({
   page,
   context,
 }) => {
@@ -80,14 +80,34 @@ test("購読詳細を開いたときに、フィードごとの最終試行と�
 
   const nextCheck = "2026-11-19T14:00:00.000Z";
   blog.lastFetchedAt = Date.parse(nextCheck);
-  await openBlog.click();
+  const refresh = Promise.withResolvers<void>();
+  await context.route(
+    "**/api/v1/feeds",
+    async (route) => {
+      await refresh.promise;
+      await route.fallback();
+    },
+    { times: 1 },
+  );
+  try {
+    await openBlog.click();
+    await expect(times.nth(0)).toHaveAttribute("datetime", lastChecked);
+    await expect(times.nth(1)).toHaveAttribute("datetime", lastSuccessful);
+  } finally {
+    refresh.resolve();
+  }
   await expect(times.nth(0)).toHaveAttribute("datetime", nextCheck);
   await expect(times.nth(1)).toHaveAttribute("datetime", lastSuccessful);
   await dialog.getByRole("button", { name: "Close", exact: true }).click();
 
   await context.route("**/api/v1/feeds", (route) => route.abort("internetdisconnected"));
+  await page.reload();
   await openBlog.click();
-  await expect(dialog.getByText("取得時刻を確認できませんでした。")).toBeVisible();
+  await expect(
+    dialog.getByText("取得時刻を更新できなかったため、前回の記録を表示しています。"),
+  ).toBeVisible();
+  await expect(times.nth(0)).toHaveAttribute("datetime", nextCheck);
+  await expect(times.nth(1)).toHaveAttribute("datetime", lastSuccessful);
   await expect(dialog.getByRole("combobox", { name: "Move to" })).toBeEnabled();
   await expect(dialog.getByRole("button", { name: "Unsubscribe…", exact: true })).toBeEnabled();
 });

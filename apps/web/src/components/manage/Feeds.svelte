@@ -25,7 +25,9 @@
   let selectedId = $state<string | null>(null);
   let menuOpen = $state(false);
   let confirming = $state(false);
-  let fetchTimes = $state<Promise<FeedFetchTimes | null> | null>(null);
+  let fetchTimes = $state<FeedFetchTimes | null>(null);
+  let fetchTimesStatus = $state<"loading" | "ready" | "unavailable">("loading");
+  const userId = $derived(reader.user?.id);
   const selected = $derived(reader.feeds.find((feed) => feed.id === selectedId));
   const term = $derived(query.trim().toLowerCase());
   const matches = $derived(
@@ -52,6 +54,30 @@
     if (selected === undefined) menuOpen = false;
   });
 
+  $effect(() => {
+    const feedId = selectedId;
+    fetchTimes = null;
+    fetchTimesStatus = "loading";
+    if (!menuOpen || feedId === null || userId === undefined) return;
+    let active = true;
+    void (async () => {
+      try {
+        const cached = await reader.client.getFeedFetchTimes(feedId);
+        if (!active) return;
+        fetchTimes = cached;
+        const latest = await reader.client.refreshFeedFetchTimes(feedId);
+        if (!active) return;
+        if (latest !== null) fetchTimes = latest;
+        fetchTimesStatus = latest === null ? "unavailable" : "ready";
+      } catch {
+        if (active) fetchTimesStatus = "unavailable";
+      }
+    })();
+    return () => {
+      active = false;
+    };
+  });
+
   function hostOf(feed: Feed): string {
     try {
       return new URL(feed.url).host;
@@ -74,7 +100,6 @@
     selectedId = feed.id;
     confirming = false;
     message = null;
-    fetchTimes = reader.client.fetchFeedTimes(feed.id).catch(() => null);
     menuOpen = true;
   }
 
@@ -223,21 +248,24 @@
       </div>
     {:else}
       <p class="url">{selected.url}</p>
-      {#if menuOpen && fetchTimes !== null}
-        {#await fetchTimes}
+      {#if menuOpen}
+        {#if fetchTimes !== null}
+          <dl class="fetch-times">
+            <dt>Last checked</dt>
+            <dd>{@render fetchTime(fetchTimes.lastFetchedAt)}</dd>
+            <dt>Last successful fetch</dt>
+            <dd>{@render fetchTime(fetchTimes.lastSuccessfulFetchAt)}</dd>
+          </dl>
+        {:else if fetchTimesStatus === "loading"}
           <p class="fetch-times-note" role="status">取得時刻を確認しています…</p>
-        {:then times}
-          {#if times === null}
-            <p class="fetch-times-note" role="status">取得時刻を確認できませんでした。</p>
-          {:else}
-            <dl class="fetch-times">
-              <dt>Last checked</dt>
-              <dd>{@render fetchTime(times.lastFetchedAt)}</dd>
-              <dt>Last successful fetch</dt>
-              <dd>{@render fetchTime(times.lastSuccessfulFetchAt)}</dd>
-            </dl>
-          {/if}
-        {/await}
+        {/if}
+        {#if fetchTimesStatus === "unavailable"}
+          <p class="fetch-times-note" role="status">
+            {fetchTimes === null
+              ? "取得時刻を確認できませんでした。"
+              : "取得時刻を更新できなかったため、前回の記録を表示しています。"}
+          </p>
+        {/if}
       {/if}
       <label class="move-label" for="selected-feed-folder">Move to</label>
       <select
