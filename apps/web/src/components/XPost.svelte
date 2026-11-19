@@ -3,12 +3,14 @@
 
   let { href, children }: { href: string; children: Snippet } = $props();
   const origin = __X_EMBED_ORIGIN__;
+  // セッションのクッキーはポートで分かれないため、同じホスト名は使えない。
+  const separateHost =
+    origin !== "" &&
+    new URL(origin).hostname.replace(/\.$/, "") !== window.location.hostname.replace(/\.$/, "");
   let frame = $state<HTMLIFrameElement>();
   let height = $state(0);
   const src = $derived(
-    origin && origin !== window.location.origin
-      ? `${origin}/#${new URL(href).pathname.split("/").at(-1)}`
-      : "",
+    separateHost ? `${origin}/#${new URL(href).pathname.split("/").at(-1)}` : "",
   );
 
   function resize(event: MessageEvent) {

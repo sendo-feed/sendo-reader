@@ -161,8 +161,9 @@ test("X の引用は投稿リンクを表示し、設定した隔離フレーム
   });
   await routeFakeSendo(context, server);
   const setting = process.env.SENDO_X_EMBED_ORIGIN;
-  if (setting) {
-    await context.route(`${new URL(setting).origin}/**`, (route) =>
+  const embed = setting ? new URL(setting) : null;
+  if (embed) {
+    await context.route(`${embed.origin}/**`, (route) =>
       route.fulfill({
         contentType: "text/html",
         body: `<p>公式埋め込みの代わり</p><script>
@@ -181,8 +182,8 @@ test("X の引用は投稿リンクを表示し、設定した隔離フレーム
     "https://x.com/user/status/123",
   );
   const frame = view.locator("iframe");
-  if (setting) {
-    await expect(frame).toHaveAttribute("src", `${new URL(setting).origin}/#123`);
+  if (embed && embed.hostname !== new URL(page.url()).hostname) {
+    await expect(frame).toHaveAttribute("src", `${embed.origin}/#123`);
     await expect(frame).toHaveAttribute("sandbox", "allow-scripts allow-same-origin");
     await expect(frame).toHaveAttribute("referrerpolicy", "no-referrer");
     await expect(frame).toHaveAttribute("height", "240");
