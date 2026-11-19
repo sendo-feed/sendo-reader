@@ -3,8 +3,8 @@
  *
  * ページに他人の JS が入ると、ページを開いている間はセッションで API を使われ、手元のデータも
  * 読まれるので、CSP を厳しくする（ほかのオリジンへの通信と、インラインのスクリプトを許さない）。
- * 本番は、ビルドで dist/_headers に書き出し、Workers Static Assets が付ける。
- * 手元は、Vite の dev サーバーが付ける。
+ * 本番は、reader のコンテナのサーバー（server/static.ts）が、画面のすべての応答に付ける。
+ * 手元は、Vite の dev サーバーと preview が付ける。
  */
 
 /** 本番の CSP。ほかのオリジンへの通信と、インラインのスクリプトを許さない */
@@ -54,12 +54,4 @@ export function securityHeaders(mode: "production" | "development"): Record<stri
     "Referrer-Policy": "no-referrer",
     "Permissions-Policy": "camera=(), microphone=(), geolocation=(), payment=(), usb=()",
   };
-}
-
-/** Workers Static Assets の _headers の形にする（すべてのパスに付ける） */
-export function renderHeadersFile(): string {
-  const lines = Object.entries(securityHeaders("production")).map(
-    ([name, value]) => `  ${name}: ${value}`,
-  );
-  return ["/*", ...lines, ""].join("\n");
 }

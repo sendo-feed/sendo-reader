@@ -15,7 +15,7 @@ WORKDIR /app
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY packages/core/package.json packages/core/
 COPY apps/web/package.json apps/web/
-# インストール時のスクリプト（wrangler types など）は、ビルドには要らないので動かさない
+# インストール時のスクリプトは、ビルドには要らないので動かさない
 RUN pnpm install --frozen-lockfile --ignore-scripts
 COPY tsconfig.base.json ./
 COPY packages/core packages/core

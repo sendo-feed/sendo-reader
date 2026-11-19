@@ -3,7 +3,6 @@ import { FakeSendo, routeFakeSendo, signIn } from "./fake-sendo";
 
 function seed() {
   const server = new FakeSendo();
-  server.pageContentEnabled = true;
   const feed = server.subscribe({ url: "https://example.com/feed", title: "Blog" });
   const article = server.deliver(feed.id, { title: "要約の記事", summary: "短い要約" });
   server.pageContents.set(article.id, "<h2>元ページの見出し</h2><p>要約にない全文の続き</p>");
@@ -151,7 +150,7 @@ test("自動取得中にフィードへ切り替えたら、取得後も選ん�
   expect(server.pageContentRequests).toEqual([article.id]);
 });
 
-test("機能一覧が遅くても要約を先に出し、スマホでも全文と原文への導線を使える", async ({
+test("全文の取得が遅くても要約を先に出し、スマホでも全文と原文への導線を使える", async ({
   page,
   context,
 }) => {
@@ -160,7 +159,7 @@ test("機能一覧が遅くても要約を先に出し、スマホでも全文�
   const blocked = new Promise<void>((resolve) => {
     release = resolve;
   });
-  server.onRequest = (path) => (path.endsWith("/features") ? blocked : Promise.resolve());
+  server.onRequest = (path) => (path.endsWith("/content") ? blocked : Promise.resolve());
   await page.setViewportSize({ width: 390, height: 844 });
   await routeFakeSendo(context, server);
   await page.goto("/");
@@ -181,24 +180,6 @@ test("機能一覧が遅くても要約を先に出し、スマホでも全文�
   await expect(view.locator(".body")).toContainText("要約にない全文の続き");
   expect(server.pageContentRequests).toEqual([article.id]);
 });
-
-for (const featuresStatus of [200, 404]) {
-  test(`全文を使えない版では取得ボタンを出さない（features=${featuresStatus}）`, async ({
-    page,
-    context,
-  }) => {
-    const { server, article } = seed();
-    server.pageContentEnabled = false;
-    server.featuresStatus = featuresStatus;
-    await routeFakeSendo(context, server);
-    await page.goto("/");
-    await signIn(page);
-    await page.locator(".article-list .item", { hasText: article.title ?? "" }).click();
-    await expect(page.locator(".article-view .summary")).toHaveText("短い要約");
-    await expect(page.getByRole("button", { name: "More actions" })).toHaveCount(0);
-    expect(server.pageContentRequests).toEqual([]);
-  });
-}
 
 test("補助メニューをキーボードで開閉しても記事を閉じず、フォーカスを戻す", async ({
   page,
@@ -224,4 +205,26 @@ test("補助メニューをキーボードで開閉しても記事を閉じず�
   await chooseContent(page, "Show feed content");
   await expect(more).toBeFocused();
   await expect(view.locator(".summary")).toHaveText("短い要約");
+});
+
+test("開いたときの全文の自動取得が届かなくても知らせず、つながったら取り直す", async ({
+  page,
+  context,
+}) => {
+  const { server, article } = seed();
+  await routeFakeSendo(context, server);
+  await page.goto("/");
+  await signIn(page);
+  server.onRequest = (path) =>
+    path.endsWith("/content") ? Promise.reject(new TypeError("offline")) : Promise.resolve();
+  await page.locator(".article-list .item", { hasText: article.title ?? "" }).click();
+  const view = page.locator(".article-view");
+  await expect(view.locator(".summary")).toHaveText("短い要約");
+  await expect(view.getByRole("status")).toHaveCount(0);
+  expect(server.pageContentRequests).toEqual([]);
+
+  server.onRequest = null;
+  await page.evaluate(() => window.dispatchEvent(new Event("online")));
+  await expect(view.locator(".body")).toContainText("要約にない全文の続き");
+  expect(server.pageContentRequests).toEqual([article.id]);
 });

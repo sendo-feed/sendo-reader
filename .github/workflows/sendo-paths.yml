@@ -34,7 +34,7 @@ jobs:
         with:
           node-version-file: .node-version
 
-      # ルーターを組み立てるだけなので、Worker の型生成・DB・Rust のビルドは要らない
+      # ルーターを組み立てるだけなので、インストール時のスクリプト（Rust のネイティブのモジュールなど）は要らない
       - name: Install sendo dependencies
         run: pnpm --dir "$RUNNER_TEMP/sendo" install --frozen-lockfile --ignore-scripts
 

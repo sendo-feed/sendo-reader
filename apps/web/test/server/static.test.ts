@@ -14,7 +14,6 @@ beforeAll(async () => {
     "assets/index-abc.js": SCRIPT,
     "assets/sqlite3-abc.wasm": new Uint8Array(4000),
     "favicon.svg": "<svg/>",
-    _headers: "/*\n  X-Test: 1\n",
     ".hidden": "secret",
   });
 });
@@ -40,11 +39,11 @@ describe("静的なファイル", () => {
     },
   );
 
-  test.each(["/_headers", "/.hidden"])("%s は画面のファイルとして返さない", async (path) => {
-    expect(await get(path).text()).toBe(INDEX_HTML);
+  test("ドットで始まるファイルは、画面のファイルとして返さない", async () => {
+    expect(await get("/.hidden").text()).toBe(INDEX_HTML);
   });
 
-  test("Cloudflare 版の _headers と同じセキュリティのヘッダーを付ける", () => {
+  test("すべての応答に、本番のセキュリティのヘッダーを付ける", () => {
     for (const response of [get("/"), get("/assets/index-abc.js"), get("/", {}, "POST")]) {
       for (const [name, value] of Object.entries(securityHeaders("production"))) {
         expect(response.headers.get(name)).toBe(value);
