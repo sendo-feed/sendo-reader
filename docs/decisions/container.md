@@ -25,11 +25,11 @@ sendo-reader は、[sendo のコンテナ版](https://github.com/sendo-feed/send
    - 画面のルートは、一覧と重ねない。`/oauth/authorize` は画面（許可の画面）で、`/oauth/token` と `/oauth/register` は sendo。`/oauth/` で始まるパスをまとめて回さない
    - sendo が外に出すパスを足したら、この一覧にも足す。CI で、sendo の `main` の実際のルートと一覧を突き合わせる
    - `/healthz` は sendo の生死を答える。外から `https://reader.example.com/healthz` を見ると、reader と sendo をつないだ全体を確かめられる
-4. **中継では、リクエストと応答を書き換えない。**
-   - メソッド、パスとクエリ、ヘッダー、本文をそのまま sendo に渡す。除くのは、1 回の接続にだけ関わるヘッダー（`Connection`、`Transfer-Encoding` など）だけにする。`Cookie`、`Origin`、`Sec-Fetch-*`、`Authorization` はそのまま渡す
+4. **中継するメソッド、パス、状態コード、本文を保つ。ヘッダーは接続の管理と更新通知の照合に必要なものを調整する。**
+   - メソッド、パスとクエリ、本文をそのまま sendo に渡す。`Cookie`、`Origin`、`Sec-Fetch-*`、`Authorization` も同じ値を渡す。1 回の接続にだけ関わるヘッダー（`Connection`、`Transfer-Encoding` など）と通知の照合用ヘッダーは、この接続の中で扱う
    - `X-Forwarded-*` は付けない。sendo はそれを信じず、URL のオリジンを `PUBLIC_URL` に置き換える
    - リダイレクトは追わずに、そのまま返す（ログインの 302 など）
-   - 応答の状態、ヘッダー（複数の `Set-Cookie` を含む）、本文をそのまま返す。本文は溜めずに流す（MCP、OPML の書き出しなど）
+   - 応答の状態と本文、接続を越えて使うヘッダー（複数の `Set-Cookie` を含む）はそのまま返す。通知の照合に関わる応答ヘッダーは下記の扱いにする。本文は溜めずに流す（MCP、OPML の書き出しなど）
    - sendo の応答には、画面のセキュリティのヘッダーを足さない
    - 通知用の `GET /api/v1/sync/updates` だけは WebSocket Upgrade を中継する。ブラウザの `Origin` とクッキーを Sendo に渡し、Sendo が `101` を返してからブラウザにも `101` を返して両方向に流す。Sendo が拒否したら、その HTTP 応答を返す。接続の片側が閉じたときと reader が停止するときは残りの接続も閉じる（sendo の[差分同期](https://github.com/sendo-feed/sendo/blob/main/docs/decisions/sync.md)の 9）
    - ブラウザが `GET /api/v1/me` でユーザーを確かめるとき、reader は成功したクッキー認証の応答に、そのクッキーで作った照合値をヘッダーで返す。ワーカーは同期済みと同じユーザーを確かめてから、その値を `Sec-WebSocket-Protocol` に付ける。reader は Upgrade に付いたクッキーと照合してから中継する。Sendo へは照合用ヘッダーを送らず、Sendo 側の Upgrade が成功したらブラウザへの `101` に選択した値を返す。手元の Vite も同じ扱いにする
@@ -68,7 +68,7 @@ sendo-reader は、[sendo のコンテナ版](https://github.com/sendo-feed/send
   - 「静的なファイル以外は全部 sendo に回す」と、画面のルート（`/settings`、`/feeds/<ID>`、`/oauth/authorize` など）を `index.html` にするために、結局、画面のルートの一覧が要る。画面のルートは増えやすい
   - ページの移動（`Sec-Fetch-Mode: navigate`）かどうかで分けると、同じパスでも、ブラウザで開いたときとアプリから呼んだときで行き先が変わる
   - sendo が外に出すパスは、プロトコルで決まったもので数が少なく、めったに増えない。一覧なら、何が sendo に届くかを 1 か所で読める
-- **書き換えずに中継する**：sendo は、受けたヘッダー（`Sec-Fetch-Site`、`Origin`、`Cookie`）でセッションと CSRF を確かめる。書き換えなければ、sendo から見て、ブラウザが直接呼んだのと変わらない。sendo はクライアントの IP を使わない（`X-Forwarded-For` などを読まない）ので、すべてのリクエストが reader のコンテナから来ても困らない
+- **Sendo の認証に使うヘッダーを保つ**：sendo は、受けたヘッダー（`Sec-Fetch-Site`、`Origin`、`Cookie`）でセッションと CSRF を確かめる。元の値が届けば同じ判定ができる。通知の照合は reader が受け持つ。sendo はクライアントの IP を使わない（`X-Forwarded-For` などを読まない）ので、すべてのリクエストが reader のコンテナから来ても困らない
 - **ヘルスチェックで `/` を見る**：sendo が止まっても、reader のコンテナは静的なファイルを返し続けられ、作り直しても直らない。reader の生死に sendo を混ぜると、sendo だけの不調で reader まで不健全と出て、どちらが悪いか分からなくなる。sendo の生死は、sendo のコンテナのヘルスチェック（compose の `depends_on` もこれを見る）と、外からの `/healthz` で見る
 - **Node で書く**
   - `security-headers.ts` をそのまま読み込めて、ヘッダーを 1 か所で保てる
