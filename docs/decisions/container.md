@@ -17,7 +17,7 @@
    - sendo のコンテナは、ポートを外に出さない。reader のコンテナが、compose の中のネットワークで呼ぶ
    - sendo の `PUBLIC_URL` と `READER_URL` には、どちらも reader のオリジン（例：`https://reader.example.com`）を入れる。`PUBLIC_URL` は欠かせない。コンテナは HTTP だけを受けるので、ないと sendo から見える URL は、中継の先の URL（`http://sendo:8787`）か、ホスト名は合っていても `http` のままのオリジンになり、ログインの戻り先や `__Host-` のクッキーが合わない
    - Google のリダイレクト URI、リーダーアプリ（Google Reader API）のサーバー、MCP の URL も、このオリジンにする
-   - X の埋め込みを有効にする場合は、専用の HTTPS ホストのルート（`/`）で埋め込みページ、`/embed.js` でそのスクリプトを配る（[ローカルファースト](local-first.md#ページの守り)）。reader の配布済みイメージで通常の構成を使うと、引用と投稿リンクを表示する。埋め込みを有効にする場合は、配信元を指定して reader のイメージをビルドし、Compose の `reader` でそのイメージを使う。更新時は reader のイメージもビルドし直す
+   - X の埋め込みを有効にする場合は、専用の HTTPS ホストのルート（`/`）で埋め込みページ、`/embed.js` でそのスクリプトを配る（[ローカルファースト](local-first.md#ページの守り)）。reader の配布済みイメージで通常の構成を使うと、引用と投稿リンクを表示する。埋め込みを有効にする場合は、HTTPS の配信元を `SENDO_X_EMBED_ORIGIN` の Docker ビルド引数に渡して reader のイメージをビルドし、Compose の `reader` でそのイメージを使う。配信先の変更と reader の更新に合わせてイメージをビルドし直す
 3. **reader のコンテナは、画面の静的なファイルを返し、sendo のパスを sendo に中継する。中継するパスは、許す一覧で持つ。**
    - 一覧：`/api/`（の下すべて）、`/mcp`、`/.well-known/oauth-protected-resource/mcp`、`/.well-known/oauth-authorization-server`、`/oauth/token`、`/oauth/register`、`/accounts/ClientLogin`、`/reader/api/0/`（の下すべて）、`/healthz`
    - 一覧にないパスには、静的なファイルか、なければ `index.html` を返す（Cloudflare 版と同じ SPA の扱い）
