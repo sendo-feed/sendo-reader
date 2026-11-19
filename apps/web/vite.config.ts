@@ -34,8 +34,11 @@ function securityHeadersPlugin(): Plugin {
   };
 }
 
-/** 手元で動かす sendo（sendo の pnpm dev） */
-const SENDO_DEV_URL = "http://localhost:8787";
+/**
+ * 手元で動かす sendo（sendo の pnpm dev）。e2e は、偽の通知のサーバーに向ける（SENDO_DEV_URL。
+ * playwright.config.ts）
+ */
+const SENDO_DEV_URL = process.env.SENDO_DEV_URL || "http://localhost:8787";
 
 /** Workbox が、1 回の取得の間、プラグインの呼び出しに渡して回す入れ物 */
 type GenerationState = { state?: { generation?: string } };
@@ -171,7 +174,11 @@ export default defineConfig({
     // （ポート 8787）に中継する（docs/decisions/ui.md の 4）。^ で始まるキーは、Vite が正規表現として
     // パスとクエリに当てる
     proxy: Object.fromEntries(
-      SENDO_NAVIGATION_DENYLIST.map((pattern) => [pattern.source, { target: SENDO_DEV_URL }]),
+      // ws: true で、sendo の通知（WebSocket の Upgrade）も中継する
+      SENDO_NAVIGATION_DENYLIST.map((pattern) => [
+        pattern.source,
+        { target: SENDO_DEV_URL, ws: true },
+      ]),
     ),
   },
 });

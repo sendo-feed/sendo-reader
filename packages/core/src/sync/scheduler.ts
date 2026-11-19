@@ -31,6 +31,11 @@ export interface SchedulerOptions {
 export const PERIODIC_SYNC_MS = 5 * 60 * 1000;
 /** 書き込みのあと、まとめて送るまで待つ時間 */
 export const WRITE_DEBOUNCE_MS = 500;
+/**
+ * sendo の通知を受けてから同期するまで待つ時間。続けて届いた知らせや、自分の書き込みのあとの同期と
+ * まとめる。sendo が利用者ごとに 1 秒まとめて送るので、長く待たない（docs/decisions/local-first.md の 3）
+ */
+export const NOTIFY_DEBOUNCE_MS = 300;
 /** 届かなかったときに、次に試すまでの時間（失敗が続くほど延ばす） */
 export const RETRY_DELAYS_MS = [5_000, 15_000, 60_000, PERIODIC_SYNC_MS] as const;
 
@@ -40,6 +45,7 @@ export const RETRY_DELAYS_MS = [5_000, 15_000, 60_000, PERIODIC_SYNC_MS] as cons
  * - 起動したら、すぐ同期する
  * - 書き込んだら、少し待ってから送る（続けて操作したときに、まとめて送れるように）
  * - 何もなくても、一定の間隔で同期する
+ * - sendo の通知（sync/updates.ts）を受けたら、少し待ってから同期する
  * - 届かなかったら、間隔を延ばしながらやり直す。オンラインに戻ったら、すぐ試す
  * - セッションが切れたら止め、ログインし直すまで待つ
  * - ログインしていなければ、送れていないログアウトだけを送る。届かなければ、間隔を延ばしながら
@@ -106,6 +112,11 @@ export class SyncScheduler {
     if (savedPageChanged) this.#update({ savedPageError: null });
     this.#schedule(WRITE_DEBOUNCE_MS);
     void this.#refreshPending();
+  }
+
+  /** sendo の通知を受けたとき。少し待ってから同期する（続けて届いた知らせとまとめる） */
+  requestNotified(): void {
+    this.#schedule(NOTIFY_DEBOUNCE_MS);
   }
 
   /**
