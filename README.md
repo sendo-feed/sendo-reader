@@ -29,7 +29,7 @@ Windows では、WSL の中（Linux 側のファイルシステム）にクロ�
 
 ## はじめかた
 
-まず、Sendo を手元で動かします（[Sendo の README](https://github.com/sendo-feed/sendo#はじめかた)）。`http://localhost:8787` で動いていれば十分です。
+まず、Sendo を手元で動かします（[Sendo の README](https://github.com/sendo-feed/sendo#手元で動かす)）。`http://localhost:8787` で動いていれば十分です。
 
 ```sh
 git clone https://github.com/sendo-feed/sendo-reader.git
@@ -41,7 +41,7 @@ pnpm dev
 
 `http://localhost:5173` で画面が開きます。`/api` へのリクエストは、Vite の dev サーバーが `http://localhost:8787` の Sendo に中継します。最初の画面で「Google でログイン」を押すと、Sendo の Google のログインを通って戻ってきます。
 
-ログインするには、手元の Sendo に Google の OAuth クライアントと、ログインできるメールを設定しておきます（[旧版の Sendo の README](https://github.com/sendo-feed/sendo/blob/94181bb/README.md#ブラウザでログインするgoogle)）。「承認済みのリダイレクト URI」には `http://localhost:5173/api/v1/auth/google/callback` を登録します。
+ログインするには、手元の Sendo に Google の OAuth クライアントと、ログインできるメールを設定しておきます（[Sendo の README](https://github.com/sendo-feed/sendo#ブラウザでログインするgoogle)）。「承認済みのリダイレクト URI」には `http://localhost:5173/api/v1/auth/google/callback` を登録します。
 
 ## コマンド
 
@@ -56,54 +56,10 @@ pnpm dev
 | `pnpm build` | 画面をビルドし、reader Worker をデプロイせずにバンドルして確かめる。コンテナ版のサーバーもバンドルする |
 | `pnpm size` | ビルドのあとに、画面の JS とワーカーの JS・wasm の大きさが予算に収まるか確かめる |
 | `pnpm e2e` | 画面を通したテスト（Playwright。`pnpm build` のあとに） |
-| `pnpm run deploy` | 画面をビルドし、reader Worker をデプロイする（[デプロイ](#デプロイ)。ふつうは fork への push で Workers Builds が動かす） |
 | `pnpm --filter @sendo-reader/web start:server` | コンテナ版のサーバーを手元の Node で動かす（`pnpm build` のあとに。`SENDO_URL=http://localhost:8787` で手元の Sendo に中継する） |
 | `pnpm --filter @sendo-reader/web lighthouse` | 初回の読み込みを Lighthouse で測る |
 | `pnpm --filter @sendo-reader/core api:fetch` | 手元の Sendo から API の定義（OpenAPI）を写す |
 | `pnpm --filter @sendo-reader/core api:generate` | 写した定義から API の型を作る |
-
-## デプロイ
-
-現行の Sendo とは Docker Compose で並べて動かします。[コンテナ版で動かす](#コンテナ版で動かす)を参照してください。
-
-### 旧 Sendo Worker と組み合わせる
-
-この手順は、Cloudflare 版の Sendo Worker を運用している環境向けです。
-
-自分の Cloudflare アカウントに、GitHub の fork からデプロイします。fork の `main` に push するたびに、Cloudflare（Workers Builds）がその版の reader をビルドしてデプロイします（[決定](docs/decisions/deploy.md)）。Cloudflare の無料プランで動きます。
-
-画面は Workers Static Assets で配信し、reader Worker が `/api` を Service binding で Sendo（Worker 名 `sendo`）に中継します。同じアカウントにある Sendo Worker に接続します。旧版の配備手順は [当時の Sendo の README](https://github.com/sendo-feed/sendo/blob/94181bb/README.md#デプロイ) にあります。
-
-### 初めてのデプロイ
-
-1. GitHub で `sendo-feed/sendo-reader` を自分のアカウントに fork し、fork の `main` を、旧 Sendo Worker と互換性を確認した reader のコミットに固定する
-2. Cloudflare の画面で、Workers & Pages →「作成」→「リポジトリをインポート」を選び、fork を選ぶ。Cloudflare の GitHub App の「Repository access」に、この fork を入れる
-   - Sendo の fork だけを入れていたら、GitHub の Settings → Applications → Cloudflare Workers and Pages で足す。入れ忘れると、画面から始めたビルドは動くのに、push してもビルドが始まらない
-3. 次のように入れてデプロイする
-
-   | 項目 | 値 |
-   |---|---|
-   | Worker の名前 | `sendo-reader`（変えない。`wrangler.jsonc` の `name` と違うとビルドが失敗し、Sendo の `READER_URL` やリダイレクト URI も、この名前の URL を前提にしている） |
-   | ビルドのコマンド | 空のまま |
-   | デプロイのコマンド | `pnpm run deploy`（`run` を付ける。`pnpm deploy` は pnpm 自身のコマンド） |
-   | ルート ディレクトリ | 空のまま、または `/`（`apps/web` にしない） |
-
-4. Worker の「設定」→「ビルド」で、「プレビュービルドの有効化」をオフにする（main 以外のブランチのビルドを止める）。リポジトリの一番上には wrangler の設定がないので、既定のコマンドでは失敗する
-5. `https://sendo-reader.<自分のサブドメイン>.workers.dev` を開き、Google でログインする
-   - Sendo の Google の OAuth クライアントの「承認済みのリダイレクト URI」に、`https://sendo-reader.<自分のサブドメイン>.workers.dev/api/v1/auth/google/callback` を入れておく（[旧版の Sendo の README](https://github.com/sendo-feed/sendo/blob/94181bb/README.md#ブラウザでログインするgoogle)）
-
-### 更新する
-
-旧 Sendo Worker を運用する間は、Sendo と reader を互換性を確認した版に固定します。以前の手順で sendo-updater を設定した環境では、自動取り込みを停止します。現行の Sendo に更新する場合は、[コンテナ版で動かす](#コンテナ版で動かす)の手順で reader と一緒に配備します。
-
-### 手元からデプロイする
-
-手元から再配備するときは、Workers Builds に使う固定済みのコミットをチェックアウトしてから実行します。
-
-```sh
-pnpm --filter @sendo-reader/web exec wrangler login   # 最初に 1 回
-pnpm run deploy
-```
 
 ## コンテナ版で動かす
 
