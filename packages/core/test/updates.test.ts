@@ -188,16 +188,20 @@ describe("sendo の通知", () => {
     expect(sockets).toHaveLength(2);
   });
 
-  test("1008 はすぐにはつなぎ直さず、同期で確かめる。401 なら止め、通れば間を空けてつなぐ", () => {
+  test("1008 はすぐにはつなぎ直さず、確かめの同期が終わるのを待つ。401 なら止め、通れば間を空けてつなぐ", () => {
     const { updates, sockets, calls, advance, nextDelay, last } = setup();
     updates.update(status());
     last().open();
     last().end(1008);
     expect(calls.checkSession).toBe(1);
+    // 確かめの同期が終わるまでは、どれだけ待っても、オンラインに戻っても、つながない
+    expect(nextDelay()).toBeNull();
+    advance(RECONNECT_DELAYS_MS.at(-1) ?? 0);
+    updates.online();
     expect(sockets).toHaveLength(1);
-    expect(nextDelay()).toBe(SESSION_CHECK_DELAY_MS);
 
     // 確かめの同期が 401：ログインし直すまでつながない
+    updates.update(status({ syncing: true }));
     updates.update(status({ error: "unauthorized" }));
     advance(RECONNECT_DELAYS_MS.at(-1) ?? 0);
     expect(sockets).toHaveLength(1);
@@ -206,15 +210,40 @@ describe("sendo の通知", () => {
     updates.update(status());
     expect(sockets).toHaveLength(2);
     last().end(1008);
+    updates.update(status({ syncing: true }));
+    expect(nextDelay()).toBeNull();
     updates.update(status({ lastSyncedAt: 10 }));
+    expect(nextDelay()).toBe(SESSION_CHECK_DELAY_MS);
+    // 間を空けている間も、オンラインに戻ったことでは縮めない
+    updates.online();
+    expect(sockets).toHaveLength(2);
     advance(SESSION_CHECK_DELAY_MS);
     expect(sockets).toHaveLength(3);
   });
 
-  test("1013 は 1 分以上空けてつなぎ直す", () => {
+  test("1008 のときに走っていた同期は確かめにせず、その次の同期を待つ", () => {
+    const { updates, sockets, advance, nextDelay, last } = setup();
+    updates.update(status());
+    last().open();
+    updates.update(status({ syncing: true }));
+    last().end(1008);
+    // 閉じる前から走っていた同期が終わっても、まだつながない
+    updates.update(status({ lastSyncedAt: 1 }));
+    expect(nextDelay()).toBeNull();
+    // 確かめの同期が始まって終われば、間を空けてつなぐ
+    updates.update(status({ syncing: true, lastSyncedAt: 1 }));
+    updates.update(status({ lastSyncedAt: 2 }));
+    advance(nextDelay() ?? 0);
+    expect(sockets).toHaveLength(2);
+  });
+
+  test("1013 は 1 分以上空けてつなぎ直す。オンラインに戻っても縮めない", () => {
     const { updates, sockets, advance, nextDelay, last } = setup();
     updates.update(status());
     last().end(1013);
+    expect(nextDelay()).toBe(TRY_AGAIN_LATER_DELAY_MS);
+    updates.online();
+    expect(sockets).toHaveLength(1);
     expect(nextDelay()).toBe(TRY_AGAIN_LATER_DELAY_MS);
     advance(TRY_AGAIN_LATER_DELAY_MS - 1);
     expect(sockets).toHaveLength(1);

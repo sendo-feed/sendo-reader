@@ -76,6 +76,16 @@ export class SyncUpdates {
   /** 今の接続が開いた時刻（開く前は null） */
   #openedAt: number | null = null;
   #timer: unknown = null;
+  /**
+   * いま待っている理由。オンラインに戻ったときに縮めてよいのは、ネットワークの都合で待っている
+   * ときだけ（1013 の最短の間や、1008 のあとの確かめは縮めない）
+   */
+  #waiting: "network" | "minimum" | null = null;
+  /**
+   * 1008 のあと、セッションを確かめる同期の進み具合。同期が始まって終わるまで、つなぎ直さない。
+   * idle は、閉じたときに走っていた同期が終わるのを待っている（その同期は確かめにならない）
+   */
+  #check: "idle" | "start" | "end" | null = null;
   #failures = 0;
   /** ログインしていて、セッションも切れていない */
   #enabled = false;
@@ -98,31 +108,53 @@ export class SyncUpdates {
     return this.#socket !== null && this.#openedAt !== null;
   }
 
+  #syncing = false;
+
   /** 同期の様子が変わったら呼ぶ。ログインしている間だけつなぐ */
   update(status: SyncStatus): void {
+    this.#syncing = status.syncing;
     const enabled = status.signedIn && status.error !== "unauthorized";
-    if (enabled === this.#enabled) return;
-    this.#enabled = enabled;
-    this.#failures = 0;
-    if (enabled) {
-      this.#open();
-    } else {
-      this.#cancelTimer();
-      this.#drop();
+    if (enabled !== this.#enabled) {
+      this.#enabled = enabled;
+      this.#failures = 0;
+      this.#check = null;
+      if (enabled) {
+        this.#open();
+      } else {
+        this.#cancelTimer();
+        this.#drop();
+      }
+      return;
     }
+    if (enabled) this.#advanceCheck(status.syncing);
   }
 
-  /** オンラインに戻ったら、待たずにつなぎ直す */
+  /** オンラインに戻ったら、ネットワークの都合で待っているときだけ、待たずにつなぎ直す */
   online(): void {
     if (!this.#enabled || this.#stopped || this.#socket !== null) return;
+    if (this.#check !== null || this.#waiting === "minimum") return;
     this.#cancelTimer();
     this.#failures = 0;
     this.#open();
   }
 
+  /**
+   * 1008 のあとの確かめの同期を追う。401 なら update で止まる。終わって止まっていなければ（通った、
+   * または 401 でない失敗）、間を延ばしてつなぎ直す
+   */
+  #advanceCheck(syncing: boolean): void {
+    if (this.#check === "idle" && !syncing) this.#check = "start";
+    else if (this.#check === "start" && syncing) this.#check = "end";
+    else if (this.#check === "end" && !syncing) {
+      this.#check = null;
+      this.#reconnectLater(Math.max(SESSION_CHECK_DELAY_MS, this.#backoff()), "minimum");
+    }
+  }
+
   stop(): void {
     this.#stopped = true;
     this.#enabled = false;
+    this.#check = null;
     this.#cancelTimer();
     this.#drop();
   }
@@ -169,12 +201,14 @@ export class SyncUpdates {
         this.#reconnectLater(GOING_AWAY_DELAY_MS);
         return;
       case POLICY_VIOLATION:
-        // 同期の 401 が届いたら update で止まる。通れば、間を延ばしてつなぎ直す
+        // すぐにはつなぎ直さず、同期で確かめる（#advanceCheck）。走っている同期があれば、
+        // その次の同期を確かめにする
+        this.#cancelTimer();
+        this.#check = this.#syncing ? "idle" : "start";
         this.#checkSession();
-        this.#reconnectLater(Math.max(SESSION_CHECK_DELAY_MS, this.#backoff()));
         return;
       case TRY_AGAIN_LATER:
-        this.#reconnectLater(Math.max(TRY_AGAIN_LATER_DELAY_MS, this.#backoff()));
+        this.#reconnectLater(Math.max(TRY_AGAIN_LATER_DELAY_MS, this.#backoff()), "minimum");
         return;
       default:
         this.#reconnectLater(this.#backoff());
@@ -188,17 +222,20 @@ export class SyncUpdates {
     return delay ?? MAX_RECONNECT_DELAY_MS;
   }
 
-  #reconnectLater(delayMs: number): void {
+  #reconnectLater(delayMs: number, waiting: "network" | "minimum" = "network"): void {
     this.#cancelTimer();
     // 一斉につなぎ直さないように、少し（最大 25%）ずらす
     const jittered = Math.round(delayMs * (1 + this.#random() * 0.25));
+    this.#waiting = waiting;
     this.#timer = this.#setTimeout(() => {
       this.#timer = null;
+      this.#waiting = null;
       this.#open();
     }, jittered);
   }
 
   #cancelTimer(): void {
+    this.#waiting = null;
     if (this.#timer === null) return;
     this.#clearTimeout(this.#timer);
     this.#timer = null;

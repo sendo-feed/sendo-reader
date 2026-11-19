@@ -84,10 +84,30 @@ export function createUpgradeRelay(sendoOrigin: string): UpgradeRelay {
     }
   }
 
+  /**
+   * upgrade のイベントで投げると、reader のプロセスごと落ちる（http.Server は、このイベントの例外を
+   * 受け止めない）。どこで失敗しても、断って閉じる
+   */
   function handle(request: IncomingMessage, socket: Duplex, head: Buffer): void {
     socket.on("error", () => socket.destroy());
-    const url = new URL(request.url ?? "/", "http://reader.invalid");
-    if (!isSendoPath(url.pathname)) {
+    try {
+      relay(request, socket, head);
+    } catch (error) {
+      console.error("could not relay websocket", { error });
+      reject(socket, 400, "Bad Request");
+    }
+  }
+
+  function relay(request: IncomingMessage, socket: Duplex, head: Buffer): void {
+    let url: URL;
+    try {
+      url = new URL(request.url ?? "/", "http://reader.invalid");
+    } catch {
+      // 壊れたパス（//[ など）。URL として読めなければ、sendo のパスでもない
+      reject(socket, 400, "Bad Request");
+      return;
+    }
+    if (!url.pathname.startsWith("/") || !isSendoPath(url.pathname)) {
       reject(socket, 400, "Bad Request");
       return;
     }

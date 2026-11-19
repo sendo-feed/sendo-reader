@@ -1,5 +1,6 @@
 import type { IncomingMessage } from "node:http";
 import { request as httpRequest } from "node:http";
+import { connect } from "node:net";
 import type { Duplex } from "node:stream";
 import { afterEach, beforeAll, describe, expect, test } from "vitest";
 import type { Assets } from "../../server/static";
@@ -202,6 +203,32 @@ describe("WebSocket の中継", () => {
       expect(result).toMatchObject({ kind: "response", status: 400 });
     }
     expect(upgraded).toEqual([]);
+  });
+
+  test("URL として読めない Upgrade は 400 で断り、reader は止まらない", async () => {
+    const upgraded: Upgraded[] = [];
+    const { reader } = await start((request, socket, head) => {
+      upgraded.push({ request, socket, head });
+      acceptWebSocket(request, socket);
+    });
+    const { port } = new URL(reader.origin);
+    const response = await new Promise<string>((resolve, reject) => {
+      const socket = connect(Number(port), "127.0.0.1", () => {
+        socket.write(
+          "GET //[/api/v1/sync/updates HTTP/1.1\r\nHost: reader.example\r\nConnection: Upgrade\r\nUpgrade: websocket\r\nSec-WebSocket-Version: 13\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n\r\n",
+        );
+      });
+      let text = "";
+      socket.on("data", (chunk: Buffer) => {
+        text += chunk.toString();
+      });
+      socket.on("end", () => resolve(text));
+      socket.on("error", reject);
+    });
+    expect(response.startsWith("HTTP/1.1 400 ")).toBe(true);
+    expect(upgraded).toEqual([]);
+    // reader は動き続けている
+    expect((await fetch(`${reader.origin}/`)).status).toBe(200);
   });
 
   test("sendo に届かなければ 502", async () => {
