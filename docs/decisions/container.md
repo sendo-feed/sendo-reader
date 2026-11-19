@@ -39,9 +39,9 @@ sendo-reader は、[sendo のコンテナ版](https://github.com/sendo-feed/send
    - JS、CSS、wasm などは、ブラウザが受けられれば圧縮して返す（brotli か gzip）
 6. **reader のコンテナのヘルスチェック（イメージの `HEALTHCHECK`）は、reader 自身が返す `/`（`index.html`）を見る。** `/healthz` は sendo に中継するので、reader のコンテナで見ると sendo の生死を見ることになる。reader のためだけのパスは足さない（sendo のパスと重なるおそれを増やさない）。
 7. **サーバーは Node で書く。** HTTP は Hono と `@hono/node-server`（sendo と同じ）で受ける。コードは `apps/web/server/` に置き、ここだけ `node:*` を使ってよい。イメージには、画面のビルド（`vite build` の `dist`）と、依存ごと 1 つのファイルにまとめたサーバーを入れる。
-8. **本文の抽出と言語判定は使える前提で作る。通知の対応は `GET /api/v1/features` で確かめる。**
+8. **本文の抽出と言語判定は使える前提で作る。更新通知は対応を確かめてから接続を試す。**
    - sendo は、ページ本文の抽出と言語判定を常に動かし、欠いたままでは起動しない（sendo の[コンテナ版](https://github.com/sendo-feed/sendo/blob/main/docs/decisions/container.md)の 1〜3）。reader は、全文の取得を、いつでも使える機能として出す
-   - sendo が機能一覧に `syncUpdates: true` を返したら、画面と同じオリジンの `/api/v1/sync/updates` に WebSocket の接続を試す（sendo の[差分同期](https://github.com/sendo-feed/sendo/blob/main/docs/decisions/sync.md)の 9）。実際に接続が開けば、その時点で動いている reader が中継できることを確かめられる。初回接続や再接続が開いたあとと通知を受けたときに、手元のカーソルから差分同期を始める。同期の失敗後は、決まった再試行の間隔を守る。接続中も定期同期を続け、どちらかが未対応でつながらない間も定期同期で動く
+   - sendo の[差分同期](https://github.com/sendo-feed/sendo/blob/main/docs/decisions/sync.md)の 9 に従って対応を確かめ、対応していれば画面と同じオリジンの通知先（4）へ接続を試す。実際に接続が開けば、その時点で動いている reader が中継できることを確かめられる。接続が開いたときと通知を受けたときの差分同期も sendo の決定に従い、同期の失敗後は決まった再試行の間隔を守る。接続中も定期同期を続け、どちらかが未対応でつながらない間も定期同期で動く
    - 通知接続に失敗したときや切断されたときは、5 秒、15 秒、1 分、5 分と間隔を延ばしてつなぎ直す。つながれば間隔を元に戻す。Sendo が機能一覧で未対応を返したときは、5 分後に対応を確かめ直す
 9. **テストは Node で動かす。** 中継するパスの振り分け、中継（ヘッダー、`Set-Cookie`、リダイレクト、ストリーム）、静的なファイルのヘッダーを、偽の sendo を相手に Vitest で確かめる。CI では、PR でイメージが作れて動くことを確かめ、`main` に入ったらイメージを出す（sendo と同じ形）。
 
@@ -92,6 +92,6 @@ sendo-reader は、[sendo のコンテナ版](https://github.com/sendo-feed/send
 
 - sendo が外に出すパスを足したり、変えたりしたとき。一覧を直す。
 - sendo が版を切るようになったとき。reader のイメージのタグも、そろえて決める。
-- sendo が、機能を欠いた形で動くようになったとき。8 の出し分けを決め直す。
+- sendo が本文の抽出や言語判定を欠いた状態で動くようになったとき。両方を使えるとする 8 の前提を見直す。
 - サーバーを持たない人にも使ってもらう必要が出たとき（sendo の[テックスタック](https://github.com/sendo-feed/sendo/blob/main/docs/decisions/tech-stack.md)の見直す条件と一緒に）。
 - ネイティブ（Capacitor）で包むとき。アプリがどのオリジンを呼ぶかを決め直す。
