@@ -11,13 +11,13 @@
    - 上流の CI がイメージを作り、GHCR（`ghcr.io/sendo-feed/sendo-reader`）に置く。使う人は fork しない
    - タグと CPU は sendo にそろえる。`main` に入るたびに `main` と `sha-<コミット>` のタグで出し、amd64 と arm64 の両方で作る。版のタグは、sendo が版を切るときに一緒に決める
    - イメージは公開する（sendo のイメージと同じ）。使う人は `docker login` せずに取ってこられる
-   - sendo の `compose.yaml` に reader のサービスを並べ、`docker compose pull && docker compose up -d` で一緒に更新する。reader は、sendo が動き出してから（ヘルスチェックが通ってから）始める
+   - sendo の `compose.yaml` に reader のサービスを並べる。標準構成は `docker compose pull && docker compose up -d` で一緒に更新する。reader は、sendo が動き出してから（ヘルスチェックが通ってから）始める
 2. **reader の画面と Sendo の API・認証は、reader のオリジン 1 つから配る。**
    - 外に出すのは reader のコンテナだけにする。TLS は、sendo と同じく、手前に置くリバースプロキシや Cloudflare Tunnel で終える。コンテナは HTTP だけを受ける
    - sendo のコンテナは、ポートを外に出さない。reader のコンテナが、compose の中のネットワークで呼ぶ
    - sendo の `PUBLIC_URL` と `READER_URL` には、どちらも reader のオリジン（例：`https://reader.example.com`）を入れる。`PUBLIC_URL` は欠かせない。コンテナは HTTP だけを受けるので、ないと sendo から見える URL は、中継の先の URL（`http://sendo:8787`）か、ホスト名は合っていても `http` のままのオリジンになり、ログインの戻り先や `__Host-` のクッキーが合わない
    - Google のリダイレクト URI、リーダーアプリ（Google Reader API）のサーバー、MCP の URL も、このオリジンにする
-   - X の埋め込みを有効にする場合は、埋め込み用の静的ファイルだけを別ホストから配る（[ローカルファースト](local-first.md#ページの守り)）。reader と Sendo の通常の構成でも、引用と投稿リンクは表示できる
+   - X の埋め込みを有効にする場合は、埋め込み用の静的ファイルだけを別ホストから配る（[ローカルファースト](local-first.md#ページの守り)）。reader の配布済みイメージで通常の構成を使うと、引用と投稿リンクを表示する。埋め込みを有効にする場合は、配信元を指定して reader のイメージをビルドし、Compose の `reader` でそのイメージを使う。更新時は reader のイメージもビルドし直す
 3. **reader のコンテナは、画面の静的なファイルを返し、sendo のパスを sendo に中継する。中継するパスは、許す一覧で持つ。**
    - 一覧：`/api/`（の下すべて）、`/mcp`、`/.well-known/oauth-protected-resource/mcp`、`/.well-known/oauth-authorization-server`、`/oauth/token`、`/oauth/register`、`/accounts/ClientLogin`、`/reader/api/0/`（の下すべて）、`/healthz`
    - 一覧にないパスには、静的なファイルか、なければ `index.html` を返す（Cloudflare 版と同じ SPA の扱い）
@@ -44,7 +44,7 @@
 
 ## 理由
 
-- **reader のオリジン 1 つに見せる**
+- **画面・API・認証は reader のオリジン 1 つから配る**
   - Cloudflare 版でログインが動くのは、Service binding が、受けたリクエストを reader のオリジンの URL のまま sendo に渡すから（`env.SENDO.fetch(request)`）。Cloudflare 版の sendo は URL を書き換えないので、ログインの戻り先（ブラウザから見た `/api/v1/auth/<提供元>/login` の隣）も、セッションのクッキーも、reader のオリジンのものになる
   - コンテナ版の sendo は、リクエストの URL のオリジンを `PUBLIC_URL` に置き換える。`PUBLIC_URL` を reader のオリジンにすれば、Cloudflare 版と同じことが起きる。戻り先、クッキー、状態を変えるリクエストの確かめ（`Sec-Fetch-Site` と `Origin`）、OAuth の発行者（issuer）と MCP の宛先、`/mcp` の `Origin` の確かめが、どれも reader のオリジンでそろう
   - sendo の設定は、`PUBLIC_URL` と `READER_URL` が同じオリジンでも受ける（2 つを比べる処理はない。sendo の `src/platform/config.ts`）。sendo のコードを変えずに済む

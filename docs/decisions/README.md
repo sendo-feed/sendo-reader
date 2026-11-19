@@ -13,7 +13,7 @@ sendo-reader で決めたことを、テーマごとに1ファイルで置く。
 | [設定の同期](settings.md) | 提案中 | 表示の設定を sendo に預け、端末の種類（スマホは `mobile`、ほかは `desktop`）ごとに引き継ぐ。項目ごとに手元の DB に置いて操作キューで送り、既定と同じ値は預けない。「未読」は一覧の絞り込みの状態で、別の画面にはしない。前の localStorage の設定は、同期してから sendo にない項目だけを送る |
 | [アカウントの画面](account.md) | 提案中 | 設定の画面でアクセストークンと OAuth の許可を管理し、OAuth の許可の画面を置く。どちらもネットワークが要る画面で、発行したトークンは一度だけ出して保存しない。許可は毎回、利用者が押して決める |
 | [速さの予算](performance.md) | 提案中 | 画面のスレッドの JS は gzip 後 100KB 以下、ワーカーは JS と wasm で 550KB 以下。キャッシュ済みの起動から記事まで 1 秒、操作の反応は 100ms |
-| [コンテナ版](container.md) | 提案中 | コンテナ版の sendo と組むときは、reader もコンテナで配る（`ghcr.io/sendo-feed/sendo-reader`）。外からは reader のオリジン 1 つに見せ、sendo の `PUBLIC_URL` と `READER_URL` をそのオリジンにする。sendo のパスは許す一覧で中継し、書き換えない。サーバーは Node（Hono）。Cloudflare 版は Service binding で `/api` を中継する |
+| [コンテナ版](container.md) | 提案中 | コンテナ版の sendo と組むときは、reader もコンテナで配る（`ghcr.io/sendo-feed/sendo-reader`）。画面・API・認証は reader のオリジン 1 つから配り、sendo の `PUBLIC_URL` と `READER_URL` をそのオリジンにする。sendo のパスは許す一覧で中継し、書き換えない。サーバーは Node（Hono）。Cloudflare 版は Service binding で `/api` を中継する。X の埋め込み用の静的ファイルは設定時のみ別ホストで配る |
 | [デプロイ](deploy.md) | 提案中 | sendo と同じく、各自が fork し、Workers Builds でつなぐ。sendo を先にデプロイする。ルート ディレクトリは一番上のまま、手順は一番上の `package.json` の `deploy` に書く。main 以外のブランチのビルドはオフ。自動で取り込むなら sendo の sendo-updater が、sendo のデプロイのあとに取り込む |
 
 経緯を知りたいとき：
