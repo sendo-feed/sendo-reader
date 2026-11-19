@@ -336,13 +336,16 @@
       scrollToTop(scroller, top);
       const offset = scrollTopOf(scroller);
       appliedTop = offset;
-      const preceding = Array.from(element.querySelectorAll("[data-x-embed]")).filter(
+      const posts = Array.from(element.querySelectorAll("[data-x-embed]"));
+      const preceding = posts.filter(
         (post) =>
           anchorPosts.has(post) || post.getBoundingClientRect().top - viewportTop + offset < top,
       );
       const pending = preceding.filter((post) => post.getAttribute("data-x-embed") === "waiting");
-      for (const post of pending) post.dispatchEvent(new Event("sendo:open-x-post"));
-      if (preceding.length === 0) {
+      for (const post of pending) {
+        post.dispatchEvent(new CustomEvent("sendo:open-x-post", { detail: cancel.signal }));
+      }
+      if (preceding.length === 0 && (posts.length === 0 || offset >= top - 1)) {
         stop();
       } else if (pending.length === 0 && restoreTimer === undefined) {
         // 最初の高さの通知のあとに画像などが展開する間も、同じ段落を追う。

@@ -82,6 +82,20 @@ function xPostUrl(href: string): string | undefined {
   return `https://x.com${url.pathname.replace(/\/$/, "")}`;
 }
 
+const ATTRIBUTION_INLINE_TAGS = new Set(["strong", "em", "b", "i", "u", "s", "small", "mark"]);
+
+function attributionText(node: ContentNode): string | null {
+  if (typeof node === "string") return node;
+  if (!ATTRIBUTION_INLINE_TAGS.has(node.tag)) return null;
+  const parts: string[] = [];
+  for (const child of node.children) {
+    const part = attributionText(child);
+    if (part === null) return null;
+    parts.push(part);
+  }
+  return parts.join("");
+}
+
 /** 本文の HTML を木にする */
 export function parseContent(html: string): ContentNode[] {
   const root: ContentNode[] = [];
@@ -230,8 +244,17 @@ export function parseContent(html: string): ContentNode[] {
         index -= 1;
         continue;
       }
-      const text = quote.children[index - 1];
-      if (typeof text !== "string" || typeof child === "string" || child?.tag !== "a") break;
+      if (typeof child === "string" || child?.tag !== "a") break;
+      const parts: string[] = [];
+      let before = index - 1;
+      for (; before >= 0; before -= 1) {
+        const node = quote.children[before];
+        if (node === undefined) break;
+        const part = attributionText(node);
+        if (part === null) break;
+        parts.push(part);
+      }
+      const text = parts.reverse().join("");
       const start = text.indexOf("—");
       const attribution = /\(@([A-Za-z0-9_]{1,15})\)\s*$/.exec(text);
       const handle = attribution?.[1];
@@ -253,7 +276,7 @@ export function parseContent(html: string): ContentNode[] {
           posts.set(id, candidate);
         }
       }
-      index -= 2;
+      index = before;
       bodyText = text.slice(0, start).trim();
       if (bodyText !== "") break;
     }

@@ -1,5 +1,6 @@
 export interface XEmbedRequest {
   cancel(): void;
+  cancelPendingRestore(): boolean;
   prioritize(): void;
 }
 
@@ -42,6 +43,9 @@ export function createXEmbedQueue() {
         visible.delete(start);
         restoring.delete(start);
         done();
+      },
+      cancelPendingRestore() {
+        return restoring.delete(start);
       },
       prioritize() {
         if (!restoring.delete(start)) return;

@@ -32,15 +32,24 @@
     active && separateHost ? `${origin}/#${new URL(href).pathname.split("/").at(-1)}` : "",
   );
 
-  function requestLoad(inView: boolean) {
+  function requestLoad(inView: boolean, restoreSignal?: AbortSignal) {
     if (request !== undefined) {
       if (inView) request.prioritize();
       return;
     }
-    request = enqueue(() => {
+    if (restoreSignal?.aborted) return;
+    const queued = enqueue(() => {
       active = true;
       timer = setTimeout(() => finish(0), 15_000);
     }, inView);
+    request = queued;
+    restoreSignal?.addEventListener(
+      "abort",
+      () => {
+        if (request === queued && queued.cancelPendingRestore()) request = undefined;
+      },
+      { once: true },
+    );
   }
 
   function finish(value: number) {
@@ -66,7 +75,8 @@
         requestLoad(true);
       }
     });
-    const loadForRestore = () => requestLoad(false);
+    const loadForRestore = (event: Event) =>
+      requestLoad(false, (event as CustomEvent<AbortSignal>).detail);
     const keepQuoteOpen = () => {
       preserveQuote = height === 0;
       quoteOpen = true;

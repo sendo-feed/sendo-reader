@@ -27,3 +27,27 @@ test("復元待ちより、表示された X の投稿を先に読み込む", ()
   finish.get("visible")?.();
   expect(started.at(-1)).toBe("restore-4");
 });
+
+test("復元を中断すると、未開始の画面外の投稿だけを取り消す", () => {
+  const enqueue = createXEmbedQueue();
+  const started: string[] = [];
+  const finish = new Map<string, () => void>();
+  const add = (id: string) =>
+    enqueue((done) => {
+      started.push(id);
+      finish.set(id, done);
+    }, false);
+  const active = add("active");
+  add("second");
+  add("third");
+  const offscreen = add("offscreen");
+  const promoted = add("visible");
+  promoted.prioritize();
+
+  expect(offscreen.cancelPendingRestore()).toBe(true);
+  expect(active.cancelPendingRestore()).toBe(false);
+  expect(promoted.cancelPendingRestore()).toBe(false);
+  finish.get("visible")?.();
+  finish.get("active")?.();
+  expect(started).toEqual(["active", "second", "third", "visible"]);
+});
