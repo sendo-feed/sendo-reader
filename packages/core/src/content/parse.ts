@@ -214,29 +214,43 @@ export function parseContent(html: string): ContentNode[] {
   // 公式の引用は、本文のあとに出典のユーザー名と投稿元へのリンクを置く。
   for (const quote of postQuotes) {
     const posts = new Map<string, { url: string; links: ContentElement[] }>();
-    // 公式の引用は、空でも本文用の段落を出典より前に置く。
-    const bodyIndex = quote.children.findLastIndex(
-      (child) => typeof child !== "string" && child.tag === "p",
-    );
-    if (bodyIndex === -1) continue;
-    for (const [index, child] of quote.children.entries()) {
-      if (index <= bodyIndex + 1) continue;
-      if (typeof child === "string" || child.tag !== "a" || child.href === undefined) continue;
-      const attribution = quote.children[index - 1];
-      const handle =
-        typeof attribution === "string"
-          ? /—[^—]*\(@([A-Za-z0-9_]{1,15})\)\s*$/.exec(attribution)?.[1]
-          : undefined;
-      if (handle === undefined) continue;
-      const post = xPostUrl(child.href);
-      if (!post) continue;
-      const [, , , user, , id] = post.split("/");
-      if (id === undefined || user?.toLowerCase() !== handle.toLowerCase()) continue;
+    let index = quote.children.length - 1;
+    let bodyText = "";
+    // 引用の末尾に並ぶ出典だけをたどり、途中にあったリンクは出典候補に含めない。
+    while (index >= 0) {
+      const child = quote.children[index];
+      if (typeof child === "string" ? child.trim() === "" : child?.tag === "br") {
+        index -= 1;
+        continue;
+      }
+      const text = quote.children[index - 1];
+      if (typeof text !== "string" || typeof child === "string" || child?.tag !== "a") break;
+      const attribution = /—[^—]*\(@([A-Za-z0-9_]{1,15})\)\s*$/.exec(text);
+      if (attribution === null || attribution[1] === undefined) break;
+      const handle = attribution[1];
 
-      const candidate = posts.get(id) ?? { url: post, links: [] };
-      candidate.links.push(child);
-      posts.set(id, candidate);
+      const post = child.href === undefined ? undefined : xPostUrl(child.href);
+      if (post !== undefined) {
+        const [, , , user, , id] = post.split("/");
+        if (id !== undefined && user?.toLowerCase() === handle.toLowerCase()) {
+          const candidate = posts.get(id) ?? { url: post, links: [] };
+          candidate.url = post;
+          candidate.links.push(child);
+          posts.set(id, candidate);
+        }
+      }
+      index -= 2;
+      bodyText = text.slice(0, attribution.index).trim();
+      if (bodyText !== "") break;
     }
+    // 本文用の段落が空でも、出典より手前に本文の要素があれば候補を使う。
+    if (
+      bodyText === "" &&
+      !quote.children
+        .slice(0, index + 1)
+        .some((child) => (typeof child === "string" ? child.trim() !== "" : child.tag !== "br"))
+    )
+      continue;
     const candidate = posts.size === 1 ? posts.values().next().value : undefined;
     if (candidate !== undefined) {
       const { url, links } = candidate;

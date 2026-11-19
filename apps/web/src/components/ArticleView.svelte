@@ -289,14 +289,21 @@
     const restore = () => {
       const viewportTop = articleViewportTop();
       let top = saved.top;
+      let anchorPost: Element | null = null;
       if (saved.anchor !== undefined && saved.anchor.source === content?.source) {
         let target: Element | undefined = element.querySelector(".body") ?? undefined;
         for (const index of saved.anchor.path) target = target?.children[index];
         if (target !== undefined) {
           const quote = target.closest<HTMLDetailsElement>("details[data-x-quote]");
-          if (quote !== null && target.closest("summary") === null) {
-            quote.open = true;
-            quote.closest("[data-x-embed]")?.dispatchEvent(new Event("sendo:restore-x-quote"));
+          if (quote !== null) {
+            anchorPost = quote.closest("[data-x-embed]");
+            const summary = target.closest<HTMLElement>("summary");
+            if (summary === null) {
+              if (!quote.open) quote.open = true;
+              anchorPost?.dispatchEvent(new Event("sendo:restore-x-quote"));
+            } else if (summary.hidden) {
+              target = anchorPost ?? quote;
+            }
           }
           top = Math.max(
             0,
@@ -311,7 +318,8 @@
       const offset = scrollTopOf(scroller);
       appliedTop = offset;
       const preceding = Array.from(element.querySelectorAll("[data-x-embed]")).filter(
-        (post) => post.getBoundingClientRect().top - viewportTop + offset < top,
+        (post) =>
+          post === anchorPost || post.getBoundingClientRect().top - viewportTop + offset < top,
       );
       const pending = preceding.filter((post) => post.getAttribute("data-x-embed") === "waiting");
       for (const post of pending) post.dispatchEvent(new Event("sendo:open-x-post"));

@@ -31,7 +31,7 @@ const ELEMENT_KEYS = new Set([
 describe("sendo が配る形の本文", () => {
   test("X の埋め込みは本文が空でも投稿 URL を持つ", () => {
     const nodes = parseContent(
-      '<blockquote data-embed="x"><p></p> — (@user) <a href="https://twitter.com/user/status/123456789?ref=foo"></a><br><a href="https://example.com">出典の補足</a></blockquote>',
+      '<blockquote data-embed="x"><p></p> — (@user) <a href="https://twitter.com/user/status/123456789?ref=foo"></a><br></blockquote>',
     );
     expect(nodes[0]).toMatchObject({
       tag: "blockquote",
@@ -64,11 +64,19 @@ describe("sendo が配る形の本文", () => {
     expect(quote).toMatchObject({ xPost: "https://x.com/user/status/123" });
   });
 
+  test("末尾に出典があれば段落以外の本文でも埋め込む", () => {
+    const [quote] = parseContent(
+      '<blockquote data-embed="x"><div>引用本文</div> — (@user) <a href="https://x.com/user/status/123">投稿日</a></blockquote>',
+    );
+    expect(quote).toMatchObject({ xPost: "https://x.com/user/status/123" });
+  });
+
   test("引用本文にある X リンクは投稿元と見なさない", () => {
     for (const contents of [
       '<p>引用文 <a href="https://x.com/other/status/998">本文のリンク</a></p>',
       '— (@user) <a href="https://x.com/user/status/123">冒頭のリンク</a><p>引用文</p>',
       '<p>引用の前半</p> — (@user) <a href="https://x.com/user/status/123">途中のリンク</a><p>引用の後半</p>',
+      '<p>引用の前半</p> — (@user) <a href="https://x.com/user/status/123">途中のリンク</a><div>引用の後半</div>',
     ]) {
       const [quote] = parseContent(`<blockquote data-embed="x">${contents}</blockquote>`);
       expect(quote).not.toHaveProperty("xPost");

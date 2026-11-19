@@ -260,7 +260,42 @@ for (const long of [false, true]) {
           )
           .toBeLessThan(2);
 
-        await view.getByText("記事中の引用", { exact: true }).click();
+        const summary = view.getByText("記事中の引用", { exact: true });
+        const summaryTop = await summary.evaluate((element) => {
+          const pane = element.closest<HTMLElement>(".article-view");
+          const toolbar = pane?.querySelector(".toolbar");
+          if (!pane || !toolbar) throw new Error("記事のスクロール領域がない");
+          pane.scrollTop +=
+            element.getBoundingClientRect().top - toolbar.getBoundingClientRect().bottom + 4;
+          return pane.scrollTop;
+        });
+        await page.waitForFunction(
+          (top) =>
+            history.state?.article?.top === top && history.state.article.anchor !== undefined,
+          summaryTop,
+        );
+        const delayedWidget = Promise.withResolvers<void>();
+        waitForWidget = delayedWidget.promise;
+        try {
+          await page.reload({ waitUntil: "domcontentloaded" });
+          await expect(frame).toHaveAttribute("height", "0");
+        } finally {
+          delayedWidget.resolve();
+        }
+        await expect(frame).toHaveAttribute("height", "1216");
+        await expect
+          .poll(() =>
+            summary.evaluate((element) => {
+              const toolbar = element.closest(".article-view")?.querySelector(".toolbar");
+              if (!toolbar) throw new Error("記事のツールバーがない");
+              return Math.abs(
+                element.getBoundingClientRect().top - toolbar.getBoundingClientRect().bottom + 4,
+              );
+            }),
+          )
+          .toBeLessThan(2);
+
+        await summary.click();
         const savedQuote = view.getByText("記事中の引用の段落 6", { exact: true });
         const quoteTop = await savedQuote.evaluate((element) => {
           const pane = element.closest<HTMLElement>(".article-view");
