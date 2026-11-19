@@ -1,4 +1,10 @@
-import { ApiError, createSendoApi, errorFromBody, type SendoApiOptions } from "./api/client";
+import {
+  ApiError,
+  createSendoApi,
+  errorFromBody,
+  type SendoApi,
+  type SendoApiOptions,
+} from "./api/client";
 import type { components } from "./api/schema.gen";
 import type { User } from "./models";
 
@@ -104,10 +110,8 @@ export function createAccountApi(options: SendoApiOptions) {
       return api.me(signal);
     },
 
-    async getDiscord(signal?: AbortSignal): Promise<DiscordIntegration> {
-      const { data, error, response } = await api.client(signal).GET("/integrations/discord");
-      if (data === undefined) throw errorFromBody(response.status, error);
-      return data;
+    getDiscord(signal?: AbortSignal): Promise<DiscordIntegration> {
+      return getDiscord(api, signal);
     },
 
     async connectDiscord(returnTo: string, signal?: AbortSignal): Promise<string> {
@@ -124,19 +128,6 @@ export function createAccountApi(options: SendoApiOptions) {
         .POST("/integrations/discord/subscriptions", { body: { url } });
       if (data === undefined) throw errorFromBody(response.status, error);
       return data;
-    },
-
-    async unsubscribeDiscord(id: string, signal?: AbortSignal): Promise<void> {
-      const { error, response } = await api.client(signal).DELETE("/feeds/{id}", {
-        params: { path: { id } },
-      });
-      // 別の端末ですでに購読を解除していても目的は達成している。
-      if (!response.ok && response.status !== 404) throw errorFromBody(response.status, error);
-    },
-
-    async disconnectDiscord(signal?: AbortSignal): Promise<void> {
-      const { error, response } = await api.client(signal).DELETE("/integrations/discord");
-      if (!response.ok) throw errorFromBody(response.status, error);
     },
 
     /** アクセストークンの一覧（新しい順） */
@@ -223,6 +214,29 @@ export function createAccountApi(options: SendoApiOptions) {
       if (!response.ok) throw errorFromBody(response.status, error);
     },
   };
+}
+
+export async function getDiscord(api: SendoApi, signal?: AbortSignal): Promise<DiscordIntegration> {
+  const { data, error, response } = await api.client(signal).GET("/integrations/discord");
+  if (data === undefined) throw errorFromBody(response.status, error);
+  return data;
+}
+
+export async function unsubscribeDiscord(
+  api: SendoApi,
+  id: string,
+  signal: AbortSignal,
+): Promise<void> {
+  const { error, response } = await api.client(signal).DELETE("/feeds/{id}", {
+    params: { path: { id } },
+  });
+  // 別の端末ですでに購読を解除していても目的は達成している。
+  if (!response.ok && response.status !== 404) throw errorFromBody(response.status, error);
+}
+
+export async function disconnectDiscord(api: SendoApi, signal: AbortSignal): Promise<void> {
+  const { error, response } = await api.client(signal).DELETE("/integrations/discord");
+  if (!response.ok) throw errorFromBody(response.status, error);
 }
 
 function toAccessToken(token: {

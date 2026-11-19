@@ -138,16 +138,18 @@
 
   function remove() {
     const subscription = target;
+    const userId = reader.user?.id;
+    if (userId === undefined) return;
     return run(async () => {
       if (subscription === null) {
-        await account.disconnectDiscord(signal);
+        await reader.client.disconnectDiscord(userId);
         channelUrl = "";
         notice = "Discord の連携を解除しました。";
       } else {
-        await account.unsubscribeDiscord(subscription.feedId, signal);
+        await reader.client.unsubscribeDiscord(userId, subscription.feedId);
         notice = "チャンネルの購読を解除しました。";
       }
-      sync();
+      if (signal.aborted) return;
       await load();
       confirming = false;
     });

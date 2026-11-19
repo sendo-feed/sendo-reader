@@ -89,7 +89,7 @@ async function setup(context: BrowserContext, initial: Partial<DiscordIntegratio
         return route.abort();
     }
   });
-  return { integration, requests };
+  return { integration, requests, server };
 }
 
 const integrationsTab = (page: Page) =>
@@ -153,7 +153,7 @@ test("チャンネルを購読・解除し、Discord の連携解除も差分同
   page,
   context,
 }) => {
-  const { requests, integration } = await setup(context, { connected: true });
+  const { requests, integration, server } = await setup(context, { connected: true });
   await openIntegrations(page);
 
   const input = page.getByLabel("Channel URL");
@@ -172,6 +172,11 @@ test("チャンネルを購読・解除し、Discord の連携解除も差分同
   await input.fill(secondChannelUrl);
   await subscribe.click();
   await expect(page.getByRole("link", { name: "general", exact: true })).toBeVisible();
+
+  const names = integration.subscriptions.map(({ feedId }) => `reader.list:/feeds/${feedId}`);
+  for (const device of ["mobile", "desktop"] as const) {
+    for (const name of names) server.putSetting(device, name, { unreadOnly: false });
+  }
 
   const saved = page.getByRole("link", { name: "Saved", exact: true });
   await saved.click();
@@ -204,6 +209,9 @@ test("チャンネルを購読・解除し、Discord の連携解除も差分同
   await saved.click();
   await expect(page.getByText("Discord: announcements", { exact: true })).toHaveCount(0);
   await expect(page.getByText("Discord: general", { exact: true })).toBeVisible();
+  for (const device of ["mobile", "desktop"] as const) {
+    await expect.poll(() => Object.keys(server.settingsOf(device))).toEqual(names.slice(1));
+  }
   await page.getByRole("link", { name: "Settings", exact: true }).click();
   await integrationsTab(page).click();
 
@@ -217,6 +225,9 @@ test("チャンネルを購読・解除し、Discord の連携解除も差分同
   await saved.click();
   await expect(page.getByText("Discord: general", { exact: true })).toHaveCount(0);
   expect(integration.subscriptions).toHaveLength(0);
+  for (const device of ["mobile", "desktop"] as const) {
+    await expect.poll(() => server.settingsOf(device)).toEqual({});
+  }
   expect(requests.filter((path) => path.startsWith("DELETE"))).toEqual([
     expect.stringMatching(/^DELETE \/feeds\//),
     `DELETE ${api}`,
