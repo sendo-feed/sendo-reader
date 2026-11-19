@@ -7,6 +7,38 @@ function must<T>(value: T | null): T {
   return value;
 }
 
+describe("フィードの取得時刻", () => {
+  test("時刻がないことも手元に記録し、購読が同期で消えたときに記録も消す", async () => {
+    const { server, core } = await setup();
+    const feed = server.subscribe({ url: "https://blog.example/feed.xml" });
+    await core.sync();
+    expect(await core.getFeedFetchTimes(feed.id)).toBeNull();
+
+    await core.refreshFeedFetchTimes(feed.id);
+    expect(await core.getFeedFetchTimes(feed.id)).toEqual({
+      lastFetchedAt: null,
+      lastSuccessfulFetchAt: null,
+    });
+
+    server.unsubscribe(feed.id);
+    await core.sync();
+    expect(await core.getFeedFetchTimes(feed.id)).toBeNull();
+  });
+
+  test("時刻の応答を待っている間に購読をやめたら、時刻を置かない", async () => {
+    const { server, core } = await setup();
+    const feed = server.subscribe({ url: "https://blog.example/feed.xml" });
+    feed.lastFetchedAt = server.now;
+    await core.sync();
+    server.onRequest = async (path) => {
+      if (path === "GET /feeds") await core.unsubscribe(feed.id);
+    };
+
+    expect(await core.refreshFeedFetchTimes(feed.id)).toBeNull();
+    expect(await core.getFeedFetchTimes(feed.id)).toBeNull();
+  });
+});
+
 describe("フィードの候補を探す", () => {
   test("サイトの URL から候補を返す", async () => {
     const { server, core } = await setup();

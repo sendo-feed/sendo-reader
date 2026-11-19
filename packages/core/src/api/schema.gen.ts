@@ -2309,6 +2309,11 @@ export interface components {
              * @description 最後に取得を試した時刻
              */
             lastFetchedAt: string | null;
+            /**
+             * Format: date-time
+             * @description 最後に成功した取得（HTTP 304 を含む）を試した時刻。記録がなければ null
+             */
+            lastSuccessfulFetchAt: string | null;
             /** Format: date-time */
             nextFetchAt: string;
             /**

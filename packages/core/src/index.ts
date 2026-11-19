@@ -25,6 +25,7 @@ export type {
   ContentNode,
   DeviceType,
   Feed,
+  FeedFetchTimes,
   Folder,
   JsonValue,
   LocalArticleContent,
