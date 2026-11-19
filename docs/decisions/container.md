@@ -19,7 +19,7 @@ sendo-reader は、[sendo のコンテナ版](https://github.com/sendo-feed/send
    - Google のリダイレクト URI、リーダーアプリ（Google Reader API）のサーバー、MCP の URL も、このオリジンにする
    - 画面を使わない人は、reader のコンテナを外して sendo のポートを出してよい（sendo の[コンテナ版](https://github.com/sendo-feed/sendo/blob/main/docs/decisions/container.md)の 7。このとき OAuth は使えない）。reader は、この形には関わらない
    - X の埋め込みを有効にする場合は、専用の HTTPS ホストのルート（`/`）で埋め込みページ、`/embed.js` でそのスクリプトを配る（[ローカルファースト](local-first.md#ページの守り)）。reader の配布済みイメージで通常の構成を使うと、引用と投稿リンクを表示する。埋め込みを有効にする場合は、HTTPS の配信元を `SENDO_X_EMBED_ORIGIN` の Docker ビルド引数に渡して reader のイメージをビルドし、Compose の `reader` でそのイメージを使う。配信先の変更と reader の更新に合わせてイメージをビルドし直す。静的ファイルや配信用ヘッダーに変更があった場合は、そのイメージのソースと同じ版の `apps/web/x-embed/` を再配信する。投稿 ID や高さ通知の形式を変えるときは旧 reader との互換性を保つ。互換性を変える場合は新しいホストを使う。配信先を移す場合は、開いたままの旧 reader と、Service Worker のキャッシュから起動する旧 reader が使うホストの配信も続ける。Sendo は `docker compose pull sendo` で更新し、Compose でコンテナを作り直す
-   - 配備後は、対象記事の本文をまだ保持していないブラウザープロファイルで、対応版の Sendo が取得・保存した、[HTTPS の投稿リンクと出典から投稿 ID が一意に決まる引用](local-first.md#記事の本文)を含む記事をオンラインで開き、隔離フレームに公式ウィジェットが表示されることを確かめる。専用ホストのルート（`/`）の HTTPS 応答のヘッダー（CSP と Referrer-Policy を含む）を、reader のビルドに使った版の `apps/web/x-embed/_headers` と照合する。保存済み本文での取り扱いは [Sendo の本文の決定](https://github.com/sendo-feed/sendo/blob/main/docs/decisions/content.md)に従う
+   - 配備後は、対象記事の本文をまだ保持していないブラウザープロファイルで、対応版の Sendo が取得・保存した、[HTTPS の投稿リンクと出典から投稿 ID が一意に決まる引用](local-first.md#記事の本文)を含む記事をオンラインで開き、対象の引用が表示範囲に入るまでスクロールして、隔離フレームに公式ウィジェットが表示されることを確かめる。専用ホストのルート（`/`）の HTTPS 応答のヘッダー（CSP と Referrer-Policy を含む）を、reader のビルドに使った版の `apps/web/x-embed/_headers` と照合する。保存済み本文での取り扱いは [Sendo の本文の決定](https://github.com/sendo-feed/sendo/blob/main/docs/decisions/content.md)に従う
 3. **reader のコンテナは、画面の静的なファイルを返し、sendo のパスを sendo に中継する。中継するパスは、許す一覧で持つ。**
    - 一覧：`/api/`（の下すべて）、`/mcp`、`/.well-known/oauth-protected-resource/mcp`、`/.well-known/oauth-authorization-server`、`/oauth/token`、`/oauth/register`、`/accounts/ClientLogin`、`/reader/api/0/`（の下すべて）、`/healthz`
    - 一覧にないパスには、静的なファイルか、なければ `index.html` を返す（SPA）
@@ -42,8 +42,8 @@ sendo-reader は、[sendo のコンテナ版](https://github.com/sendo-feed/send
 7. **サーバーは Node で書く。** HTTP は Hono と `@hono/node-server`（sendo と同じ）で受ける。コードは `apps/web/server/` に置き、ここだけ `node:*` を使ってよい。イメージには、画面のビルド（`vite build` の `dist`）と、依存ごと 1 つのファイルにまとめたサーバーを入れる。
 8. **全文取得は常に使える機能として出す。全文取得の可否に `GET /api/v1/features` を使わない。**
    - sendo は、ページ本文の抽出と言語判定を常に動かし、欠いたままでは起動しない（sendo の[コンテナ版](https://github.com/sendo-feed/sendo/blob/main/docs/decisions/container.md)の 1〜3）。reader は、全文の取得を、いつでも使える機能として出す
-   - 全文取得の判定に使っていた参照は廃止済み（[sendo-reader #125](https://github.com/sendo-feed/sendo-reader/pull/125)）。WebSocket 通知の互換判定と API の削除条件は、sendo の[差分同期の決定](https://github.com/sendo-feed/sendo/blob/main/docs/decisions/sync.md#決定)の 9 と[コンテナ版の決定](https://github.com/sendo-feed/sendo/blob/main/docs/decisions/container.md)の 3 に従う
-   - 消したあとに、古い版の画面（Service Worker に残った版）が `/features` を呼んでも、404 を「全文を使えない」と受けて、全文の取得の操作を出さないだけで動き続ける。新しい版に切り替われば（[UI とツール](ui.md)の 5）、出る
+   - 全文取得の判定に使っていた参照は廃止済み（[sendo-reader #125](https://github.com/sendo-feed/sendo-reader/pull/125)）。Sendo も `/api/v1/features` を削除済み（[sendo #140](https://github.com/sendo-feed/sendo/pull/140)）。WebSocket 通知への対応は、[Sendo の差分同期の決定](https://github.com/sendo-feed/sendo/blob/main/docs/decisions/sync.md#決定)の 9 に従い、実際に接続を試して判断する
+   - 旧版の画面が現行の Sendo で `/api/v1/features` を呼ぶと、404 を受けて全文の取得操作を隠す。reader を現行版に切り替えると（[UI とツール](ui.md)の 5）、取得操作が出る
 9. **テストは Node で動かす。** 中継するパスの振り分け、中継（ヘッダー、`Set-Cookie`、リダイレクト、ストリーム）、静的なファイルのヘッダーを、偽の sendo を相手に Vitest で確かめる。CI では、PR でイメージが作れて動くことを確かめ、`main` に入ったらイメージを出す（sendo と同じ形）。
 
 ## 理由
@@ -73,7 +73,7 @@ sendo-reader は、[sendo のコンテナ版](https://github.com/sendo-feed/send
   - sendo と同じ道具（Node、Hono）で、2 つのコンテナの作りがそろう
 - **全文取得を常に使える機能として出す**
   - sendo はページ本文の抽出が使えなければ起動を止める。全文取得の可否判定を残すと、使われない分岐とテストを保ち、記事を開くたびに `/features` を呼ぶことになる
-  - 全文取得の判定を廃止したため、現行版では最初から全文の操作が出る。キャッシュ済みの旧 reader は、この API が返す値に応じて全文の操作を出し分ける
+  - 現行の reader は、追加の問い合わせを待たずに全文取得の操作を出せる
 
 ## 検討した代替案
 
