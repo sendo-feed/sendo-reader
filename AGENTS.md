@@ -19,11 +19,11 @@ Sendo の公式リーダー。`packages/core`（同期エンジン）と `apps/w
 - `pnpm install`：依存を入れる
 - `pnpm check`：型チェック、lint、テストをまとめて実行する。変更したら、コミットの前に必ず通す
 - `pnpm format`：整形して、直せる lint の指摘を直す（Biome。`.svelte` も対象）
-- `pnpm dev`：画面の dev サーバー（http://localhost:5173）。sendo のパス（`apps/web/sendo-paths.ts` の一覧。本番と同じ）は、手元の sendo（sendo の `pnpm dev`、http://localhost:8787）に中継する。sendo は sendo の README のとおりに別に動かす
+- `pnpm dev`：画面の dev サーバー（http://localhost:5173）。sendo のパス（`apps/web/sendo-paths.ts` の一覧。本番と同じ。WebSocket の通知も）は、手元の sendo（sendo の `pnpm dev`、http://localhost:8787）に中継する。sendo は sendo の README のとおりに別に動かす
 - `pnpm build`：画面をビルドし、コンテナのサーバーを `apps/web/dist-server/server.mjs` にバンドルする
 - `pnpm --filter @sendo-reader/web start:server`：コンテナのサーバーを手元の Node で動かす（`pnpm build` のあとに。`SENDO_URL` で中継の先を、`PORT` で受けるポートを変える）。イメージは `docker build -t sendo-reader .`
 - `pnpm size`：ビルドのあとに、画面のスレッドの JS（gzip 後 100KB）と、DB のワーカーの JS と wasm（550KB）が予算に収まるか確かめる
-- `pnpm e2e`：画面を通したテスト（Playwright）。`pnpm build` のあとに動かす。本番のビルドを `vite preview` で開き、`/api` には `packages/core/test/fake-sendo.ts` の偽の sendo が答える。速さの予算（キャッシュ済みの起動から記事まで 1 秒、操作の反応 100ms）も、CPU を 4 倍遅くして確かめる
+- `pnpm e2e`：画面を通したテスト（Playwright）。`pnpm build` のあとに動かす。本番のビルドを `vite preview` で開き、`/api` には `packages/core/test/fake-sendo.ts` の偽の sendo が答える。通知（WebSocket）はワーカーから開くので Playwright では横取りできず、`vite preview` の中継を通して `e2e/fake-updates.ts` の偽の通知のサーバー（ポート 8798）につなぐ。速さの予算（キャッシュ済みの起動から記事まで 1 秒、操作の反応 100ms）も、CPU を 4 倍遅くして確かめる
 - `pnpm --filter @sendo-reader/web lighthouse`：初回の読み込みを Lighthouse で測り、`apps/web/.lighthouseci/` に残す（上限はまだ決めていない）。手元では `CHROME_PATH` に Chromium の場所を渡す
 - sendo の API が変わったら、`pnpm --filter @sendo-reader/core api:fetch`（sendo の OpenAPI を `packages/core/src/api/openapi.json` に写す。既定は手元の sendo の `/api/v1/openapi.json`。`SENDO_OPENAPI` で、sendo の `spec/openapi.json` などの別のファイルか URL を指せる）と `pnpm --filter @sendo-reader/core api:generate`（`schema.gen.ts` を作る）を実行し、両方をコミットする。生成したファイルは手で直さない（CI で食い違いを検査している）
 
@@ -37,7 +37,8 @@ Sendo の公式リーダー。`packages/core`（同期エンジン）と `apps/w
   - `src/content/parse.ts`：記事の本文の HTML（信頼できない）を、通すタグと属性だけの木（`ContentNode`）にする。通すものを変えるときは、ここと `test/content-parse.test.ts` を直す。手元の置き場所は `src/db/content.ts`（`article_contents` の表。記事を消すと、トリガーで一緒に消える）。本文は差分同期に載らず、記事ごとに取る（`ReaderCore` の `getArticleContent` は手元だけ、`fetchArticleContent` は、なければ sendo から取る）
   - `src/online.ts`：sendo に問い合わせないとできない操作（フィードの候補探し、購読、OPML の取り込み）。手元にすぐ反映できないので、画面では待っている間の表示を出す
   - `src/sync/`：差分同期（`pull.ts`）と操作キュー（`ops.ts` が操作ごとの「手元への反映・送り方・戻し方」、`queue.ts` が積む・まとめる・送る）。操作は手元への反映と同じトランザクションで積み、同期で届いた行の上に重ね直す。どの操作も冪等にする
-  - `src/sync/scheduler.ts`：いつ同期するか（起動時、書き込みのあと、一定の間隔、届かなければ間隔を延ばしてやり直す）
+  - `src/sync/scheduler.ts`：いつ同期するか（起動時、書き込みのあと、一定の間隔、sendo の通知を受けたとき、届かなければ間隔を延ばしてやり直す）
+  - `src/sync/updates.ts`：sendo の通知（WebSocket の `/api/v1/sync/updates`）。代表のタブのワーカーだけがつなぎ、知らせを受けたら同期を頼む。閉じるコードごとの動きは sendo の `sync.md` の 9 と OpenAPI の説明に従う。つながらなくても定期同期で動く
   - `src/web/`：Web の実装（UI には依存しない）。`worker.ts` はタブごとの Dedicated Worker で動き、Web Locks で決めた代表だけが DB（`database.ts`、opfs-sahpool）と同期を持ち、ほかのタブは BroadcastChannel で代表に頼む。`client.ts` は画面から使う窓口（`@sendo-reader/core/web`）。やり取りの形は `protocol.ts`
   - `src/web/image-cache.ts`：画像のキャッシュ（Service Worker が入れる `sendo-images`）の名前と上限、消す・減らす処理。ログアウトとユーザーの切り替えで、手元の DB と一緒に消す
   - opfs-sahpool は、開くのに失敗すると既定でデータを消す。`preserveOnInitFailure` を外さない
@@ -61,7 +62,7 @@ Sendo の公式リーダー。`packages/core`（同期エンジン）と `apps/w
     - `routes/`：画面（ログイン、読む画面、購読の管理）、`components/`：部品（`components/manage/` は購読の管理の部品）
     - `lib/errors.ts`：失敗（`ApiError` の `code` ／ `kind`）を、画面に出す文にする
     - 画面は `@sendo-reader/core/web` の窓口だけを使い、DB や sendo の API に直接触れない
-  - `server/`：reader のコンテナのサーバー（`docs/decisions/container.md`）。画面を配る唯一の形（Cloudflare では動かさない）。Node で動き、ここだけ `node:*` を使ってよい。`assets.ts` が画面のビルドを起動するときにメモリーに読み、`static.ts` が決まった応答（ヘッダー、ETag、圧縮、SPA）で返し、`proxy.ts` が sendo のパスを書き換えずに中継する。依存ごと esbuild で 1 つのファイルにまとめる（イメージに `node_modules` を入れない）
+  - `server/`：reader のコンテナのサーバー（`docs/decisions/container.md`）。画面を配る唯一の形（Cloudflare では動かさない）。Node で動き、ここだけ `node:*` を使ってよい。`assets.ts` が画面のビルドを起動するときにメモリーに読み、`static.ts` が決まった応答（ヘッダー、ETag、圧縮、SPA）で返し、`proxy.ts` が sendo のパスを書き換えずに中継する（WebSocket の Upgrade は `websocket.ts`）。依存ごと esbuild で 1 つのファイルにまとめる（イメージに `node_modules` を入れない）
   - `sendo-paths.ts`：sendo に中継するパスの一覧。Service Worker の `navigateFallbackDenylist` と、手元の Vite の dev サーバーの中継も同じものを使う。sendo が外に出すパスを足したらここに足し、画面のルートはここと重ねない（`/oauth/authorize` は画面、`/oauth/token` は sendo）
   - `security-headers.ts`：CSP などのヘッダー。dev サーバー・preview と、本番のコンテナのサーバーの両方に使う
   - `test/`：ヘッダーと、新しい版への切り替えのテスト。`test/server/` はコンテナのサーバーのテストで、偽の sendo と reader のサーバーを本物の HTTP で動かして確かめる

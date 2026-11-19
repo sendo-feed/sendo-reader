@@ -72,23 +72,6 @@
           "email"
         ]
       },
-      "Features": {
-        "type": "object",
-        "properties": {
-          "languageDetection": {
-            "type": "boolean",
-            "description": "記事の主言語を背景で判定・保存できるか。常に true"
-          },
-          "pageContent": {
-            "type": "boolean",
-            "description": "記事のページから本文を抜けるか（GET /articles/{id}/content?source=page）。常に true"
-          }
-        },
-        "required": [
-          "languageDetection",
-          "pageContent"
-        ]
-      },
       "DiscordIntegration": {
         "type": "object",
         "properties": {
@@ -1487,6 +1470,44 @@
         }
       }
     },
+    "/sync/updates": {
+      "get": {
+        "summary": "受信箱の更新を WebSocket で受け取る",
+        "description": "同じオリジンからセッションのクッキーで接続する。人ごとの同期の対象が変わると {\"type\":\"sync_required\"} が届くので、最後のカーソルから差分を取る。初回の接続時と再接続時にも差分を取る。クライアントからはメッセージを送らない（docs/decisions/sync.md の 9）。\n\nSendo は次のコードで接続を閉じる。クライアントは、コードで次の動きを分ける。\n- 1001（going away）：Sendo が止まる、または入れ替わる。数秒待ってつなぎ直す\n- 1008（session ended）：セッションが切れた。すぐにはつなぎ直さず、同期を 1 回して確かめる。401 ならログインし直し、通れば間を延ばしながらつなぎ直す。クライアントからメッセージが届いたとき（client messages are not supported）も 1008 で閉じる\n- 1013（try again later）：接続数の上限に達した。1 分以上空けてつなぎ直す\n- そのほか（1006 など）：ネットワークの都合や、応答しない接続を切ったとき。上限を置いて間を延ばしながらつなぎ直す\n\n101 を返す前に断ったとき（下の 401、403、429、503）は、ブラウザの WebSocket からは状態コードが見えず、1006 で閉じたように見える。ほかの 1006 と同じく、間を延ばしてつなぎ直す。",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "101": {
+            "description": "WebSocket 接続を開始した"
+          },
+          "400": {
+            "description": "切り替えが必要か、ハンドシェイクの形式が不正。通常の HTTP で受けた場合は本文なし",
+            "content": {
+              "text/html": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "有効なブラウザのセッションが必要"
+          },
+          "403": {
+            "description": "公開オリジンと一致しないか、公開オリジンの設定が不正"
+          },
+          "429": {
+            "description": "WebSocket の接続数の上限に達した"
+          },
+          "503": {
+            "description": "サーバーは終了処理中"
+          }
+        }
+      }
+    },
     "/mcp-icon.png": {
       "get": {
         "summary": "MCP サーバーのアイコン",
@@ -1525,24 +1546,6 @@
                   "required": [
                     "user"
                   ]
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/features": {
-      "get": {
-        "summary": "この Sendo で使える機能",
-        "description": "使える機能を返す。今はどの機能も常に使えるので、すべて true を返す。\nsendo-reader の互換のために残している。sendo-reader が使わなくなったら消す（docs/decisions/container.md の 3）。",
-        "responses": {
-          "200": {
-            "description": "使える機能",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Features"
                 }
               }
             }
