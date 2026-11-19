@@ -130,7 +130,13 @@ class Router {
     if (path === "/search") return { kind: "search" };
     if (path === "/manage") return { kind: "manage" };
     if (path === CAPTURE_PATH) return { kind: "add" };
-    if (path === "/settings") return { kind: "settings" };
+    // sendo は OAuth の state が無効だと、returnTo を使わず / に戻す。
+    if (
+      path === "/settings" ||
+      (path === "/" && this.url.searchParams.get("discord") === "invalid_state")
+    ) {
+      return { kind: "settings" };
+    }
     const feed = /^\/feeds\/([^/]+)$/.exec(path);
     if (feed?.[1] !== undefined) return { kind: "feed", id: decodeURIComponent(feed[1]) };
     const folder = /^\/folders\/([^/]+)$/.exec(path);

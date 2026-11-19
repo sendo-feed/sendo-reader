@@ -1,3 +1,4 @@
+import { disconnectDiscord, getDiscord, unsubscribeDiscord } from "./account";
 import { ApiError, createSendoApi, type SendoApi } from "./api/client";
 import { hasVisibleContent, parseContent } from "./content/parse";
 import {
@@ -706,25 +707,35 @@ export class ReaderCore {
   }
 
   /**
-   * 操作を積み、あわせて、なくなる一覧（やめた購読、消したフォルダ）の設定を、両方の端末の種類で
-   * 消す（docs/decisions/settings.md の 3。sendo は名前を解釈しないので、消すのは reader の仕事）。
-   * 手元にその項目がなくても送る（ほかの端末が置いた設定が、まだ手元に届いていないことがある。
-   * ない項目を消しても、sendo では何も起きない）
+   * 操作と、なくなる一覧の設定の削除を、同じトランザクションで積む。
    */
   async #writeWithListSettings(op: Operation, paths: string[], tables: Table[]): Promise<void> {
     this.#requireSignedIn();
     const session = this.#session.signal;
-    const remove = paths.flatMap((path) => listSettingName(path) ?? []);
-    await this.#db.transaction(async (tx) => {
+    const removed = await this.#db.transaction(async (tx) => {
       throwIfSessionEnded(session);
       await this.#enqueue(tx, op);
-      if (remove.length === 0) return;
-      for (const deviceType of DEVICE_TYPES) {
-        await this.#dropFromSettingsSeed(tx, deviceType, remove);
-        await this.#enqueue(tx, { kind: "setSettings", deviceType, put: [], remove });
-      }
+      return this.#enqueueListSettingsRemoval(tx, paths);
     });
-    this.#emit(new Set<Table>(remove.length > 0 ? [...tables, "settings"] : tables));
+    this.#emit(new Set<Table>(removed ? [...tables, "settings"] : tables));
+  }
+
+  /**
+   * なくなる一覧の設定を、両方の端末の種類で消す（docs/decisions/settings.md の 3）。
+   * ほかの端末が置いた設定がまだ同期で届いていないことがあるので、手元になくても送る。
+   */
+  async #enqueueListSettingsRemoval(
+    tx: Executor,
+    paths: string[],
+    online = false,
+  ): Promise<boolean> {
+    const remove = [...new Set(paths.flatMap((path) => listSettingName(path) ?? []))];
+    if (remove.length === 0) return false;
+    for (const deviceType of DEVICE_TYPES) {
+      await this.#dropFromSettingsSeed(tx, deviceType, remove);
+      await this.#enqueue(tx, { kind: "setSettings", deviceType, put: [], remove }, online);
+    }
+    return true;
   }
 
   // --- 設定（docs/decisions/settings.md。手元にすぐ反映し、操作キューに積む） ---
@@ -872,6 +883,41 @@ export class ReaderCore {
   importOpml(xml: string): Promise<OpmlImportResult> {
     this.#requireSignedIn();
     return this.#online((signal) => importOpml(this.#api, xml, signal));
+  }
+
+  /** Discord の購読をやめる。記事の削除は、スター付きも含めて次の差分同期で届く。 */
+  unsubscribeDiscord(userId: string, feedId: string): Promise<void> {
+    return this.#removeDiscordSubscriptions(userId, async (signal) => {
+      await unsubscribeDiscord(this.#api, feedId, signal);
+      return [feedId];
+    });
+  }
+
+  /** Discord との接続を解除する。解除する一覧は、送る前に sendo で確かめる。 */
+  disconnectDiscord(userId: string): Promise<void> {
+    return this.#removeDiscordSubscriptions(userId, async (signal) => {
+      const { subscriptions } = await getDiscord(this.#api, signal);
+      await this.#confirmSameUser(signal);
+      await disconnectDiscord(this.#api, signal);
+      return subscriptions.map(({ feedId }) => feedId);
+    });
+  }
+
+  async #removeDiscordSubscriptions(
+    userId: string,
+    remove: (signal: AbortSignal) => Promise<string[]>,
+  ): Promise<void> {
+    if (this.#user?.id !== userId) {
+      throw new ApiError("unauthorized", "別のユーザーでログインしていたので、送らなかった");
+    }
+    const removed = await this.#online(async (signal) => {
+      const feedIds = await remove(signal);
+      return this.#db.transaction(async (tx) => {
+        throwIfSessionEnded(signal);
+        return this.#enqueueListSettingsRemoval(tx, feedIds.map(feedListPath), true);
+      });
+    });
+    if (removed) this.#emit(new Set<Table>(["settings"]));
   }
 
   /**

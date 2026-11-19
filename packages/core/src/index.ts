@@ -4,6 +4,8 @@ export {
   AuthorizationError,
   type AuthorizationRequest,
   createAccountApi,
+  type DiscordIntegration,
+  type DiscordSubscription,
   type IssuedAccessToken,
   MAX_TOKEN_NAME_LENGTH,
   type NewAccessToken,

@@ -45,6 +45,8 @@ export const READER_METHODS = [
   "moveFeed",
   "renameFeed",
   "unsubscribe",
+  "unsubscribeDiscord",
+  "disconnectDiscord",
   "listSettings",
   "changeSettings",
   "seedSettings",
@@ -94,6 +96,8 @@ export const SYNC_NOW_METHODS = new Set<Method>([
   "signOut",
   "subscribe",
   "importOpml",
+  "unsubscribeDiscord",
+  "disconnectDiscord",
   // 移行待ちの設定は、同期を終えたときに送る
   "seedSettings",
 ]);
