@@ -101,7 +101,7 @@ reader は Sendo の API の型に合わせて作っているので、新しい 
 
 ### 手元からデプロイする
 
-Workers Builds を使わずに、手元からもデプロイできます。X の埋め込みを有効にした構成を手元から再デプロイする場合は、Workers Builds に設定した `SENDO_X_EMBED_ORIGIN` と同じ値をビルド環境に渡します。
+Workers Builds を使わずに、手元からもデプロイできます。
 
 ```sh
 pnpm --filter @sendo-reader/web exec wrangler login   # 最初に 1 回
@@ -110,7 +110,7 @@ pnpm run deploy
 
 ## コンテナ版で動かす
 
-上流の CI が作ったイメージ（`ghcr.io/sendo-feed/sendo-reader`）を、Sendo のコンテナ版と同じ `compose.yaml` で動かします。標準構成では fork もビルドも要りません。手順は [Sendo の README](https://github.com/sendo-feed/sendo#コンテナ版で動かす) にあります（[決定](docs/decisions/container.md)）。
+上流の CI が作ったイメージ（`ghcr.io/sendo-feed/sendo-reader`）を、Sendo のコンテナ版と同じ `compose.yaml` で動かします。標準構成では fork もビルドも要りません。手順は [Sendo の README](https://github.com/sendo-feed/sendo#動かす) にあります（[決定](docs/decisions/container.md)）。
 
 - 外に出すのは reader のコンテナだけです。reader のコンテナが画面を返し、Sendo のパス（`/api`、`/mcp`、OAuth、Google Reader API など）を、compose の中の Sendo に中継します。reader の画面と Sendo の API・認証は reader のオリジン 1 つで使えます
 - Sendo の `PUBLIC_URL` と `READER_URL` には、どちらも reader のオリジン（例：`https://reader.example.com`）を入れます。Google のリダイレクト URI、リーダーアプリのサーバー、MCP の URL も、このオリジンにします
