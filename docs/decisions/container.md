@@ -12,11 +12,12 @@
    - タグと CPU は sendo にそろえる。`main` に入るたびに `main` と `sha-<コミット>` のタグで出し、amd64 と arm64 の両方で作る。版のタグは、sendo が版を切るときに一緒に決める
    - イメージは公開する（sendo のイメージと同じ）。使う人は `docker login` せずに取ってこられる
    - sendo の `compose.yaml` に reader のサービスを並べ、`docker compose pull && docker compose up -d` で一緒に更新する。reader は、sendo が動き出してから（ヘルスチェックが通ってから）始める
-2. **外からは、reader のオリジン 1 つに見せる。**
+2. **reader の画面と Sendo の API・認証は、reader のオリジン 1 つから配る。**
    - 外に出すのは reader のコンテナだけにする。TLS は、sendo と同じく、手前に置くリバースプロキシや Cloudflare Tunnel で終える。コンテナは HTTP だけを受ける
    - sendo のコンテナは、ポートを外に出さない。reader のコンテナが、compose の中のネットワークで呼ぶ
    - sendo の `PUBLIC_URL` と `READER_URL` には、どちらも reader のオリジン（例：`https://reader.example.com`）を入れる。`PUBLIC_URL` は欠かせない。コンテナは HTTP だけを受けるので、ないと sendo から見える URL は、中継の先の URL（`http://sendo:8787`）か、ホスト名は合っていても `http` のままのオリジンになり、ログインの戻り先や `__Host-` のクッキーが合わない
    - Google のリダイレクト URI、リーダーアプリ（Google Reader API）のサーバー、MCP の URL も、このオリジンにする
+   - X の埋め込みを有効にする場合は、埋め込み用の静的ファイルだけを別ホストから配る（[ローカルファースト](local-first.md#ページの守り)）。reader と Sendo の通常の構成でも、引用と投稿リンクは表示できる
 3. **reader のコンテナは、画面の静的なファイルを返し、sendo のパスを sendo に中継する。中継するパスは、許す一覧で持つ。**
    - 一覧：`/api/`（の下すべて）、`/mcp`、`/.well-known/oauth-protected-resource/mcp`、`/.well-known/oauth-authorization-server`、`/oauth/token`、`/oauth/register`、`/accounts/ClientLogin`、`/reader/api/0/`（の下すべて）、`/healthz`
    - 一覧にないパスには、静的なファイルか、なければ `index.html` を返す（Cloudflare 版と同じ SPA の扱い）
@@ -30,7 +31,7 @@
    - リダイレクトは追わずに、そのまま返す（ログインの 302 など）
    - 応答の状態、ヘッダー（複数の `Set-Cookie` を含む）、本文をそのまま返す。本文は溜めずに流す（MCP、OPML の書き出しなど）
    - sendo の応答には、画面のセキュリティのヘッダーを足さない（Cloudflare 版の `/api` と同じ）
-   - 中継の先は設定 `SENDO_URL` で変えられる（既定は `http://sendo:8787`）。reader のコンテナに、ほかの設定は要らない（自分のオリジンも知らなくてよい）
+   - 中継の先は設定 `SENDO_URL` で変えられる（既定は `http://sendo:8787`）。reader のコンテナは自分のオリジンを知らなくてよい
 5. **静的なファイルの応答は、Cloudflare 版と同じにする。**
    - `apps/web/security-headers.ts` のヘッダーを、静的なファイルのすべての応答に付ける。`dist/_headers` と同じところから作り、別に書き写さない
    - キャッシュは、毎回確かめさせる（ETag で、変わっていなければ 304）。Service Worker（`sw.js`）が新しい版を見つけられるように、長く持たせない
