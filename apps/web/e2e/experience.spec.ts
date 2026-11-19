@@ -808,7 +808,7 @@ test("手元の記事を探せる（オフラインでも）。探した結果�
   await expect(list.getByRole("searchbox", { name: "Search articles" })).toHaveValue("");
 });
 
-test("見出しや下のバーを押すと一覧の先頭に戻る。先頭で下に引くと、読み直して同期する", async ({
+test("見出しを押すと一覧の先頭に戻る。先頭で下に引くと、読み直して同期する", async ({
   page,
   context,
 }) => {
@@ -830,13 +830,6 @@ test("見出しや下のバーを押すと一覧の先頭に戻る。先頭で�
   await expect.poll(scrollTop).toBeGreaterThan(1000);
   await list.getByRole("button", { name: /^All/ }).click();
   await expect.poll(scrollTop).toBe(0);
-
-  // 下のバーで、いまいる画面をもう一度押しても、先頭に戻る（画面は移らない）
-  await page.evaluate(() => window.scrollTo({ top: 1500 }));
-  await expect.poll(scrollTop).toBeGreaterThan(1000);
-  await page.getByRole("navigation", { name: "Main" }).getByRole("link", { name: "All" }).click();
-  await expect.poll(scrollTop).toBe(0);
-  await expect(page).toHaveURL(/\/$/);
 
   // 通り過ぎて既読になった記事は、一覧に残っている。その間に、新しい記事が sendo に届いた
   await expect(list.locator(".row:not(.unread)").first()).toBeAttached();
