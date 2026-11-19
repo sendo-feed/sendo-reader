@@ -79,7 +79,7 @@ test("未ログインでも長い投稿 URL を引き継ぎ、確認して Saved
   await expect(page).toHaveURL(/\/starred$/);
 });
 
-test("iPhone のショートカットの作り方を、このサイトの URL を埋めて出す", async ({
+test("iPhone のショートカットを作る文を、このサイトの URL を埋めて出す", async ({
   page,
   context,
 }) => {
@@ -90,9 +90,10 @@ test("iPhone のショートカットの作り方を、このサイトの URL �
   await page.getByRole("button", { name: "Set up iPhone shortcut" }).click();
   const dialog = page.getByRole("dialog", { name: "iPhone shortcut" });
   await expect(dialog.getByRole("heading", { name: "作り方" })).toBeVisible();
-  const prefix = await dialog.getByRole("textbox", { name: "Shortcut URL" }).inputValue();
-  const origin = new URL(page.url()).origin;
-  expect(prefix).toBe(`${origin}/add#url=`);
+  // Siri に渡す文に、このサイトの追加画面の URL を埋める
+  const prompt = await dialog.getByRole("textbox", { name: "Shortcut prompt" }).inputValue();
+  const prefix = `${new URL(page.url()).origin}/add#url=`;
+  expect(prompt).toContain(`「${prefix}」`);
   // ショートカットが組み立てる URL（前半 ＋ エンコードした URL）で、追加画面に来られる
   const site = "https://blog.example/post?a=1&b=2#part";
   await page.goto(prefix + encodeURIComponent(site));
