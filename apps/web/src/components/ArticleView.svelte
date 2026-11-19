@@ -233,6 +233,7 @@
         void loadContent(id);
       }
     });
+    return () => cancelRestore?.();
   });
 
   // 実際に表示された記事だけを一度記録する。先読み、一覧の既読操作、本文の再取得では記録しない。
@@ -245,6 +246,8 @@
 
   /** 本文が出たら戻す、前に見ていた位置（px） */
   let restoreTop: number | null = null;
+  let cancelRestore: (() => void) | undefined;
+  let articleContent = $state<HTMLDivElement>();
 
   $effect(() => {
     // 本文を確かめている間・取っている間は、高さが決まらないので待つ（取れなかったら、要約で戻す）
@@ -255,16 +258,42 @@
       pageLoading
     )
       return;
-    untrack(() => {
-      const top = restoreTop;
-      restoreTop = null;
-      if (top === null) return;
-      const id = articleId;
-      void tick().then(() => {
-        // 待っている間に別の記事に替えた、読み始めた
-        if (articleId !== id || scrollTopOf(scroller) > 0) return;
-        scrollToTop(scroller, top);
-      });
+    const element = articleContent;
+    if (element === undefined) return;
+    const top = restoreTop;
+    restoreTop = null;
+    if (top === null) return;
+
+    let observer: ResizeObserver | undefined;
+    const cancel = new AbortController();
+    const stop = () => {
+      observer?.disconnect();
+      cancel.abort();
+      if (cancelRestore === stop) cancelRestore = undefined;
+    };
+    cancelRestore = stop;
+    const restore = () => {
+      scrollToTop(scroller, top);
+      if (scrollTopOf(scroller) >= top - 1) stop();
+    };
+
+    void tick().then(() => {
+      // 待っている間に別の記事に替えた、読み始めた
+      if (cancel.signal.aborted || scrollTopOf(scroller) > 0) {
+        stop();
+        return;
+      }
+      restore();
+      // 埋め込みの高さがまだ届かず、保存した位置まで動けなければ、高さが変わるたびに試す。
+      if (cancel.signal.aborted || !element.querySelector("iframe[title='X の投稿']")) {
+        stop();
+        return;
+      }
+      observer = new ResizeObserver(restore);
+      observer.observe(element);
+      for (const event of ["wheel", "touchstart", "pointerdown", "keydown"]) {
+        window.addEventListener(event, stop, { capture: true, signal: cancel.signal });
+      }
     });
   });
 
@@ -761,7 +790,7 @@
     </div>
 
     {#key articleId}
-      <div class="content" class:fade-in={fadeIn}>
+      <div class="content" bind:this={articleContent} class:fade-in={fadeIn}>
         <header>
           <p class="meta">
             <a class="feed" href={feedHref} onclick={(e) => handleLink(e, feedHref)}>

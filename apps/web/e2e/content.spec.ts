@@ -1,3 +1,4 @@
+import { readFile } from "node:fs/promises";
 import { type BrowserContext, expect, type Page, test } from "@playwright/test";
 import { FakeSendo, routeFakeSendo, signIn } from "./fake-sendo";
 
@@ -162,15 +163,37 @@ test("X の引用は投稿リンクを表示し、設定した隔離フレーム
   await routeFakeSendo(context, server);
   const setting = process.env.SENDO_X_EMBED_ORIGIN;
   const embed = setting ? new URL(setting) : null;
+  let waitForWidget: Promise<void> | undefined;
   if (embed) {
-    await context.route(`${embed.origin}/**`, (route) =>
-      route.fulfill({
-        contentType: "text/html",
-        body: `<p>公式埋め込みの代わり</p><script>
-        parent.postMessage({type: "sendo:x-post-height", height: 240}, "*");
-        </script>`,
-      }),
-    );
+    const assets = new URL("../x-embed/", import.meta.url);
+    const rawHeaders = await readFile(new URL("_headers", assets), "utf8");
+    const csp = /^ {2}Content-Security-Policy: (.+)$/m.exec(rawHeaders)?.[1] ?? "";
+    await context.route(`${embed.origin}/**`, async (route) => {
+      const script = new URL(route.request().url()).pathname === "/embed.js";
+      await route.fulfill({
+        contentType: script ? "text/javascript" : "text/html",
+        body: await readFile(new URL(script ? "embed.js" : "index.html", assets), "utf8"),
+        headers: { "content-security-policy": csp },
+      });
+    });
+    await context.route("https://platform.twitter.com/widgets.js", async (route) => {
+      await waitForWidget;
+      await route.fulfill({
+        contentType: "text/javascript",
+        body: `window.twttr = {
+          ready: async (callback) => callback({
+            widgets: { createTweet: async (id, container, options) => {
+              if (id !== "123" || options.dnt !== true) return;
+              const post = document.createElement("section");
+              post.style.height = "1200px";
+              post.textContent = "公式埋め込みの代わり";
+              container.append(post);
+              return post;
+            } }
+          })
+        };`,
+      });
+    });
   }
   await page.goto("/");
   await signIn(page);
@@ -186,7 +209,22 @@ test("X の引用は投稿リンクを表示し、設定した隔離フレーム
     await expect(frame).toHaveAttribute("src", `${embed.origin}/#123`);
     await expect(frame).toHaveAttribute("sandbox", "allow-scripts allow-same-origin");
     await expect(frame).toHaveAttribute("referrerpolicy", "no-referrer");
-    await expect(frame).toHaveAttribute("height", "240");
+    await expect(frame).toHaveAttribute("height", "1216");
+    await expect(frame.contentFrame().getByText("公式埋め込みの代わり")).toBeVisible();
+
+    const top = 300;
+    await view.evaluate((element, offset) => element.scrollTo({ top: offset }), top);
+    await page.waitForFunction((offset) => history.state?.article?.top === offset, top);
+    const widget = Promise.withResolvers<void>();
+    waitForWidget = widget.promise;
+    try {
+      await page.reload({ waitUntil: "domcontentloaded" });
+      await expect(frame).toHaveAttribute("height", "0");
+      expect(await view.evaluate((element) => element.scrollTop)).toBeLessThan(top);
+    } finally {
+      widget.resolve();
+    }
+    await expect.poll(() => view.evaluate((element) => element.scrollTop)).toBe(top);
   } else {
     await expect(frame).toHaveCount(0);
   }

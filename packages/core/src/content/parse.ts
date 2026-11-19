@@ -72,7 +72,7 @@ function xPostUrl(href: string): string | undefined {
     url.username !== "" ||
     url.password !== "" ||
     !["x.com", "www.x.com", "twitter.com", "www.twitter.com"].includes(url.hostname) ||
-    !/^\/[A-Za-z0-9_]{1,15}\/status\/[0-9]{1,20}\/?$/.test(url.pathname)
+    !/^\/(?:[A-Za-z0-9_]{1,15}|i\/web)\/status\/[0-9]{1,20}\/?$/.test(url.pathname)
   ) {
     return undefined;
   }

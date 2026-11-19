@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { ContentNode } from "@sendo-reader/core";
+  import type { ContentElement, ContentNode } from "@sendo-reader/core";
   import RemoteImage from "./RemoteImage.svelte";
   import XPost from "./XPost.svelte";
 
@@ -17,6 +17,18 @@
    *   横にあふれたら、その中で動かす
    */
   let { nodes }: { nodes: readonly ContentNode[] } = $props();
+
+  // 投稿の多い記事でも一度に大量のウィジェットを起動しない。
+  function automaticEmbeds(children: readonly ContentNode[], embeds = new Set<ContentElement>()) {
+    for (const node of children) {
+      if (embeds.size >= 8) break;
+      if (typeof node === "string") continue;
+      if (node.xPost !== undefined) embeds.add(node);
+      else automaticEmbeds(node.children, embeds);
+    }
+    return embeds;
+  }
+  const embeds = $derived(automaticEmbeds(nodes));
 </script>
 
 {#snippet render(children: readonly ContentNode[])}
@@ -37,7 +49,9 @@
       />
     {:else if node.xPost !== undefined}
       {#key node.xPost}
-        <XPost href={node.xPost}> {@render render(node.children)} </XPost>
+        <XPost href={node.xPost} automatic={embeds.has(node)}>
+          {@render render(node.children)}
+        </XPost>
       {/key}
     {:else if node.tag === "a"}
       <a href={node.href} target="_blank" rel="noopener noreferrer nofollow"

@@ -9,6 +9,7 @@ import { type Assets, serveAsset } from "./static";
 
 export type ReaderServerOptions = {
   assets: Assets;
+  embedOrigin?: string;
   /** 中継の先の sendo のオリジン（例：http://sendo:8787） */
   sendoOrigin: string;
 };
@@ -19,7 +20,7 @@ export function createReaderServer(options: ReaderServerOptions) {
     const request = c.req.raw;
     return isSendoPath(new URL(request.url).pathname)
       ? proxyToSendo(request, options.sendoOrigin)
-      : serveAsset(request, options.assets);
+      : serveAsset(request, options.assets, options.embedOrigin);
   });
   app.onError((error, c) => {
     console.error(error);

@@ -8,7 +8,7 @@
  * - ないパスには index.html を返す（SPA）
  * - ブラウザが受けられれば、圧縮して返す
  */
-import { securityHeaders, xEmbedOrigin } from "../security-headers";
+import { securityHeaders } from "../security-headers";
 
 export type AssetVariant = { body: Uint8Array; etag: string };
 
@@ -24,7 +24,6 @@ export type Assets = ReadonlyMap<string, Asset>;
 
 /** Workers Static Assets の既定と同じ */
 const CACHE_CONTROL = "public, max-age=0, must-revalidate";
-const embedOrigin = xEmbedOrigin(process.env.SENDO_X_EMBED_ORIGIN);
 
 type Encoding = "br" | "gzip";
 
@@ -72,7 +71,7 @@ function findAsset(pathname: string, assets: Assets): Asset | undefined {
   return assets.get("/index.html");
 }
 
-export function serveAsset(request: Request, assets: Assets): Response {
+export function serveAsset(request: Request, assets: Assets, embedOrigin = ""): Response {
   const headers = new Headers(securityHeaders("production", embedOrigin));
   if (request.method !== "GET" && request.method !== "HEAD") {
     headers.set("allow", "GET, HEAD");

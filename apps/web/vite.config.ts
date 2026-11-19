@@ -1,4 +1,6 @@
 import { execSync } from "node:child_process";
+import { readFile } from "node:fs/promises";
+import { resolve } from "node:path";
 import { svelte } from "@sveltejs/vite-plugin-svelte";
 import { defineConfig, type Plugin } from "vite";
 import { VitePWA } from "vite-plugin-pwa";
@@ -7,7 +9,12 @@ import {
   IMAGE_CACHE_NAME,
   IMAGE_CACHE_URL_PATTERN,
 } from "../../packages/core/src/web/image-cache.ts";
-import { renderHeadersFile, securityHeaders, xEmbedOrigin } from "./security-headers.ts";
+import {
+  embedOriginFromHeaders,
+  renderHeadersFile,
+  securityHeaders,
+  xEmbedOrigin,
+} from "./security-headers.ts";
 import { SENDO_NAVIGATION_DENYLIST } from "./sendo-paths.ts";
 
 const embedOrigin = xEmbedOrigin(process.env.SENDO_X_EMBED_ORIGIN);
@@ -23,8 +30,10 @@ function securityHeadersPlugin(): Plugin {
         next();
       });
     },
-    configurePreviewServer(server) {
-      const headers = securityHeaders("production", embedOrigin);
+    async configurePreviewServer(server) {
+      const path = resolve(server.config.root, server.config.build.outDir, "_headers");
+      const builtHeaders = await readFile(path, "utf8");
+      const headers = securityHeaders("production", embedOriginFromHeaders(builtHeaders));
       server.middlewares.use((_req, res, next) => {
         for (const [name, value] of Object.entries(headers)) res.setHeader(name, value);
         next();

@@ -8,8 +8,11 @@
  * - HOST：受けるアドレス。既定は 0.0.0.0
  * - DIST_DIR：画面のビルドの置き場。既定は、このバンドル（dist-server/server.mjs）から見た ../dist
  */
+import { readFile } from "node:fs/promises";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { serve } from "@hono/node-server";
+import { embedOriginFromHeaders } from "../security-headers";
 import { createReaderServer } from "./app";
 import { loadAssets } from "./assets";
 import { type Env, parsePort, parseSendoUrl } from "./config";
@@ -24,8 +27,16 @@ function distDirectory(env: Env): string {
 async function main(env: Env): Promise<void> {
   const sendoOrigin = parseSendoUrl(env.SENDO_URL);
   const port = parsePort(env.PORT);
-  const assets = await loadAssets(distDirectory(env));
-  const app = createReaderServer({ assets, sendoOrigin });
+  const directory = distDirectory(env);
+  const [assets, builtHeaders] = await Promise.all([
+    loadAssets(directory),
+    readFile(join(directory, "_headers"), "utf8").catch((error) => {
+      if (error.code === "ENOENT") return "";
+      throw error;
+    }),
+  ]);
+  const embedOrigin = embedOriginFromHeaders(builtHeaders);
+  const app = createReaderServer({ assets, sendoOrigin, embedOrigin });
 
   const server = serve(
     { fetch: app.fetch, port, hostname: env.HOST?.trim() || "0.0.0.0" },

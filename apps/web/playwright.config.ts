@@ -19,6 +19,7 @@ export default defineConfig({
   webServer: {
     command: "pnpm exec vite preview --port 4173 --strictPort",
     port: 4173,
+    env: { SENDO_X_EMBED_ORIGIN: "" },
     reuseExistingServer: !process.env.CI,
   },
 });

@@ -1,5 +1,10 @@
 import { describe, expect, test } from "vitest";
-import { contentSecurityPolicy, renderHeadersFile, xEmbedOrigin } from "../security-headers";
+import {
+  contentSecurityPolicy,
+  embedOriginFromHeaders,
+  renderHeadersFile,
+  xEmbedOrigin,
+} from "../security-headers";
 
 describe("CSP", () => {
   test("本番では、ほかのオリジンへの通信とインラインのスクリプトを許さない", () => {
@@ -33,6 +38,9 @@ test("X の埋め込みのオリジンだけをフレームの CSP に追加す�
   expect(csp).toContain("frame-src https://embed.example");
   expect(csp).toContain("script-src 'self' 'wasm-unsafe-eval'");
   expect(renderHeadersFile(embed)).toContain("frame-src https://embed.example");
+  expect(embedOriginFromHeaders(renderHeadersFile(embed))).toBe(embed);
+  expect(embedOriginFromHeaders(renderHeadersFile())).toBe("");
   expect(contentSecurityPolicy("production")).not.toContain("frame-src");
   expect(() => xEmbedOrigin("https://embed.example/path")).toThrow();
+  expect(() => xEmbedOrigin("https://*.example")).toThrow();
 });

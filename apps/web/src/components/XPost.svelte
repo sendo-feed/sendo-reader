@@ -1,7 +1,8 @@
 <script lang="ts">
   import type { Snippet } from "svelte";
 
-  let { href, children }: { href: string; children: Snippet } = $props();
+  let { href, automatic, children }: { href: string; automatic: boolean; children: Snippet } =
+    $props();
   const origin = __X_EMBED_ORIGIN__;
   // セッションのクッキーはポートで分かれないため、同じホスト名は使えない。
   const separateHost =
@@ -10,7 +11,7 @@
   let frame = $state<HTMLIFrameElement>();
   let height = $state(0);
   const src = $derived(
-    separateHost ? `${origin}/#${new URL(href).pathname.split("/").at(-1)}` : "",
+    automatic && separateHost ? `${origin}/#${new URL(href).pathname.split("/").at(-1)}` : "",
   );
 
   function resize(event: MessageEvent) {
@@ -41,6 +42,7 @@
       {src}
       {height}
       title="X の投稿"
+      loading="lazy"
       sandbox="allow-scripts allow-same-origin"
       referrerpolicy="no-referrer"
     ></iframe>

@@ -44,7 +44,7 @@ export function xEmbedOrigin(value: string | undefined): string {
   const url = new URL(value);
   if (
     url.protocol !== "https:" ||
-    /[;,]/.test(url.hostname) ||
+    /[*;,]/.test(url.hostname) ||
     url.username !== "" ||
     url.password !== "" ||
     url.pathname !== "/" ||
@@ -54,6 +54,19 @@ export function xEmbedOrigin(value: string | undefined): string {
     throw new Error("SENDO_X_EMBED_ORIGIN には、HTTPS のオリジンを指定してください");
   }
   return url.origin;
+}
+
+/** ビルド済みの画面と同じ CSP を preview とコンテナ版でも使う。 */
+export function embedOriginFromHeaders(headers: string): string {
+  for (const line of headers.split("\n")) {
+    if (!line.trimStart().startsWith("Content-Security-Policy:")) continue;
+    const directive = line
+      .split(";")
+      .map((part) => part.trim())
+      .find((part) => part.startsWith("frame-src "));
+    return xEmbedOrigin(directive?.slice("frame-src ".length));
+  }
+  return "";
 }
 
 export function contentSecurityPolicy(

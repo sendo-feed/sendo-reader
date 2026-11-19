@@ -40,6 +40,13 @@ describe("sendo が配る形の本文", () => {
     expect(hasVisibleContent(nodes)).toBe(true);
   });
 
+  test("アカウント名を含まない公式の投稿リンクも認識する", () => {
+    const [quote] = parseContent(
+      '<blockquote data-embed="x"><a href="https://x.com/i/web/status/123"></a></blockquote>',
+    );
+    expect(quote).toMatchObject({ xPost: "https://x.com/i/web/status/123" });
+  });
+
   test("X 以外の URL や通常の投稿リンクからは埋め込みを作らない", () => {
     for (const href of [
       "https://x.com.example/user/status/123",

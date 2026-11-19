@@ -175,4 +175,10 @@ sendo-reader/
 
 `apps/web/x-embed/` を reader とホスト名が異なる HTTPS オリジンのルートで配信する。Cloudflare Pages など、同梱の `_headers` を適用できる静的ホスティングを使う。埋め込み用のオリジンには reader の API や認証を置かない。
 
-reader をビルドするときに `SENDO_X_EMBED_ORIGIN` でそのオリジンを指定する。Docker では同名の `--build-arg` を渡す。設定した reader は、記事を開いたときに X の公式ウィジェットを自動で読み込む。未設定の reader は記事内の引用と投稿リンクを表示する。
+reader をビルドするときに `SENDO_X_EMBED_ORIGIN` でそのオリジンを指定する。Docker では次のようにイメージを作る。
+
+```sh
+docker build --build-arg SENDO_X_EMBED_ORIGIN=https://embed.example.com -t sendo-reader:x-embeds .
+```
+
+設定した reader は、記事を開いたときに X の公式ウィジェットを自動で読み込む。未設定の reader は記事内の引用と投稿リンクを表示する。
