@@ -235,13 +235,15 @@ export class ReaderCore {
     return this.#session.signal;
   }
 
-  /** 通知につなぐ直前に、Sendo の対応とクッキーの持ち主を確かめる。 */
-  async syncUpdatesAvailability(
-    signal: AbortSignal,
-  ): Promise<"available" | "unsupported" | "session_changed"> {
-    if (!(await this.#api.syncUpdatesAvailable(signal))) return "unsupported";
-    const user = await this.#api.me(signal);
-    return user.id === this.#user?.id ? "available" : "session_changed";
+  /** 通知につなぐ直前に、クッキーの持ち主が手元のユーザーと同じかを確かめる。 */
+  async syncUpdatesUserId(signal: AbortSignal): Promise<string | null> {
+    try {
+      const user = await this.#api.me(signal);
+      return user.id === this.#user?.id ? user.id : null;
+    } catch (error) {
+      if (error instanceof ApiError && error.kind === "unauthorized") return null;
+      throw error;
+    }
   }
 
   /**

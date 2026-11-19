@@ -2,6 +2,8 @@
   "extends": "../../../tsconfig.base.json",
   "compilerOptions": {
     "lib": ["es2024"],
+    // 通知の中継は Vite の設定からも読み込むため、Node で解決できる拡張子付きの import を許す
+    "allowImportingTsExtensions": true,
     // コンテナ版のサーバーは Node で動く（docs/decisions/container.md の 7）
     "types": ["node"]
   },

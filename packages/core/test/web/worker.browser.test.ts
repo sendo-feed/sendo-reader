@@ -21,7 +21,6 @@ afterEach(() => {
 function world(updates = false) {
   const namespace = `test-${crypto.randomUUID()}${updates ? ":updates" : ""}`;
   const server = new FakeSendo();
-  server.syncUpdates = updates;
   const connections: string[] = [];
   if (updates) {
     const channel = new BroadcastChannel(`${namespace}:updates`);
@@ -217,10 +216,11 @@ describe("セッションが切れたとき", () => {
     const pausedSync = new Promise<void>((resolve) => {
       finishSync = resolve;
     });
+    let firstSync = false;
     let switching = false;
     let waiting = false;
     server.onRequest = async (path) => {
-      if (path === "GET /features" && !switching) {
+      if (firstSync && path === "GET /me" && !switching) {
         switching = true;
         server.signInAs(nextUser);
       }
@@ -228,6 +228,7 @@ describe("セッションが切れたとき", () => {
         waiting = true;
         await pausedSync;
       }
+      if (path === "GET /sync") firstSync = true;
     };
     const tab = open();
     await signIn(tab);
@@ -239,6 +240,21 @@ describe("セッションが切れたとき", () => {
     }
     await vi.waitFor(() => expect(connections).toHaveLength(1));
     expect(await tab.client.currentUser()).toEqual(nextUser);
+  });
+
+  test("通知に接続する前にセッション切れが分かったら、同期で画面に伝える", async () => {
+    const { server, open, signIn, connections } = world(true);
+    let firstSync = false;
+    server.onRequest = async (path) => {
+      if (firstSync && path === "GET /me") server.expireSession();
+      if (path === "GET /sync") firstSync = true;
+    };
+    const tab = open();
+    await signIn(tab);
+    await vi.waitFor(() => {
+      expect(tab.statuses.at(-1)?.error).toBe("unauthorized");
+    });
+    expect(connections).toHaveLength(0);
   });
 
   test("ほかのタブでログインし直して戻ってきたら、代表のタブの止まっていた同期を再開する", async () => {

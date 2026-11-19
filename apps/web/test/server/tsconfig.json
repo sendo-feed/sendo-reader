@@ -1,8 +1,4 @@
 {
-  "extends": "../../../../tsconfig.base.json",
-  "compilerOptions": {
-    "lib": ["es2024"],
-    "types": ["node"]
-  },
+  "extends": "../../server/tsconfig.json",
   "include": [".", "../../server", "../../security-headers.ts", "../../sendo-paths.ts"]
 }

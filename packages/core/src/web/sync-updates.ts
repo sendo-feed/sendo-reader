@@ -1,11 +1,12 @@
 import { PERIODIC_SYNC_MS, RETRY_DELAYS_MS } from "../sync/scheduler";
+import { syncUpdatesProtocol } from "./sync-updates-protocol";
 
 const CONNECT_TIMEOUT_MS = 10_000;
 
 interface SyncUpdatesOptions {
   baseUrl: string;
   session: AbortSignal;
-  available(signal: AbortSignal): Promise<boolean>;
+  verifiedUserId(signal: AbortSignal): Promise<string | null>;
   onOpen(): void;
   onUpdate(): void;
 }
@@ -43,13 +44,13 @@ export function startSyncUpdates(options: SyncUpdatesOptions): () => void {
   async function connect(): Promise<void> {
     retry = undefined;
     try {
-      const supported = await options.available(lifetime.signal);
+      const userId = await options.verifiedUserId(lifetime.signal);
       if (lifetime.signal.aborted) return;
-      if (!supported) {
-        retryLater(PERIODIC_SYNC_MS);
+      if (userId === null) {
+        retryAfterFailure();
         return;
       }
-      const connection = new WebSocket(url);
+      const connection = new WebSocket(url, syncUpdatesProtocol(userId));
       socket = connection;
       const deadline = setTimeout(() => connection.close(), CONNECT_TIMEOUT_MS);
       connection.addEventListener("open", () => {

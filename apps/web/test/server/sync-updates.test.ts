@@ -27,10 +27,21 @@ const headers = {
   origin: "https://reader.example",
   cookie: "__Host-sendo_session=example",
   "sec-websocket-key": "dGhlIHNhbXBsZSBub25jZQ==",
+  "sec-websocket-protocol": "sendo-sync.dXNlci0x",
   "sec-websocket-version": "13",
   "sec-fetch-mode": "websocket",
   "x-forwarded-host": "ignored.example",
 };
+
+function mockSendo(userId = "user-1") {
+  return createServer((req, res) => {
+    expect(req.url).toBe("/api/v1/me");
+    expect(req.headers.cookie).toBe(headers.cookie);
+    expect(req.headers.authorization).toBeUndefined();
+    res.setHeader("content-type", "application/json");
+    res.end(JSON.stringify({ user: { id: userId } }));
+  });
+}
 
 async function startReader(sendoOrigin: string) {
   const proxy = createSyncUpdatesProxy(sendoOrigin);
@@ -44,25 +55,19 @@ async function startReader(sendoOrigin: string) {
   return { url, proxy };
 }
 
-function connect(
-  url: string,
-): Promise<{ response: IncomingMessage; socket?: Duplex; head?: Buffer; body?: string }> {
+function connect(url: string): Promise<{ response: IncomingMessage; socket?: Duplex }> {
   return new Promise((resolve, reject) => {
     const outgoing = request(url, { headers });
     outgoing.on("error", reject);
-    outgoing.on("upgrade", (response, socket, head) => {
+    outgoing.on("upgrade", (response, socket) => {
       stops.push(async () => {
         socket.destroy();
       });
-      resolve({ response, socket, head });
+      resolve({ response, socket });
     });
     outgoing.on("response", (response) => {
-      let body = "";
-      response.setEncoding("utf8");
-      response.on("data", (chunk: string) => {
-        body += chunk;
-      });
-      response.on("end", () => resolve({ response, body }));
+      response.resume();
+      response.on("end", () => resolve({ response }));
       response.on("error", reject);
     });
     outgoing.end();
@@ -70,7 +75,7 @@ function connect(
 }
 
 test("通知先だけで 101 を中継し、両方向のデータと切断を通す", async () => {
-  const sendo = createServer();
+  const sendo = mockSendo();
   const received = new Promise<IncomingMessage>((resolve) => {
     sendo.on("upgrade", (incoming, socket) => {
       resolve(incoming);
@@ -90,6 +95,7 @@ test("通知先だけで 101 を中継し、両方向のデータと切断を通
   const { response, socket } = await connect(`${url}${SYNC_UPDATES_PATH}?x=%2F`);
   expect(response.statusCode).toBe(101);
   expect(response.headers["sec-websocket-accept"]).toBe("test");
+  expect(response.headers["sec-websocket-protocol"]).toBe(headers["sec-websocket-protocol"]);
   expect(response.headers["set-cookie"]).toEqual(["first=1", "second=2"]);
   expect(response.headers["x-label"]).toBe("café");
   expect(response.headers["x-hop"]).toBeUndefined();
@@ -102,6 +108,7 @@ test("通知先だけで 101 を中継し、両方向のデータと切断を通
     "sec-fetch-mode": "websocket",
   });
   expect(forwarded.headers["x-forwarded-host"]).toBeUndefined();
+  expect(forwarded.headers["sec-websocket-protocol"]).toBeUndefined();
 
   if (!socket) throw new Error("missing connection");
   const data = once(socket, "data");
@@ -112,6 +119,19 @@ test("通知先だけで 101 を中継し、両方向のデータと切断を通
   await closed;
 
   expect((await connect(`${url}/api/v1/other`)).response.statusCode).toBe(200);
+});
+
+test("同期したユーザーと Upgrade のクッキーの持ち主が違えば中継しない", async () => {
+  const sendo = mockSendo("user-2");
+  let upgrades = 0;
+  sendo.on("upgrade", (_request, socket) => {
+    upgrades += 1;
+    socket.destroy();
+  });
+  const { url } = await startReader(await listen(sendo));
+  const result = await connect(`${url}${SYNC_UPDATES_PATH}`);
+  expect(result.response.statusCode).toBe(403);
+  expect(upgrades).toBe(0);
 });
 
 test("ソケットに通常の HTTP 応答が残っている間は Upgrade しない", () => {
@@ -134,14 +154,15 @@ test("ソケットに通常の HTTP 応答が残っている間は Upgrade し�
 });
 
 test("Sendo のハンドシェイク拒否は HTTP の状態コードで返す", async () => {
-  const sendo = createServer();
+  const sendo = mockSendo();
+  const body = Buffer.alloc(256 * 1024, "x");
   const upstream = new Promise<Duplex>((resolve) => {
     sendo.on("upgrade", (_incoming, socket) => {
       stops.push(async () => {
         socket.destroy();
       });
       socket.write(
-        "HTTP/1.1 400 Bad Request\r\nConnection: close, x-session\r\nX-Session: ignored\r\nSec-WebSocket-Version: 13\r\nContent-Type: text/plain\r\nContent-Length: 7\r\n\r\n",
+        `HTTP/1.1 400 Bad Request\r\nConnection: close, x-session\r\nX-Session: ignored\r\nSec-WebSocket-Version: 13\r\nContent-Type: text/plain\r\nContent-Length: ${body.length}\r\n\r\n`,
       );
       resolve(socket);
     });
@@ -157,14 +178,14 @@ test("Sendo のハンドシェイク拒否は HTTP の状態コードで返す",
   expect(response.headers["x-session"]).toBeUndefined();
 
   // 本文を待つ間にも拒否のヘッダーが届いている。本文が届いたら最後まで流す。
-  (await upstream).end("invalid");
+  (await upstream).end(body);
   const chunks: Buffer[] = [];
   for await (const chunk of response) chunks.push(chunk);
-  expect(Buffer.concat(chunks).toString()).toBe("invalid");
+  expect(Buffer.concat(chunks).equals(body)).toBe(true);
 });
 
 test("Sendo の応答を待つ間も、下流が送信を終えたら上流を切断する", async () => {
-  const sendo = createServer();
+  const sendo = mockSendo();
   const incoming = new Promise<Duplex>((resolve) => {
     sendo.on("upgrade", (_incoming, socket) => {
       stops.push(async () => {

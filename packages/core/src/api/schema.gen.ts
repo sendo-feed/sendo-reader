@@ -295,46 +295,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/features": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * この Sendo で使える機能
-         * @description 使える機能を返す。今はどの機能も常に使えるので、すべて true を返す。
-         *     sendo-reader の互換のために残している。sendo-reader が使わなくなったら消す（docs/decisions/container.md の 3）。
-         */
-        get: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description 使える機能 */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Features"];
-                    };
-                };
-            };
-        };
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/integrations/discord": {
         parameters: {
             query?: never;
@@ -2332,14 +2292,6 @@ export interface components {
             id: string;
             /** @example you@example.com */
             email: string;
-        };
-        Features: {
-            /** @description 記事の主言語を背景で判定・保存できるか。常に true */
-            languageDetection: boolean;
-            /** @description 記事のページから本文を抜けるか（GET /articles/{id}/content?source=page）。常に true */
-            pageContent: boolean;
-            /** @description Sendo が WebSocket 通知に対応しているか（GET /sync/updates）。対応前の Sendo はこの項目を返さない */
-            syncUpdates: boolean;
         };
         DiscordIntegration: {
             available: boolean;

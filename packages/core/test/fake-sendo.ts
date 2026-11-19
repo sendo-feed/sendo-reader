@@ -412,7 +412,6 @@ export class FakeSendo {
   /** 元ページから抜いた全文（sendo は全文の抽出を常に動かす） */
   readonly pageContents = new Map<string, string>();
   readonly pageContentRequests: string[] = [];
-  syncUpdates = false;
   /** hasContent は true のまま、本文だけがなくなったことにする記事（片付けの途中など） */
   readonly contentGone = new Set<string>();
   /** 本文の出どころとして返す値（あとで、記事のページから抜いた本文の値が増える） */
@@ -601,13 +600,6 @@ export class FakeSendo {
     }
     if (request.method === "GET" && path === "/me") {
       return json(200, { user: { id: user.id, email: user.email } });
-    }
-    if (request.method === "GET" && path === "/features") {
-      return json(200, {
-        languageDetection: true,
-        pageContent: true,
-        syncUpdates: this.syncUpdates,
-      });
     }
     if (path === "/tokens" || path.startsWith("/tokens/")) return this.#tokens(request, path);
     if (path === "/oauth/grants" || path.startsWith("/oauth/grants/")) {

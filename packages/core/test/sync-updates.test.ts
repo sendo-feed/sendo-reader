@@ -5,7 +5,10 @@ import { startSyncUpdates } from "../src/web/sync-updates";
 class TestSocket extends EventTarget {
   static sockets: TestSocket[] = [];
 
-  constructor(readonly url: URL) {
+  constructor(
+    readonly url: URL,
+    readonly protocol: string,
+  ) {
     super();
     TestSocket.sockets.push(this);
   }
@@ -44,11 +47,11 @@ afterEach(() => {
 test("初回と再接続で同期し、通知を読む。停止したら再接続しない", async () => {
   const onOpen = vi.fn();
   const onUpdate = vi.fn();
-  const available = vi.fn().mockResolvedValue(true);
+  const available = vi.fn().mockResolvedValue("user-1");
   stop = startSyncUpdates({
     baseUrl: "/api/v1",
     session: session.signal,
-    available,
+    verifiedUserId: available,
     onOpen,
     onUpdate,
   });
@@ -57,6 +60,7 @@ test("初回と再接続で同期し、通知を読む。停止したら再接�
   const first = TestSocket.sockets[0];
   if (!first) throw new Error("missing connection");
   expect(first.url.href).toBe("wss://reader.example:8080/api/v1/sync/updates");
+  expect(first.protocol).toBe("sendo-sync.dXNlci0x");
   first.open();
   first.message("invalid");
   first.message('{"type":"other"}');
@@ -76,30 +80,56 @@ test("初回と再接続で同期し、通知を読む。停止したら再接�
   expect(onUpdate).toHaveBeenCalledTimes(1);
 });
 
-test("旧 Sendo では接続せず、次の確認で対応していれば接続する", async () => {
-  const available = vi.fn().mockResolvedValueOnce(false).mockResolvedValue(true);
+test("旧版の中継が接続を受けなければ、間隔を延ばしてつなぎ直す", async () => {
+  const verifiedUserId = vi.fn().mockResolvedValue("user-1");
   stop = startSyncUpdates({
     baseUrl: "/api/v1",
     session: session.signal,
-    available,
+    verifiedUserId,
     onOpen: vi.fn(),
     onUpdate: vi.fn(),
   });
-  await vi.advanceTimersByTimeAsync(PERIODIC_SYNC_MS - 1);
+  await vi.advanceTimersByTimeAsync(0);
+  expect(TestSocket.sockets).toHaveLength(1);
+  TestSocket.sockets[0]?.close();
+  await vi.advanceTimersByTimeAsync(RETRY_DELAYS_MS[0] - 1);
+  expect(TestSocket.sockets).toHaveLength(1);
+  await vi.advanceTimersByTimeAsync(1);
+  expect(TestSocket.sockets).toHaveLength(2);
+  TestSocket.sockets[1]?.close();
+  await vi.advanceTimersByTimeAsync(RETRY_DELAYS_MS[1] - 1);
+  expect(TestSocket.sockets).toHaveLength(2);
+  await vi.advanceTimersByTimeAsync(1);
+  expect(TestSocket.sockets).toHaveLength(3);
+});
+
+test("ユーザーの確認に一時的に失敗したら、再試行の間隔を待って確認し直す", async () => {
+  const verifiedUserId = vi.fn().mockRejectedValueOnce(new Error("offline"));
+  verifiedUserId.mockResolvedValue("user-1");
+  stop = startSyncUpdates({
+    baseUrl: "/api/v1",
+    session: session.signal,
+    verifiedUserId,
+    onOpen: vi.fn(),
+    onUpdate: vi.fn(),
+  });
+  await vi.advanceTimersByTimeAsync(RETRY_DELAYS_MS[0] - 1);
+  expect(verifiedUserId).toHaveBeenCalledTimes(1);
   expect(TestSocket.sockets).toHaveLength(0);
   await vi.advanceTimersByTimeAsync(1);
+  expect(verifiedUserId).toHaveBeenCalledTimes(2);
   expect(TestSocket.sockets).toHaveLength(1);
 });
 
-test("対応状況の確認中に止めた場合は、応答が来ても接続しない", async () => {
+test("ユーザーの確認中に止めた場合は、応答が来ても接続しない", async () => {
   const available = vi.fn(async () => {
     await new Promise((resolve) => setTimeout(resolve, 10));
-    return true;
+    return "user-1";
   });
   stop = startSyncUpdates({
     baseUrl: "/api/v1",
     session: session.signal,
-    available,
+    verifiedUserId: available,
     onOpen: vi.fn(),
     onUpdate: vi.fn(),
   });
@@ -110,11 +140,11 @@ test("対応状況の確認中に止めた場合は、応答が来ても接続�
 });
 
 test("別オリジンの WebSocket には接続しない", () => {
-  const available = vi.fn().mockResolvedValue(true);
+  const available = vi.fn().mockResolvedValue("user-1");
   stop = startSyncUpdates({
     baseUrl: "https://external.example/api/v1",
     session: session.signal,
-    available,
+    verifiedUserId: available,
     onOpen: vi.fn(),
     onUpdate: vi.fn(),
   });

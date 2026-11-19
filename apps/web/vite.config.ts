@@ -9,6 +9,7 @@ import {
 } from "../../packages/core/src/web/image-cache.ts";
 import { securityHeaders } from "./security-headers.ts";
 import { SENDO_NAVIGATION_DENYLIST, SYNC_UPDATES_PATH } from "./sendo-paths.ts";
+import { createSyncUpdatesProxy } from "./server/sync-updates.ts";
 
 /**
  * 手元の dev サーバーと preview にヘッダーを付ける。本番は、reader のコンテナのサーバーが同じものを付ける
@@ -36,6 +37,23 @@ function securityHeadersPlugin(): Plugin {
 
 /** 手元で動かす sendo（sendo の pnpm dev） */
 const SENDO_DEV_URL = "http://localhost:8787";
+
+function syncUpdatesProxyPlugin(): Plugin {
+  return {
+    name: "sendo-reader:sync-updates-proxy",
+    configureServer({ httpServer }) {
+      if (!httpServer) return;
+      const proxy = createSyncUpdatesProxy(SENDO_DEV_URL);
+      httpServer.prependListener("request", proxy.trackRequest);
+      httpServer.on("upgrade", (request, socket, head) => {
+        if (request.url?.split("?", 1)[0] !== SYNC_UPDATES_PATH) return;
+        if (proxy.shouldUpgrade(request)) proxy.handle(request, socket, head);
+        else socket.destroy();
+      });
+      httpServer.once("close", proxy.stop);
+    },
+  };
+}
 
 /** Workbox が、1 回の取得の間、プラグインの呼び出しに渡して回す入れ物 */
 type GenerationState = { state?: { generation?: string } };
@@ -104,6 +122,7 @@ export default defineConfig({
   plugins: [
     svelte(),
     securityHeadersPlugin(),
+    syncUpdatesProxyPlugin(),
     // アプリの外枠と SQLite の wasm をキャッシュして、ネットワークがなくても起動する
     // （docs/decisions/ui.md）。登録は src/main.ts で、Trusted Types のポリシーを通して行う
     VitePWA({
@@ -170,11 +189,8 @@ export default defineConfig({
     // 手元では、本番の reader のコンテナのサーバーと同じパス（sendo-paths.ts）を、sendo の pnpm dev
     // （ポート 8787）に中継する（docs/decisions/ui.md の 4）。^ で始まるキーは、Vite が正規表現として
     // パスとクエリに当てる
-    proxy: {
-      [`^${SYNC_UPDATES_PATH}(?:\\?|$)`]: { target: SENDO_DEV_URL, ws: true },
-      ...Object.fromEntries(
-        SENDO_NAVIGATION_DENYLIST.map((pattern) => [pattern.source, { target: SENDO_DEV_URL }]),
-      ),
-    },
+    proxy: Object.fromEntries(
+      SENDO_NAVIGATION_DENYLIST.map((pattern) => [pattern.source, { target: SENDO_DEV_URL }]),
+    ),
   },
 });
