@@ -43,7 +43,8 @@ function syncUpdatesProxyPlugin(): Plugin {
     name: "sendo-reader:sync-updates-proxy",
     configureServer({ httpServer }) {
       if (!httpServer) return;
-      const proxy = createSyncUpdatesProxy(SENDO_DEV_URL);
+      // PUBLIC_URL を設定していない手元の Sendo は Host と Origin を照合する。
+      const proxy = createSyncUpdatesProxy(SENDO_DEV_URL, { preserveHost: true });
       httpServer.prependListener("request", proxy.trackRequest);
       httpServer.on("upgrade", (request, socket, head) => {
         if (request.url?.split("?", 1)[0] !== SYNC_UPDATES_PATH) return;

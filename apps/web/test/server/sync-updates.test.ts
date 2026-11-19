@@ -43,8 +43,8 @@ function mockSendo(userId = "user-1") {
   });
 }
 
-async function startReader(sendoOrigin: string) {
-  const proxy = createSyncUpdatesProxy(sendoOrigin);
+async function startReader(sendoOrigin: string, preserveHost = false) {
+  const proxy = createSyncUpdatesProxy(sendoOrigin, { preserveHost });
   const server = createServer({ shouldUpgradeCallback: proxy.shouldUpgrade }, (_req, res) =>
     res.end("ordinary HTTP"),
   );
@@ -74,52 +74,56 @@ function connect(url: string): Promise<{ response: IncomingMessage; socket?: Dup
   });
 }
 
-test("通知先だけで 101 を中継し、両方向のデータと切断を通す", async () => {
-  const sendo = mockSendo();
-  const received = new Promise<IncomingMessage>((resolve) => {
-    sendo.on("upgrade", (incoming, socket) => {
-      resolve(incoming);
-      socket.write(
-        "HTTP/1.1 101 Switching Protocols\r\nConnection: Upgrade, X-Hop\r\nUpgrade: websocket\r\nSec-WebSocket-Accept: test\r\nSet-Cookie: first=1\r\nSet-Cookie: second=2\r\nX-Label: café\r\nX-Hop: upstream-only\r\n\r\n",
-        "latin1",
-      );
-      socket.on("data", (data) => socket.write(data));
-      stops.push(async () => {
-        socket.destroy();
+test.each([false, true])(
+  "通知先だけで 101 と双方向のデータを中継する（Host を保つ: %s）",
+  async (preserveHost) => {
+    const sendo = mockSendo();
+    const received = new Promise<IncomingMessage>((resolve) => {
+      sendo.on("upgrade", (incoming, socket) => {
+        resolve(incoming);
+        socket.write(
+          "HTTP/1.1 101 Switching Protocols\r\nConnection: Upgrade, X-Hop\r\nUpgrade: websocket\r\nSec-WebSocket-Accept: test\r\nSet-Cookie: first=1\r\nSet-Cookie: second=2\r\nX-Label: café\r\nX-Hop: upstream-only\r\n\r\n",
+          "latin1",
+        );
+        socket.on("data", (data) => socket.write(data));
+        stops.push(async () => {
+          socket.destroy();
+        });
       });
     });
-  });
-  const sendoOrigin = await listen(sendo);
-  const { url, proxy } = await startReader(sendoOrigin);
+    const sendoOrigin = await listen(sendo);
+    const { url, proxy } = await startReader(sendoOrigin, preserveHost);
 
-  const { response, socket } = await connect(`${url}${SYNC_UPDATES_PATH}?x=%2F`);
-  expect(response.statusCode).toBe(101);
-  expect(response.headers["sec-websocket-accept"]).toBe("test");
-  expect(response.headers["sec-websocket-protocol"]).toBe(headers["sec-websocket-protocol"]);
-  expect(response.headers["set-cookie"]).toEqual(["first=1", "second=2"]);
-  expect(response.headers["x-label"]).toBe("café");
-  expect(response.headers["x-hop"]).toBeUndefined();
-  const forwarded = await received;
-  expect(forwarded.url).toBe(`${SYNC_UPDATES_PATH}?x=%2F`);
-  expect(forwarded.headers).toMatchObject({
-    origin: headers.origin,
-    cookie: headers.cookie,
-    "sec-websocket-key": headers["sec-websocket-key"],
-    "sec-fetch-mode": "websocket",
-  });
-  expect(forwarded.headers["x-forwarded-host"]).toBeUndefined();
-  expect(forwarded.headers["sec-websocket-protocol"]).toBeUndefined();
+    const { response, socket } = await connect(`${url}${SYNC_UPDATES_PATH}?x=%2F`);
+    expect(response.statusCode).toBe(101);
+    expect(response.headers["sec-websocket-accept"]).toBe("test");
+    expect(response.headers["sec-websocket-protocol"]).toBe(headers["sec-websocket-protocol"]);
+    expect(response.headers["set-cookie"]).toEqual(["first=1", "second=2"]);
+    expect(response.headers["x-label"]).toBe("café");
+    expect(response.headers["x-hop"]).toBeUndefined();
+    const forwarded = await received;
+    expect(forwarded.url).toBe(`${SYNC_UPDATES_PATH}?x=%2F`);
+    expect(forwarded.headers).toMatchObject({
+      origin: headers.origin,
+      cookie: headers.cookie,
+      "sec-websocket-key": headers["sec-websocket-key"],
+      "sec-fetch-mode": "websocket",
+    });
+    expect(forwarded.headers["x-forwarded-host"]).toBeUndefined();
+    expect(forwarded.headers["sec-websocket-protocol"]).toBeUndefined();
+    expect(forwarded.headers.host).toBe(new URL(preserveHost ? url : sendoOrigin).host);
 
-  if (!socket) throw new Error("missing connection");
-  const data = once(socket, "data");
-  socket.write("socket data");
-  expect(String((await data)[0])).toBe("socket data");
-  const closed = once(socket, "close");
-  proxy.stop();
-  await closed;
+    if (!socket) throw new Error("missing connection");
+    const data = once(socket, "data");
+    socket.write("socket data");
+    expect(String((await data)[0])).toBe("socket data");
+    const closed = once(socket, "close");
+    proxy.stop();
+    await closed;
 
-  expect((await connect(`${url}/api/v1/other`)).response.statusCode).toBe(200);
-});
+    expect((await connect(`${url}/api/v1/other`)).response.statusCode).toBe(200);
+  },
+);
 
 test("同期したユーザーと Upgrade のクッキーの持ち主が違えば中継しない", async () => {
   const sendo = mockSendo("user-2");

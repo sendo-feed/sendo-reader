@@ -32,7 +32,10 @@ function writeResponseHead(
   socket.write(`${lines.join("\r\n")}\r\n\r\n`, "latin1");
 }
 
-export function createSyncUpdatesProxy(sendoOrigin: string) {
+export function createSyncUpdatesProxy(
+  sendoOrigin: string,
+  options: { preserveHost?: boolean } = {},
+) {
   const sockets = new Set<Duplex>();
   const pendingHttp = new WeakMap<Socket, number>();
 
@@ -69,6 +72,9 @@ export function createSyncUpdatesProxy(sendoOrigin: string) {
       Object.entries(request.headers).filter(([name]) => !name.startsWith("x-forwarded-")),
       request.headers.connection,
     );
+    if (options.preserveHost && request.headers.host !== undefined) {
+      headers.host = request.headers.host;
+    }
     const cookie = headers.cookie;
     const protocol = headers["sec-websocket-protocol"];
     // このサブプロトコルは reader が消費する。Sendo には WebSocket の通常の要求を渡す。
