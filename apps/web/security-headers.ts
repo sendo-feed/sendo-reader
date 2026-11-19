@@ -3,8 +3,7 @@
  *
  * ページに他人の JS が入ると、ページを開いている間はセッションで API を使われ、手元のデータも
  * 読まれるので、CSP を厳しくする。設定した X の埋め込みは、別オリジンのフレームに限る。
- * 本番は、ビルドで dist/_headers に書き出し、Workers Static Assets が付ける。
- * 手元は、Vite の dev サーバーが付ける。
+ * 本番は reader のコンテナのサーバー、手元は Vite の dev サーバーと preview が付ける。
  */
 
 /** 本番の CSP。埋め込みのオリジンは実際の構成に応じて足す */
@@ -56,17 +55,13 @@ export function xEmbedOrigin(value: string | undefined): string {
   return url.origin;
 }
 
-/** ビルド済みの画面と同じ CSP を preview とコンテナ版でも使う。 */
-export function embedOriginFromHeaders(headers: string): string {
-  for (const line of headers.split("\n")) {
-    if (!line.trimStart().startsWith("Content-Security-Policy:")) continue;
-    const directive = line
-      .split(";")
-      .map((part) => part.trim())
-      .find((part) => part.startsWith("frame-src "));
-    return xEmbedOrigin(directive?.slice("frame-src ".length));
-  }
-  return "";
+export const X_EMBED_ORIGIN_FILE = "x-embed-origin.json";
+
+/** ビルド済みの画面と同じ配信元を preview とコンテナで使う。 */
+export function embedOriginFromBuild(contents: string): string {
+  const value: unknown = JSON.parse(contents);
+  if (typeof value !== "string") throw new Error("埋め込みのビルド設定が文字列ではありません");
+  return xEmbedOrigin(value);
 }
 
 export function contentSecurityPolicy(
@@ -94,12 +89,4 @@ export function securityHeaders(
     "Referrer-Policy": "no-referrer",
     "Permissions-Policy": "camera=(), microphone=(), geolocation=(), payment=(), usb=()",
   };
-}
-
-/** Workers Static Assets の _headers の形にする（すべてのパスに付ける） */
-export function renderHeadersFile(embedOrigin = ""): string {
-  const lines = Object.entries(securityHeaders("production", embedOrigin)).map(
-    ([name, value]) => `  ${name}: ${value}`,
-  );
-  return ["/*", ...lines, ""].join("\n");
 }

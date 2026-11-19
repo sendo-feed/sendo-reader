@@ -1,6 +1,6 @@
 /**
  * コンテナ版の reader のサーバー（docs/decisions/container.md）。sendo のパスは sendo に中継し、
- * ほかは画面の静的なファイルを返す。Cloudflare 版の reader Worker（worker/index.ts）に当たる。
+ * ほかは画面の静的なファイルを返す。
  */
 import { Hono } from "hono";
 import { isSendoPath } from "../sendo-paths";

@@ -1,9 +1,10 @@
 {
   "extends": "../../../tsconfig.base.json",
   "compilerOptions": {
-    "lib": ["es2024"]
+    // 画面のコード（src/lib/app-update.ts など）を、ブラウザの型で調べる
+    "lib": ["es2024", "dom"]
   },
-  "include": [".", "../worker/worker-configuration.d.ts"],
+  "include": ["."],
   // server/ はコンテナ版のサーバーのテスト。Node で動くので、server/ の tsconfig で調べる
   "exclude": ["server"]
 }

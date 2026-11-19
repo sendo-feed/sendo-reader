@@ -1,10 +1,5 @@
 import { describe, expect, test } from "vitest";
-import {
-  contentSecurityPolicy,
-  embedOriginFromHeaders,
-  renderHeadersFile,
-  xEmbedOrigin,
-} from "../security-headers";
+import { contentSecurityPolicy, embedOriginFromBuild, xEmbedOrigin } from "../security-headers";
 
 describe("CSP", () => {
   test("本番では、ほかのオリジンへの通信とインラインのスクリプトを許さない", () => {
@@ -23,13 +18,6 @@ describe("CSP", () => {
     expect(csp).toContain("script-src 'self' 'wasm-unsafe-eval'");
     expect(csp).not.toContain("trusted-types");
   });
-
-  test("_headers は、すべてのパスに本番のヘッダーを付ける", () => {
-    const file = renderHeadersFile();
-    expect(file.startsWith("/*\n")).toBe(true);
-    expect(file).toContain(`  Content-Security-Policy: ${contentSecurityPolicy("production")}\n`);
-    expect(file).toContain("  X-Content-Type-Options: nosniff\n");
-  });
 });
 
 test("X の埋め込みのオリジンだけをフレームの CSP に追加する", () => {
@@ -37,9 +25,9 @@ test("X の埋め込みのオリジンだけをフレームの CSP に追加す�
   const csp = contentSecurityPolicy("production", embed);
   expect(csp).toContain("frame-src https://embed.example");
   expect(csp).toContain("script-src 'self' 'wasm-unsafe-eval'");
-  expect(renderHeadersFile(embed)).toContain("frame-src https://embed.example");
-  expect(embedOriginFromHeaders(renderHeadersFile(embed))).toBe(embed);
-  expect(embedOriginFromHeaders(renderHeadersFile())).toBe("");
+  expect(embedOriginFromBuild(JSON.stringify(embed))).toBe(embed);
+  expect(embedOriginFromBuild(JSON.stringify(""))).toBe("");
+  expect(() => embedOriginFromBuild("null")).toThrow();
   expect(contentSecurityPolicy("production")).not.toContain("frame-src");
   expect(() => xEmbedOrigin("https://embed.example/path")).toThrow();
   expect(() => xEmbedOrigin("https://*.example")).toThrow();

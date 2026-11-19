@@ -27,9 +27,6 @@ updates:
       # Vitest は Vite の版に合わせて動くのでまとめる
       vite:
         patterns: ["vite", "vitest"]
-      # Cloudflare の開発ツールは揃えて上げないと噛み合わないことがあるのでまとめる
-      cloudflare:
-        patterns: ["wrangler", "@cloudflare/*"]
       minor-and-patch:
         update-types: [minor, patch]
     open-pull-requests-limit: 5

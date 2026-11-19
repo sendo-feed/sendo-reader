@@ -12,7 +12,7 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { serve } from "@hono/node-server";
-import { embedOriginFromHeaders } from "../security-headers";
+import { embedOriginFromBuild, X_EMBED_ORIGIN_FILE } from "../security-headers";
 import { createReaderServer } from "./app";
 import { loadAssets } from "./assets";
 import { type Env, parsePort, parseSendoUrl } from "./config";
@@ -28,14 +28,14 @@ async function main(env: Env): Promise<void> {
   const sendoOrigin = parseSendoUrl(env.SENDO_URL);
   const port = parsePort(env.PORT);
   const directory = distDirectory(env);
-  const [assets, builtHeaders] = await Promise.all([
+  const [assets, builtOrigin] = await Promise.all([
     loadAssets(directory),
-    readFile(join(directory, "_headers"), "utf8").catch((error) => {
-      if (error.code === "ENOENT") return "";
+    readFile(join(directory, X_EMBED_ORIGIN_FILE), "utf8").catch((error) => {
+      if (error.code === "ENOENT") return JSON.stringify("");
       throw error;
     }),
   ]);
-  const embedOrigin = embedOriginFromHeaders(builtHeaders);
+  const embedOrigin = embedOriginFromBuild(builtOrigin);
   const app = createReaderServer({ assets, sendoOrigin, embedOrigin });
 
   const server = serve(

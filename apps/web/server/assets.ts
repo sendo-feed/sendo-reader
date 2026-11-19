@@ -40,9 +40,6 @@ const COMPRESSIBLE = new Set([
   ".txt",
 ]);
 
-/** Workers Static Assets の設定のファイル。画面のファイルではないので返さない */
-const IGNORED = new Set(["_headers", "_redirects"]);
-
 function hashOf(body: Uint8Array): string {
   return createHash("sha256").update(body).digest("base64url").slice(0, 22);
 }
@@ -90,7 +87,7 @@ export async function loadAssets(directory: string): Promise<Assets> {
     if (!entry.isFile()) continue;
     const file = path.join(entry.parentPath, entry.name);
     const relative = path.relative(directory, file).split(path.sep).join("/");
-    if (IGNORED.has(relative) || relative.split("/").some((part) => part.startsWith("."))) {
+    if (relative.split("/").some((part) => part.startsWith("."))) {
       continue;
     }
     assets.set(`/${relative}`, toAsset(file, new Uint8Array(await readFile(file))));

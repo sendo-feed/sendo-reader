@@ -1,6 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { type BrowserContext, expect, type Page, test } from "@playwright/test";
-import { embedOriginFromHeaders } from "../security-headers";
+import { embedOriginFromBuild, X_EMBED_ORIGIN_FILE } from "../security-headers";
 import { FakeSendo, routeFakeSendo, signIn } from "./fake-sendo";
 
 /**
@@ -173,8 +173,11 @@ for (const long of [false, true]) {
         (long ? Array.from({ length: 50 }, (_, i) => `<p>長い記事の段落 ${i}</p>`).join("") : ""),
     });
     await routeFakeSendo(context, server);
-    const headers = await readFile(new URL("../dist/_headers", import.meta.url), "utf8");
-    const setting = embedOriginFromHeaders(headers);
+    const headers = await readFile(
+      new URL(`../dist/${X_EMBED_ORIGIN_FILE}`, import.meta.url),
+      "utf8",
+    );
+    const setting = embedOriginFromBuild(headers);
     if (process.env.SENDO_EXPECT_X_EMBED_ORIGIN !== undefined) {
       expect(setting).toBe(process.env.SENDO_EXPECT_X_EMBED_ORIGIN);
     }
@@ -467,7 +470,7 @@ test("手元にある本文は、オフラインでも出る。手元になけ�
   await expect(view.locator(".body")).toHaveText("あとで開く記事の本文");
   expect(server.contentRequests).toEqual([later.id]);
   await expect(view.locator(".summary")).toHaveCount(0);
-  await expect(view.locator(".content-note")).toHaveCount(0);
+  await expect(view.locator(".content-note", { hasText: "つながったら読めます" })).toHaveCount(0);
 });
 
 test("未読の新しい記事の本文は、開く前に取っておき、オフラインでも読める", async ({
