@@ -32,6 +32,7 @@ sendo-reader は、[sendo のコンテナ版](https://github.com/sendo-feed/send
    - 応答の状態、ヘッダー（複数の `Set-Cookie` を含む）、本文をそのまま返す。本文は溜めずに流す（MCP、OPML の書き出しなど）
    - sendo の応答には、画面のセキュリティのヘッダーを足さない
    - 通知用の `GET /api/v1/sync/updates` だけは WebSocket Upgrade を中継する。ブラウザの `Origin` とクッキーを Sendo に渡し、Sendo が `101` を返してからブラウザにも `101` を返して両方向に流す。Sendo が拒否したら、その HTTP 応答を返す。接続の片側が閉じたときと reader が停止するときは残りの接続も閉じる（sendo の[差分同期](https://github.com/sendo-feed/sendo/blob/main/docs/decisions/sync.md)の 9）
+   - ワーカーが指定した同期済みユーザーと、Upgrade のクッキーの持ち主を中継前に照合する。照合と中継には、Upgrade で受け取った同じクッキーを使う。照合用のサブプロトコルは手元の Vite と本番の reader が扱う
    - 中継の先は設定 `SENDO_URL` で変えられる（既定は compose の中の `http://sendo:8787`）。reader のコンテナに、ほかの設定は要らない（自分のオリジンも知らなくてよい）
 5. **静的なファイルは、次のように返す。**
    - `apps/web/security-headers.ts` のヘッダーを、静的なファイルのすべての応答に付ける。手元の Vite の dev サーバー・preview も同じところから付け、別に書き写さない
@@ -42,7 +43,7 @@ sendo-reader は、[sendo のコンテナ版](https://github.com/sendo-feed/send
 8. **本文の抽出と言語判定は使える前提で作る。更新通知は対応を確かめてから接続を試す。**
    - sendo は、ページ本文の抽出と言語判定を常に動かし、欠いたままでは起動しない（sendo の[コンテナ版](https://github.com/sendo-feed/sendo/blob/main/docs/decisions/container.md)の 1〜3）。reader は、全文の取得を、いつでも使える機能として出す
    - sendo の[差分同期](https://github.com/sendo-feed/sendo/blob/main/docs/decisions/sync.md)の 9 に従って対応を確かめ、対応していれば画面と同じオリジンの通知先（4）へ接続を試す。実際に接続が開けば、その時点で動いている reader が中継できることを確かめられる。接続が開いたときと通知を受けたときの差分同期も sendo の決定に従い、同期の失敗後は決まった再試行の間隔を守る。接続中も定期同期を続け、どちらかが未対応でつながらない間も定期同期で動く
-   - 通知接続に失敗したときや切断されたときは、5 秒、15 秒、1 分、5 分と間隔を延ばしてつなぎ直す。つながれば間隔を元に戻す。Sendo が機能一覧で未対応を返したときは、5 分後に対応を確かめ直す
+   - 対応の確認や通知への接続に失敗したとき、接続が切れたときは、5 秒、15 秒、1 分、5 分と間隔を延ばして対応の確認からやり直す。つながれば間隔を元に戻す。Sendo が機能一覧で未対応を返したときは、5 分後に対応を確かめ直す
 9. **テストは Node で動かす。** 中継するパスの振り分け、中継（ヘッダー、`Set-Cookie`、リダイレクト、ストリーム）、静的なファイルのヘッダーを、偽の sendo を相手に Vitest で確かめる。CI では、PR でイメージが作れて動くことを確かめ、`main` に入ったらイメージを出す（sendo と同じ形）。
 
 ## 理由
