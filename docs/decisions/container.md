@@ -33,7 +33,7 @@ sendo-reader は、[sendo のコンテナ版](https://github.com/sendo-feed/send
    - sendo の応答には、画面のセキュリティのヘッダーを足さない
    - 通知用の `GET /api/v1/sync/updates` だけは WebSocket Upgrade を中継する。ブラウザの `Origin` とクッキーを Sendo に渡し、Sendo が `101` を返してからブラウザにも `101` を返して両方向に流す。Sendo が拒否したら、その HTTP 応答を返す。接続の片側が閉じたときと reader が停止するときは残りの接続も閉じる（sendo の[差分同期](https://github.com/sendo-feed/sendo/blob/main/docs/decisions/sync.md)の 9）
    - ワーカーが指定した同期済みユーザーと、Upgrade のクッキーの持ち主を中継前に照合する。照合と中継には Upgrade で受け取った同じクッキーを使う。照合用の `Sec-WebSocket-Protocol` は手元の Vite と本番の reader が受け取り、Sendo へ送るヘッダーから外す。照合と Sendo 側の Upgrade がともに成功したら、ブラウザへの `101` に選択したプロトコルを返す
-   - 手元で Sendo の `PUBLIC_URL` を入れるときは、ブラウザで開く Vite のオリジンにそろえる。空のときは、Vite が元の `Host` と `Origin` を渡すので、そのオリジンで Sendo が照合する
+   - 手元で Sendo の `PUBLIC_URL` を入れるときは、ブラウザで開く Vite のオリジンにそろえる。使えるのは HTTPS またはループバックの HTTP。空のときは、Vite が元の `Host` と `Origin` を渡すので、そのオリジンで Sendo が照合する
    - 中継は、照合から Upgrade の応答までを 10 秒で打ち切る。期限を超えた照合と上流への接続を閉じ、ワーカーは接続失敗として再試行する（8）。拒否応答はヘッダーから順に返し、本文の通信が 30 秒止まったら接続を閉じる
    - 中継の先は設定 `SENDO_URL` で変えられる（既定は compose の中の `http://sendo:8787`）。reader のコンテナに、ほかの設定は要らない（自分のオリジンも知らなくてよい）
 5. **静的なファイルは、次のように返す。**
