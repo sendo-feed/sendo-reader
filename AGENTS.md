@@ -103,7 +103,7 @@ Conventional Commits を土台にする。全文は https://github.com/sendo-fee
   - `{@html}` を使わない（Biome の `noSvelteAtHtmlTags` で検査している）。本文の HTML は、sendo がサニタイズしてあっても信頼しない。core で、通すタグと属性だけの木にしてから（`src/content/parse.ts`）、専用の部品（`ArticleBody.svelte`）で出す。HTML の文字列を、画面に渡さない（`innerHTML` や `DOMParser` に入れない）
   - URL は `toSafeHttpUrl`（`packages/core`）を通し、http ／ https のものだけを `href` に入れる
   - 画像の URL（記事の `thumbnailUrl`、フィードの `iconUrl`）は、sendo から受け取ったものをそのまま使う。組み立てない、書き換えない、中身（`url=` や `sig=`）を読まない（`docs/decisions/images.md`）。同じオリジンを指すかは、同期で受けるときに `toSameOriginUrl` で確かめる
-- CSP を緩めない（`apps/web/security-headers.ts`）。インラインのスクリプト、`eval`、テンプレートの `style` 属性（本番の CSP で止まる。`style:` ディレクティブか CSS のクラスを使う）、ほかのオリジンへの通信を使わない。緩める必要が出たら、`docs/decisions/local-first.md` を直してから変える
+- CSP を緩めない（`apps/web/security-headers.ts`）。インラインのスクリプト、`eval`、テンプレートの `style` 属性（本番の CSP で止まる。`style:` ディレクティブか CSS のクラスを使う）、reader 本体ではほかのオリジンへの通信を使わない。X の公式埋め込みを設定した場合は、決定に従い、その配信元だけを `frame-src` に足す。さらに緩める必要が出たら、`docs/decisions/local-first.md` を直してから変える
 - ログインは sendo のセッションのクッキーで行う（`docs/decisions/local-first.md` の 6）。リクエストに `Authorization` を付けない。アクセストークンなど sendo が返す秘密は、画面に一度出すだけにし、手元の DB、ログ、エラーの表示、URL、Service Worker のキャッシュに入れない
 - 速さの予算（`docs/decisions/performance.md`）を超える依存を足さない。足す前に `pnpm build && pnpm size` で確かめる
 - Svelte の `generics="…"` の中に `{` を書かない（Biome が解析に失敗する）。型に名前を付けてから使う

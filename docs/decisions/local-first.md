@@ -37,6 +37,8 @@
 - 記事の本文は、sendo の[記事の本文](https://github.com/sendo-feed/sendo/blob/main/docs/decisions/content.md)に従い、記事ごとに取得する。フィード本文とページから抽出した全文を手元の別々の表に置き、記事を削除したときに一緒に消す。
 - 記事を開いたら手元の本文を読み、取得済みの全文はオフラインでも表示する。フィード本文が手元になければ、取得中は要約を表示する。全文取得が使える版では、フィード本文か要約を出したあとに開いている記事の全文を取得する。全文取得に失敗したときも、表示中の本文か要約を残す。
 
+- 本文に X の投稿の埋め込みがあれば、記事を開いたときに X の公式ウィジェットを別オリジンの隔離フレームで自動表示する。ブラウザは表示時に X に通信する。投稿へのリンクは、オフラインや読み込みに失敗したときも表示する。
+
 ### 保存と開封履歴
 
 - 購読外の URL は[あとで読むページ](https://github.com/sendo-feed/sendo/blob/main/docs/decisions/saved.md)として手元に保存し、操作キューと差分同期を使って端末間で揃える。Saved にはスター付きの記事と保存ページを出し、URL が重なったときは記事を表示する。
@@ -50,6 +52,7 @@
   - `default-src 'none'`、`script-src 'self' 'wasm-unsafe-eval'`（wasm のため）、`worker-src 'self'`、`connect-src 'self'`、`img-src 'self' data:`、`style-src 'self'`、`manifest-src 'self'`、`base-uri 'none'`、`form-action 'none'`、`frame-ancestors 'none'`、`object-src 'none'`
   - インラインのスクリプトと `eval` を許さない。ほかのオリジンへの通信を許さないので、手元のデータを `fetch` で外に送れない
   - 記事のサムネイルやフィードのアイコンのために、`img-src` は緩めない。画像は sendo が中継し、同じオリジン（`/api/v1/images`）から読む（[画像](images.md)）
+  - X の埋め込みを配る別オリジンを構成した場合は、`frame-src` にそのオリジンだけを許す。フレームに渡すのは検証済みの投稿への参照だけ。X のスクリプトは隔離フレームで読み込む
   - ほかに緩める必要が出たら、そのときに範囲を決めてこのファイルを直す
   - 手元の dev サーバーだけは、2 つ緩める。Vite が開発中の CSS を `<style>` で差し込むので `style-src` に `'unsafe-inline'` を足し、Vite のエラーの表示が `innerHTML` を使うので Trusted Types を強制しない。それ以外（ほかのオリジンへの通信、インラインのスクリプト、`eval` を許さない）は本番と同じにする。本番と同じヘッダーは、本番のビルドを `vite preview` と Playwright で開いて確かめる
 - **Trusted Types を強制する**（`require-trusted-types-for 'script'`）。許すポリシーは、Svelte が作るもの（`svelte-trusted-html`）と、ワーカーの URL を自分のオリジンに限るものだけにする。対応していないブラウザでは効かないので、ほかの対策と重ねる。
