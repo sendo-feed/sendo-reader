@@ -11,7 +11,7 @@
    - 上流の CI がイメージを作り、GHCR（`ghcr.io/sendo-feed/sendo-reader`）に置く。使う人は fork しない
    - タグと CPU は sendo にそろえる。`main` に入るたびに `main` と `sha-<コミット>` のタグで出し、amd64 と arm64 の両方で作る。版のタグは、sendo が版を切るときに一緒に決める
    - イメージは公開する（sendo のイメージと同じ）。使う人は `docker login` せずに取ってこられる
-   - sendo の `compose.yaml` に reader のサービスを並べ、`docker compose pull && docker compose up -d` で一緒に更新する。reader は、sendo が動き出してから（ヘルスチェックが通ってから）始める
+   - sendo の `compose.yaml` に reader のサービスを並べる。標準構成は `docker compose pull && docker compose up -d` で一緒に更新する。reader は、sendo が動き出してから（ヘルスチェックが通ってから）始める
 2. **reader の画面と Sendo の API・認証は、reader のオリジン 1 つから配る。**
    - 外に出すのは reader のコンテナだけにする。TLS は、sendo と同じく、手前に置くリバースプロキシや Cloudflare Tunnel で終える。コンテナは HTTP だけを受ける
    - sendo のコンテナは、ポートを外に出さない。reader のコンテナが、compose の中のネットワークで呼ぶ

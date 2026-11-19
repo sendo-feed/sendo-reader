@@ -110,7 +110,7 @@ pnpm run deploy
 
 ## コンテナ版で動かす
 
-上流の CI が作ったイメージ（`ghcr.io/sendo-feed/sendo-reader`）を、Sendo のコンテナ版と同じ `compose.yaml` で動かします。fork も標準構成ではビルドも要りません。手順は [Sendo の README](https://github.com/sendo-feed/sendo#コンテナ版で動かす) にあります（[決定](docs/decisions/container.md)）。
+上流の CI が作ったイメージ（`ghcr.io/sendo-feed/sendo-reader`）を、Sendo のコンテナ版と同じ `compose.yaml` で動かします。標準構成では fork もビルドも要りません。手順は [Sendo の README](https://github.com/sendo-feed/sendo#コンテナ版で動かす) にあります（[決定](docs/decisions/container.md)）。
 
 X の埋め込みを有効にする構成では、埋め込み用の静的ファイルを別の HTTPS ホストで配信し、その配信元を指定して reader のイメージをビルドします。
 
