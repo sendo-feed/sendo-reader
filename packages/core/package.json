@@ -19,7 +19,7 @@
     "api:generate": "openapi-typescript src/api/openapi.json --output src/api/schema.gen.ts"
   },
   "devDependencies": {
-    "@vitest/browser-playwright": "5.0.5",
+    "@vitest/browser-playwright": "5.1.0",
     "openapi-typescript": "7.13.0",
     "playwright": "1.64.1",
     "typescript": "6.0.3",

@@ -21,7 +21,7 @@
     "e2e": "pnpm --filter @sendo-reader/web e2e"
   },
   "devDependencies": {
-    "@biomejs/biome": "2.6.4",
+    "@biomejs/biome": "2.6.5",
     "typescript": "6.0.3"
   }
 }
