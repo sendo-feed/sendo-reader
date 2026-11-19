@@ -330,7 +330,8 @@ for (const long of [false, true]) {
           await expect(frame).toHaveCount(0);
           await view.dispatchEvent("wheel", { deltaY: 20 });
           await expect(frame).toHaveAttribute("height", "0");
-          await paragraph.evaluate((element) => {
+          const pendingLink = view.locator("a[data-x-link]");
+          await pendingLink.evaluate((element) => {
             const pane = element.closest<HTMLElement>(".article-view");
             const toolbar = pane?.querySelector(".toolbar");
             if (!pane || !toolbar) throw new Error("記事のスクロール領域がない");
@@ -339,6 +340,25 @@ for (const long of [false, true]) {
               element.getBoundingClientRect().top - toolbar.getBoundingClientRect().bottom + 4;
           });
           expandingWidget.resolve();
+          await expect(frame).toHaveAttribute("height", "66");
+          await expect
+            .poll(() =>
+              pendingLink.evaluate((element) => {
+                const toolbar = element.closest(".article-view")?.querySelector(".toolbar");
+                if (!toolbar) throw new Error("記事のツールバーがない");
+                return Math.abs(
+                  element.getBoundingClientRect().top - toolbar.getBoundingClientRect().bottom + 4,
+                );
+              }),
+            )
+            .toBeLessThan(2);
+          await paragraph.evaluate((element) => {
+            const pane = element.closest<HTMLElement>(".article-view");
+            const toolbar = pane?.querySelector(".toolbar");
+            if (!pane || !toolbar) throw new Error("記事のスクロール領域がない");
+            pane.scrollTop +=
+              element.getBoundingClientRect().top - toolbar.getBoundingClientRect().bottom + 4;
+          });
           await expect(frame).toHaveAttribute("height", "1216");
           await expect
             .poll(() =>
@@ -602,6 +622,10 @@ for (const long of [false, true]) {
         await expect(frame).toHaveCount(0);
         await context.setOffline(false);
         await expect(frame).toHaveAttribute("height", "1216");
+        await expect(view.getByRole("link", { name: "引用内リンク" })).toBeHidden();
+        await context.setOffline(true);
+        await expect(view.getByRole("link", { name: "引用内リンク" })).toBeVisible();
+        await context.setOffline(false);
       } else {
         const fallbackLink = view.getByRole("link", { name: "引用内リンク" });
         await fallbackLink.focus();

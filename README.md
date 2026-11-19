@@ -97,6 +97,8 @@ pnpm --dir ../sendo exec tsx ../sendo-reader/scripts/check-sendo-paths.ts ../sen
 
 `apps/web/x-embed/` を reader とホスト名が異なる HTTPS オリジンのルートで配信する。Cloudflare Pages など、同梱の `_headers` を適用できる静的ホスティングを使う。埋め込み用のオリジンには reader の API や認証を置かない。
 
+ヘッダーだけを更新する場合も、変更した URL の旧 ETag と旧 Last-Modified が新しい配信を妨げないようにする。静的ホストがファイルの中身から検証用の値を作る場合は、対象ファイルに配備版を示すコメントを入れるなどして更新し、旧応答の値を個別に送って新しいヘッダー付きの `200` を確認する。[配備後の確認](docs/decisions/container.md#決定)
+
 reader をビルドするときに `SENDO_X_EMBED_ORIGIN` でそのオリジンを指定する。Docker では次のようにイメージを作る。
 
 ```sh

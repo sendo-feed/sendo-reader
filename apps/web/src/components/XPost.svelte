@@ -29,6 +29,7 @@
   let block = $state<HTMLElement>();
   let frame = $state<HTMLIFrameElement>();
   let fallback = $state<HTMLDetailsElement>();
+  let postLink = $state<HTMLAnchorElement>();
   let quoteOpen = $state(true);
   let preserveQuote = false;
   let active = $state(false);
@@ -84,45 +85,55 @@
     return bounds.bottom > top && bounds.top < bottom && bounds.right > left && bounds.left < right;
   }
 
+  function readingViewportTop() {
+    return scrollRoot === null ? 0 : scrollRoot.getBoundingClientRect().top + toolbarHeight;
+  }
+
+  function containsReadingLine(element: Element | undefined, top: number) {
+    const bounds = element?.getBoundingClientRect();
+    return bounds !== undefined && bounds.top <= top + 1 && bounds.bottom > top + 1;
+  }
+
+  function keepReadingPosition(readingQuote: boolean, top: number) {
+    const scroller = scrollRoot ?? document.scrollingElement;
+    const post = block;
+    if (restoringScroll || scroller === null || post === undefined) return;
+
+    const quote = fallback;
+    const link = postLink;
+    let edge: (() => number) | undefined;
+    if (readingQuote && quote !== undefined) {
+      const summary = quote.querySelector(":scope > summary");
+      edge = () =>
+        quote.getBoundingClientRect().top + (summary?.getBoundingClientRect().height ?? 0);
+    } else if (link !== undefined && containsReadingLine(link, top)) {
+      edge = () => link.getBoundingClientRect().top;
+    } else if (post.getBoundingClientRect().bottom <= top) {
+      edge = () => post.getBoundingClientRect().bottom;
+    }
+    if (edge === undefined) return;
+    const anchor = edge;
+    const before = anchor();
+    void tick().then(() => {
+      if (post.isConnected && !restoringScroll) scroller.scrollTop += anchor() - before;
+    });
+  }
+
   function finish(value: number) {
     if (!navigator.onLine && value === 0 && !settled) {
       suspendRequest();
       return;
     }
-    const quote = fallback;
-    const scroller = scrollRoot ?? document.scrollingElement;
-    const quoteBounds = quote?.getBoundingClientRect();
-    const readingTop =
-      scrollRoot === null ? 0 : scrollRoot.getBoundingClientRect().top + toolbarHeight;
-    const readingQuote =
-      !restoringScroll &&
-      quoteBounds !== undefined &&
-      quoteBounds.top <= readingTop + 1 &&
-      quoteBounds.bottom > readingTop + 1;
-    if (!restoringScroll && value !== height && scroller !== null) {
-      const post = block;
-      let readAnchor: (() => number) | undefined;
-      if (readingQuote && quote !== undefined) {
-        const summary = quote.querySelector(":scope > summary");
-        readAnchor = () =>
-          quote.getBoundingClientRect().top + (summary?.getBoundingClientRect().height ?? 0);
-      } else if (post !== undefined && post.getBoundingClientRect().bottom <= readingTop) {
-        // 後ろを読んでいるときは、引用全体の高さの変化を反映する。
-        readAnchor = () => post.getBoundingClientRect().bottom;
-      }
-      if (readAnchor !== undefined) {
-        const anchor = readAnchor;
-        const before = anchor();
-        void tick().then(() => {
-          if (!post?.isConnected || restoringScroll) return;
-          scroller.scrollTop += anchor() - before;
-        });
-      }
-    }
+    const top = readingViewportTop();
+    const readingQuote = !restoringScroll && containsReadingLine(fallback, top);
+    if (value !== height) keepReadingPosition(readingQuote, top);
     if (value === 0) quoteOpen = true;
     else if (height === 0) {
       quoteOpen =
-        readingQuote || preserveQuote || (quote?.contains(document.activeElement) ?? false);
+        readingQuote ||
+        preserveQuote ||
+        !navigator.onLine ||
+        (fallback?.contains(document.activeElement) ?? false);
       preserveQuote = false;
     }
     height = value;
@@ -134,7 +145,13 @@
   }
 
   function suspendRequest() {
-    if (settled) return;
+    if (settled) {
+      if (!quoteOpen) {
+        keepReadingPosition(false, readingViewportTop());
+        quoteOpen = true;
+      }
+      return;
+    }
     clearTimeout(timer);
     request?.cancel();
     request = undefined;
@@ -246,7 +263,9 @@
     <summary hidden={height === 0}>記事中の引用</summary>
     {@render children()}
   </details>
-  <a {href} data-x-link target="_blank" rel="noopener noreferrer nofollow">X で開く</a>
+  <a {href} bind:this={postLink} data-x-link target="_blank" rel="noopener noreferrer nofollow"
+    >X で開く</a
+  >
 </blockquote>
 
 <style>

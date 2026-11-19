@@ -256,7 +256,7 @@ export function parseContent(html: string): ContentNode[] {
     const posts = new Map<string, { url: string; links: ContentElement[] }>();
     let index = quote.children.length - 1;
     let hasInlineBody = false;
-    // 引用の末尾に並ぶ出典だけをたどり、途中にあったリンクは出典候補に含めない。
+    // 末尾の出典から本文のブロックまで戻り、間の補足リンクも飛ばして照合する。
     while (index >= 0) {
       const child = quote.children[index];
       if (typeof child === "string" ? child.trim() === "" : child?.tag === "br") {
@@ -282,8 +282,12 @@ export function parseContent(html: string): ContentNode[] {
         attribution === null ||
         attribution.index <= start ||
         handle === undefined
-      )
-        break;
+      ) {
+        if (posts.size === 0) break;
+        hasInlineBody ||= text.trim() !== "" || hasVisibleContent(child.children);
+        index = before;
+        continue;
+      }
 
       const post = child.href === undefined ? undefined : xPostUrl(child.href);
       if (post !== undefined) {
