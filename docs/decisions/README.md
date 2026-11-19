@@ -14,7 +14,7 @@ sendo-reader で決めたことを、テーマごとに1ファイルで置く。
 | [アカウントの画面](account.md) | 提案中 | 設定の画面でアクセストークンと OAuth の許可を管理し、OAuth の許可の画面を置く。どちらもネットワークが要る画面で、発行したトークンは一度だけ出して保存しない。許可は毎回、利用者が押して決める |
 | [速さの予算](performance.md) | 提案中 | 画面のスレッドの JS は gzip 後 100KB 以下、ワーカーは JS と wasm で 550KB 以下。キャッシュ済みの起動から記事まで 1 秒、操作の反応は 100ms |
 | [コンテナ版](container.md) | 提案中 | コンテナ版の sendo と組むときは、reader もコンテナで配る（`ghcr.io/sendo-feed/sendo-reader`）。画面・API・認証は reader のオリジン 1 つから配り、sendo の `PUBLIC_URL` と `READER_URL` をそのオリジンにする。sendo のパスは許す一覧で中継し、書き換えない。サーバーは Node（Hono）。X の埋め込みを有効にする場合は、別 HTTPS ホストで静的ページを配信し、配信元を指定して reader をビルドする |
-| [デプロイ](deploy.md) | 提案中 | 旧 Sendo Worker と組むときは、各自が fork し、Workers Builds でつなぐ。sendo を先にデプロイする。ルート ディレクトリは一番上のまま、手順は一番上の `package.json` の `deploy` に書く。main 以外のブランチのビルドはオフ。自動で取り込むなら sendo の sendo-updater が、sendo のデプロイのあとに取り込む |
+| [デプロイ](deploy.md) | 提案中 | 旧 Sendo Worker と組むときは、各自が fork し、Workers Builds でつなぐ。sendo を先にデプロイする。ルート ディレクトリは一番上のまま、手順は一番上の `package.json` の `deploy` に書く。main 以外のブランチのビルドはオフ。Sendo と reader を互換性を確認した版に固定する |
 
 経緯を知りたいとき：
 

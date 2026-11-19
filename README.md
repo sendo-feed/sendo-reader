@@ -70,7 +70,7 @@ pnpm dev
 
 この手順は、Cloudflare 版の Sendo Worker を運用している環境向けです。
 
-自分の Cloudflare アカウントに、GitHub の fork からデプロイします。fork の `main` に push するたびに、Cloudflare（Workers Builds）がビルドしてデプロイします（[決定](docs/decisions/deploy.md)）。Cloudflare の無料プランで動きます。
+自分の Cloudflare アカウントに、GitHub の fork からデプロイします。fork の `main` に push するたびに、Cloudflare（Workers Builds）がその版の reader をビルドしてデプロイします（[決定](docs/decisions/deploy.md)）。Cloudflare の無料プランで動きます。
 
 画面は Workers Static Assets で配信し、reader Worker が `/api` を Service binding で Sendo（Worker 名 `sendo`）に中継します。同じアカウントにある Sendo Worker に接続します。旧版の配備手順は [当時の Sendo の README](https://github.com/sendo-feed/sendo/blob/94181bb/README.md#デプロイ) にあります。
 
@@ -94,11 +94,7 @@ pnpm dev
 
 ### 更新する
 
-Sendo を先に更新してから、GitHub の reader の fork の画面で「Sync fork」→「Update branch」を押します。上流の変更が fork の `main` に入り、その push でデプロイされます。
-
-reader は Sendo の API の型に合わせて作っているので、新しい reader を古い Sendo につなぐと、まだない API を呼ぶことがあります。
-
-自動で取り込みたいときは、Sendo の [sendo-updater](https://github.com/sendo-feed/sendo-updater) が reader の fork も受け持ちます。Sendo の fork が上流に追いつき、そのデプロイが成功してから reader を取り込むので、順番を手で守る必要はありません。入れ方は sendo-updater の README にあります。
+旧 Sendo Worker を運用する間は、Sendo と reader を互換性を確認した版に固定します。現行の Sendo に更新する場合は、[コンテナ版で動かす](#コンテナ版で動かす)の手順で reader と一緒に配備します。
 
 ### 手元からデプロイする
 

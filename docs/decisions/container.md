@@ -37,9 +37,9 @@
    - キャッシュは、毎回確かめさせる（ETag で、変わっていなければ 304）。Service Worker（`sw.js`）が新しい版を見つけられるように、長く持たせない
    - JS、CSS、wasm などは圧縮して返す（Workers Static Assets と同じ）
 6. **reader のコンテナのヘルスチェック（イメージの `HEALTHCHECK`）は、reader 自身が返す `/`（`index.html`）を見る。** `/healthz` は sendo に中継するので、reader のコンテナで見ると sendo の生死を見ることになる。reader のためだけのパスは足さない（sendo のパスと重なるおそれを増やさない）。
-7. **サーバーは Node で書く。** HTTP は Hono と `@hono/node-server`（sendo のコンテナ版と同じ）で受ける。コードは `apps/web/server/` に置き、ここだけ `node:*` を使ってよい。イメージには、Cloudflare 版と同じ画面のビルド（`vite build` の `dist`）を入れる。
-8. **Cloudflare 版の reader Worker は、`/api` だけを Service binding で中継する。**画面のビルドは、2 つの版で同じものを使う。
-   - 支える組み合わせは、Cloudflare 版どうしと、コンテナ版どうしの 2 つだけにする。Cloudflare 版の reader とコンテナ版の sendo のような、版をまたぐ組み合わせは支えない
+7. **サーバーは Node で書く。** HTTP は Hono と `@hono/node-server`（sendo のコンテナ版と同じ）で受ける。コードは `apps/web/server/` に置き、ここだけ `node:*` を使ってよい。イメージには `vite build` の `dist` を入れる。X の埋め込みを有効にするイメージでは、2 のビルド引数で配信元を設定する。
+8. **旧 Sendo Worker と組む reader Worker は、`/api` だけを Service binding で中継する。** 画面はコンテナと共通のビルド手順で作る。
+   - 現行 Sendo にはコンテナ版の reader を使う。既存の旧 Sendo Worker には、互換性を確かめた reader Worker を使う（[デプロイ](deploy.md)）
 9. **テストは Node で動かす。** 中継するパスの振り分け、中継（ヘッダー、`Set-Cookie`、リダイレクト、ストリーム）、静的なファイルのヘッダーを、偽の sendo を相手に Vitest で確かめる。CI では、PR でイメージが作れることを確かめ、`main` に入ったらイメージを出す（sendo と同じ形）。
 
 ## 理由
@@ -64,7 +64,7 @@
   - `security-headers.ts` をそのまま読み込めて、ヘッダーを 1 か所で保てる
   - 振り分けと中継を、ほかのテストと同じ Vitest で確かめられる
   - sendo のコンテナ版と同じ道具（Node、Hono）で、2 つのコンテナの作りがそろう
-- **Cloudflare 版は `/api` を中継する**：Cloudflare 版では、MCP のクライアントやリーダーアプリは sendo のオリジンに直接つなぐ（sendo の mcp.md の「理由」）。reader Worker が `/api` のほかを中継する理由がない
+- **Cloudflare 版は `/api` を中継する**：Cloudflare 版では、MCP のクライアントやリーダーアプリは sendo のオリジンに直接つなぐ（[旧 Sendo Worker の MCP の決定](https://github.com/sendo-feed/sendo/blob/94181bb/docs/decisions/mcp.md#理由)）。reader Worker が `/api` のほかを中継する理由がない
 - **版をまたぐ組み合わせを支えない**：下の代替案のとおり、どちらも Cloudflare 版の動きを変えるか、sendo を外に出すことになる。
 
 ## 検討した代替案
