@@ -1,5 +1,6 @@
 <script lang="ts">
   import Appearance from "../components/settings/Appearance.svelte";
+  import Discord from "../components/settings/Discord.svelte";
   import Grants from "../components/settings/Grants.svelte";
   import Reading from "../components/settings/Reading.svelte";
   import Tokens from "../components/settings/Tokens.svelte";
@@ -7,9 +8,10 @@
   import { useReader } from "../lib/context";
   import { scrollToTop } from "../lib/layout.svelte";
   import { detectDeviceType } from "../lib/prefs.svelte";
+  import { router } from "../lib/router.svelte";
 
   /**
-   * Connections（docs/decisions/account.md）は、sendo にしかないもの（アクセストークン、OAuth の許可）を
+   * Connections と Integrations は、sendo にしかないもの（アクセストークン、OAuth の許可、Discord 連携）を
    * 扱うので、ネットワークが要る。手元の DB には置かず、このカテゴリを開くたびに sendo に聞く。
    *
    * 出しているアカウントは手元のユーザーで、sendo には今のクッキーで送る。別のタブなどでログインし
@@ -19,13 +21,26 @@
    */
   const reader = useReader();
 
-  const categories = ["Appearance", "Reading", "Connections"] as const;
+  const categories = ["Appearance", "Reading", "Connections", "Integrations"] as const;
   type Category = (typeof categories)[number];
   let active = $state<Category>("Appearance");
+  let discordResult = $state<string | null>(null);
   let main = $state<HTMLElement>();
   const device = detectDeviceType() === "mobile" ? "スマホ" : "PC・タブレット";
 
+  $effect(() => {
+    const next = new URL(router.url);
+    const result = next.searchParams.get("discord");
+    if (result === null) return;
+    discordResult = result;
+    select("Integrations");
+    next.pathname = "/settings";
+    next.searchParams.delete("discord");
+    router.replace(next.href);
+  });
+
   function select(category: Category) {
+    if (category !== "Integrations") discordResult = null;
     active = category;
     scrollToTop(main);
   }
@@ -103,6 +118,13 @@
               <Grants {confirm} />
             {/if}
           {/key}
+        {:else if category === "Integrations"}
+          {#key reader.user?.id}
+            {#if reader.user !== null}
+              <p class="account">ログインしているアカウント：{reader.user.email}</p>
+              <Discord {confirm} result={discordResult} />
+            {/if}
+          {/key}
         {:else}
           <p class="note">
             {device}向けの設定です。変更は自動で保存し、同期で同じ種類の端末に引き継ぎます。
@@ -142,11 +164,17 @@
 
   .categories {
     display: grid;
-    grid-template-columns: repeat(3, auto);
+    grid-template-columns: repeat(4, auto);
     padding: 0.25rem;
     border: 1px solid var(--border);
     border-radius: var(--radius-small);
     background: var(--surface);
+  }
+
+  @media (max-width: 24rem) {
+    .categories {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
   }
 
   .categories button {
