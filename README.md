@@ -70,7 +70,7 @@ Sendo と並べて、コンテナで動かします（[決定](docs/decisions/co
 - 外に出すのは reader のコンテナのポート（`127.0.0.1:8080`）だけです。reader のコンテナが画面を返し、Sendo のパス（`/api`、`/mcp`、OAuth、Google Reader API、`/healthz`）を、compose の中の Sendo（`http://sendo:8787`）に中継します。画面・API・認証は同じ reader のオリジンを使います
 - Sendo の `PUBLIC_URL` と `READER_URL` には、どちらも reader のオリジン（例：`https://reader.example.com`）を入れます。Google のリダイレクト URI、リーダーアプリのサーバー、MCP の URL も、このオリジンにします
 - TLS は、手前に置くリバースプロキシ（Caddy など）や Cloudflare Tunnel で終えます。コンテナは HTTP（既定はポート 8080）だけを受けます
-- reader は、Sendo のヘルスチェックが通ってから始まります。更新は `docker compose pull && docker compose up -d` で、Sendo と一緒に新しくなります
+- reader は、Sendo のヘルスチェックが通ってから始まります。標準構成の更新は `docker compose pull && docker compose up -d` で、Sendo と一緒に新しくなります
 
 reader のコンテナの設定（環境変数）は、次の 2 つだけです。どちらも、ふつうは変えません。
 
