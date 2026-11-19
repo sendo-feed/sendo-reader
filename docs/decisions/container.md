@@ -31,6 +31,8 @@ sendo-reader は、[sendo のコンテナ版](https://github.com/sendo-feed/send
    - メソッド、パスとクエリ、ヘッダー、本文をそのまま sendo に渡す。除くのは、1 回の接続にだけ関わるヘッダー（`Connection`、`Transfer-Encoding` など）だけにする。`Cookie`、`Origin`、`Sec-Fetch-*`、`Authorization` はそのまま渡す
    - `X-Forwarded-*` は付けない。sendo はそれを信じず、URL のオリジンを `PUBLIC_URL` に置き換える
    - リダイレクトは追わずに、そのまま返す（ログインの 302 など）
+   - WebSocket の Upgrade（sendo の通知の `/api/v1/sync/updates`。sendo の[差分同期](https://github.com/sendo-feed/sendo/blob/main/docs/decisions/sync.md)の 9）も、一覧のパスなら書き換えずに中継する。`Origin`、`Cookie`、`Sec-WebSocket-*` はそのまま渡す。sendo が `101` を返したら、そのあとは両方向のバイト列を、中身（フレーム）を読まずにそのまま流す。`101` 以外の応答（401、403、429 など）は、そのままブラウザに返す。一覧にないパスの Upgrade は断る
+   - reader のコンテナが止まるときは、中継している WebSocket も切る。ブラウザはつなぎ直す（[ローカルファースト](local-first.md)の 3）
    - 応答の状態、ヘッダー（複数の `Set-Cookie` を含む）、本文をそのまま返す。本文は溜めずに流す（MCP、OPML の書き出しなど）
    - sendo の応答には、画面のセキュリティのヘッダーを足さない
    - 中継の先は設定 `SENDO_URL` で変えられる（既定は compose の中の `http://sendo:8787`）。reader のコンテナに、ほかの設定は要らない（自分のオリジンも知らなくてよい）
@@ -42,9 +44,9 @@ sendo-reader は、[sendo のコンテナ版](https://github.com/sendo-feed/send
 7. **サーバーは Node で書く。** HTTP は Hono と `@hono/node-server`（sendo と同じ）で受ける。コードは `apps/web/server/` に置き、ここだけ `node:*` を使ってよい。イメージには、画面のビルド（`vite build` の `dist`）と、依存ごと 1 つのファイルにまとめたサーバーを入れる。
 8. **全文取得は常に使える機能として出す。全文取得の可否に `GET /api/v1/features` を使わない。**
    - sendo は、ページ本文の抽出と言語判定を常に動かし、欠いたままでは起動しない（sendo の[コンテナ版](https://github.com/sendo-feed/sendo/blob/main/docs/decisions/container.md)の 1〜3）。reader は、全文の取得を、いつでも使える機能として出す
-   - 全文取得の判定に使っていた参照は廃止済み（[sendo-reader #125](https://github.com/sendo-feed/sendo-reader/pull/125)）。Sendo も `/api/v1/features` を削除済み（[sendo #140](https://github.com/sendo-feed/sendo/pull/140)）。現行の reader は定期同期を行う。今後 WebSocket 通知に対応する版は、[Sendo の差分同期の決定](https://github.com/sendo-feed/sendo/blob/main/docs/decisions/sync.md#決定)の 9 に従い、実際に接続を試して通知が使えるかを判断する
+   - 全文取得の判定に使っていた参照は廃止済み（[sendo-reader #125](https://github.com/sendo-feed/sendo-reader/pull/125)）。Sendo も `/api/v1/features` を削除済み（[sendo #140](https://github.com/sendo-feed/sendo/pull/140)）。WebSocket 通知の接続判定は、[ローカルファーストの決定](local-first.md)に従う
    - 旧版の画面が現行の Sendo で `/api/v1/features` を呼ぶと、404 を受けて、未取得の記事で全文の取得操作を隠す。[取得済みの全文](local-first.md#記事の本文)は引き続き表示する。reader を現行版に切り替えると（[UI とツール](ui.md)の 5）、未取得の記事でも取得操作が出る
-9. **テストは Node で動かす。** 中継するパスの振り分け、中継（ヘッダー、`Set-Cookie`、リダイレクト、ストリーム）、静的なファイルのヘッダーを、偽の sendo を相手に Vitest で確かめる。CI では、PR でイメージが作れて動くことを確かめ、`main` に入ったらイメージを出す（sendo と同じ形）。
+9. **テストは Node で動かす。** 中継するパスの振り分け、中継（ヘッダー、`Set-Cookie`、リダイレクト、ストリーム、WebSocket の Upgrade）、静的なファイルのヘッダーを、偽の sendo を相手に Vitest で確かめる。CI では、PR でイメージが作れて動くことを確かめ、`main` に入ったらイメージを出す（sendo と同じ形）。
 
 ## 理由
 
@@ -65,7 +67,7 @@ sendo-reader は、[sendo のコンテナ版](https://github.com/sendo-feed/send
   - 「静的なファイル以外は全部 sendo に回す」と、画面のルート（`/settings`、`/feeds/<ID>`、`/oauth/authorize` など）を `index.html` にするために、結局、画面のルートの一覧が要る。画面のルートは増えやすい
   - ページの移動（`Sec-Fetch-Mode: navigate`）かどうかで分けると、同じパスでも、ブラウザで開いたときとアプリから呼んだときで行き先が変わる
   - sendo が外に出すパスは、プロトコルで決まったもので数が少なく、めったに増えない。一覧なら、何が sendo に届くかを 1 か所で読める
-- **書き換えずに中継する**：sendo は、受けたヘッダー（`Sec-Fetch-Site`、`Origin`、`Cookie`）でセッションと CSRF を確かめる。書き換えなければ、sendo から見て、ブラウザが直接呼んだのと変わらない。sendo はクライアントの IP を使わない（`X-Forwarded-For` などを読まない）ので、すべてのリクエストが reader のコンテナから来ても困らない
+- **書き換えずに中継する**：sendo は、受けたヘッダー（`Sec-Fetch-Site`、`Origin`、`Cookie`）でセッションと CSRF を確かめる。書き換えなければ、sendo から見て、ブラウザが直接呼んだのと変わらない。WebSocket も同じで、`Origin` とクッキーをそのまま渡せば sendo が接続を確かめられ、フレームを読まずに流せば、sendo の閉じるコードもそのままブラウザに届く。sendo はクライアントの IP を使わない（`X-Forwarded-For` などを読まない）ので、すべてのリクエストが reader のコンテナから来ても困らない
 - **ヘルスチェックで `/` を見る**：sendo が止まっても、reader のコンテナは静的なファイルを返し続けられ、作り直しても直らない。reader の生死に sendo を混ぜると、sendo だけの不調で reader まで不健全と出て、どちらが悪いか分からなくなる。sendo の生死は、sendo のコンテナのヘルスチェック（compose の `depends_on` もこれを見る）と、外からの `/healthz` で見る
 - **Node で書く**
   - `security-headers.ts` をそのまま読み込めて、ヘッダーを 1 か所で保てる
@@ -83,6 +85,7 @@ sendo-reader は、[sendo のコンテナ版](https://github.com/sendo-feed/send
   - sendo の `PUBLIC_URL` を sendo のオリジンにすると、ログインの戻り先もクッキーも sendo のオリジンのものになり、reader のオリジンにセッションができない
   - reader Worker が `X-Forwarded-Host` を付け、sendo がそれを信じる形は、sendo が避けている。そのヘッダーは誰でも付けられる
   - sendo の `PUBLIC_URL` を reader のオリジンにすれば、sendo を変えずに動く。ただ、OAuth の発行者と MCP の宛先も reader のオリジンになるので、reader Worker が `/mcp`、OAuth、Google Reader API もすべて中継することになる。sendo のコンテナも外に出す必要があり、使う人が置くものが 2 か所（Cloudflare とサーバー）に分かれ、配り方と中継を 2 組保つことになる
+- **WebSocket は中継せず、sendo のポートを外に出してブラウザから直接つなぐ**：中継の作りが要らないが、外から見えるオリジンが 2 つになる。クッキーと `Origin` の確かめが合わなくなり、CSP の `connect-src` も緩めることになる。
 - **静的な配信のサーバー（Caddy、nginx）で返し、中継する**：配信と中継はよくこなれていて、イメージも小さい。ただ、設定の言語が 1 つ増え、ヘッダーを `security-headers.ts` とは別の形で書き出すことになる。振り分けを確かめるにも、サーバーを動かす必要がある。
 - **中継するパスを、`/` 以外は全部 sendo にする、ページの移動かどうかで分ける**：上の「許す一覧で中継する」の理由で採らない。
 - **`/features` を見て全文取得の操作を出し分ける**：ページ本文を抽出できない sendo にも対応できる。ただ、現行の sendo はページ本文の抽出を常に動かすため、通常の構成では判定が必要ない。
