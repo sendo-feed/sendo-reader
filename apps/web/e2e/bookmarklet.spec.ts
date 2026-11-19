@@ -15,11 +15,27 @@ test("Chrome のブックマークレットから候補を見つけてフィー�
 
   await page.goto("/manage");
   await signIn(page);
-  await page.getByText("Add to Sendo", { exact: true }).click();
-  const bookmarklet = await page.getByRole("textbox", { name: "Bookmarklet URL" }).inputValue();
+  // ブックマークレットは、Add feed の窓の下で案内する。ボタンをブックマークバーへドラッグして入れる
+  await page.getByRole("button", { name: "Add feed" }).first().click();
+  const dialog = page.getByRole("dialog", { name: "Add feed" });
+  await expect(dialog.getByRole("heading", { name: "Bookmarklet" })).toBeVisible();
+  const drag = dialog.getByRole("link", { name: "Add to Sendo" });
+  const bookmarklet = await drag.getAttribute("href");
+  expect(bookmarklet).toMatch(/^javascript:/);
+  // この画面で押しても動かない。ドラッグして使うことを伝える
+  await drag.click();
+  await expect(dialog.getByRole("status")).toHaveText(
+    "このボタンは、ブックマークバーへドラッグして使います。",
+  );
+  await expect(page).toHaveURL(/\/manage$/);
+  // ドラッグできないときは、同じ文字列をコピーできる
+  await dialog.getByText("ドラッグできないとき").click();
+  await expect(dialog.getByRole("textbox", { name: "Bookmarklet URL" })).toHaveValue(
+    bookmarklet ?? "",
+  );
 
   await page.goto(site);
-  await page.evaluate((script) => location.assign(script), bookmarklet);
+  await page.evaluate((script) => location.assign(script), bookmarklet ?? "");
   await expect(page.getByRole("heading", { name: "Add to Sendo" })).toBeVisible();
   await expect(page.getByText(site, { exact: true })).toBeVisible();
   expect(server.requests).not.toContain("POST /feeds");

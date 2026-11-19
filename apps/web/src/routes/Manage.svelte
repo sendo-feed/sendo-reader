@@ -52,7 +52,6 @@
 
   <footer>
     <button type="button" class="link" onclick={() => (importOpen = true)}>Import OPML</button>
-    <Bookmarklet />
   </footer>
   <p class="notice" role="status">{notice}</p>
 </main>
@@ -66,6 +65,9 @@
       notice = `${feedName(feed)} を購読しました。`;
     }}
   />
+  <div class="bookmarklet">
+    <Bookmarklet />
+  </div>
   <div class="import-link">
     <button
       type="button"
@@ -182,6 +184,7 @@
     display: none;
   }
 
+  .bookmarklet,
   .import-link {
     margin-top: 1.25rem;
     padding-top: 1rem;
