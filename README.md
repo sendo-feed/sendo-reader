@@ -67,7 +67,7 @@ Sendo と並べて、コンテナで動かします（[決定](docs/decisions/co
 
 X の公式埋め込みを有効にするには、Sendo と reader の両方で対応版が必要です。対応版の reader は、別の HTTPS ホストを用意し、その配信元を指定してイメージをビルドします。有効化と更新は [コンテナ版の決定の 2](docs/decisions/container.md#決定)を参照してください。
 
-- 外に出すのは reader のコンテナのポート（`127.0.0.1:8080`）だけです。reader のコンテナが画面を返し、Sendo のパス（`/api`、`/mcp`、OAuth、Google Reader API、`/healthz`）を、compose の中の Sendo（`http://sendo:8787`）に中継します。Sendo の通知（WebSocket の `/api/v1/sync/updates`）も中継します。外からは reader のオリジン 1 つに見えます
+- 外に出すのは reader のコンテナのポート（`127.0.0.1:8080`）だけです。reader のコンテナが画面を返し、Sendo のパス（`/api`、`/mcp`、OAuth、Google Reader API、`/healthz`）を、compose の中の Sendo（`http://sendo:8787`）に中継します。Sendo の通知（WebSocket の `/api/v1/sync/updates`）も中継します。画面・API・認証は reader のオリジンにまとめ、X の埋め込みは有効にした場合に専用ホストから配信します
 - Sendo の `PUBLIC_URL` と `READER_URL` には、どちらも reader のオリジン（例：`https://reader.example.com`）を入れます。Google のリダイレクト URI、リーダーアプリのサーバー、MCP の URL も、このオリジンにします
 - TLS は、手前に置くリバースプロキシ（Caddy など）や Cloudflare Tunnel で終えます。コンテナは HTTP（既定はポート 8080）だけを受けます
 - 手前のプロキシは、WebSocket の Upgrade を通すようにします（Caddy と Cloudflare Tunnel は何も足さずに通します。nginx などの設定は [Sendo の README](https://github.com/sendo-feed/sendo#動かす) にあります）。通さなくても、画面は定期同期だけで動きます
