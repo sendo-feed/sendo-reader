@@ -9,6 +9,9 @@
  * - sendo が 101 を返したら、そのあとは両方向のバイト列を、フレームを読まずにそのまま流す。
  *   sendo の閉じるコードも、そのままブラウザに届く
  * - 101 以外の応答（401、403、429 など）は、そのまま返して閉じる
+ * - sendo が決まった時間（HANDSHAKE_TIMEOUT_MS）のうちに答え終えなければ、504 で断って閉じる。
+ *   黙った sendo に、ブラウザとの接続を持たせたままにしない。ブラウザはつなぎ直す
+ *   （docs/decisions/local-first.md の 3）
  */
 import type { IncomingMessage, OutgoingHttpHeaders } from "node:http";
 import { request as httpRequest } from "node:http";
@@ -30,6 +33,14 @@ const SKIPPED = new Set([
 
 /** 101 以外の応答の本文を、ためて返す上限（エラーの短い本文だけを想定する） */
 const MAX_ERROR_BODY = 64 * 1024;
+
+/** sendo が Upgrade に答え終えるまで（101 か、断る応答の本文の終わりまで）待つ上限 */
+export const HANDSHAKE_TIMEOUT_MS = 10 * 1000;
+
+export type UpgradeRelayOptions = {
+  /** テストで短くする */
+  handshakeTimeoutMs?: number;
+};
 
 export type UpgradeRelay = {
   /** http.Server の upgrade のイベントで呼ぶ */
@@ -74,7 +85,11 @@ function requestHeaders(rawHeaders: string[]): OutgoingHttpHeaders {
   return headers;
 }
 
-export function createUpgradeRelay(sendoOrigin: string): UpgradeRelay {
+export function createUpgradeRelay(
+  sendoOrigin: string,
+  options: UpgradeRelayOptions = {},
+): UpgradeRelay {
+  const handshakeTimeoutMs = options.handshakeTimeoutMs ?? HANDSHAKE_TIMEOUT_MS;
   const open = new Set<Duplex>();
 
   function track(...sockets: Duplex[]): void {
@@ -121,8 +136,19 @@ export function createUpgradeRelay(sendoOrigin: string): UpgradeRelay {
     });
     track(socket);
 
+    // 答え終えたら（101 を流し始めたか、断る応答を返したら）止める
+    let timedOut = false;
+    const deadline = setTimeout(() => {
+      timedOut = true;
+      console.error("sendo did not answer websocket in time", { path: url.pathname });
+      reject(socket, 504, "Gateway Timeout");
+      outgoing.destroy();
+    }, handshakeTimeoutMs);
+    deadline.unref();
+
     outgoing.on("upgrade", (response, upstream, upstreamHead) => {
-      if (socket.destroyed) {
+      clearTimeout(deadline);
+      if (socket.destroyed || timedOut) {
         upstream.destroy();
         return;
       }
@@ -149,6 +175,7 @@ export function createUpgradeRelay(sendoOrigin: string): UpgradeRelay {
         if (size <= MAX_ERROR_BODY) chunks.push(chunk);
       });
       response.on("end", () => {
+        clearTimeout(deadline);
         const body = Buffer.concat(chunks);
         const lines = headerLines(
           response.rawHeaders,
@@ -158,7 +185,7 @@ export function createUpgradeRelay(sendoOrigin: string): UpgradeRelay {
             name === "transfer-encoding" ||
             name === "content-length",
         );
-        if (socket.destroyed) return;
+        if (socket.destroyed || timedOut) return;
         socket.end(
           Buffer.concat([
             Buffer.from(
@@ -172,11 +199,17 @@ export function createUpgradeRelay(sendoOrigin: string): UpgradeRelay {
     });
 
     outgoing.on("error", (error) => {
+      clearTimeout(deadline);
+      // 待ちきれずに切ったときは、もう 504 で断ってある
+      if (timedOut) return;
       // クエリには値が入りうるので、ログにはパスだけを出す
       console.error("could not reach sendo for websocket", { path: url.pathname, error });
       reject(socket, 502, "Bad Gateway");
     });
-    socket.on("close", () => outgoing.destroy());
+    socket.on("close", () => {
+      clearTimeout(deadline);
+      outgoing.destroy();
+    });
     outgoing.end();
   }
 

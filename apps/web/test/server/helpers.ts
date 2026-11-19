@@ -9,7 +9,7 @@ import { serve } from "@hono/node-server";
 import { createReaderServer } from "../../server/app";
 import { loadAssets } from "../../server/assets";
 import type { Assets } from "../../server/static";
-import { createUpgradeRelay } from "../../server/websocket";
+import { createUpgradeRelay, type UpgradeRelayOptions } from "../../server/websocket";
 
 /** 画面のビルドに見立てたファイルを置き、読み込む */
 export async function fixtureAssets(files: Record<string, string | Uint8Array>): Promise<Assets> {
@@ -107,7 +107,11 @@ export function closeFrame(code: number): Buffer {
 export type RunningReader = { origin: string; close: () => Promise<void> };
 
 /** reader のサーバーを、本番と同じく @hono/node-server で動かす */
-export async function startReader(assets: Assets, sendoOrigin: string): Promise<RunningReader> {
+export async function startReader(
+  assets: Assets,
+  sendoOrigin: string,
+  relayOptions: UpgradeRelayOptions = {},
+): Promise<RunningReader> {
   const app = createReaderServer({ assets, sendoOrigin });
   const { server, port } = await new Promise<{ server: ReturnType<typeof serve>; port: number }>(
     (resolve) => {
@@ -116,7 +120,7 @@ export async function startReader(assets: Assets, sendoOrigin: string): Promise<
       );
     },
   );
-  const relay = createUpgradeRelay(sendoOrigin);
+  const relay = createUpgradeRelay(sendoOrigin, relayOptions);
   server.on("upgrade", relay.handle);
   return {
     origin: `http://127.0.0.1:${port}`,

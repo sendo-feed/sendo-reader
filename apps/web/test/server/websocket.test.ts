@@ -4,6 +4,7 @@ import { connect } from "node:net";
 import type { Duplex } from "node:stream";
 import { afterEach, beforeAll, describe, expect, test } from "vitest";
 import type { Assets } from "../../server/static";
+import type { UpgradeRelayOptions } from "../../server/websocket";
 import {
   acceptWebSocket,
   closeFrame,
@@ -29,12 +30,15 @@ afterEach(async () => {
 type Upgraded = { request: IncomingMessage; socket: Duplex; head: Buffer };
 
 /** WebSocket を受ける偽の sendo と、reader を動かす */
-async function start(onUpgrade: (request: IncomingMessage, socket: Duplex, head: Buffer) => void) {
+async function start(
+  onUpgrade: (request: IncomingMessage, socket: Duplex, head: Buffer) => void,
+  relayOptions: UpgradeRelayOptions = {},
+) {
   const sendo = await startFakeSendo((_request, response) => {
     response.writeHead(404);
     response.end();
   }, onUpgrade);
-  const reader = await startReader(assets, sendo.origin);
+  const reader = await startReader(assets, sendo.origin, relayOptions);
   running.push(sendo, reader);
   return { sendo, reader };
 }
@@ -236,6 +240,50 @@ describe("WebSocket の中継", () => {
     running.push(reader);
     const result = await upgradeRequest(reader.origin, "/api/v1/sync/updates");
     expect(result).toMatchObject({ kind: "response", status: 502 });
+  });
+
+  test("sendo が Upgrade に答えなければ、504 で断り、sendo への接続も切る", async () => {
+    let sendoClosed: Promise<void> | undefined;
+    const { reader } = await start(
+      (_request, socket) => {
+        // 何も返さない
+        sendoClosed = new Promise((resolve) => socket.on("end", () => resolve()));
+      },
+      { handshakeTimeoutMs: 200 },
+    );
+    const result = await upgradeRequest(reader.origin, "/api/v1/sync/updates");
+    expect(result).toMatchObject({ kind: "response", status: 504 });
+    await sendoClosed;
+  });
+
+  test("断る応答の本文が終わらなければ、504 で断る", async () => {
+    const { reader } = await start(
+      (_request, socket) => {
+        // ヘッダーだけ返して、本文を送り終えない
+        socket.write("HTTP/1.1 401 Unauthorized\r\nContent-Length: 100\r\n\r\n{");
+      },
+      { handshakeTimeoutMs: 200 },
+    );
+    const result = await upgradeRequest(reader.origin, "/api/v1/sync/updates");
+    expect(result).toMatchObject({ kind: "response", status: 504 });
+  });
+
+  test("つながったあとは、待つ上限を過ぎても切らない", async () => {
+    let sendoSocket: Duplex | undefined;
+    const { reader } = await start(
+      (request, socket) => {
+        sendoSocket = socket;
+        acceptWebSocket(request, socket);
+      },
+      { handshakeTimeoutMs: 100 },
+    );
+    const result = await upgradeRequest(reader.origin, "/api/v1/sync/updates");
+    if (result.kind !== "upgrade") throw new Error("101 にならなかった");
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    const frame = textFrame('{"type":"sync_required"}');
+    const received = read(result.socket, frame.length, result.head);
+    sendoSocket?.write(frame);
+    expect(await received).toEqual(frame);
   });
 
   test("reader を止めたら、中継している接続も切る", async () => {
