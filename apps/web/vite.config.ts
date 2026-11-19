@@ -7,10 +7,13 @@ import {
   IMAGE_CACHE_NAME,
   IMAGE_CACHE_URL_PATTERN,
 } from "../../packages/core/src/web/image-cache.ts";
-import { renderHeadersFile, securityHeaders } from "./security-headers.ts";
+import { securityHeaders } from "./security-headers.ts";
 import { SENDO_NAVIGATION_DENYLIST } from "./sendo-paths.ts";
 
-/** 手元のサーバーにはヘッダーを付け、本番のビルドには _headers を書き出す */
+/**
+ * 手元の dev サーバーと preview にヘッダーを付ける。本番は、reader のコンテナのサーバーが同じものを付ける
+ * （server/static.ts）
+ */
 function securityHeadersPlugin(): Plugin {
   return {
     name: "sendo-reader:security-headers",
@@ -28,11 +31,11 @@ function securityHeadersPlugin(): Plugin {
         next();
       });
     },
-    generateBundle() {
-      this.emitFile({ type: "asset", fileName: "_headers", source: renderHeadersFile() });
-    },
   };
 }
+
+/** 手元で動かす sendo（sendo の pnpm dev） */
+const SENDO_DEV_URL = "http://localhost:8787";
 
 /** Workbox が、1 回の取得の間、プラグインの呼び出しに渡して回す入れ物 */
 type GenerationState = { state?: { generation?: string } };
@@ -80,11 +83,11 @@ const imageCacheGenerationPlugin = {
 /**
  * 動いている版を、設定の画面で見分けるための印（コミットと、ビルドした時刻）。
  * PWA は、新しい版に替わるのが遅れることがあるので、いまどの版かを画面で確かめられるようにする。
- * Workers Builds はコミットを環境変数で渡す。コンテナ版のイメージは、CI がビルドの引数で APP_COMMIT_SHA に
- * 渡す（イメージを作るときは .git がない）。手元では git から読む
+ * コンテナのイメージは、CI がビルドの引数で APP_COMMIT_SHA に渡す（イメージを作るときは .git がない）。
+ * 手元では git から読む
  */
 function appVersion(): { commit: string; builtAt: string } {
-  let commit = process.env.WORKERS_CI_COMMIT_SHA || process.env.APP_COMMIT_SHA || "";
+  let commit = process.env.APP_COMMIT_SHA || "";
   if (commit === "") {
     try {
       commit = execSync("git rev-parse HEAD", { encoding: "utf8" }).trim();
@@ -131,8 +134,8 @@ export default defineConfig({
         globPatterns: ["**/*.{js,css,html,svg,png,wasm,webmanifest}"],
         // sqlite-wasm が一緒に出力するが、使わないワーカーの JS はキャッシュしない
         globIgnores: ["**/sqlite3-worker1-*.js", "**/sqlite3-opfs-async-proxy-*.js"],
-        // SPA なので、ないパスには index.html を返す。sendo のパス（/api、コンテナ版で同じオリジンに
-        // 並ぶ /mcp や OAuth など）は横取りせず、sendo に届ける（docs/decisions/container.md の 3）
+        // SPA なので、ないパスには index.html を返す。sendo のパス（/api、同じオリジンに並ぶ /mcp や
+        // OAuth など）は横取りせず、sendo に届ける（docs/decisions/container.md の 3）
         navigateFallback: "/index.html",
         navigateFallbackDenylist: SENDO_NAVIGATION_DENYLIST,
         // CSP で Trusted Types を強制しているので、Service Worker の中で importScripts に
@@ -164,10 +167,11 @@ export default defineConfig({
   worker: { format: "es" },
   optimizeDeps: { exclude: ["@sqlite.org/sqlite-wasm"] },
   server: {
-    // 手元では sendo（pnpm dev、ポート 8787）に中継する。本番は reader Worker が
-    // Service binding で中継する（worker/index.ts）
-    proxy: {
-      "/api": { target: "http://localhost:8787" },
-    },
+    // 手元では、本番の reader のコンテナのサーバーと同じパス（sendo-paths.ts）を、sendo の pnpm dev
+    // （ポート 8787）に中継する（docs/decisions/ui.md の 4）。^ で始まるキーは、Vite が正規表現として
+    // パスとクエリに当てる
+    proxy: Object.fromEntries(
+      SENDO_NAVIGATION_DENYLIST.map((pattern) => [pattern.source, { target: SENDO_DEV_URL }]),
+    ),
   },
 });

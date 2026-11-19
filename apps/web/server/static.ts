@@ -1,8 +1,7 @@
 /**
- * 画面の静的なファイルを返す（docs/decisions/container.md の 5）。Cloudflare 版の Workers Static
- * Assets と同じ応答にする。
+ * 画面の静的なファイルを返す（docs/decisions/container.md の 5）。
  *
- * - セキュリティのヘッダーは、dist/_headers と同じところ（security-headers.ts）から付ける
+ * - セキュリティのヘッダーは、手元の Vite と同じところ（security-headers.ts）から付ける
  * - キャッシュは毎回確かめさせる（ETag。変わっていなければ 304）。sw.js が新しい版を見つけられるように、
  *   長く持たせない
  * - ないパスには index.html を返す（SPA）
@@ -22,7 +21,7 @@ export type Asset = {
 /** URL のパス（/index.html など）ごとのファイル */
 export type Assets = ReadonlyMap<string, Asset>;
 
-/** Workers Static Assets の既定と同じ */
+/** 毎回確かめさせる（Service Worker が新しい版を見つけられるように、長く持たせない） */
 const CACHE_CONTROL = "public, max-age=0, must-revalidate";
 
 type Encoding = "br" | "gzip";

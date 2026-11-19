@@ -4,16 +4,9 @@ node_modules/
 # ビルドと実行の生成物
 dist/
 dist-server/
-.wrangler/
 coverage/
 
-# wrangler types の生成物（pnpm install のときに生成する）
-worker-configuration.d.ts
-
 # 手元の秘密情報
-.dev.vars
-.dev.vars.*
-!.dev.vars.example
 .env
 .env.*
 !.env.example

@@ -203,11 +203,9 @@ describe("本文を取る", () => {
 describe("元ページの全文", () => {
   test("要約だけの記事でも取得し、オフラインでは手元から返す。フィード本文とは混ぜない", async () => {
     const { server, core, feed } = await seeded();
-    server.pageContentEnabled = true;
     const article = server.deliver(feed.id, { summary: "要約" });
     server.pageContents.set(article.id, "<p>元ページの全文</p>");
     await core.sync();
-    expect(await core.pageContentAvailable()).toBe(true);
     expect(await core.getArticleContent(article.id, "page")).toEqual({ status: "missing" });
     const full = await core.fetchArticleContent(article.id, "page");
     expect(full).toEqual({
@@ -228,7 +226,6 @@ describe("元ページの全文", () => {
 
   test("同じ記事の全文は同時に 1 回だけ取得する。フィード本文の取得とは分ける", async () => {
     const { server, core, feed } = await seeded();
-    server.pageContentEnabled = true;
     const article = server.deliver(feed.id, { content: "<p>フィード本文</p>" });
     server.pageContents.set(article.id, "<p>全文</p>");
     await core.sync();
@@ -248,7 +245,6 @@ describe("元ページの全文", () => {
 
   test("抽出に失敗してもフィード本文を消さず、あとで再取得できる", async () => {
     const { server, core, feed } = await seeded();
-    server.pageContentEnabled = true;
     const article = server.deliver(feed.id, { content: "<p>フィード本文</p>" });
     await core.sync();
     const original = await core.fetchArticleContent(article.id);
@@ -259,23 +255,8 @@ describe("元ページの全文", () => {
     expect((await core.fetchArticleContent(article.id, "page"))?.source).toBe("page");
   });
 
-  test("Cloudflare 版や機能一覧のない古い版に対応し、501 は失敗として返す", async () => {
-    const { server, core, feed } = await seeded();
-    expect(await core.pageContentAvailable()).toBe(false);
-    server.featuresStatus = 404;
-    expect(await core.pageContentAvailable()).toBe(false);
-    const article = server.deliver(feed.id, { content: "<p>フィード本文</p>" });
-    await core.sync();
-    await expect(core.fetchArticleContent(article.id, "page")).rejects.toMatchObject({
-      status: 501,
-      code: "feature_unavailable",
-    });
-    expect((await core.getArticle(article.id))?.hasContent).toBe(true);
-  });
-
   test("全文も安全な木にして返す。抽出した HTML を画面に渡さない", async () => {
     const { server, core, feed } = await seeded();
-    server.pageContentEnabled = true;
     const article = server.deliver(feed.id);
     server.pageContents.set(
       article.id,
@@ -290,7 +271,6 @@ describe("元ページの全文", () => {
 
   test.each(["削除", "ログアウト"] as const)("%s で保存済みの全文も消える", async (action) => {
     const { server, core, feed, db } = await seeded();
-    server.pageContentEnabled = true;
     const article = server.deliver(feed.id);
     server.pageContents.set(article.id, "<p>全文</p>");
     await core.sync();
@@ -307,7 +287,6 @@ describe("元ページの全文", () => {
 
   test("取得中にログアウトしたら、全文を置かない", async () => {
     const { server, core, feed, db } = await seeded();
-    server.pageContentEnabled = true;
     const article = server.deliver(feed.id);
     await core.sync();
     server.failNext("hang");
@@ -319,7 +298,6 @@ describe("元ページの全文", () => {
 
   test("別のユーザーのセッションでは全文を取らない", async () => {
     const { server, core, feed, db } = await seeded();
-    server.pageContentEnabled = true;
     const article = server.deliver(feed.id);
     await core.sync();
     server.signInAs({ id: "other", email: "other@example.com" });

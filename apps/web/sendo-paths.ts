@@ -2,8 +2,9 @@
  * コンテナ版の reader のサーバーが sendo に中継するパス（docs/decisions/container.md の 3）。
  * ここにないパスには、画面の静的なファイルか index.html を返す。
  *
- * 同じ一覧を、Service Worker がページの移動を横取りしないパスにも使う（vite.config.ts）。ブラウザで
- * これらのパスを開いたときに、Service Worker が index.html を返さず、sendo に届くようにする。
+ * 同じ一覧を、Service Worker がページの移動を横取りしないパスと、手元の Vite の dev サーバーが sendo の
+ * pnpm dev に中継するパスにも使う（vite.config.ts）。ブラウザでこれらのパスを開いたときに、
+ * Service Worker が index.html を返さず、sendo に届くようにする。
  *
  * 画面のルート（src/lib/router.svelte.ts）は、ここと重ねない。/oauth/authorize は画面（許可の画面）で、
  * /oauth/token と /oauth/register は sendo。sendo が外に出すパスを足したら、ここにも足す。

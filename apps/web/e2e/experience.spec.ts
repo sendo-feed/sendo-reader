@@ -710,7 +710,7 @@ test("記事の画面から、リンクを共有し、文字の大きさを変�
 
   // 共有の窓がなければ、リンクをコピーする
   await view.getByRole("button", { name: "Share" }).click();
-  await expect(view.getByRole("status")).toHaveText("リンクをコピーしました。");
+  await expect(view.locator(".notice")).toHaveText("リンクをコピーしました。");
   expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(
     "https://blog.example/first",
   );
