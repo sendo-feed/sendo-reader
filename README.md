@@ -101,7 +101,7 @@ reader は Sendo の API の型に合わせて作っているので、新しい 
 
 ### 手元からデプロイする
 
-Workers Builds を使わずに、手元からもデプロイできます。
+Workers Builds を使わずに、手元からもデプロイできます。X の埋め込みを有効にした構成を手元から再デプロイする場合は、Workers Builds に設定した `SENDO_X_EMBED_ORIGIN` と同じ値をビルド環境に渡します。
 
 ```sh
 pnpm --filter @sendo-reader/web exec wrangler login   # 最初に 1 回
