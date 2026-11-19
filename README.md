@@ -76,7 +76,7 @@ pnpm dev
 
 ### 初めてのデプロイ
 
-1. GitHub で `sendo-feed/sendo-reader` を、自分のアカウントに fork する
+1. GitHub で `sendo-feed/sendo-reader` を自分のアカウントに fork し、ビルド対象のブランチを旧 Sendo Worker と互換性を確認した reader のコミットに固定する
 2. Cloudflare の画面で、Workers & Pages →「作成」→「リポジトリをインポート」を選び、fork を選ぶ。Cloudflare の GitHub App の「Repository access」に、この fork を入れる
    - Sendo の fork だけを入れていたら、GitHub の Settings → Applications → Cloudflare Workers and Pages で足す。入れ忘れると、画面から始めたビルドは動くのに、push してもビルドが始まらない
 3. 次のように入れてデプロイする
@@ -94,7 +94,7 @@ pnpm dev
 
 ### 更新する
 
-旧 Sendo Worker を運用する間は、Sendo と reader を互換性を確認した版に固定します。現行の Sendo に更新する場合は、[コンテナ版で動かす](#コンテナ版で動かす)の手順で reader と一緒に配備します。
+旧 Sendo Worker を運用する間は、Sendo と reader を互換性を確認した版に固定します。以前の手順で sendo-updater を設定した環境では、自動取り込みを停止します。現行の Sendo に更新する場合は、[コンテナ版で動かす](#コンテナ版で動かす)の手順で reader と一緒に配備します。
 
 ### 手元からデプロイする
 

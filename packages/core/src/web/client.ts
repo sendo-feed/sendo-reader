@@ -18,7 +18,7 @@ type Remote<T> = {
 
 /**
  * 画面から使う、sendo-reader の中核の窓口。中身は自分のタブのワーカーにあり、すべて Promise で返す。
- * 読み出しは手元の DB だけを読むので、ネットワークを待たない。
+ * 一覧の読み出しは手元の DB だけを読むので、ネットワークを待たない。
  */
 export type ReaderClient = Remote<Pick<ReaderCore, ReaderMethod>> & {
   /** 今すぐ同期し、終わったときの様子を返す */
