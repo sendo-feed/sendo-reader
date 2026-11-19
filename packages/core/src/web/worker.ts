@@ -213,7 +213,13 @@ export function runReaderWorker(options: ReaderWorkerOptions = {}): void {
             stop: startSyncUpdates({
               baseUrl,
               session,
-              available: (signal) => core.syncUpdatesAvailable(signal),
+              available: async (signal) => {
+                const availability = await core.syncUpdatesAvailability(signal);
+                if (availability === "session_changed" && !signal.aborted) {
+                  scheduler.requestForUpdate();
+                }
+                return availability === "available";
+              },
               onOpen: () => scheduler.requestForUpdate(),
               onUpdate: () => scheduler.requestForUpdate(),
             }),

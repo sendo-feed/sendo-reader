@@ -135,18 +135,32 @@ test("ソケットに通常の HTTP 応答が残っている間は Upgrade し�
 
 test("Sendo のハンドシェイク拒否は HTTP の状態コードで返す", async () => {
   const sendo = createServer();
-  sendo.on("upgrade", (_incoming, socket) => {
-    socket.end(
-      "HTTP/1.1 400 Bad Request\r\nConnection: close, x-session\r\nX-Session: ignored\r\nSec-WebSocket-Version: 13\r\nContent-Type: text/plain\r\nContent-Length: 7\r\n\r\ninvalid",
-    );
+  const upstream = new Promise<Duplex>((resolve) => {
+    sendo.on("upgrade", (_incoming, socket) => {
+      stops.push(async () => {
+        socket.destroy();
+      });
+      socket.write(
+        "HTTP/1.1 400 Bad Request\r\nConnection: close, x-session\r\nX-Session: ignored\r\nSec-WebSocket-Version: 13\r\nContent-Type: text/plain\r\nContent-Length: 7\r\n\r\n",
+      );
+      resolve(socket);
+    });
   });
   const { url } = await startReader(await listen(sendo));
-  const result = await connect(`${url}${SYNC_UPDATES_PATH}`);
-  expect(result.response.statusCode).toBe(400);
-  expect(result.response.headers["sec-websocket-version"]).toBe("13");
-  expect(result.response.headers["x-session"]).toBeUndefined();
-  expect(result.body).toBe("invalid");
-  expect(result.socket).toBeUndefined();
+  const response = await new Promise<IncomingMessage>((resolve, reject) => {
+    const outgoing = request(`${url}${SYNC_UPDATES_PATH}`, { headers }, resolve);
+    outgoing.on("error", reject);
+    outgoing.end();
+  });
+  expect(response.statusCode).toBe(400);
+  expect(response.headers["sec-websocket-version"]).toBe("13");
+  expect(response.headers["x-session"]).toBeUndefined();
+
+  // 本文を待つ間にも拒否のヘッダーが届いている。本文が届いたら最後まで流す。
+  (await upstream).end("invalid");
+  const chunks: Buffer[] = [];
+  for await (const chunk of response) chunks.push(chunk);
+  expect(Buffer.concat(chunks).toString()).toBe("invalid");
 });
 
 test("Sendo の応答を待つ間も、下流が送信を終えたら上流を切断する", async () => {

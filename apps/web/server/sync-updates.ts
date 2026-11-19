@@ -11,6 +11,7 @@ import { SYNC_UPDATES_PATH } from "../sendo-paths";
 import { forwardedRequestHeaders, forwardedResponseHeaders } from "./proxy";
 
 const HANDSHAKE_TIMEOUT_MS = 10_000;
+const REJECTION_IDLE_TIMEOUT_MS = 30_000;
 const MAX_PENDING_BYTES = 64 * 1024;
 
 export function createSyncUpdatesProxy(sendoOrigin: string) {
@@ -100,6 +101,7 @@ export function createSyncUpdatesProxy(sendoOrigin: string) {
       // Upgrade しなかった場合は、通常の HTTP と同じく応答のヘッダーと本文を中継する。
       settled = true;
       clearTimeout(deadline);
+      outgoing.setTimeout(REJECTION_IDLE_TIMEOUT_MS, () => downstream.destroy());
       const reply = new ServerResponse(request);
       // HTTP/1.1 の GET が Upgrade に渡した TCP ソケット。HTTP の応答を書き直す相手にする。
       reply.assignSocket(downstream as Socket);
@@ -110,6 +112,7 @@ export function createSyncUpdatesProxy(sendoOrigin: string) {
         "Connection",
         "close",
       ]);
+      reply.flushHeaders();
       reply.once("finish", () => {
         downstream.end(() => downstream.destroy());
       });

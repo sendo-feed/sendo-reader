@@ -235,8 +235,13 @@ export class ReaderCore {
     return this.#session.signal;
   }
 
-  syncUpdatesAvailable(signal: AbortSignal): Promise<boolean> {
-    return this.#api.syncUpdatesAvailable(signal);
+  /** 通知につなぐ直前に、Sendo の対応とクッキーの持ち主を確かめる。 */
+  async syncUpdatesAvailability(
+    signal: AbortSignal,
+  ): Promise<"available" | "unsupported" | "session_changed"> {
+    if (!(await this.#api.syncUpdatesAvailable(signal))) return "unsupported";
+    const user = await this.#api.me(signal);
+    return user.id === this.#user?.id ? "available" : "session_changed";
   }
 
   /**

@@ -210,6 +210,37 @@ describe("複数のタブ", () => {
 });
 
 describe("セッションが切れたとき", () => {
+  test("通知の接続前にユーザーが替わったら、新しいユーザーの同期を待つ", async () => {
+    const { server, open, signIn, connections } = world(true);
+    const nextUser = { id: "user-2", email: "other@example.com" };
+    let finishSync = () => {};
+    const pausedSync = new Promise<void>((resolve) => {
+      finishSync = resolve;
+    });
+    let switching = false;
+    let waiting = false;
+    server.onRequest = async (path) => {
+      if (path === "GET /features" && !switching) {
+        switching = true;
+        server.signInAs(nextUser);
+      }
+      if (path === "GET /sync" && switching && !waiting) {
+        waiting = true;
+        await pausedSync;
+      }
+    };
+    const tab = open();
+    await signIn(tab);
+    try {
+      await vi.waitFor(() => expect(waiting).toBe(true));
+      expect(connections).toHaveLength(0);
+    } finally {
+      finishSync();
+    }
+    await vi.waitFor(() => expect(connections).toHaveLength(1));
+    expect(await tab.client.currentUser()).toEqual(nextUser);
+  });
+
   test("ほかのタブでログインし直して戻ってきたら、代表のタブの止まっていた同期を再開する", async () => {
     const { server, open, signIn } = world();
     const first = open();
