@@ -9,8 +9,8 @@
  * - 設定の項目（settings）は、どの端末の種類の分も届く。消した項目は deleted: true で届く
  * - カーソルが読めない（古すぎる、など）ときは 400 と error.code = "invalid_cursor"。最初から同期し直す
  *
- * 応答は外から来たデータなので、生成した型を当てる前に形を確かめる。確かめたものを生成した型
- * （SyncChanges）として組み立てるので、sendo が形を変えたら、ここが型チェックで止まる。
+ * 応答は外から来たデータなので、使う項目の形を確かめて、生成した型をもとに組み立てる。
+ * sendo が使っている項目の形を変えたら、ここが型チェックで止まる。
  */
 
 import { DEVICE_TYPES, type JsonValue, type SavedPage } from "../models";
@@ -22,6 +22,18 @@ import type { components } from "./schema.gen";
 
 type Schemas = components["schemas"];
 export type SyncChanges = Schemas["SyncChanges"];
+type SyncFeed = Pick<
+  Schemas["SyncFeed"],
+  | "id"
+  | "url"
+  | "title"
+  | "displayName"
+  | "siteUrl"
+  | "folderId"
+  | "iconUrl"
+  | "createdAt"
+  | "deleted"
+>;
 
 /** sendo の応答を確かめて、core の中の形にする。形が違えば ApiError（server）を投げる */
 export function toSyncPage(body: unknown): SyncPage {
@@ -96,9 +108,10 @@ export function toSyncPage(body: unknown): SyncPage {
  * 確かめる（画面では HTML として出さない）。時刻は読める形であることを確かめる。画像の URL
  * （thumbnailUrl、iconUrl）は、core の中の形にするときに、同じオリジンを指すものだけを残す。
  */
-function parseSyncChanges(body: unknown): Omit<SyncChanges, "settings" | "savedPages"> & {
+function parseSyncChanges(body: unknown): Omit<SyncChanges, "settings" | "savedPages" | "feeds"> & {
   settings: SyncChanges["settings"] | undefined;
   savedPages: SyncChanges["savedPages"];
+  feeds: SyncFeed[];
 } {
   const root = record(body, "(root)");
   return {
@@ -138,7 +151,7 @@ function parseSyncChanges(body: unknown): Omit<SyncChanges, "settings" | "savedP
         deleted: boolean(row.deleted, at("deleted")),
       };
     }),
-    feeds: array(root.feeds, "feeds").map((value, i): Schemas["SyncFeed"] => {
+    feeds: array(root.feeds, "feeds").map((value, i): SyncFeed => {
       const row = record(value, `feeds[${i}]`);
       const at = (field: string) => `feeds[${i}].${field}`;
       return {

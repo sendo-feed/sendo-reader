@@ -46,6 +46,8 @@ import {
 import {
   discoverFeeds,
   type FeedCandidate,
+  type FeedFetchTimes,
+  fetchFeedTimes,
   importOpml,
   type OpmlImportResult,
   subscribe,
@@ -782,6 +784,14 @@ export class ReaderCore {
 
   // --- 通信が要る操作（画面では待っている間の表示を出す） ---
 
+  /** 購読詳細に出す取得時刻を読む */
+  async fetchFeedTimes(feedId: string): Promise<FeedFetchTimes | null> {
+    this.#requireSignedIn();
+    const session = this.#session.signal;
+    await this.#confirmSameUser(session);
+    return fetchFeedTimes(this.#api, feedId, session);
+  }
+
   /** サイトの URL から、購読できるフィードの候補を探す */
   discoverFeeds(url: string): Promise<FeedCandidate[]> {
     this.#requireSignedIn();
@@ -1017,7 +1027,7 @@ export class ReaderCore {
   /**
    * sendo のセッションのユーザーが、手元のユーザーと同じかを確かめる（docs/decisions/local-first.md
    * の 6）。違えば、手元を消してそのユーザーに替え、ApiError（unauthorized）を投げる（頼まれた
-   * 記事は、前のユーザーのもの）
+   * 読み出しは、前のユーザーのためのもの）
    */
   async #confirmSameUser(session: AbortSignal): Promise<void> {
     if ((await this.#confirmUser(session)) !== session) {

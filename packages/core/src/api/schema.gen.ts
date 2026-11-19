@@ -261,6 +261,320 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/integrations/discord": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Discord の接続状態と購読中のチャンネルを返す */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description 接続状態 */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["DiscordIntegration"];
+                    };
+                };
+                /** @description ブラウザのセッションが必要 */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        /**
+         * Discord の接続を解除する
+         * @description この接続の購読と取り込んだ投稿を、スター付きも含めて削除する。
+         */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description 接続を解除した */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description ブラウザのセッションが必要 */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/integrations/discord/connect": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Discord アカウントの接続を始める
+         * @description 応答の authorizationUrl に同じブラウザを移す。許可したあとは returnTo に戻る。
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        returnTo?: string;
+                    };
+                };
+            };
+            responses: {
+                /** @description Discord の許可画面の URL */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** Format: uri */
+                            authorizationUrl: string;
+                        };
+                    };
+                };
+                /** @description ブラウザのセッションが必要 */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Discord 連携の設定がない */
+                501: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/integrations/discord/callback": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Discord の許可画面から戻る先
+         * @description 接続開始時の returnTo に戻る。discord=connected、access_denied、invalid_state、already_connected、provider_error のいずれかを返す。
+         */
+        get: {
+            parameters: {
+                query?: {
+                    code?: string;
+                    state?: string;
+                    error?: string;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description 接続の結果を付けて画面へ戻る */
+                302: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description ブラウザのセッションが必要 */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Discord 連携の設定がない */
+                501: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/integrations/discord/subscriptions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Discord のチャンネルを購読する
+         * @description Discord のチャンネル URL を指定する。購読したあとの投稿を受信箱に取り込む。
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["DiscordSubscribeRequest"];
+                };
+            };
+            responses: {
+                /** @description 購読済み */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            feedId: string;
+                            url: string;
+                            name: string | null;
+                        };
+                    };
+                };
+                /** @description 購読した */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            feedId: string;
+                            url: string;
+                            name: string | null;
+                        };
+                    };
+                };
+                /** @description URL またはフォルダが正しくない */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description ブラウザのセッションが必要 */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description チャンネルがないか、本人または Bot に閲覧権限がない */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Discord アカウントとの接続がない */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Discord 連携の設定がない */
+                501: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Discord API が応答しないか、応答が正しくない */
+                502: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/feeds": {
         parameters: {
             query?: never;
@@ -1960,6 +2274,22 @@ export interface components {
             /** @description 記事のページから本文を抜けるか（GET /articles/{id}/content?source=page）。コンテナ版だけ */
             pageContent: boolean;
         };
+        DiscordIntegration: {
+            available: boolean;
+            connected: boolean;
+            /** Format: uri */
+            inviteUrl: string | null;
+            subscriptions: {
+                feedId: string;
+                url: string;
+                name: string | null;
+            }[];
+        };
+        DiscordSubscribeRequest: {
+            /** @example https://discord.com/channels/111/222 */
+            url: string;
+            folderId?: string | null;
+        };
         Feed: {
             id: string;
             /** @example https://example.com/feed.xml */
@@ -1974,11 +2304,38 @@ export interface components {
              */
             iconUrl: string | null;
             folderId: string | null;
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description 最後に取得を試した時刻
+             */
             lastFetchedAt: string | null;
+            /**
+             * Format: date-time
+             * @description 最後に成功した取得（HTTP 304 を含む）を試した時刻。記録がなければ null
+             */
+            lastSuccessfulFetchAt: string | null;
             /** Format: date-time */
             nextFetchAt: string;
+            /**
+             * @description Sendo からの取得状態。active は数えた失敗なし（429 を除く）、failing は失敗中、stalled は長期の失敗または HTTP 410
+             * @enum {string}
+             */
+            status: "active" | "failing" | "stalled";
+            /** @description 連続した失敗の回数（429 を除く） */
             errorCount: number;
+            /**
+             * @description 直近の取得失敗の理由。成功後や、理由を記録していない場合は null
+             * @enum {string|null}
+             */
+            lastErrorCode: "blocked_url" | "http_status" | "too_large" | "too_many_redirects" | "timeout" | "network" | "dns" | "gone" | "rate_limited" | "invalid_feed" | null;
+            /** @description 取得に失敗した応答から確認した移転先候補 */
+            relocationCandidate: {
+                /** @description 確認できた候補のフィード URL */
+                url: string;
+                /** @description プレーンテキストのタイトル */
+                title: string | null;
+                siteUrl: string | null;
+            } | null;
             lastError: string | null;
             /**
              * Format: date-time
@@ -2150,6 +2507,24 @@ export interface components {
             title: string | null;
             /** @description この購読の表示名。null なら配信元の title（なければ URL）を使う */
             displayName: string | null;
+            /**
+             * @description Sendo からの取得状態。active は数えた失敗なし（429 を除く）、failing は失敗中、stalled は長期の失敗または HTTP 410
+             * @enum {string}
+             */
+            status: "active" | "failing" | "stalled";
+            /**
+             * @description 直近の取得失敗の理由。成功後や、理由を記録していない場合は null
+             * @enum {string|null}
+             */
+            lastErrorCode: "blocked_url" | "http_status" | "too_large" | "too_many_redirects" | "timeout" | "network" | "dns" | "gone" | "rate_limited" | "invalid_feed" | null;
+            /** @description 取得に失敗した応答から確認した移転先候補 */
+            relocationCandidate: {
+                /** @description 確認できた候補のフィード URL */
+                url: string;
+                /** @description プレーンテキストのタイトル */
+                title: string | null;
+                siteUrl: string | null;
+            } | null;
             siteUrl: string | null;
             /**
              * @description フィードのアイコン。中継を通る画像の URL（/api/v1/images?url=…&sig=… の形のパス。オリジンは付かない）で、そのまま <img src> に入れる。クライアントは組み立てたり書き換えたりしない。なければ null

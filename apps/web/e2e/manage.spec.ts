@@ -49,6 +49,49 @@ test("フォルダと中身を一緒に表示し、検索中は畳んだフィ�
   expect(server.requests.length).toBe(requests);
 });
 
+test("購読詳細を開いたときに、フィードごとの最終試行と最終成功の時刻を読む", async ({
+  page,
+  context,
+}) => {
+  const { server, blog, news } = seed();
+  const lastChecked = "2026-11-19T12:00:00.000Z";
+  const lastSuccessful = "2026-11-18T12:00:00.000Z";
+  blog.lastFetchedAt = Date.parse(lastChecked);
+  blog.lastSuccessfulFetchAt = Date.parse(lastSuccessful);
+  news.lastFetchedAt = Date.parse("2026-11-19T13:00:00.000Z");
+  await routeFakeSendo(context, server);
+  await page.goto("/manage");
+  await signIn(page);
+  const openBlog = page.getByRole("button", { name: "Feed options: Blog", exact: true });
+  await expect(openBlog).toBeVisible();
+  expect(server.requests).not.toContain("GET /feeds");
+
+  const dialog = page.getByRole("dialog");
+  const times = dialog.locator("time");
+  await openBlog.click();
+  await expect(times.nth(0)).toHaveAttribute("datetime", lastChecked);
+  await expect(times.nth(1)).toHaveAttribute("datetime", lastSuccessful);
+  await dialog.getByRole("button", { name: "Close", exact: true }).click();
+
+  await page.getByRole("button", { name: "Feed options: News", exact: true }).click();
+  await expect(times).toHaveAttribute("datetime", "2026-11-19T13:00:00.000Z");
+  await expect(dialog.getByText("No record", { exact: true })).toBeVisible();
+  await dialog.getByRole("button", { name: "Close", exact: true }).click();
+
+  const nextCheck = "2026-11-19T14:00:00.000Z";
+  blog.lastFetchedAt = Date.parse(nextCheck);
+  await openBlog.click();
+  await expect(times.nth(0)).toHaveAttribute("datetime", nextCheck);
+  await expect(times.nth(1)).toHaveAttribute("datetime", lastSuccessful);
+  await dialog.getByRole("button", { name: "Close", exact: true }).click();
+
+  await context.route("**/api/v1/feeds", (route) => route.abort("internetdisconnected"));
+  await openBlog.click();
+  await expect(dialog.getByText("取得時刻を確認できませんでした。")).toBeVisible();
+  await expect(dialog.getByRole("combobox", { name: "Move to" })).toBeEnabled();
+  await expect(dialog.getByRole("button", { name: "Unsubscribe…", exact: true })).toBeEnabled();
+});
+
 test("移動・フォルダの作成と名前変更・削除・購読解除はオフラインでも反映され、あとで同期する", async ({
   page,
   context,

@@ -66,6 +66,8 @@ interface FeedRow {
   siteUrl: string | null;
   folderId: string | null;
   iconUrl: string | null;
+  lastFetchedAt: number | null;
+  lastSuccessfulFetchAt: number | null;
   createdAt: number;
   deletedAt: number | null;
   seq: number;
@@ -312,6 +314,8 @@ export class FakeSendo {
       siteUrl: null,
       folderId: input.folderId ?? null,
       iconUrl: input.iconUrl ?? null,
+      lastFetchedAt: null,
+      lastSuccessfulFetchAt: null,
       createdAt: this.now,
       deletedAt: null,
       seq: this.#bump("feeds"),
@@ -1238,7 +1242,9 @@ function feedJson(row: FeedRow) {
     siteUrl: row.siteUrl,
     folderId: row.folderId,
     iconUrl: row.iconUrl,
-    lastFetchedAt: null,
+    lastFetchedAt: row.lastFetchedAt === null ? null : iso(row.lastFetchedAt),
+    lastSuccessfulFetchAt:
+      row.lastSuccessfulFetchAt === null ? null : iso(row.lastSuccessfulFetchAt),
     nextFetchAt: iso(row.createdAt),
     errorCount: 0,
     lastError: null,

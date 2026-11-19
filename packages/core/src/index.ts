@@ -34,7 +34,7 @@ export type {
   User,
 } from "./models";
 export { feedName } from "./models";
-export type { FeedCandidate, OpmlImportResult } from "./online";
+export type { FeedCandidate, FeedFetchTimes, OpmlImportResult } from "./online";
 export {
   type ChangeListener,
   MAX_FEED_DISPLAY_NAME_LENGTH,

@@ -6,7 +6,7 @@ import { reapplyPending } from "./sync/queue";
 import { toSameOriginUrl } from "./url";
 
 /**
- * sendo に問い合わせないとできない操作（フィードの候補探し、購読、OPML の取り込み）。
+ * sendo に問い合わせないとできない操作（フィードの取得時刻、候補探し、購読、OPML の取り込み）。
  *
  * 購読は、sendo がフィードを取得して確かめるので、手元だけでは決められない。画面では
  * 「通信が要る操作」として、待っている間の表示を出す。結果は、次の同期で手元にも揃う。
@@ -15,6 +15,36 @@ import { toSameOriginUrl } from "./url";
 export interface FeedCandidate {
   url: string;
   title: string | null;
+}
+
+export interface FeedFetchTimes {
+  /** 失敗も含む、最後の取得試行の時刻 */
+  lastFetchedAt: number | null;
+  /** 304 も含む、最後に取得に成功した時刻 */
+  lastSuccessfulFetchAt: number | null;
+}
+
+/** 差分同期に載らない取得時刻を REST API から読む。購読がなければ null */
+export async function fetchFeedTimes(
+  api: SendoApi,
+  feedId: string,
+  signal: AbortSignal,
+): Promise<FeedFetchTimes | null> {
+  const { data, error, response } = await api.client(signal).GET("/feeds", { cache: "no-store" });
+  if (data === undefined) throw errorFromBody(response.status, error);
+  const feed = data.items.find((item) => item.id === feedId);
+  if (feed === undefined) return null;
+  return {
+    lastFetchedAt: parseFetchTime(feed.lastFetchedAt),
+    lastSuccessfulFetchAt: parseFetchTime(feed.lastSuccessfulFetchAt),
+  };
+}
+
+function parseFetchTime(value: unknown): number | null {
+  // 成功時刻を返す前の版の sendo では、項目そのものがない。
+  if (typeof value !== "string") return null;
+  const time = Date.parse(value);
+  return Number.isFinite(time) ? time : null;
 }
 
 /** サイトの URL から、購読できるフィードの候補を探す。URL がフィードそのものなら、それだけを返す */

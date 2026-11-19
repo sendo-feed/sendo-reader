@@ -47,6 +47,7 @@ export const READER_METHODS = [
   "listSettings",
   "changeSettings",
   "seedSettings",
+  "fetchFeedTimes",
   "discoverFeeds",
   "subscribe",
   "importOpml",
