@@ -315,7 +315,8 @@
    *
    * 記事は指に付いて横に動き、離したら、外へ流して操作するか、元の位置へ戻す。戻る動きでは、
    * 狭い画面なら記事の後ろに一覧を見せる（onpeek）。次・前の記事へは、外へ流したあと、
-   * 次の記事を反対の側から入れる
+   * 次の記事を反対の側から入れる。保存の切り替えでは、記事を外へ流さず、少しだけ動かして空いた
+   * ところに、何をするかを出す。離したら、切り替えて元の位置へ戻す
    */
 
   /** 記事を、指で横に動かしている分（px） */
@@ -326,6 +327,8 @@
   let settling = $state(false);
   /** 記事を、元の位置からずらしている */
   const moved = $derived(dragX !== 0 || settling);
+  /** 保存を切り替える向きに動かしている（記事を欄の中で動かし、空いたところに印を出す） */
+  let starring = $state(false);
 
   /** 外へ流す・元に戻す時間（ミリ秒）。CSS の transition と揃える */
   const SLIDE = 220;
@@ -334,6 +337,10 @@
   /** これより短くても、これより速く（px/ミリ秒）はじいたら、操作する */
   const FLICK_DISTANCE = 30;
   const FLICK_SPEED = 0.5;
+  /** 保存を切り替える向きには、これより先へは動かさない（px） */
+  const STAR_REACH = 112;
+  /** 保存を切り替えるところまで動かした */
+  const starArmed = $derived(Math.abs(dragX) >= SWIPE_DISTANCE);
 
   interface Gesture {
     startX: number;
@@ -405,8 +412,14 @@
     }
     const action = actionFor(dx);
     if (action === "back") startPeek(current);
+    starring = action === "star";
     // 何も割り当てていない向きには、ほとんど動かさない（手ごたえだけ）
-    dragX = action === "none" ? dx * 0.1 : dx;
+    dragX =
+      action === "none"
+        ? dx * 0.1
+        : action === "star"
+          ? Math.max(-STAR_REACH, Math.min(STAR_REACH, dx))
+          : dx;
   }
 
   /**
@@ -448,6 +461,10 @@
       void settleBack(current.peeking);
       return;
     }
+    if (action === "star") {
+      void star(current.peeking);
+      return;
+    }
     if (action === "back") startPeek(current);
     void complete(action, dx < 0 ? -1 : 1, current.peeking);
   }
@@ -478,12 +495,26 @@
   async function settleBack(peeking: boolean) {
     if (dragX === 0 && !peeking) {
       dragging = false;
+      starring = false;
       return;
     }
     settling = true;
     await slide(0);
     if (peeking) onpeek(false);
     settling = false;
+    starring = false;
+  }
+
+  /** 保存を切り替えるところまで動かして離した。切り替えてから、元の位置に戻す */
+  async function star(peeking: boolean) {
+    settling = true;
+    if (peeking) onpeek(false);
+    const on = article?.starredAt === null;
+    void toggle("starredAt");
+    showNotice(on ? "Saved に入れました。" : "Saved から外しました。");
+    await slide(0);
+    settling = false;
+    starring = false;
   }
 
   /** 操作するところまで動かして離した。記事を外へ流してから、操作する */
@@ -493,6 +524,7 @@
     peeking: boolean,
   ) {
     settling = true;
+    starring = false;
     const from = articleId;
     const width = scroller?.clientWidth || window.innerWidth;
     await slide(direction * width);
@@ -605,9 +637,25 @@
   ontouchcancel={abandon}
   class:moved
   class:dragging
+  class:starring
   style:--drag={`${dragX}px`}
 >
   {#if article !== null}
+    {#if starring}
+      <!-- 保存を切り替える向きに動かしている間、空いたところに何をするかを出す -->
+      <div
+        class="star-hint"
+        class:armed={starArmed}
+        class:end={dragX < 0}
+        style:opacity={Math.min(1, Math.abs(dragX) / SWIPE_DISTANCE)}
+        aria-hidden="true"
+      >
+        <span>
+          <Icon name="bookmark" filled={article.starredAt === null} />
+          {article.starredAt === null ? "Save" : "Unsave"}
+        </span>
+      </div>
+    {/if}
     <div class="toolbar">
       <button
         type="button"
@@ -817,19 +865,53 @@
    * 指で横にスワイプしている間と、離したあとに外へ流す・元に戻す間。広い画面では、欄の中で
    * 中身を動かす（欄の外にははみ出さない）
    */
-  .article-view.moved > :not(dialog) {
+  .article-view.moved > :not(dialog, .star-hint) {
     transform: translateX(var(--drag));
     transition: transform 0.22s cubic-bezier(0.2, 0.8, 0.2, 1);
   }
 
-  .article-view.dragging > :not(dialog) {
+  .article-view.dragging > :not(dialog, .star-hint) {
     transition: none;
   }
 
   @media (prefers-reduced-motion: reduce) {
-    .article-view.moved > :not(dialog) {
+    .article-view.moved > :not(dialog, .star-hint) {
       transition: none;
     }
+  }
+
+  /*
+   * 保存を切り替える向きに動かしている間の印。動かない場所（欄の縦の真ん中あたり）に置き、
+   * 記事が動いて空いたところの真ん中に出す
+   */
+  .star-hint {
+    position: sticky;
+    top: 0;
+    flex: none;
+    height: 0;
+  }
+
+  .star-hint > span {
+    position: absolute;
+    top: 35vh;
+    left: calc(var(--drag) / 2);
+    display: grid;
+    justify-items: center;
+    gap: 0.25rem;
+    color: var(--muted);
+    font-size: 0.8125rem;
+    font-weight: 600;
+    transform: translateX(-50%);
+  }
+
+  .star-hint.end > span {
+    left: auto;
+    right: calc(var(--drag) / -2);
+    transform: translateX(50%);
+  }
+
+  .star-hint.armed > span {
+    color: var(--accent);
   }
 
   .toolbar {
@@ -1021,14 +1103,15 @@
 
     /*
      * 狭い画面では、記事をまるごと動かす（戻る動きでは、後ろに一覧が見える）。
-     * 横にはみ出した分は、Reader が切り取る
+     * 横にはみ出した分は、Reader が切り取る。保存の切り替えでは、広い画面と同じく中身を動かす
+     * （記事の画面は動かさず、空いたところに印を出す）
      */
-    .article-view.moved > :not(dialog) {
+    .article-view.moved:not(.starring) > :not(dialog) {
       transform: none;
       transition: none;
     }
 
-    .article-view.moved {
+    .article-view.moved:not(.starring) {
       box-shadow: var(--shadow);
       transform: translateX(var(--drag));
       transition: transform 0.22s cubic-bezier(0.2, 0.8, 0.2, 1);

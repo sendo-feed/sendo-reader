@@ -19,6 +19,7 @@
     back: "Back",
     next: "Next",
     previous: "Previous",
+    star: "Save / Unsave",
   };
 
   const ROWS: { key: keyof Swipes; label: string; options: [string, string][] }[] = [
