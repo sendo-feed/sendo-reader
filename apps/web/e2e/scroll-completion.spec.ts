@@ -246,3 +246,103 @@ test("途中のページでは祝わず、別の一覧へ移っても完了を�
   await expect(page.locator(".read-celebration")).toHaveCount(0);
   await expect(page.locator(".article-list").getByText("すべて読み終えました。")).toBeVisible();
 });
+
+test("スマホの All を押し直すと、手元の未読だけで開き直す", async ({ page, context }) => {
+  const { server } = seed(20);
+  await routeFakeSendo(context, server);
+  await page.setViewportSize({ width: 390, height: 700 });
+  await page.goto("/");
+  await signIn(page);
+  const list = page.locator(".article-list");
+  const rows = list.locator(".row");
+  const all = page.getByRole("navigation", { name: "Main" }).getByRole("link", { name: "All" });
+  await expect(rows).toHaveCount(20);
+  await context.setOffline(true);
+  await scroll(page, 220);
+  await expect.poll(() => list.locator(".row.unread").count()).toBeLessThan(20);
+  const unread = await list.locator(".row.unread").count();
+  expect(unread).toBeGreaterThan(0);
+
+  await all.click();
+  await expect(rows).toHaveCount(unread);
+  await expect(list.locator(".row.unread")).toHaveCount(unread);
+  await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(0);
+  await readToEnd(page);
+  await expect(page.locator(".read-celebration")).toBeVisible();
+
+  await all.click();
+  await expect(rows).toHaveCount(0);
+  await expect(list.getByText("すべて読み終えました。")).toBeVisible();
+});
+
+for (const reducedMotion of ["no-preference", "reduce"] as const) {
+  test(`表示中の記事を読み切り、末尾の次のスワイプで新着を開く（動きの設定=${reducedMotion}）`, async ({
+    page,
+    context,
+  }) => {
+    const { server, feed } = seed(6);
+    await routeFakeSendo(context, server);
+    const cdp = await context.newCDPSession(page);
+    await cdp.send("Emulation.setTouchEmulationEnabled", { enabled: true });
+    await page.setViewportSize({ width: 390, height: 700 });
+    await page.emulateMedia({ reducedMotion });
+    await page.goto("/");
+    await signIn(page);
+    const list = page.locator(".article-list");
+    const rows = list.locator(".row");
+    await expect(rows).toHaveCount(6);
+    server.deliver(feed.id, { title: "新着の記事", publishedAt: Date.now() + 1000 });
+    await page.getByRole("button", { name: "Menu", exact: true }).click();
+    await page.getByRole("button", { name: "Sync now", exact: true }).click();
+    await page.keyboard.press("Escape");
+    const fresh = list.getByRole("button", { name: "1 new", exact: true });
+    await expect(fresh).toBeVisible();
+    await expect(rows).toHaveCount(6);
+
+    await context.setOffline(true);
+    await readToEnd(page);
+    const status = list.getByRole("status");
+    await expect(status).toHaveText("表示中の記事を読み終えました。");
+    await expect(page.locator(".read-celebration")).toHaveCount(
+      reducedMotion === "no-preference" ? 1 : 0,
+    );
+    await expect(rows).toHaveCount(6);
+    await expect(list.getByRole("button", { name: "Load new articles" })).toBeVisible();
+
+    // 最後の行が見出しを通過した後にも、指に合わせて進める通常のスクロール領域がある
+    await scroll(page, 100_000);
+    await scroll(page, -56);
+    const remaining = () =>
+      page.evaluate(
+        () => document.documentElement.scrollHeight - window.innerHeight - window.scrollY,
+      );
+    expect(await remaining()).toBe(56);
+    const tail = await rows.last().boundingBox();
+    const header = await list.locator("header").boundingBox();
+    expect(tail?.y).toBeLessThan((header?.y ?? 0) + (header?.height ?? 0));
+
+    const touch = (type: "touchStart" | "touchMove" | "touchCancel" | "touchEnd", y?: number) =>
+      cdp.send("Input.dispatchTouchEvent", {
+        type,
+        touchPoints: y === undefined ? [] : [{ x: 195, y }],
+      });
+    await touch("touchStart", 560);
+    await touch("touchMove", 460);
+    await expect.poll(remaining).toBeLessThanOrEqual(1);
+    await touch("touchMove", 330);
+    await touch("touchCancel");
+    await expect(rows).toHaveCount(6);
+
+    await touch("touchStart", 560);
+    await touch("touchMove", 440);
+    await touch("touchMove", 310);
+    await expect(rows).toHaveCount(6);
+    await touch("touchEnd");
+
+    await expect(rows).toHaveCount(1);
+    await expect(rows).toContainText("新着の記事");
+    await expect(rows).toHaveClass(/\bunread\b/);
+    await expect(fresh).toHaveCount(0);
+    await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(0);
+  });
+}
