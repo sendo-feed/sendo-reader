@@ -7,7 +7,7 @@
 
 ## 決定
 
-1. **コンテナ版の sendo と組むときは、reader もコンテナで配る。**
+1. **現行の Sendo と組むときは、reader もコンテナで配る。**
    - 上流の CI がイメージを作り、GHCR（`ghcr.io/sendo-feed/sendo-reader`）に置く。使う人は fork しない
    - タグと CPU は sendo にそろえる。`main` に入るたびに `main` と `sha-<コミット>` のタグで出し、amd64 と arm64 の両方で作る。版のタグは、sendo が版を切るときに一緒に決める
    - イメージは公開する（sendo のイメージと同じ）。使う人は `docker login` せずに取ってこられる

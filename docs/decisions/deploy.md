@@ -1,9 +1,9 @@
 # デプロイ
 
 - 状態：提案中
-- 関連：sendo の[デプロイ](https://github.com/sendo-feed/sendo/blob/main/docs/decisions/deploy.md)、[UI とツール](ui.md)（4。配信と `/api` の中継）、[コンテナ版](container.md)
+- 関連：sendo の[デプロイ](https://github.com/sendo-feed/sendo/blob/94181bb/docs/decisions/deploy.md)、[UI とツール](ui.md)（4。配信と `/api` の中継）、[コンテナ版](container.md)
 
-ここでは Cloudflare 版を決める。コンテナ版の sendo と組むときの配り方は、[コンテナ版](container.md)で決める。
+現行の Sendo と組むときは、[コンテナ版](container.md)の手順を使う。ここでは、Cloudflare 版の Sendo Worker を運用している環境での reader の配備を決める。
 
 Cloudflare 版の sendo-reader も、使う人がそれぞれ自分の Cloudflare アカウントにデプロイする。sendo と同じアカウントに置き、`/api` を Service binding で sendo に中継する（[UI とツール](ui.md)の 4）。デプロイの形は sendo にそろえ、ここには reader だけの違いを決める。2026-11-16 に、fork と Workers Builds で実際にデプロイし、ブラウザでログインして確かめた。
 
@@ -29,7 +29,7 @@ Cloudflare 版の sendo-reader も、使う人がそれぞれ自分の Cloudflar
 ## 理由
 
 - **sendo と同じ形にする**
-  - sendo が fork と Workers Builds を選んだ理由は、reader にもそのまま当てはまる。GitHub App はリポジトリを持つアカウントにしか入れられず、上流を直接つなげない。fork なら「Sync fork」1 つで更新がデプロイになり、各自が API トークンを作る必要もない（sendo の[デプロイ](https://github.com/sendo-feed/sendo/blob/main/docs/decisions/deploy.md)の「理由」）
+  - sendo が fork と Workers Builds を選んだ理由は、reader にもそのまま当てはまる。GitHub App はリポジトリを持つアカウントにしか入れられず、上流を直接つなげない。fork なら「Sync fork」1 つで更新がデプロイになり、各自が API トークンを作る必要もない（sendo の[デプロイ](https://github.com/sendo-feed/sendo/blob/94181bb/docs/decisions/deploy.md)の「理由」）
   - 2 つが同じ手順なら、使う人は sendo と reader を同じやり方で扱える
   - reader は、同じアカウントの sendo を名前で呼ぶ。各自が自分のアカウントに 2 つの fork をつなぐ形なら、何も足さずに満たせる
 - **自動の取り込みも sendo にそろえる**。sendo-updater が sendo のデプロイ成功を待って reader を取り込むため、reader が先に配備されて新しい API を呼ぶ事態を防げる。

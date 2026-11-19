@@ -64,14 +64,15 @@ pnpm dev
 
 ## デプロイ
 
-Sendo と同じく、2 つの版があります。Sendo と同じ版を使ってください（版をまたぐ組み合わせは使えません）。
+現行の Sendo とは Docker Compose で並べて動かします。[コンテナ版で動かす](#コンテナ版で動かす)を参照してください。
 
-- **Cloudflare 版**：自分の Cloudflare アカウントに、fork からデプロイします（このあとの節）
-- **コンテナ版**：自分のサーバーで、Sendo のコンテナ版と並べて Docker で動かします（[コンテナ版で動かす](#コンテナ版で動かす)）
+### 旧 Sendo Worker と組み合わせる
+
+この手順は、Cloudflare 版の Sendo Worker を運用している環境向けです。
 
 自分の Cloudflare アカウントに、GitHub の fork からデプロイします。fork の `main` に push するたびに、Cloudflare（Workers Builds）がビルドしてデプロイします（[決定](docs/decisions/deploy.md)）。Cloudflare の無料プランで動きます。
 
-画面は Workers Static Assets で配信し、reader Worker が `/api` を Service binding で Sendo（Worker 名 `sendo`）に中継します。Sendo を、同じアカウントに先にデプロイしておいてください（[Sendo の README](https://github.com/sendo-feed/sendo#デプロイ)）。
+画面は Workers Static Assets で配信し、reader Worker が `/api` を Service binding で Sendo（Worker 名 `sendo`）に中継します。同じアカウントにある Sendo Worker に接続します。旧版の配備手順は [当時の Sendo の README](https://github.com/sendo-feed/sendo/blob/94181bb/README.md#デプロイ) にあります。
 
 ### 初めてのデプロイ
 
