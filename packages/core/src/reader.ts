@@ -20,6 +20,7 @@ import {
   listArticles,
   listFeeds,
   listFolders,
+  listLatestArticleDates,
 } from "./db/queries";
 import { clearSavedPages, countSavedPages, getSavedPage, listSavedPages } from "./db/saved-pages";
 import { migrate } from "./db/schema";
@@ -974,6 +975,10 @@ export class ReaderCore {
 
   listFeeds(): Promise<Feed[]> {
     return listFeeds(this.#db);
+  }
+
+  listLatestArticleDates(): Promise<Map<string, number>> {
+    return listLatestArticleDates(this.#db);
   }
 
   /** 保存済みの取得時刻。まだ時刻を確認していなければ null */

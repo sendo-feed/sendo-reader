@@ -112,6 +112,50 @@ test("購読詳細の時刻は、再取得を待つ間も通信できないと�
   await expect(dialog.getByRole("button", { name: "Unsubscribe…", exact: true })).toBeEnabled();
 });
 
+test("最新記事の公開日を表示し、フォルダをまたいで古い順に並べる", async ({ page, context }) => {
+  const { server, blog, news } = seed();
+  const old = "2023-04-03T12:00:00.000Z";
+  const newer = "2026-11-18T12:00:00.000Z";
+  server.deliver(news.id, { title: "最新", publishedAt: Date.parse(old) });
+  server.deliver(news.id, { title: "古い記事", publishedAt: Date.parse("2022-01-01T12:00:00Z") });
+  server.deliver(blog.id, { title: "新着", publishedAt: Date.parse(newer) });
+  news.lastFetchedAt = Date.parse("2026-11-19T10:00:00.000Z");
+  news.lastSuccessfulFetchAt = news.lastFetchedAt;
+  const folder = server.createFolder("Archive");
+  server.subscribe({ url: "https://empty.example/feed", title: "Empty feed", folderId: folder.id });
+  await page.clock.setFixedTime(new Date("2026-11-19T12:00:00Z"));
+  await routeFakeSendo(context, server);
+  await page.goto("/manage");
+  await signIn(page);
+
+  const manage = page.getByRole("main");
+  const rows = manage.locator(".feed-row");
+  await expect(rows).toHaveCount(3);
+  await expect(manage.getByRole("region", { name: "Tech", exact: true })).toBeVisible();
+  const sort = manage.getByRole("combobox", { name: "並び順" });
+  await sort.selectOption({ label: "最新記事が古い順" });
+  await expect(rows.nth(0)).toContainText("News");
+  await expect(rows.nth(0)).toContainText("2023/04/03（3年以上前）");
+  await expect(rows.nth(1)).toContainText("Blog");
+  await expect(rows.nth(2)).toContainText("同期済みの記事なし");
+
+  await manage.getByRole("button", { name: "Feed options: News" }).click();
+  const dialog = page.getByRole("dialog", { name: "News" });
+  await expect(dialog.locator("time").nth(0)).toHaveAttribute("datetime", old);
+  await expect(dialog.locator("time").nth(1)).toHaveAttribute(
+    "datetime",
+    "2026-11-19T10:00:00.000Z",
+  );
+  await dialog.getByRole("button", { name: "Close", exact: true }).click();
+
+  server.deliver(news.id, { title: "新しい記事", publishedAt: Date.parse("2026-11-19T11:00:00Z") });
+  await page.getByRole("button", { name: "Sync now", exact: true }).click();
+  await expect(rows.nth(0)).toContainText("Blog");
+  await expect(rows.nth(1)).toContainText("News");
+  await sort.selectOption({ label: "フォルダごと" });
+  await expect(manage.getByRole("region", { name: "Tech", exact: true })).toBeVisible();
+});
+
 test("移動・フォルダの作成と名前変更・削除・購読解除はオフラインでも反映され、あとで同期する", async ({
   page,
   context,
