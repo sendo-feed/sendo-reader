@@ -757,6 +757,7 @@
   function showContent(source: "feed" | "page") {
     actionsOpen = false;
     if (articleId === null) return;
+    cancelRestore?.();
     if (source === "feed") void loadContent(articleId, true);
     else void loadFullText(articleId);
   }

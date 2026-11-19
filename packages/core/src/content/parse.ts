@@ -225,9 +225,16 @@ export function parseContent(html: string): ContentNode[] {
       }
       const text = quote.children[index - 1];
       if (typeof text !== "string" || typeof child === "string" || child?.tag !== "a") break;
-      const attribution = /—[^—]*\(@([A-Za-z0-9_]{1,15})\)\s*$/.exec(text);
-      if (attribution === null || attribution[1] === undefined) break;
-      const handle = attribution[1];
+      const start = text.indexOf("—");
+      const attribution = /\(@([A-Za-z0-9_]{1,15})\)\s*$/.exec(text);
+      const handle = attribution?.[1];
+      if (
+        start === -1 ||
+        attribution === null ||
+        attribution.index <= start ||
+        handle === undefined
+      )
+        break;
 
       const post = child.href === undefined ? undefined : xPostUrl(child.href);
       if (post !== undefined) {
@@ -240,7 +247,7 @@ export function parseContent(html: string): ContentNode[] {
         }
       }
       index -= 2;
-      bodyText = text.slice(0, attribution.index).trim();
+      bodyText = text.slice(0, start).trim();
       if (bodyText !== "") break;
     }
     // 本文用の段落が空でも、出典より手前に本文の要素があれば候補を使う。
