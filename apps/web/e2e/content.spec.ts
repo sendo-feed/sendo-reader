@@ -231,7 +231,7 @@ test("手元にある本文は、オフラインでも出る。手元になけ�
   await expect(view.locator(".body")).toHaveText("あとで開く記事の本文");
   expect(server.contentRequests).toEqual([later.id]);
   await expect(view.locator(".summary")).toHaveCount(0);
-  await expect(view.locator(".content-note")).toHaveCount(0);
+  await expect(view.locator(".content-note", { hasText: "つながったら読めます" })).toHaveCount(0);
 });
 
 test("未読の新しい記事の本文は、開く前に取っておき、オフラインでも読める", async ({

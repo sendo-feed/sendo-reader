@@ -91,7 +91,9 @@ test("スマートフォンで記事を読んでいる間に取り消しても�
   const top = await page.evaluate(() => window.scrollY);
   expect(top).toBeGreaterThan(500);
   await page.getByRole("status").getByRole("button", { name: "Undo" }).click();
-  await expect(page.getByRole("status")).toContainText("21 件を未読に戻しました。");
+  await expect(
+    page.getByRole("status").filter({ hasText: "21 件を未読に戻しました。" }),
+  ).toBeVisible();
   await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(top);
   await expect(list).toBeHidden();
 });

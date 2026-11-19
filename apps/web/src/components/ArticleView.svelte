@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { ApiError, type Article, type ArticleContent, toSafeHttpUrl } from "@sendo-reader/core";
+  import { type Article, type ArticleContent, toSafeHttpUrl } from "@sendo-reader/core";
   import { tick, untrack } from "svelte";
   import { useReader } from "../lib/context";
   import { formatDateTime } from "../lib/format";
@@ -48,7 +48,6 @@
    */
   let content = $state<ArticleContent | null>(null);
   let contentState = $state<"checking" | "ready" | "loading" | "unavailable" | "none">("none");
-  let pageAvailable = $state(false);
   let hasPageContent = $state(false);
   let pageLoading = $state(false);
   let pageNote = $state<string | null>(null);
@@ -56,26 +55,13 @@
   let pageAttempted = $state(false);
   let contentRequest = 0;
 
-  /** 使える機能を裏で確かめる。通信できなくても、手元の記事はそのまま読める */
-  $effect(() => {
-    const check = () => {
-      void reader.client.pageContentAvailable().then(
-        (available) => (pageAvailable = available),
-        () => {},
-      );
-    };
-    check();
-    window.addEventListener("online", check);
-    return () => window.removeEventListener("online", check);
-  });
-
   async function loadContent(id: string, feedOnly = false) {
     if (feedOnly) preferFullText = false;
     const request = ++contentRequest;
     pageLoading = false;
     pageNote = null;
     try {
-      // 一度取得した全文は、機能一覧の通信や hasContent によらず、オフラインでも出す
+      // 一度取得した全文は、hasContent によらず、オフラインでも出す
       if (!feedOnly) {
         const page = await reader.client.getArticleContent(id, "page");
         if (id !== articleId || request !== contentRequest) return;
@@ -113,8 +99,18 @@
     }
   }
 
-  /** 元ページの全文を取る。取っている間や失敗したときも、今読んでいる本文・要約を残す */
-  async function loadFullText(id: string) {
+  /**
+   * 自動で取りにいった全文が届かなかった（オフラインなど）。知らせは出さず、つながったら取り直す
+   * （記事を開くたびに、取れなかったと出さないため）
+   */
+  let autoPageFailed = false;
+
+  /**
+   * 元ページの全文を取る。取っている間や失敗したときも、今読んでいる本文・要約を残す。
+   * automatic は、開いたときの自動の取得（届かなくても知らせない）
+   */
+  async function loadFullText(id: string, automatic = false) {
+    autoPageFailed = false;
     preferFullText = true;
     pageAttempted = true;
     const request = ++contentRequest;
@@ -130,41 +126,44 @@
         content = fetched;
         contentState = "ready";
       }
-    } catch (error) {
+    } catch {
       if (id !== articleId || request !== contentRequest) return;
-      if (error instanceof ApiError && error.code === "feature_unavailable") {
-        pageAvailable = false;
-        pageNote = "この sendo では全文の取得を利用できません。";
-      } else {
-        pageNote = "全文を取得できませんでした。接続を確かめて、もう一度お試しください。";
-      }
+      if (automatic) autoPageFailed = true;
+      else pageNote = "全文を取得できませんでした。接続を確かめて、もう一度お試しください。";
     } finally {
       if (id === articleId && request === contentRequest) pageLoading = false;
     }
   }
 
-  /** 手元の本文・要約を先に出し、使える版では開いた記事の全文を一度だけ自動取得する */
+  /** 手元の本文・要約を先に出し、そのあと開いた記事の全文を一度だけ自動取得する */
   $effect(() => {
     if (
       articleId === null ||
       link === null ||
-      !pageAvailable ||
       !preferFullText ||
       hasPageContent ||
       pageAttempted ||
       contentState === "checking" ||
-      contentState === "loading"
+      contentState === "loading" ||
+      // 本文も届かなかった（オフライン）。つながって本文を取り直してから取る
+      contentState === "unavailable"
     )
       return;
     const id = articleId;
-    untrack(() => void loadFullText(id));
+    untrack(() => void loadFullText(id, true));
   });
 
-  /** つながったら、取れなかった本文を取り直す */
+  /** つながったら、取れなかった本文・自動で取れなかった全文を取り直す */
   $effect(() => {
     const retry = () => {
-      if (articleId !== null && contentState === "unavailable" && !pageLoading) {
+      if (articleId === null || pageLoading) return;
+      if (contentState === "unavailable") {
+        // 本文が届いたら、上の自動の取得が全文も取る
         void loadContent(articleId);
+      } else if (autoPageFailed) {
+        // もう一度、自動で取らせる
+        autoPageFailed = false;
+        pageAttempted = false;
       }
     };
     window.addEventListener("online", retry);
@@ -211,6 +210,7 @@
       hasPageContent = false;
       preferFullText = true;
       pageAttempted = false;
+      autoPageFailed = false;
       if (id === null) {
         article = null;
         missing = false;
@@ -745,7 +745,7 @@
           <Icon name="external" />
         </a>
       {/if}
-      {#if (pageAvailable && link !== null) || hasPageContent}
+      {#if link !== null || hasPageContent}
         <button
           type="button"
           class="icon-button"

@@ -16,17 +16,15 @@ Sendo の公式リーダー。`packages/core`（同期エンジン）と `apps/w
 
 ## 開発コマンド
 
-- `pnpm install`：依存を入れる。あわせて `apps/web/worker/worker-configuration.d.ts`（reader Worker の型）を生成する
+- `pnpm install`：依存を入れる
 - `pnpm check`：型チェック、lint、テストをまとめて実行する。変更したら、コミットの前に必ず通す
 - `pnpm format`：整形して、直せる lint の指摘を直す（Biome。`.svelte` も対象）
-- `pnpm dev`：画面の dev サーバー（http://localhost:5173）。`/api` は手元の sendo（http://localhost:8787）に中継する。sendo は sendo の README のとおりに別に動かす
-- `pnpm build`：画面をビルドし、reader Worker をデプロイせずにバンドルして確かめる。コンテナ版のサーバーも `apps/web/dist-server/server.mjs` にバンドルする
-- `pnpm --filter @sendo-reader/web start:server`：コンテナ版のサーバーを手元の Node で動かす（`pnpm build` のあとに。`SENDO_URL` で中継の先を、`PORT` で受けるポートを変える）。イメージは `docker build -t sendo-reader .`
-- `pnpm run deploy`：画面をビルドし、reader Worker をデプロイする。ふつうは各自の fork への push で、Workers Builds がこれを動かす（`docs/decisions/deploy.md`）。手順を変えるときは、画面のコマンド（`pnpm run deploy`）を変えずに済むよう、`package.json` の側で直す
+- `pnpm dev`：画面の dev サーバー（http://localhost:5173）。sendo のパス（`apps/web/sendo-paths.ts` の一覧。本番と同じ）は、手元の sendo（sendo の `pnpm dev`、http://localhost:8787）に中継する。sendo は sendo の README のとおりに別に動かす
+- `pnpm build`：画面をビルドし、コンテナのサーバーを `apps/web/dist-server/server.mjs` にバンドルする
+- `pnpm --filter @sendo-reader/web start:server`：コンテナのサーバーを手元の Node で動かす（`pnpm build` のあとに。`SENDO_URL` で中継の先を、`PORT` で受けるポートを変える）。イメージは `docker build -t sendo-reader .`
 - `pnpm size`：ビルドのあとに、画面のスレッドの JS（gzip 後 100KB）と、DB のワーカーの JS と wasm（550KB）が予算に収まるか確かめる
 - `pnpm e2e`：画面を通したテスト（Playwright）。`pnpm build` のあとに動かす。本番のビルドを `vite preview` で開き、`/api` には `packages/core/test/fake-sendo.ts` の偽の sendo が答える。速さの予算（キャッシュ済みの起動から記事まで 1 秒、操作の反応 100ms）も、CPU を 4 倍遅くして確かめる
 - `pnpm --filter @sendo-reader/web lighthouse`：初回の読み込みを Lighthouse で測り、`apps/web/.lighthouseci/` に残す（上限はまだ決めていない）。手元では `CHROME_PATH` に Chromium の場所を渡す
-- `apps/web/wrangler.jsonc` を変えたら `pnpm --filter @sendo-reader/web cf-typegen` で型を作り直す
 - sendo の API が変わったら、`pnpm --filter @sendo-reader/core api:fetch`（sendo の OpenAPI を `packages/core/src/api/openapi.json` に写す。既定は手元の sendo の `/api/v1/openapi.json`。`SENDO_OPENAPI` で、sendo の `spec/openapi.json` などの別のファイルか URL を指せる）と `pnpm --filter @sendo-reader/core api:generate`（`schema.gen.ts` を作る）を実行し、両方をコミットする。生成したファイルは手で直さない（CI で食い違いを検査している）
 
 ## ディレクトリ
@@ -63,11 +61,10 @@ Sendo の公式リーダー。`packages/core`（同期エンジン）と `apps/w
     - `routes/`：画面（ログイン、読む画面、購読の管理）、`components/`：部品（`components/manage/` は購読の管理の部品）
     - `lib/errors.ts`：失敗（`ApiError` の `code` ／ `kind`）を、画面に出す文にする
     - 画面は `@sendo-reader/core/web` の窓口だけを使い、DB や sendo の API に直接触れない
-  - `worker/`：reader Worker（Cloudflare 版）。静的なファイルは Workers Static Assets が返し、`/api` だけを Service binding で sendo に中継する
-  - `server/`：コンテナ版のサーバー（`docs/decisions/container.md`）。Node で動き、ここだけ `node:*` を使ってよい。`assets.ts` が画面のビルドを起動するときにメモリーに読み、`static.ts` が Workers Static Assets と同じ応答（ヘッダー、ETag、圧縮、SPA）で返し、`proxy.ts` が sendo のパスを書き換えずに中継する。依存ごと esbuild で 1 つのファイルにまとめる（イメージに `node_modules` を入れない）
-  - `sendo-paths.ts`：コンテナ版で sendo に中継するパスの一覧。Service Worker の `navigateFallbackDenylist` も同じものを使う。sendo が外に出すパスを足したらここに足し、画面のルートはここと重ねない（`/oauth/authorize` は画面、`/oauth/token` は sendo）
-  - `security-headers.ts`：CSP などのヘッダー。dev サーバーと、本番の `dist/_headers` の両方に使う
-  - `test/`：reader Worker とヘッダーのテスト。`test/server/` はコンテナ版のサーバーのテストで、偽の sendo と reader のサーバーを本物の HTTP で動かして確かめる
+  - `server/`：reader のコンテナのサーバー（`docs/decisions/container.md`）。画面を配る唯一の形（Cloudflare では動かさない）。Node で動き、ここだけ `node:*` を使ってよい。`assets.ts` が画面のビルドを起動するときにメモリーに読み、`static.ts` が決まった応答（ヘッダー、ETag、圧縮、SPA）で返し、`proxy.ts` が sendo のパスを書き換えずに中継する。依存ごと esbuild で 1 つのファイルにまとめる（イメージに `node_modules` を入れない）
+  - `sendo-paths.ts`：sendo に中継するパスの一覧。Service Worker の `navigateFallbackDenylist` と、手元の Vite の dev サーバーの中継も同じものを使う。sendo が外に出すパスを足したらここに足し、画面のルートはここと重ねない（`/oauth/authorize` は画面、`/oauth/token` は sendo）
+  - `security-headers.ts`：CSP などのヘッダー。dev サーバー・preview と、本番のコンテナのサーバーの両方に使う
+  - `test/`：ヘッダーと、新しい版への切り替えのテスト。`test/server/` はコンテナのサーバーのテストで、偽の sendo と reader のサーバーを本物の HTTP で動かして確かめる
 - `scripts/`：手元と CI で動かす道具（Node で動く。`node:*` を使ってよい）
 - `apps/mobile/`：Capacitor（あとで作る）
 
@@ -96,7 +93,7 @@ Conventional Commits を土台にする。全文は https://github.com/sendo-fee
 ## 守る規約
 
 - 同期とローカル DB のロジックはすべて `packages/core` に入れる。`packages/core` は UI のフレームワーク（`svelte`）と `apps/` に依存しない（Biome の `noRestrictedImports` で検査している）
-- `packages/core`、`apps/web/src`、`apps/web/worker` では `node:*` を使わない（ブラウザと Workers で動くため。Biome で検査している）。コンテナ版のサーバー（`apps/web/server`）は Node で動くので使ってよい
+- `packages/core`、`apps/web/src` では `node:*` を使わない（ブラウザで動くため。Biome で検査している）。コンテナのサーバー（`apps/web/server`）は Node で動くので使ってよい
 - 画面はネットワークを待たない。読み書きはローカル DB に対して行い、サーバーとは同期で揃える。例外は、sendo にしかないものを扱うアカウントの画面（設定、OAuth の許可の画面。`docs/decisions/account.md`）で、手元の DB に置かず、core の API の窓口（`createAccountApi`）で sendo に聞く
 - OpenAPI から生成したファイルは手で直さない。sendo の OpenAPI を直して生成し直す
 - 記事のデータ（タイトル、要約、本文）は信頼できないデータとして扱う

@@ -3,15 +3,12 @@
 **/node_modules
 **/dist
 **/dist-server
-**/.wrangler
 **/test-results
 **/playwright-report
 **/.lighthouseci
-**/worker-configuration.d.ts
 .git
 .github
 .claude
-**/.dev.vars*
 **/.env*
 coverage
 docs

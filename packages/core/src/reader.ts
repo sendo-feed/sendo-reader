@@ -118,8 +118,8 @@ export interface ReaderCoreOptions {
 }
 
 /**
- * 先に取っておく本文の数の目安（Web の既定）。本文 1 件につき、sendo の側で R2 を 1 回読み、
- * Workers のリクエストを 1 回使うので、数を絞る。本文の中の画像は、表示するまで取らない
+ * 先に取っておく本文の数の目安（Web の既定）。本文 1 件につき sendo へのリクエストを 1 回使い、
+ * 手元の容量も使うので、数を絞る。本文の中の画像は、表示するまで取らない
  */
 export const DEFAULT_PREFETCH_CONTENTS = 30;
 
@@ -1054,14 +1054,6 @@ export class ReaderCore {
     if (found === null || !found.hasContent) return null;
     const stored = found.stored ?? (await this.#fetchContent(articleId, session, false, source));
     return stored === null ? null : toArticleContent(stored);
-  }
-
-  /** この sendo で元ページから全文を取れるか。オフラインでも保存済みの全文は読める */
-  async pageContentAvailable(): Promise<boolean> {
-    this.#requireSignedIn();
-    const session = this.#session.signal;
-    await this.#confirmSameUser(session);
-    return this.#api.pageContentAvailable(session);
   }
 
   /**

@@ -2,7 +2,7 @@
  * sendo への中継（docs/decisions/container.md の 4）。リクエストと応答を書き換えない。
  *
  * sendo は、受けたヘッダー（Cookie、Origin、Sec-Fetch-*）でセッションと CSRF を確かめ、URL の
- * オリジンを自分の設定（PUBLIC_URL）に置き換える。Cloudflare 版の Service binding と同じく、
+ * オリジンを自分の設定（PUBLIC_URL）に置き換える。ブラウザが直接呼んだのと変わらないように、
  * ヘッダーも本文もそのまま渡し、X-Forwarded-* は付けない。除くのは、1 回の接続にだけ関わる
  * ヘッダー（hop-by-hop）と、接続先で決まる Host だけ。
  *

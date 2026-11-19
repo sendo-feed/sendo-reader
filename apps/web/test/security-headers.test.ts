@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { contentSecurityPolicy, renderHeadersFile } from "../security-headers";
+import { contentSecurityPolicy } from "../security-headers";
 
 describe("CSP", () => {
   test("本番では、ほかのオリジンへの通信とインラインのスクリプトを許さない", () => {
@@ -17,12 +17,5 @@ describe("CSP", () => {
     expect(csp).toContain("style-src 'self' 'unsafe-inline'");
     expect(csp).toContain("script-src 'self' 'wasm-unsafe-eval'");
     expect(csp).not.toContain("trusted-types");
-  });
-
-  test("_headers は、すべてのパスに本番のヘッダーを付ける", () => {
-    const file = renderHeadersFile();
-    expect(file.startsWith("/*\n")).toBe(true);
-    expect(file).toContain(`  Content-Security-Policy: ${contentSecurityPolicy("production")}\n`);
-    expect(file).toContain("  X-Content-Type-Options: nosniff\n");
   });
 });
