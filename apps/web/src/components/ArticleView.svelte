@@ -249,6 +249,8 @@
   /** 本文が出たら戻す、前に見ていた位置。 */
   let restorePosition: ArticlePosition | null = null;
   let awaitingPosition = $state(false);
+  let toolbar = $state<HTMLDivElement>();
+  let toolbarHeight = $state(0);
   let pendingHistoryPosition: ArticlePosition | null = null;
   let restoringScroll = $state(false);
   let cancelRestore: (() => void) | undefined;
@@ -309,6 +311,18 @@
         } else {
           const node = body?.querySelector(`[data-content-node="${path.join(".")}"]`) ?? undefined;
           target = node;
+          if (kind === "content" && node === undefined) {
+            // 読み込めず消えた画像などは、残っている最も近い親へ戻す。
+            for (let length = path.length - 1; length > 0 && target === undefined; length -= 1) {
+              target =
+                body?.querySelector(`[data-content-node="${path.slice(0, length).join(".")}"]`) ??
+                undefined;
+            }
+            if (target?.matches("[data-x-embed]")) {
+              target = target.querySelector(":scope > details[data-x-quote]") ?? target;
+            }
+            anchorOffset = 0;
+          }
           if (kind === "x-widget" && node !== undefined) {
             const widget = node.querySelector(":scope > div > iframe[data-x-widget]");
             const height = widget?.getBoundingClientRect().height ?? 0;
@@ -456,10 +470,7 @@
 
   function articleViewportTop(): number {
     if (layout.pageScroll || scroller === undefined) return 0;
-    return (
-      scroller.querySelector(".toolbar")?.getBoundingClientRect().bottom ??
-      scroller.getBoundingClientRect().top
-    );
+    return toolbar?.getBoundingClientRect().bottom ?? scroller.getBoundingClientRect().top;
   }
 
   /** 復元が済むまでは、フレームの途中の高さで履歴を書き換えない。 */
@@ -907,7 +918,7 @@
         </span>
       </div>
     {/if}
-    <div class="toolbar">
+    <div class="toolbar" bind:this={toolbar} bind:offsetHeight={toolbarHeight}>
       <button
         type="button"
         class="icon-button back"
@@ -1050,7 +1061,14 @@
           <p class="content-note" role="status">{pageNote}</p>
         {/if}
         {#if content !== null}
-          <ArticleBody nodes={content.nodes} {awaitingPosition} />
+          <ArticleBody
+            nodes={content.nodes}
+            {awaitingPosition}
+            scrollRoot={layout.pageScroll ? null : (scroller ?? null)}
+            rootMargin={layout.pageScroll
+              ? `0px 0px -${toolbarHeight}px`
+              : `-${toolbarHeight}px 0px 0px`}
+          />
         {:else if showSummary}
           {#each paragraphs as text, index (index)}
             <p class="summary">{text}</p>

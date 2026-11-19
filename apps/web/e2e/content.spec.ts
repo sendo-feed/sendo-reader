@@ -157,12 +157,17 @@ for (const long of [false, true]) {
   }) => {
     const { server, blog } = seed();
     const precedingImage = "https://blog.example/before-paragraph.png";
+    const quotedImage = "https://blog.example/quoted.png";
     const image = long
       ? `<img src="${escapeHtml(server.imageUrl(precedingImage))}" alt="前の画像" width="64" height="64">`
       : "";
     const quotedParagraphs = long
       ? Array.from({ length: 12 }, (_, i) =>
-          i === 6 ? "記事中の引用の段落 6<br>" : `<p>記事中の引用の段落 ${i}</p>`,
+          i === 6
+            ? "記事中の引用の段落 6<br>"
+            : i === 8
+              ? `<img src="${escapeHtml(server.imageUrl(quotedImage))}" alt="引用内画像" width="600" height="64">`
+              : `<p>記事中の引用の段落 ${i}</p>`,
         ).join("")
       : "";
     server.deliver(blog.id, {
@@ -293,6 +298,21 @@ for (const long of [false, true]) {
         } finally {
           initialWidget?.resolve();
         }
+        const quoteBlock = view.locator("blockquote[data-x-embed]");
+        await quoteBlock.evaluate((element) => {
+          const pane = element.closest<HTMLElement>(".article-view");
+          const toolbar = pane?.querySelector(".toolbar");
+          if (!pane || !toolbar) throw new Error("記事のスクロール領域がない");
+          pane.scrollTop +=
+            element.getBoundingClientRect().bottom - toolbar.getBoundingClientRect().bottom + 10;
+        });
+        await page.evaluate(
+          () =>
+            new Promise<void>((resolve) =>
+              requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+            ),
+        );
+        await expect(frame).toHaveCount(0);
         await view.evaluate((element) => element.scrollTo({ top: 0 }));
         await expect(frame).toHaveAttribute("height", "1216");
         await expect(view.getByText("記事中の引用", { exact: true })).toBeVisible();
@@ -402,6 +422,49 @@ for (const long of [false, true]) {
         });
         await expect(savedQuote).toBeHidden();
         await expect(summary.locator("..")).not.toHaveAttribute("open");
+
+        await summary.click();
+        const quoteImage = view.getByRole("img", { name: "引用内画像" });
+        await expect
+          .poll(() => quoteImage.evaluate((node) => (node as HTMLImageElement).naturalWidth))
+          .toBeGreaterThan(0);
+        const savedImage = await quoteImage.evaluate((element) => {
+          const pane = element.closest<HTMLElement>(".article-view");
+          const toolbar = pane?.querySelector(".toolbar");
+          if (!pane || !toolbar) throw new Error("記事のスクロール領域がない");
+          pane.scrollTop +=
+            element.getBoundingClientRect().top - toolbar.getBoundingClientRect().bottom + 4;
+          const path = element.getAttribute("data-content-node")?.split(".").map(Number);
+          return { top: pane.scrollTop, path };
+        });
+        await page.waitForFunction(
+          ({ top, path }) =>
+            history.state?.article?.top === top &&
+            JSON.stringify(history.state.article.anchor?.path) === JSON.stringify(path),
+          savedImage,
+        );
+        await page.evaluate(
+          async (url) => {
+            if (url === null) return;
+            for (const key of await caches.keys()) await (await caches.open(key)).delete(url);
+          },
+          await quoteImage.getAttribute("src"),
+        );
+        server.imageStatusFor.set(quotedImage, 502);
+        await page.reload({ waitUntil: "domcontentloaded" });
+        await expect(quoteImage).toHaveCount(0);
+        await expect(summary.locator("..")).toHaveAttribute("open");
+        await expect
+          .poll(() =>
+            summary.locator("..").evaluate((element) => {
+              const toolbar = element.closest(".article-view")?.querySelector(".toolbar");
+              if (!toolbar) throw new Error("記事のツールバーがない");
+              return Math.abs(
+                element.getBoundingClientRect().top - toolbar.getBoundingClientRect().bottom,
+              );
+            }),
+          )
+          .toBeLessThan(2);
       } else {
         const fallbackLink = view.getByRole("link", { name: "引用内リンク" });
         await fallbackLink.focus();

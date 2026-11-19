@@ -255,7 +255,7 @@ export function parseContent(html: string): ContentNode[] {
   for (const quote of postQuotes) {
     const posts = new Map<string, { url: string; links: ContentElement[] }>();
     let index = quote.children.length - 1;
-    let bodyText = "";
+    let hasInlineBody = false;
     // 引用の末尾に並ぶ出典だけをたどり、途中にあったリンクは出典候補に含めない。
     while (index >= 0) {
       const child = quote.children[index];
@@ -296,12 +296,16 @@ export function parseContent(html: string): ContentNode[] {
         }
       }
       index = before;
-      bodyText = text.slice(0, start).trim();
-      if (bodyText !== "") break;
+      if (text.slice(0, start).trim() !== "") {
+        hasInlineBody = true;
+        const previous = quote.children[before];
+        // 出典が句読点や接続詞で続くこともあるため、直前のリンクも照合する。
+        if (typeof previous === "string" || previous?.tag !== "a") break;
+      }
     }
     // 本文用の段落が空でも、出典より手前に本文の要素があれば候補を使う。
     if (
-      bodyText === "" &&
+      !hasInlineBody &&
       !quote.children
         .slice(0, index + 1)
         .some((child) => (typeof child === "string" ? child.trim() !== "" : child.tag !== "br"))

@@ -8,12 +8,16 @@
     enqueue,
     nodePath,
     awaitingPosition,
+    scrollRoot,
+    rootMargin,
   }: {
     href: string;
     children: Snippet;
     enqueue: ReturnType<typeof createXEmbedQueue>;
     nodePath: string;
     awaitingPosition: boolean;
+    scrollRoot: HTMLElement | null;
+    rootMargin: string;
   } = $props();
   const origin = __X_EMBED_ORIGIN__;
   // セッションのクッキーはポートで分かれないため、同じホスト名は使えない。
@@ -69,16 +73,20 @@
     const element = block;
     // 履歴から開き直すときは、先頭に一瞬見える投稿を読み込まない。
     if (element === undefined || !separateHost || awaitingPosition || active || settled) return;
-    const observer = new IntersectionObserver((entries) => {
-      if (awaitingPosition || active || settled) return;
-      inView = entries.at(-1)?.isIntersecting ?? false;
-      updateRequest();
-    });
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (awaitingPosition || active || settled) return;
+        const entry = entries.at(-1);
+        inView = entry !== undefined && entry.intersectionRatio > 0;
+        updateRequest();
+      },
+      { root: scrollRoot, rootMargin, threshold: [0, 0.001] },
+    );
     observer.observe(element);
     return () => {
       observer.disconnect();
       inView = false;
-      if (awaitingPosition) updateRequest();
+      updateRequest();
     };
   });
 
