@@ -271,11 +271,14 @@
     let restoreTimer: ReturnType<typeof setTimeout> | undefined;
     let appliedTop: number | undefined;
     const cancel = new AbortController();
+    const queuedPosts = new Map<Element, AbortController>();
     const stop = () => {
       resizeObserver?.disconnect();
       embedObserver?.disconnect();
       clearTimeout(restoreTimer);
       cancel.abort();
+      for (const queued of queuedPosts.values()) queued.abort();
+      queuedPosts.clear();
       if (cancelRestore === stop) {
         cancelRestore = undefined;
         pendingHistoryPosition = null;
@@ -337,13 +340,23 @@
       const offset = scrollTopOf(scroller);
       appliedTop = offset;
       const posts = Array.from(element.querySelectorAll("[data-x-embed]"));
-      const preceding = posts.filter(
-        (post) =>
-          anchorPosts.has(post) || post.getBoundingClientRect().top - viewportTop + offset < top,
-      );
+      const preceding = posts.filter((post) => {
+        if (anchorPosts.has(post)) return true;
+        const rect = post.getBoundingClientRect();
+        return rect.width > 0 && rect.height > 0 && rect.top - viewportTop + offset < top;
+      });
       const pending = preceding.filter((post) => post.getAttribute("data-x-embed") === "waiting");
+      const wanted = new Set(pending);
+      for (const [post, queued] of queuedPosts) {
+        if (wanted.has(post)) continue;
+        queued.abort();
+        queuedPosts.delete(post);
+      }
       for (const post of pending) {
-        post.dispatchEvent(new CustomEvent("sendo:open-x-post", { detail: cancel.signal }));
+        if (queuedPosts.has(post)) continue;
+        const queued = new AbortController();
+        queuedPosts.set(post, queued);
+        post.dispatchEvent(new CustomEvent("sendo:open-x-post", { detail: queued.signal }));
       }
       if (preceding.length === 0 && (posts.length === 0 || offset >= top - 1)) {
         stop();
@@ -466,12 +479,18 @@
       // 文字の横の余白を指したときも、引用の外枠ではなく開いた引用の中の位置を記録する。
       const quoteBody = node === quote?.parentElement ? quote : null;
       const target = summary ?? quoteBody ?? node;
-      position.anchor = {
+      const anchor: NonNullable<ArticlePosition["anchor"]> = {
         source: content.source,
         path: node.dataset.contentNode.split(".").map(Number),
         kind: summary !== null ? "quote-summary" : quoteBody !== null ? "quote-body" : "content",
         offset: target.getBoundingClientRect().top - viewportTop,
       };
+      if (hit === target && hit.matches("div") && hit.querySelector("[data-content-node]")) {
+        // 段落間の余白に当たったら、下を調べて段落が見つかった場合はそちらを使う。
+        position.anchor ??= anchor;
+        continue;
+      }
+      position.anchor = anchor;
       break;
     }
     return position;

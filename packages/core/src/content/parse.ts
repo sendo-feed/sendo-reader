@@ -82,7 +82,25 @@ function xPostUrl(href: string): string | undefined {
   return `https://x.com${url.pathname.replace(/\/$/, "")}`;
 }
 
-const ATTRIBUTION_INLINE_TAGS = new Set(["strong", "em", "b", "i", "u", "s", "small", "mark"]);
+const ATTRIBUTION_INLINE_TAGS = new Set([
+  "q",
+  "cite",
+  "code",
+  "kbd",
+  "strong",
+  "b",
+  "em",
+  "i",
+  "u",
+  "s",
+  "del",
+  "ins",
+  "sub",
+  "sup",
+  "small",
+  "mark",
+  "abbr",
+]);
 
 function attributionText(node: ContentNode): string | null {
   if (typeof node === "string") return node;

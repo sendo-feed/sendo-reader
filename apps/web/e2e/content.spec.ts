@@ -385,6 +385,33 @@ for (const long of [false, true]) {
         }
         await expect(frame).toHaveAttribute("height", "1216");
         await expect.poll(() => view.evaluate((element) => element.scrollTop)).toBe(top);
+
+        // アンカーより後ろの投稿が広がるまで、短い記事では保存位置に届かない。
+        const lead = view.getByText("投稿の紹介", { exact: true });
+        const leadTop = await lead.evaluate((element) => {
+          const pane = element.closest<HTMLElement>(".article-view");
+          const toolbar = pane?.querySelector(".toolbar");
+          if (!pane || !toolbar) throw new Error("記事のスクロール領域がない");
+          pane.scrollTop +=
+            element.getBoundingClientRect().top - toolbar.getBoundingClientRect().bottom + 4;
+          return pane.scrollTop;
+        });
+        await page.waitForFunction(
+          (offset) =>
+            history.state?.article?.top === offset && history.state.article.anchor !== undefined,
+          leadTop,
+        );
+        const lastWidget = Promise.withResolvers<void>();
+        waitForWidget = lastWidget.promise;
+        try {
+          await page.reload({ waitUntil: "domcontentloaded" });
+          await expect(frame).toHaveAttribute("height", "0");
+          expect(await view.evaluate((element) => element.scrollTop)).toBeLessThan(leadTop);
+        } finally {
+          lastWidget.resolve();
+        }
+        await expect(frame).toHaveAttribute("height", "1216");
+        await expect.poll(() => view.evaluate((element) => element.scrollTop)).toBe(leadTop);
       }
     } else {
       initialWidget?.resolve();
