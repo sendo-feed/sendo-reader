@@ -285,6 +285,9 @@ test("設定をキーボードで切り替え、通信できなくてもプレ�
 
   offline = false;
   await reading.press("End");
+  const integrations = page.getByRole("tab", { name: "Integrations", exact: true });
+  await expect(integrations).toBeFocused();
+  await integrations.press("ArrowLeft");
   await expect(page.getByRole("tab", { name: "Connections", exact: true })).toBeFocused();
   await expect(page.getByText("発行したトークンはまだありません。")).toBeVisible();
   expect(accountRequests.sort()).toEqual(["GET /oauth/grants", "GET /tokens"]);
@@ -334,7 +337,7 @@ test("幅 320px の画面でも各カテゴリを選べ、プレビューの文�
   await page.goto("/settings");
   await signIn(page);
   await page.getByRole("slider", { name: "Text size" }).fill("4");
-  for (const category of ["Reading", "Connections", "Appearance"]) {
+  for (const category of ["Reading", "Connections", "Integrations", "Appearance"]) {
     const tab = page.getByRole("tab", { name: category, exact: true });
     await tab.click();
     await expect(tab).toHaveAttribute("aria-selected", "true");

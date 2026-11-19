@@ -1,16 +1,25 @@
-import { ApiError, createSendoApi, errorFromBody, type SendoApiOptions } from "./api/client";
+import {
+  ApiError,
+  createSendoApi,
+  errorFromBody,
+  type SendoApi,
+  type SendoApiOptions,
+} from "./api/client";
+import type { components } from "./api/schema.gen";
 import type { User } from "./models";
 
 /**
  * アカウントの画面（設定の画面、OAuth の許可の画面）が使う sendo の API（docs/decisions/account.md）。
  *
- * sendo にしかないもの（アクセストークン、OAuth の許可）を扱うので、ネットワークが要り、結果は
+ * sendo にしかないもの（アクセストークン、OAuth の許可、Discord 連携）を扱うので、ネットワークが要り、結果は
  * 手元の DB に置かない。sendo のセッション（ブラウザのクッキー）でだけ使える。同期と同じ API の
  * 窓口（api/client.ts）を通し、タイムアウト、中断、失敗の分け方を揃える。
  */
 
 export type TokenPurpose = "reader" | "mcp";
 export type Scope = "read" | "write";
+export type DiscordIntegration = components["schemas"]["DiscordIntegration"];
+export type DiscordSubscription = DiscordIntegration["subscriptions"][number];
 
 /** アクセストークン（中身は含まない。中身は発行したときにしか受け取れない） */
 export interface AccessToken {
@@ -101,6 +110,26 @@ export function createAccountApi(options: SendoApiOptions) {
       return api.me(signal);
     },
 
+    getDiscord(signal?: AbortSignal): Promise<DiscordIntegration> {
+      return getDiscord(api, signal);
+    },
+
+    async connectDiscord(returnTo: string, signal?: AbortSignal): Promise<string> {
+      const { data, error, response } = await api
+        .client(signal)
+        .POST("/integrations/discord/connect", { body: { returnTo } });
+      if (data === undefined) throw errorFromBody(response.status, error);
+      return data.authorizationUrl;
+    },
+
+    async subscribeDiscord(url: string, signal?: AbortSignal): Promise<DiscordSubscription> {
+      const { data, error, response } = await api
+        .client(signal)
+        .POST("/integrations/discord/subscriptions", { body: { url } });
+      if (data === undefined) throw errorFromBody(response.status, error);
+      return data;
+    },
+
     /** アクセストークンの一覧（新しい順） */
     async listTokens(signal?: AbortSignal): Promise<AccessToken[]> {
       const { data, error, response } = await api.client(signal).GET("/tokens");
@@ -185,6 +214,29 @@ export function createAccountApi(options: SendoApiOptions) {
       if (!response.ok) throw errorFromBody(response.status, error);
     },
   };
+}
+
+export async function getDiscord(api: SendoApi, signal?: AbortSignal): Promise<DiscordIntegration> {
+  const { data, error, response } = await api.client(signal).GET("/integrations/discord");
+  if (data === undefined) throw errorFromBody(response.status, error);
+  return data;
+}
+
+export async function unsubscribeDiscord(
+  api: SendoApi,
+  id: string,
+  signal: AbortSignal,
+): Promise<void> {
+  const { error, response } = await api.client(signal).DELETE("/feeds/{id}", {
+    params: { path: { id } },
+  });
+  // 別の端末ですでに購読を解除していても目的は達成している。
+  if (!response.ok && response.status !== 404) throw errorFromBody(response.status, error);
+}
+
+export async function disconnectDiscord(api: SendoApi, signal: AbortSignal): Promise<void> {
+  const { error, response } = await api.client(signal).DELETE("/integrations/discord");
+  if (!response.ok) throw errorFromBody(response.status, error);
 }
 
 function toAccessToken(token: {
