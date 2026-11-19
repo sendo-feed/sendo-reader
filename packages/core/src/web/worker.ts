@@ -2,6 +2,7 @@ import type { Database } from "../db/database";
 import type { Table } from "../models";
 import { DEFAULT_PREFETCH_CONTENTS, ReaderCore } from "../reader";
 import { SyncScheduler, type SyncStatus } from "../sync/scheduler";
+import { SyncUpdates, syncUpdatesUrl, type WebSocketLike } from "../sync/updates";
 import { openWebDatabase } from "./database";
 import { clearImageCache } from "./image-cache";
 import {
@@ -26,6 +27,11 @@ export interface ReaderWorkerOptions {
   fetch?: typeof fetch;
   /** DB を開く（テストで差し替える） */
   openDatabase?: (name: string) => Promise<Database>;
+  /**
+   * sendo の通知（WebSocket）につなぐ。既定はブラウザの WebSocket。null なら通知を使わず、
+   * 定期同期だけで動く（テストで使う）
+   */
+  webSocket?: ((url: string) => WebSocketLike) | null;
 }
 
 /** 代表として受けた呼び出しを覚えておく数 */
@@ -53,7 +59,8 @@ export function runReaderWorker(options: ReaderWorkerOptions = {}): void {
   const workerId = crypto.randomUUID();
   const peers = new BroadcastChannel(`${namespace}:peers`);
 
-  let leader: { core: ReaderCore; scheduler: SyncScheduler } | null = null;
+  let leader: { core: ReaderCore; scheduler: SyncScheduler; updates: SyncUpdates | null } | null =
+    null;
   /** 代表になるロックを頼んでいる（待っている、DB を開いている、または代表である） */
   let seeking = false;
   /** 開いた（開いている途中の）DB */
@@ -147,7 +154,10 @@ export function runReaderWorker(options: ReaderWorkerOptions = {}): void {
   });
 
   // オンラインに戻ったら、すぐ同期する
-  scope.addEventListener("online", () => leader?.scheduler.requestNow());
+  scope.addEventListener("online", () => {
+    leader?.scheduler.requestNow();
+    leader?.updates?.online();
+  });
 
   toPeers({ type: "hello", from: workerId });
   seekLeadership();
@@ -193,18 +203,34 @@ export function runReaderWorker(options: ReaderWorkerOptions = {}): void {
       // 同期のあとに、未読の新しい記事の本文を取っておく（オフラインでも読めるように）
       prefetchContents: DEFAULT_PREFETCH_CONTENTS,
     });
+    let updates: SyncUpdates | null = null;
     const scheduler = new SyncScheduler(core, {
       onStatus: (status: SyncStatus) => {
         toTab({ type: "status", status });
         toPeers({ type: "status", status });
+        updates?.update(status);
       },
     });
+    // 通知につなぐのは代表だけ（ブラウザごとに 1 本。docs/decisions/local-first.md の 3）
+    const openWebSocket =
+      options.webSocket === undefined
+        ? // 受け取り手の引数の型だけが違う（使うのは data と code だけ）
+          (url: string) => new WebSocket(url) as unknown as WebSocketLike
+        : options.webSocket;
+    if (openWebSocket !== null) {
+      const url = syncUpdatesUrl(options.baseUrl ?? "/api/v1", self.location.href);
+      updates = new SyncUpdates({
+        connect: () => openWebSocket(url),
+        requestSync: () => scheduler.requestNotified(),
+        checkSession: () => scheduler.requestNow(),
+      });
+    }
     core.onChange((tables) => {
       const changed: Table[] = [...tables];
       toTab({ type: "changed", tables: changed });
       toPeers({ type: "changed", tables: changed });
     });
-    const current = { core, scheduler };
+    const current = { core, scheduler, updates };
 
     // 代表を待っている間に自分のタブから頼まれた呼び出しは、ここで受ける
     for (const call of forwarded.values()) {
@@ -216,6 +242,7 @@ export function runReaderWorker(options: ReaderWorkerOptions = {}): void {
     toPeers({ type: "leader", leaderId: workerId });
     toTab({ type: "status", status: scheduler.status });
     scheduler.requestNow();
+    updates?.update(scheduler.status);
     return current;
   }
 }

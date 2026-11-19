@@ -13,6 +13,7 @@ import { serve } from "@hono/node-server";
 import { createReaderServer } from "./app";
 import { loadAssets } from "./assets";
 import { type Env, parsePort, parseSendoUrl } from "./config";
+import { createUpgradeRelay } from "./websocket";
 
 /** 止めるときに、処理中のリクエストを待つ上限 */
 const SHUTDOWN_TIMEOUT_MS = 10 * 1000;
@@ -37,6 +38,10 @@ async function main(env: Env): Promise<void> {
       }),
   );
 
+  // sendo の通知（WebSocket）の Upgrade を中継する（websocket.ts）
+  const relay = createUpgradeRelay(sendoOrigin);
+  server.on("upgrade", relay.handle);
+
   let stopping = false;
   const shutdown = (signal: string) => {
     if (stopping) return;
@@ -46,7 +51,9 @@ async function main(env: Env): Promise<void> {
       console.error("shutdown timed out; exiting");
       process.exit(1);
     }, SHUTDOWN_TIMEOUT_MS);
-    // 新しい接続を受けるのをやめ、処理中のリクエストが終わるのを待つ
+    // 中継している WebSocket は切る（ブラウザはつなぎ直す）。新しい接続を受けるのをやめ、
+    // 処理中のリクエストが終わるのを待つ
+    relay.closeAll();
     server.close(() => {
       clearTimeout(timeout);
       process.exit(0);
