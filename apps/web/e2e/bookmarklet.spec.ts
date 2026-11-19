@@ -78,3 +78,24 @@ test("未ログインでも長い投稿 URL を引き継ぎ、確認して Saved
   await expect(page.getByRole("link", { name: post })).toHaveAttribute("href", post);
   await expect(page).toHaveURL(/\/starred$/);
 });
+
+test("iPhone のショートカットの作り方を、このサイトの URL を埋めて出す", async ({
+  page,
+  context,
+}) => {
+  await routeFakeSendo(context, new FakeSendo());
+  await page.goto("/manage");
+  await signIn(page);
+  await page.getByRole("button", { name: "Add feed" }).first().click();
+  await page.getByRole("button", { name: "Set up iPhone shortcut" }).click();
+  const dialog = page.getByRole("dialog", { name: "iPhone shortcut" });
+  await expect(dialog.getByRole("heading", { name: "作り方" })).toBeVisible();
+  const prefix = await dialog.getByRole("textbox", { name: "Shortcut URL" }).inputValue();
+  const origin = new URL(page.url()).origin;
+  expect(prefix).toBe(`${origin}/add#url=`);
+  // ショートカットが組み立てる URL（前半 ＋ エンコードした URL）で、追加画面に来られる
+  const site = "https://blog.example/post?a=1&b=2#part";
+  await page.goto(prefix + encodeURIComponent(site));
+  await expect(page.getByRole("heading", { name: "Add to Sendo" })).toBeVisible();
+  await expect(page.getByText(site, { exact: true })).toBeVisible();
+});

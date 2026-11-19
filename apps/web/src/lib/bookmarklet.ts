@@ -23,9 +23,17 @@ function storedCapture(): { marker: string; url: string } | null {
   return url === null ? null : { marker, url };
 }
 
+/**
+ * 追加画面に、追加したいページの URL を渡すときの前半。後ろに、URL をエンコードしたものを付ける
+ * （ブックマークレットと、iPhone のショートカットが使う）。URL は # の後ろに置き、サーバーに送らない
+ */
+export function capturePrefixFor(origin: string): string {
+  return `${new URL(CAPTURE_PATH, origin).href}#url=`;
+}
+
 export function bookmarkletFor(origin: string): string {
-  const target = JSON.stringify(new URL(CAPTURE_PATH, origin).href);
-  return `javascript:(()=>{location.assign(${target}+"#url="+encodeURIComponent(location.href))})()`;
+  const target = JSON.stringify(capturePrefixFor(origin));
+  return `javascript:(()=>{location.assign(${target}+encodeURIComponent(location.href))})()`;
 }
 
 function urlInFragment(url: URL): string | null {

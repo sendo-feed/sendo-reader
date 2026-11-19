@@ -7,12 +7,14 @@
   import Feeds from "../components/manage/Feeds.svelte";
   import Folders from "../components/manage/Folders.svelte";
   import ImportOpml from "../components/manage/ImportOpml.svelte";
+  import IosShortcut from "../components/manage/IosShortcut.svelte";
   import { useReader } from "../lib/context";
 
   const reader = useReader();
   let query = $state("");
   let addOpen = $state(false);
   let importOpen = $state(false);
+  let shortcutOpen = $state(false);
   let folderOpen = $state(false);
   let editing = $state<Folder | null>(null);
   let notice = $state("");
@@ -68,6 +70,20 @@
   <div class="bookmarklet">
     <Bookmarklet />
   </div>
+  <section class="shortcut" aria-labelledby="shortcut-heading">
+    <h3 id="shortcut-heading">iPhone</h3>
+    <p>ショートカット App で一度設定すると、ほかのアプリの共有から追加できます。</p>
+    <button
+      type="button"
+      class="link"
+      onclick={() => {
+        addOpen = false;
+        shortcutOpen = true;
+      }}
+    >
+      Set up iPhone shortcut
+    </button>
+  </section>
   <div class="import-link">
     <button
       type="button"
@@ -97,6 +113,10 @@
 
 <Dialog bind:open={importOpen} title="Import OPML">
   <ImportOpml />
+</Dialog>
+
+<Dialog bind:open={shortcutOpen} title="iPhone shortcut">
+  <IosShortcut />
 </Dialog>
 
 <style>
@@ -185,11 +205,29 @@
   }
 
   .bookmarklet,
+  .shortcut,
   .import-link {
     margin-top: 1.25rem;
     padding-top: 1rem;
     border-top: 1px solid var(--border);
     font-size: 0.875rem;
+  }
+
+  .shortcut {
+    display: grid;
+    gap: 0.5rem;
+    justify-items: start;
+  }
+
+  .shortcut h3 {
+    margin: 0;
+    font-size: 1rem;
+  }
+
+  .shortcut p {
+    margin: 0;
+    color: var(--muted);
+    line-height: 1.6;
   }
 
   @media (max-width: 28rem) {
