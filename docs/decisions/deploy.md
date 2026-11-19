@@ -9,13 +9,14 @@ Cloudflare 版の sendo-reader も、使う人がそれぞれ自分の Cloudflar
 
 ## 決定
 
-1. **sendo と同じく、各自が GitHub で fork し、Cloudflare の Workers Builds でつなぐ。** fork の `main` に push すると、Cloudflare がビルドしてデプロイする。
+1. **使う版を固定した reader の fork を Cloudflare の Workers Builds につなぐ。** ビルド対象のブランチは、旧 Sendo Worker との互換性を確かめたコミットを指す。
    - Cloudflare の GitHub App の「Repository access」に、reader の fork も入れる。入れていないと、push でビルドが始まらない
    - 手元からも `pnpm run deploy` でデプロイできる
 2. **Worker の名前は `sendo-reader` のままにする。**
    - `wrangler.jsonc` の `name` と違うと、ビルドが失敗する
    - sendo の `READER_URL` と、Google の OAuth クライアントのリダイレクト URI は、この名前の `workers.dev` の URL を前提にしている（sendo の README）
 3. **Sendo Worker と reader は互換性を確認した版に固定する。現行 Sendo に更新する場合は、[コンテナ版](container.md)を使う。**
+   - 上流の新しい `main` を自動で取り込む設定は停止する
    - Service binding は、同じアカウントの `sendo` という名前の Worker を指す
    - reader は、sendo の OpenAPI から作った型で API を呼ぶ。新しい reader が古い sendo を呼ぶと、足した API や項目がまだないことがある
 4. **Workers Builds の「ルート ディレクトリ」は、リポジトリの一番上（`/`）のままにする。デプロイの手順は一番上の `package.json` の `deploy` に書き、画面のデプロイのコマンドは `pnpm run deploy` にする。**
@@ -33,7 +34,7 @@ Cloudflare 版の sendo-reader も、使う人がそれぞれ自分の Cloudflar
 - **ルート ディレクトリを一番上にする**
   - Workers Builds は、Node のバージョンを、ルート ディレクトリに置いた `.node-version` から読む（Cloudflare の文書）。`apps/web` にすると、一番上の `.node-version`（24）が読まれないおそれがある。ロックファイルを親のフォルダまでたどるかも、文書には書かれていない
   - 一番上なら、`pnpm install --frozen-lockfile` がワークスペースの全体を入れる。試したとき、`.node-version` と `packageManager` を読んで Node 24.22.3 と pnpm 11.28.10 で動き、`minimumReleaseAge` と `allowBuilds` も手元と同じに効いた
-- **手順を一番上の `package.json` に書く**：画面に書いた手順は、上流からは直せない。画面には `pnpm run deploy` とだけ書いておけば、手順を変えても、取り込みで各自に届く（sendo の 2 と同じ）。画面のコマンドも sendo とそろう。
+- **手順を一番上の `package.json` に書く**：画面に書いた手順は、上流からは直せない。画面には `pnpm run deploy` と書けば、固定した版のデプロイ手順をリポジトリから再現できる。
 - **main 以外のブランチのビルドをオフにする**
   - main 以外のブランチのビルドは、既定では一番上で `npx wrangler versions upload` を動かす。一番上には wrangler の設定がないので、失敗する
   - fork で main 以外のブランチを push することは、ほとんどない
@@ -48,6 +49,6 @@ Cloudflare 版の sendo-reader も、使う人がそれぞれ自分の Cloudflar
 
 ## 見直す条件
 
-- sendo のデプロイの決定が変わったとき。こちらもそろえる。
+- 固定した版を使う環境で、互換性の問題や再配備の必要が生じたとき。
 - reader に、人ごとの設定や秘密が要るようになったとき。sendo と同じく、画面の変数（`keep_vars`）とシークレットに置く形で決め直す（sendo の 4・5）。
 - `apps/mobile` など、リポジトリから出すものが増えたとき。Workers Builds のビルドを始めるパス（build watch paths）を絞るかを決める。
