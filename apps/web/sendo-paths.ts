@@ -10,6 +10,9 @@
  * /oauth/token と /oauth/register は sendo。sendo が外に出すパスを足したら、ここにも足す。
  */
 
+/** WebSocket の Upgrade を中継する唯一のパス。 */
+export const SYNC_UPDATES_PATH = "/api/v1/sync/updates";
+
 /** このパスそのものだけを中継する */
 const EXACT_PATHS = [
   "/api",

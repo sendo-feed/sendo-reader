@@ -13,6 +13,7 @@ import { serve } from "@hono/node-server";
 import { createReaderServer } from "./app";
 import { loadAssets } from "./assets";
 import { type Env, parsePort, parseSendoUrl } from "./config";
+import { createSyncUpdatesProxy } from "./sync-updates";
 
 /** 止めるときに、処理中のリクエストを待つ上限 */
 const SHUTDOWN_TIMEOUT_MS = 10 * 1000;
@@ -26,9 +27,15 @@ async function main(env: Env): Promise<void> {
   const port = parsePort(env.PORT);
   const assets = await loadAssets(distDirectory(env));
   const app = createReaderServer({ assets, sendoOrigin });
+  const updates = createSyncUpdatesProxy(sendoOrigin);
 
   const server = serve(
-    { fetch: app.fetch, port, hostname: env.HOST?.trim() || "0.0.0.0" },
+    {
+      fetch: app.fetch,
+      port,
+      hostname: env.HOST?.trim() || "0.0.0.0",
+      serverOptions: { shouldUpgradeCallback: updates.shouldUpgrade },
+    },
     (info) =>
       console.info("sendo-reader is listening", {
         address: info.address,
@@ -36,6 +43,9 @@ async function main(env: Env): Promise<void> {
         sendo: sendoOrigin,
       }),
   );
+
+  server.prependListener("request", updates.trackRequest);
+  server.on("upgrade", updates.handle);
 
   let stopping = false;
   const shutdown = (signal: string) => {
@@ -51,6 +61,7 @@ async function main(env: Env): Promise<void> {
       clearTimeout(timeout);
       process.exit(0);
     });
+    updates.stop();
     if ("closeIdleConnections" in server) server.closeIdleConnections();
   };
   process.on("SIGTERM", () => shutdown("SIGTERM"));

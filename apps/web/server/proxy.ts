@@ -42,8 +42,11 @@ function connectionScoped(connection: string | string[] | undefined | null): Set
   return names;
 }
 
-function requestHeaders(source: Headers): OutgoingHttpHeaders {
-  const skip = connectionScoped(source.get("connection"));
+export function forwardedRequestHeaders(
+  source: Iterable<[string, string | string[] | undefined]>,
+  connection: string | string[] | undefined | null,
+): OutgoingHttpHeaders {
+  const skip = connectionScoped(connection);
   const headers: OutgoingHttpHeaders = {};
   for (const [name, value] of source) {
     // Host は接続先のものを node:http が付ける。Expect（100-continue）は、この接続の手順
@@ -52,14 +55,23 @@ function requestHeaders(source: Headers): OutgoingHttpHeaders {
   return headers;
 }
 
-function responseHeaders(response: IncomingMessage): Headers {
+/** 中継する HTTP 応答の生ヘッダー。同じ名前の Set-Cookie なども保つ。 */
+export function forwardedResponseHeaders(response: IncomingMessage): string[] {
   const skip = connectionScoped(response.headers.connection);
-  const headers = new Headers();
-  // rawHeaders は名前と値が交互に並ぶ。同じ名前のヘッダー（複数の Set-Cookie など）も 1 つずつ残る
+  const headers: string[] = [];
   const raw = response.rawHeaders;
-  for (let i = 0; i + 1 < raw.length; i += 2) {
-    const name = (raw[i] ?? "").toLowerCase();
-    if (!skip.has(name)) headers.append(name, raw[i + 1] ?? "");
+  for (let i = 0; i < raw.length; i += 2) {
+    const name = raw[i] ?? "";
+    if (!skip.has(name.toLowerCase())) headers.push(name, raw[i + 1] ?? "");
+  }
+  return headers;
+}
+
+function responseHeaders(response: IncomingMessage): Headers {
+  const headers = new Headers();
+  const raw = forwardedResponseHeaders(response);
+  for (let i = 0; i < raw.length; i += 2) {
+    headers.append(raw[i] ?? "", raw[i + 1] ?? "");
   }
   return headers;
 }
@@ -93,7 +105,11 @@ export function proxyToSendo(request: Request, sendoOrigin: string): Promise<Res
 
     const outgoing = send(
       target,
-      { method: request.method, headers: requestHeaders(request.headers), signal: request.signal },
+      {
+        method: request.method,
+        headers: forwardedRequestHeaders(request.headers, request.headers.get("connection")),
+        signal: request.signal,
+      },
       (response) => {
         settled = true;
         const status = response.statusCode ?? 502;

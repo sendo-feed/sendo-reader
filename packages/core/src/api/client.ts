@@ -88,6 +88,14 @@ export function createSendoApi(options: SendoApiOptions) {
   return {
     client,
 
+    /** 古い Sendo はこの項目を返さない。 */
+    async syncUpdatesAvailable(signal?: AbortSignal): Promise<boolean> {
+      const { data, error, response } = await client(signal).GET("/features");
+      if (response.status === 404) return false;
+      if (!response.ok) throw errorFromBody(response.status, error);
+      return data?.syncUpdates === true;
+    },
+
     /** 差分を 1 ページ取る（docs/decisions/sync.md）。cursor が null なら最初の同期 */
     async sync(cursor: string | null, signal?: AbortSignal): Promise<SyncPage> {
       const url = new URL(`${baseUrl}/sync`);

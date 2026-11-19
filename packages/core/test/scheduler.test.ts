@@ -82,6 +82,33 @@ describe("同期の予定", () => {
     expect(statuses.at(-1)?.error).toBeNull();
   });
 
+  test("同期中や失敗後に通知が来ても、再試行を前倒ししない", async () => {
+    const { server, scheduler } = await scheduled();
+    server.onRequest = async (path) => {
+      if (path !== "GET /sync") return;
+      server.onRequest = null;
+      scheduler.requestForUpdate();
+      server.failNext(503);
+    };
+    await scheduler.syncNow();
+    expect(scheduler.status.error).toBe("server");
+
+    scheduler.requestForUpdate();
+    await vi.advanceTimersByTimeAsync(RETRY_DELAYS_MS[0] - 1);
+    expect(syncCalls(server.requests)).toBe(1);
+    server.onRequest = async (path) => {
+      if (path !== "GET /sync") return;
+      server.onRequest = null;
+      scheduler.requestForUpdate();
+    };
+    await vi.advanceTimersByTimeAsync(1);
+    expect(syncCalls(server.requests)).toBe(2);
+    expect(scheduler.status.error).toBeNull();
+
+    await vi.advanceTimersByTimeAsync(WRITE_DEBOUNCE_MS);
+    expect(syncCalls(server.requests)).toBe(3);
+  });
+
   test("保存の拒否を、後続の同期が失敗しても通知して保持する", async () => {
     const { server, core, scheduler } = await scheduled();
     server.maxSavedPages = 0;

@@ -18,9 +18,16 @@ afterEach(() => {
 });
 
 /** テストごとの名前空間で、偽の sendo と、タブを開く関数を用意する */
-function world() {
-  const namespace = `test-${crypto.randomUUID()}`;
+function world(updates = false) {
+  const namespace = `test-${crypto.randomUUID()}${updates ? ":updates" : ""}`;
   const server = new FakeSendo();
+  server.syncUpdates = updates;
+  const connections: string[] = [];
+  if (updates) {
+    const channel = new BroadcastChannel(`${namespace}:updates`);
+    channel.onmessage = ({ data }: MessageEvent<string>) => connections.push(data);
+    cleanups.push(() => channel.close());
+  }
   cleanups.push(serveFakeSendo(server, `${namespace}:fake-sendo`));
   /** タブを開く。"failing" なら、DB を開けないワーカーにする */
   const open = (kind: "ok" | "failing" = "ok"): Tab => {
@@ -47,7 +54,7 @@ function world() {
     server.signInAs();
     expect(await tab.client.restoreSession()).toBe(true);
   };
-  return { server, open, signIn };
+  return { server, open, signIn, connections };
 }
 
 describe("1 つのタブ", () => {
@@ -156,6 +163,31 @@ describe("複数のタブ", () => {
     await second.client.setRead(article.id, true);
     await second.client.syncNow();
     expect(server.inbox.get(article.id)?.readAt).not.toBeNull();
+  });
+
+  test("代表だけが通知に接続し、次の代表も接続時に差分を取る", async () => {
+    const { server, open, signIn, connections } = world(true);
+    const first = open();
+    await signIn(first);
+
+    const syncRequests = () =>
+      server.requests.filter((request) => request.startsWith("GET /sync?")).length;
+    await vi.waitFor(() => {
+      expect(connections).toHaveLength(1);
+      expect(syncRequests()).toBeGreaterThanOrEqual(2);
+    });
+    const second = open();
+    expect(await second.client.isSignedIn()).toBe(true);
+    expect(connections).toHaveLength(1);
+
+    const before = syncRequests();
+    first.worker.terminate();
+    await vi.waitFor(() => {
+      expect(connections).toHaveLength(2);
+      expect(syncRequests()).toBeGreaterThanOrEqual(before + 2);
+    });
+    expect(connections[0]).toMatch(/\/api\/v1\/sync\/updates$/);
+    expect(connections[1]).toBe(connections[0]);
   });
 
   test("3 つのタブで代表が 2 回入れ替わっても、どのタブからも使える", async () => {

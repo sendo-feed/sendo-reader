@@ -57,6 +57,7 @@ export class SyncScheduler {
   #running: Promise<void> | null = null;
   /** 走っている間に、もう一度同期してほしいと頼まれた */
   #again = false;
+  #updateRequested = false;
   #failures = 0;
   #stopped = false;
   #status: SyncStatus;
@@ -108,6 +109,16 @@ export class SyncScheduler {
     void this.#refreshPending();
   }
 
+  /** サーバーの通知をまとめて取り込み、失敗後の待機は短くしない。 */
+  requestForUpdate(): void {
+    if (this.#running !== null) {
+      this.#updateRequested = true;
+      return;
+    }
+    if (this.#failures > 0 || this.#status.error === "unauthorized") return;
+    this.#schedule(WRITE_DEBOUNCE_MS);
+  }
+
   /**
    * 今すぐ同期し、終わるまで待つ（画面で「今すぐ同期」を押したとき）。走っている同期があれば
    * その終わりを待ってから、もう一度最初から回す（走っている同期は、そのあとに積んだ操作を
@@ -154,9 +165,13 @@ export class SyncScheduler {
     }
     this.#running = this.#runOnce().finally(() => {
       this.#running = null;
+      const updateRequested = this.#updateRequested;
+      this.#updateRequested = false;
       if (this.#again) {
         this.#again = false;
         this.#schedule(0);
+      } else if (updateRequested) {
+        this.requestForUpdate();
       }
     });
     return this.#running;

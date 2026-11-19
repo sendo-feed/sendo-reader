@@ -15,7 +15,7 @@ sendo-reader は、フィード集約サーバー [Sendo](https://github.com/sen
 
 ## 必要なもの
 
-- Node.js 22.12 以上（CI は [.node-version](.node-version) のバージョンで動かす）
+- Node.js 22.21 以上の 22 系、または 24.9 以上（CI は [.node-version](.node-version) のバージョンで動かす）
 - pnpm（バージョンは [package.json](package.json) の `packageManager` で固定している）
 - 手元で動かす [Sendo](https://github.com/sendo-feed/sendo)（画面から Sendo の API を呼ぶため）
 

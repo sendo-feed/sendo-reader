@@ -8,7 +8,7 @@ import {
   IMAGE_CACHE_URL_PATTERN,
 } from "../../packages/core/src/web/image-cache.ts";
 import { securityHeaders } from "./security-headers.ts";
-import { SENDO_NAVIGATION_DENYLIST } from "./sendo-paths.ts";
+import { SENDO_NAVIGATION_DENYLIST, SYNC_UPDATES_PATH } from "./sendo-paths.ts";
 
 /**
  * 手元の dev サーバーと preview にヘッダーを付ける。本番は、reader のコンテナのサーバーが同じものを付ける
@@ -170,8 +170,11 @@ export default defineConfig({
     // 手元では、本番の reader のコンテナのサーバーと同じパス（sendo-paths.ts）を、sendo の pnpm dev
     // （ポート 8787）に中継する（docs/decisions/ui.md の 4）。^ で始まるキーは、Vite が正規表現として
     // パスとクエリに当てる
-    proxy: Object.fromEntries(
-      SENDO_NAVIGATION_DENYLIST.map((pattern) => [pattern.source, { target: SENDO_DEV_URL }]),
-    ),
+    proxy: {
+      [`^${SYNC_UPDATES_PATH}(?:\\?|$)`]: { target: SENDO_DEV_URL, ws: true },
+      ...Object.fromEntries(
+        SENDO_NAVIGATION_DENYLIST.map((pattern) => [pattern.source, { target: SENDO_DEV_URL }]),
+      ),
+    },
   },
 });

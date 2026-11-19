@@ -144,6 +144,80 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/sync/updates": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 受信箱の更新を WebSocket で受け取る
+         * @description 同じオリジンからセッションのクッキーで接続する。受信箱が変わると {"type":"sync_required"} が届くので、最後のカーソルから差分を取る。初回の接続時と再接続時にも差分を取る。
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description WebSocket 接続を開始した */
+                101: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description 切り替えが必要か、ハンドシェイクの形式が不正。通常の HTTP で受けた場合は本文なし */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/html": string;
+                    };
+                };
+                /** @description 有効なブラウザのセッションが必要 */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description 公開オリジンと一致しないか、公開オリジンの設定が不正 */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description WebSocket の接続数の上限に達した */
+                429: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description サーバーは終了処理中 */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/mcp-icon.png": {
         parameters: {
             query?: never;
@@ -2264,6 +2338,8 @@ export interface components {
             languageDetection: boolean;
             /** @description 記事のページから本文を抜けるか（GET /articles/{id}/content?source=page）。常に true */
             pageContent: boolean;
+            /** @description Sendo が WebSocket 通知に対応しているか（GET /sync/updates）。対応前の Sendo はこの項目を返さない */
+            syncUpdates: boolean;
         };
         DiscordIntegration: {
             available: boolean;

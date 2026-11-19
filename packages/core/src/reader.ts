@@ -230,6 +230,15 @@ export class ReaderCore {
     return this.#user === null ? null : { ...this.#user };
   }
 
+  /** ログアウトやユーザー変更に合わせて、ワーカーの通信を止める。 */
+  get sessionSignal(): AbortSignal {
+    return this.#session.signal;
+  }
+
+  syncUpdatesAvailable(signal: AbortSignal): Promise<boolean> {
+    return this.#api.syncUpdatesAvailable(signal);
+  }
+
   /**
    * 起動したときに呼ぶ。手元にユーザーがいれば、ネットワークを待たずに true を返す（sendo の
    * セッションは、送る前に確かめる）。いなければ sendo のセッションを見て、ログインしていれば

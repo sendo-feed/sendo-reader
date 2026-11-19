@@ -17,6 +17,7 @@ import {
   type WorkerMessage,
   WRITE_METHODS,
 } from "./protocol";
+import { startSyncUpdates } from "./sync-updates";
 
 export interface ReaderWorkerOptions {
   /** DB の名前、代表を決めるロックの名前、タブの間のチャンネルの名前の元。既定は "sendo-reader" */
@@ -184,17 +185,40 @@ export function runReaderWorker(options: ReaderWorkerOptions = {}): void {
       opened = null;
       throw error;
     });
+    const baseUrl = options.baseUrl ?? "/api/v1";
     const core = await ReaderCore.open({
       db,
-      baseUrl: options.baseUrl ?? "/api/v1",
+      baseUrl,
       ...(options.fetch === undefined ? {} : { fetch: options.fetch }),
       // 手元の DB を消すとき（ログアウト、ユーザーの切り替え）に、画像のキャッシュも消す
       onDataCleared: clearImageCache,
       // 同期のあとに、未読の新しい記事の本文を取っておく（オフラインでも読めるように）
       prefetchContents: DEFAULT_PREFETCH_CONTENTS,
     });
+    let updates: { session: AbortSignal; stop(): void } | undefined;
+    let syncing = false;
     const scheduler = new SyncScheduler(core, {
       onStatus: (status: SyncStatus) => {
+        const synced = syncing && !status.syncing && status.error === null;
+        syncing = status.syncing;
+        const signedIn = status.signedIn && status.error !== "unauthorized";
+        const session = core.sessionSignal;
+        if (updates && (!signedIn || updates.session !== session)) {
+          updates.stop();
+          updates = undefined;
+        }
+        if (signedIn && synced && !updates) {
+          updates = {
+            session,
+            stop: startSyncUpdates({
+              baseUrl,
+              session,
+              available: (signal) => core.syncUpdatesAvailable(signal),
+              onOpen: () => scheduler.requestForUpdate(),
+              onUpdate: () => scheduler.requestForUpdate(),
+            }),
+          };
+        }
         toTab({ type: "status", status });
         toPeers({ type: "status", status });
       },
