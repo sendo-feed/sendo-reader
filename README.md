@@ -112,7 +112,7 @@ pnpm run deploy
 
 上流の CI が作ったイメージ（`ghcr.io/sendo-feed/sendo-reader`）を、Sendo のコンテナ版と同じ `compose.yaml` で動かします。fork もビルドも要りません。手順は [Sendo の README](https://github.com/sendo-feed/sendo#コンテナ版で動かす) にあります（[決定](docs/decisions/container.md)）。
 
-- 外に出すのは reader のコンテナだけです。reader のコンテナが画面を返し、Sendo のパス（`/api`、`/mcp`、OAuth、Google Reader API など）を、compose の中の Sendo に中継します。外からは reader のオリジン 1 つに見えます
+- 外に出すのは reader のコンテナだけです。reader のコンテナが画面を返し、Sendo のパス（`/api`、`/mcp`、OAuth、Google Reader API など）を、compose の中の Sendo に中継します。reader の画面と Sendo の API・認証は reader のオリジン 1 つで使えます
 - Sendo の `PUBLIC_URL` と `READER_URL` には、どちらも reader のオリジン（例：`https://reader.example.com`）を入れます。Google のリダイレクト URI、リーダーアプリのサーバー、MCP の URL も、このオリジンにします
 - TLS は、手前に置くリバースプロキシや Cloudflare Tunnel で終えます。コンテナは HTTP（既定はポート 8080）だけを受けます
 
