@@ -164,6 +164,9 @@ test("X の引用は投稿リンクを表示し、設定した隔離フレーム
   await routeFakeSendo(context, server);
   const headers = await readFile(new URL("../dist/_headers", import.meta.url), "utf8");
   const setting = embedOriginFromHeaders(headers);
+  if (process.env.SENDO_EXPECT_X_EMBED_ORIGIN !== undefined) {
+    expect(setting).toBe(process.env.SENDO_EXPECT_X_EMBED_ORIGIN);
+  }
   const embed = setting ? new URL(setting) : null;
   let waitForWidget: Promise<void> | undefined;
   if (embed) {

@@ -296,7 +296,15 @@
       );
       const pending = preceding.filter((post) => post.getAttribute("data-x-embed") === "waiting");
       for (const post of pending) post.dispatchEvent(new Event("sendo:open-x-post"));
-      if (preceding.length === 0 || (pending.length === 0 && offset >= top - 1)) stop();
+      if (preceding.length === 0 || (pending.length === 0 && offset >= top - 1)) {
+        stop();
+      } else if (pending.length === 0) {
+        // すべての読み込みが終わっても、メディアであとから高さが変わることがある。
+        restoreTimer ??= setTimeout(stop, 15_000);
+      } else {
+        clearTimeout(restoreTimer);
+        restoreTimer = undefined;
+      }
     };
 
     void tick().then(() => {
@@ -316,7 +324,6 @@
         attributes: true,
         attributeFilter: ["data-x-embed"],
       });
-      restoreTimer = setTimeout(stop, 30_000);
       document.addEventListener(
         "scroll",
         (event) => {
