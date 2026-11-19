@@ -297,18 +297,28 @@
       const viewportTop = articleViewportTop();
       let top = saved.top;
       const anchorPosts = new Set<Element>();
-      const requiredSummaries = new Set<Element>();
+      const requiredPosts = new Set<Element>();
       if (saved.anchor !== undefined && saved.anchor.source === content?.source) {
         const body = element.querySelector(".body");
         const { kind, path } = saved.anchor;
         let target: Element | undefined;
+        let anchorOffset = saved.anchor.offset;
         if (kind === undefined) {
           target = body ?? undefined;
           for (const index of path) target = target?.children[index];
         } else {
-          const node = body?.querySelector(`[data-content-node="${path.join(".")}"]`);
-          target = node ?? undefined;
-          if (kind !== "content") {
+          const node = body?.querySelector(`[data-content-node="${path.join(".")}"]`) ?? undefined;
+          target = node;
+          if (kind === "x-widget" && node !== undefined) {
+            const widget = node.querySelector(":scope > div > iframe[data-x-widget]");
+            const height = widget?.getBoundingClientRect().height ?? 0;
+            if (node.matches("[data-x-embed]")) {
+              anchorPosts.add(node);
+              if (node.getAttribute("data-x-embed") === "waiting") requiredPosts.add(node);
+            }
+            target = height > 0 ? (widget ?? node) : node;
+            anchorOffset = Math.max(anchorOffset, Math.min(0, 1 - height));
+          } else if (kind === "quote-summary" || kind === "quote-body") {
             const quote = node?.querySelector(":scope > details[data-x-quote]");
             target =
               (kind === "quote-summary" ? quote?.querySelector(":scope > summary") : quote) ??
@@ -329,16 +339,13 @@
               if (!quote.open) quote.open = true;
               post?.dispatchEvent(new Event("sendo:restore-x-quote"));
             } else if (summary.hidden) {
-              if (post !== null) requiredSummaries.add(post);
+              if (post !== null) requiredPosts.add(post);
               target = post ?? quote;
             }
           }
           top = Math.max(
             0,
-            scrollTopOf(scroller) +
-              target.getBoundingClientRect().top -
-              viewportTop -
-              saved.anchor.offset,
+            scrollTopOf(scroller) + target.getBoundingClientRect().top - viewportTop - anchorOffset,
           );
         }
       }
@@ -354,8 +361,7 @@
       });
       const pending = preceding.filter(
         (post) =>
-          post.getAttribute("data-x-embed") === "waiting" &&
-          (clamped || requiredSummaries.has(post)),
+          post.getAttribute("data-x-embed") === "waiting" && (clamped || requiredPosts.has(post)),
       );
       const wanted = new Set(pending);
       for (const [post, queued] of queuedPosts) {
@@ -490,11 +496,19 @@
       const quote = hit.closest("details[data-x-quote]");
       // 文字の横の余白を指したときも、引用の外枠ではなく開いた引用の中の位置を記録する。
       const quoteBody = node === quote?.parentElement ? quote : null;
-      const target = summary ?? quoteBody ?? node;
+      const widget = hit.matches("iframe[data-x-widget]") ? hit : null;
+      const target = widget ?? summary ?? quoteBody ?? node;
       const anchor: NonNullable<ArticlePosition["anchor"]> = {
         source: content.source,
         path: node.dataset.contentNode.split(".").map(Number),
-        kind: summary !== null ? "quote-summary" : quoteBody !== null ? "quote-body" : "content",
+        kind:
+          widget !== null
+            ? "x-widget"
+            : summary !== null
+              ? "quote-summary"
+              : quoteBody !== null
+                ? "quote-body"
+                : "content",
         offset: target.getBoundingClientRect().top - viewportTop,
       };
       if (hit === target && hit.matches("div") && hit.querySelector("[data-content-node]")) {

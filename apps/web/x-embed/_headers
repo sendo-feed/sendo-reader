@@ -1,5 +1,6 @@
 /*
   Content-Security-Policy: default-src 'none'; script-src 'self' https://platform.twitter.com; frame-src https://platform.twitter.com; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'
   Referrer-Policy: no-referrer
+  Cache-Control: no-cache
   X-Content-Type-Options: nosniff
   Permissions-Policy: camera=(), microphone=(), geolocation=(), payment=(), usb=()

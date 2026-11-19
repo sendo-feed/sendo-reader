@@ -28,30 +28,27 @@
   let active = $state(false);
   let settled = $state(false);
   let request: XEmbedRequest | undefined;
+  let inView = false;
+  let restoreSignal: AbortSignal | undefined;
   let timer: ReturnType<typeof setTimeout> | undefined;
   let height = $state(0);
   const src = $derived(
     active && separateHost ? `${origin}/#${new URL(href).pathname.split("/").at(-1)}` : "",
   );
 
-  function requestLoad(inView: boolean, restoreSignal?: AbortSignal) {
+  function updateRequest() {
+    const forRestore = restoreSignal !== undefined && !restoreSignal.aborted;
     if (request !== undefined) {
       if (inView) request.prioritize();
+      else if (forRestore) request.deprioritize();
+      else if (request.cancelPending()) request = undefined;
       return;
     }
-    if (restoreSignal?.aborted) return;
-    const queued = enqueue(() => {
+    if (!inView && !forRestore) return;
+    request = enqueue(() => {
       active = true;
       timer = setTimeout(() => finish(0), 15_000);
     }, inView);
-    request = queued;
-    restoreSignal?.addEventListener(
-      "abort",
-      () => {
-        if (request === queued && queued.cancelPendingRestore()) request = undefined;
-      },
-      { once: true },
-    );
   }
 
   function finish(value: number) {
@@ -71,22 +68,38 @@
   $effect(() => {
     const element = block;
     // 履歴から開き直すときは、先頭に一瞬見える投稿を読み込まない。
-    if (element === undefined || !separateHost || awaitingPosition) return;
+    if (element === undefined || !separateHost || awaitingPosition || active || settled) return;
     const observer = new IntersectionObserver((entries) => {
-      if (!awaitingPosition && entries.some((entry) => entry.isIntersecting)) {
-        observer.disconnect();
-        requestLoad(true);
-      }
+      if (awaitingPosition || active || settled) return;
+      inView = entries.at(-1)?.isIntersecting ?? false;
+      updateRequest();
     });
     observer.observe(element);
-    return () => observer.disconnect();
+    return () => {
+      observer.disconnect();
+      inView = false;
+      if (awaitingPosition) updateRequest();
+    };
   });
 
   $effect(() => {
     const element = block;
     if (element === undefined || !separateHost) return;
-    const loadForRestore = (event: Event) =>
-      requestLoad(false, (event as CustomEvent<AbortSignal>).detail);
+    const loadForRestore = (event: Event) => {
+      const signal = (event as CustomEvent<AbortSignal>).detail;
+      if (signal.aborted) return;
+      restoreSignal = signal;
+      signal.addEventListener(
+        "abort",
+        () => {
+          if (restoreSignal !== signal) return;
+          restoreSignal = undefined;
+          updateRequest();
+        },
+        { once: true },
+      );
+      updateRequest();
+    };
     const keepQuoteOpen = () => {
       preserveQuote = height === 0;
       quoteOpen = true;
@@ -133,6 +146,7 @@
         bind:this={frame}
         {src}
         {height}
+        data-x-widget
         title="X の投稿"
         sandbox="allow-scripts allow-same-origin"
         referrerpolicy="no-referrer"

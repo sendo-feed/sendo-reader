@@ -28,7 +28,7 @@ test("復元待ちより、表示された X の投稿を先に読み込む", ()
   expect(started.at(-1)).toBe("restore-4");
 });
 
-test("復元を中断すると、未開始の画面外の投稿だけを取り消す", () => {
+test("画面外に出た投稿は、復元に必要な場合だけ待ち行列に残す", () => {
   const enqueue = createXEmbedQueue();
   const started: string[] = [];
   const finish = new Map<string, () => void>();
@@ -40,14 +40,16 @@ test("復元を中断すると、未開始の画面外の投稿だけを取り�
   const active = add("active");
   add("second");
   add("third");
-  const offscreen = add("offscreen");
-  const promoted = add("visible");
+  enqueue((done) => finish.set("visible", done), true);
+  const offscreen = enqueue(() => started.push("offscreen"), true);
+  const promoted = add("restore");
   promoted.prioritize();
+  promoted.deprioritize();
 
-  expect(offscreen.cancelPendingRestore()).toBe(true);
-  expect(active.cancelPendingRestore()).toBe(false);
-  expect(promoted.cancelPendingRestore()).toBe(false);
-  finish.get("visible")?.();
+  expect(offscreen.cancelPending()).toBe(true);
+  expect(active.cancelPending()).toBe(false);
   finish.get("active")?.();
-  expect(started).toEqual(["active", "second", "third", "visible"]);
+  expect(started).toEqual(["active", "second", "third"]);
+  finish.get("visible")?.();
+  expect(started).toEqual(["active", "second", "third", "restore"]);
 });

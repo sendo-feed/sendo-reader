@@ -194,13 +194,20 @@ for (const long of [false, true]) {
     if (embed) {
       const assets = new URL("../x-embed/", import.meta.url);
       const rawHeaders = await readFile(new URL("_headers", assets), "utf8");
-      const csp = /^ {2}Content-Security-Policy: (.+)$/m.exec(rawHeaders)?.[1] ?? "";
+      const embedHeaders = Object.fromEntries(
+        Array.from(rawHeaders.matchAll(/^ {2}([^:]+): (.+)$/gm), ([, name, value]) => [
+          name,
+          value,
+        ]),
+      );
+      expect(embedHeaders["Cache-Control"]).toBe("no-cache");
+      expect(embedHeaders["Referrer-Policy"]).toBe("no-referrer");
       await context.route(`${embed.origin}/**`, async (route) => {
         const script = new URL(route.request().url()).pathname === "/embed.js";
         await route.fulfill({
           contentType: script ? "text/javascript" : "text/html",
           body: await readFile(new URL(script ? "embed.js" : "index.html", assets), "utf8"),
-          headers: { "content-security-policy": csp },
+          headers: embedHeaders,
         });
       });
       await context.route("https://platform.twitter.com/widgets.js", async (route) => {
@@ -290,6 +297,37 @@ for (const long of [false, true]) {
         await expect(frame).toHaveAttribute("height", "1216");
         await expect(view.getByText("記事中の引用", { exact: true })).toBeVisible();
         await expect(view.getByRole("link", { name: "引用内リンク" })).toBeHidden();
+
+        const widgetOffset = 750;
+        const widgetTop = await frame.evaluate((element, offset) => {
+          const pane = element.closest<HTMLElement>(".article-view");
+          const toolbar = pane?.querySelector(".toolbar");
+          if (!pane || !toolbar) throw new Error("記事のスクロール領域がない");
+          pane.scrollTop +=
+            element.getBoundingClientRect().top - toolbar.getBoundingClientRect().bottom + offset;
+          return pane.scrollTop;
+        }, widgetOffset);
+        await page.waitForFunction(
+          (top) =>
+            history.state?.article?.top === top &&
+            history.state.article.anchor?.kind === "x-widget",
+          widgetTop,
+        );
+        await page.reload({ waitUntil: "domcontentloaded" });
+        await expect(frame).toHaveAttribute("height", "1216");
+        await expect
+          .poll(() =>
+            frame.evaluate((element, offset) => {
+              const toolbar = element.closest(".article-view")?.querySelector(".toolbar");
+              if (!toolbar) throw new Error("記事のツールバーがない");
+              return Math.abs(
+                element.getBoundingClientRect().top -
+                  toolbar.getBoundingClientRect().bottom +
+                  offset,
+              );
+            }, widgetOffset),
+          )
+          .toBeLessThan(2);
 
         const summary = view.getByText("記事中の引用", { exact: true });
         const summaryTop = await summary.evaluate((element) => {
