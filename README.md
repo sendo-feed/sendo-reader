@@ -41,7 +41,7 @@ pnpm dev
 
 `http://localhost:5173` で画面が開きます。`/api` へのリクエストは、Vite の dev サーバーが `http://localhost:8787` の Sendo に中継します。最初の画面で「Google でログイン」を押すと、Sendo の Google のログインを通って戻ってきます。
 
-ログインするには、手元の Sendo に Google の OAuth クライアントと、ログインできるメールを設定しておきます（[Sendo の README](https://github.com/sendo-feed/sendo#ブラウザでログインするgoogle)）。「承認済みのリダイレクト URI」には `http://localhost:5173/api/v1/auth/google/callback` を登録します。
+ログインするには、手元の Sendo に Google の OAuth クライアントと、ログインできるメールを設定しておきます（[旧版の Sendo の README](https://github.com/sendo-feed/sendo/blob/94181bb/README.md#ブラウザでログインするgoogle)）。「承認済みのリダイレクト URI」には `http://localhost:5173/api/v1/auth/google/callback` を登録します。
 
 ## コマンド
 
@@ -76,7 +76,7 @@ pnpm dev
 
 ### 初めてのデプロイ
 
-1. GitHub で `sendo-feed/sendo-reader` を自分のアカウントに fork し、ビルド対象のブランチを旧 Sendo Worker と互換性を確認した reader のコミットに固定する
+1. GitHub で `sendo-feed/sendo-reader` を自分のアカウントに fork し、fork の `main` を、旧 Sendo Worker と互換性を確認した reader のコミットに固定する
 2. Cloudflare の画面で、Workers & Pages →「作成」→「リポジトリをインポート」を選び、fork を選ぶ。Cloudflare の GitHub App の「Repository access」に、この fork を入れる
    - Sendo の fork だけを入れていたら、GitHub の Settings → Applications → Cloudflare Workers and Pages で足す。入れ忘れると、画面から始めたビルドは動くのに、push してもビルドが始まらない
 3. 次のように入れてデプロイする
@@ -90,7 +90,7 @@ pnpm dev
 
 4. Worker の「設定」→「ビルド」で、「プレビュービルドの有効化」をオフにする（main 以外のブランチのビルドを止める）。リポジトリの一番上には wrangler の設定がないので、既定のコマンドでは失敗する
 5. `https://sendo-reader.<自分のサブドメイン>.workers.dev` を開き、Google でログインする
-   - Sendo の Google の OAuth クライアントの「承認済みのリダイレクト URI」に、`https://sendo-reader.<自分のサブドメイン>.workers.dev/api/v1/auth/google/callback` を入れておく（[Sendo の README](https://github.com/sendo-feed/sendo#ブラウザでログインするgoogle)）
+   - Sendo の Google の OAuth クライアントの「承認済みのリダイレクト URI」に、`https://sendo-reader.<自分のサブドメイン>.workers.dev/api/v1/auth/google/callback` を入れておく（[旧版の Sendo の README](https://github.com/sendo-feed/sendo/blob/94181bb/README.md#ブラウザでログインするgoogle)）
 
 ### 更新する
 
@@ -98,7 +98,7 @@ pnpm dev
 
 ### 手元からデプロイする
 
-Workers Builds を使わずに、手元からもデプロイできます。
+手元から再配備するときは、Workers Builds に使う固定済みのコミットをチェックアウトしてから実行します。
 
 ```sh
 pnpm --filter @sendo-reader/web exec wrangler login   # 最初に 1 回
