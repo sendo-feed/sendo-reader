@@ -310,13 +310,11 @@
       );
       const pending = preceding.filter((post) => post.getAttribute("data-x-embed") === "waiting");
       for (const post of pending) post.dispatchEvent(new Event("sendo:open-x-post"));
-      clearTimeout(restoreTimer);
-      restoreTimer = undefined;
       if (preceding.length === 0) {
         stop();
-      } else if (pending.length === 0) {
-        // 座標が合ったあとも、画像などが展開する間は高さの変化を追う。
-        restoreTimer = setTimeout(stop, offset >= top - 1 ? 600 : 15_000);
+      } else if (pending.length === 0 && restoreTimer === undefined) {
+        // 最初の高さの通知のあとに画像などが展開する間も、同じ段落を追う。
+        restoreTimer = setTimeout(stop, 15_000);
       }
     };
 
@@ -351,13 +349,17 @@
         },
         { capture: true, signal: cancel.signal },
       );
-      for (const event of ["wheel", "touchmove"]) {
-        window.addEventListener(event, stop, { capture: true, signal: cancel.signal });
+      for (const type of ["wheel", "touchmove"]) {
+        scroller?.addEventListener(type, stop, { capture: true, signal: cancel.signal });
       }
       window.addEventListener(
         "keydown",
         (event) => {
+          const target = event.target;
+          const inArticle = target instanceof Node && scroller?.contains(target);
+          const onPage = layout.pageScroll && target === document.body;
           if (
+            (inArticle || onPage) &&
             ["ArrowDown", "ArrowUp", "PageDown", "PageUp", "Home", "End", " "].includes(event.key)
           ) {
             stop();

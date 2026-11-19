@@ -136,6 +136,18 @@ sendo の変更によって reader の検査が落ちる場合は、エラーに
 pnpm --dir ../sendo exec tsx ../sendo-reader/scripts/check-sendo-paths.ts ../sendo
 ```
 
+### X の投稿の埋め込み
+
+`apps/web/x-embed/` を reader とホスト名が異なる HTTPS オリジンのルートで配信する。Cloudflare Pages など、同梱の `_headers` を適用できる静的ホスティングを使う。埋め込み用のオリジンには reader の API や認証を置かない。
+
+reader をビルドするときに `SENDO_X_EMBED_ORIGIN` でそのオリジンを指定する。Docker では次のようにイメージを作る。
+
+```sh
+docker build --build-arg SENDO_X_EMBED_ORIGIN=https://embed.example.com -t sendo-reader:x-embeds .
+```
+
+配信先の設定があり、対象の引用から投稿が一意に決まると、記事を開いたときに X の公式ウィジェットが表示されます。未設定の場合や読み込めない場合は記事中の引用と投稿リンクが表示されます。公式ウィジェットの表示後も、その下から記事中の引用を開けます。
+
 ## ディレクトリ構成
 
 ```text
@@ -170,15 +182,3 @@ sendo-reader/
 ## ライセンス
 
 未定です。決まるまでは、すべての権利を留保します。
-
-## X の投稿の埋め込み
-
-`apps/web/x-embed/` を reader とホスト名が異なる HTTPS オリジンのルートで配信する。Cloudflare Pages など、同梱の `_headers` を適用できる静的ホスティングを使う。埋め込み用のオリジンには reader の API や認証を置かない。
-
-reader をビルドするときに `SENDO_X_EMBED_ORIGIN` でそのオリジンを指定する。Docker では次のようにイメージを作る。
-
-```sh
-docker build --build-arg SENDO_X_EMBED_ORIGIN=https://embed.example.com -t sendo-reader:x-embeds .
-```
-
-設定した reader は、記事を開いたときに X の公式ウィジェットを自動で読み込む。未設定の reader は記事内の引用と投稿リンクを表示する。

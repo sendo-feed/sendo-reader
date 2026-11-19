@@ -18,6 +18,8 @@
     new URL(origin).hostname.replace(/\.$/, "") !== window.location.hostname.replace(/\.$/, "");
   let block = $state<HTMLElement>();
   let frame = $state<HTMLIFrameElement>();
+  let fallback = $state<HTMLDetailsElement>();
+  let quoteOpen = $state(true);
   let active = $state(false);
   let settled = $state(false);
   let request: XEmbedRequest | undefined;
@@ -39,6 +41,8 @@
   }
 
   function finish(value: number) {
+    if (value === 0) quoteOpen = true;
+    else if (height === 0) quoteOpen = fallback?.contains(document.activeElement) ?? false;
     height = value;
     if (value === 0) active = false;
     if (settled) return;
@@ -102,9 +106,10 @@
       referrerpolicy="no-referrer"
     ></iframe>
   {/if}
-  {#if height === 0}
+  <details bind:this={fallback} bind:open={quoteOpen}>
+    <summary hidden={height === 0}>記事中の引用</summary>
     {@render children()}
-  {/if}
+  </details>
   <a {href} target="_blank" rel="noopener noreferrer nofollow">X で開く</a>
 </blockquote>
 

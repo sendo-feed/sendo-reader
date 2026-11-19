@@ -160,7 +160,7 @@ for (const long of [false, true]) {
       title: "X の投稿を引用した記事",
       summary: "記事の要約",
       content:
-        '<p>投稿の紹介</p><blockquote data-embed="x"><p></p> — (@user) <a href="https://twitter.com/user/status/123"></a></blockquote><p>記事の続き</p>' +
+        '<p>投稿の紹介</p><blockquote data-embed="x"><p><a href="https://example.com">引用内リンク</a></p> — (@user) <a href="https://twitter.com/user/status/123"></a></blockquote><p>記事の続き</p>' +
         (long ? Array.from({ length: 50 }, (_, i) => `<p>長い記事の段落 ${i}</p>`).join("") : ""),
     });
     await routeFakeSendo(context, server);
@@ -170,8 +170,8 @@ for (const long of [false, true]) {
       expect(setting).toBe(process.env.SENDO_EXPECT_X_EMBED_ORIGIN);
     }
     const embed = setting ? new URL(setting) : null;
-    const skippedWidget = long && embed ? Promise.withResolvers<void>() : undefined;
-    let waitForWidget = skippedWidget?.promise;
+    const initialWidget = embed ? Promise.withResolvers<void>() : undefined;
+    let waitForWidget = initialWidget?.promise;
     if (embed) {
       const assets = new URL("../x-embed/", import.meta.url);
       const rawHeaders = await readFile(new URL("_headers", assets), "utf8");
@@ -194,7 +194,7 @@ for (const long of [false, true]) {
               if (id !== "123" || options.dnt !== true) return;
               const post = document.createElement("section");
               post.style.height = "50px";
-              setTimeout(() => { post.style.height = "1200px"; }, 200);
+              setTimeout(() => { post.style.height = "1200px"; }, 1100);
               post.textContent = "公式埋め込みの代わり";
               container.append(post);
               return post;
@@ -213,13 +213,13 @@ for (const long of [false, true]) {
       "href",
       "https://x.com/user/status/123",
     );
-    await expect(view.locator("blockquote a")).toHaveCount(1);
+    await expect(view.locator("blockquote a[href$='/status/123']")).toHaveCount(1);
     const frame = view.locator("iframe");
     if (embed && embed.hostname !== new URL(page.url()).hostname) {
       await expect(frame).toHaveAttribute("src", `${embed.origin}/#123`);
       await expect(frame).toHaveAttribute("sandbox", "allow-scripts allow-same-origin");
       await expect(frame).toHaveAttribute("referrerpolicy", "no-referrer");
-      if (skippedWidget) {
+      if (long) {
         const paragraph = view.getByText("長い記事の段落 12", { exact: true });
         try {
           await expect(frame).toHaveAttribute("height", "0");
@@ -238,10 +238,13 @@ for (const long of [false, true]) {
           );
           await page.reload({ waitUntil: "domcontentloaded" });
           await expect(frame).toHaveAttribute("height", "0");
+          await page.locator(".article-list").dispatchEvent("wheel", { deltaY: 100 });
         } finally {
-          skippedWidget.resolve();
+          initialWidget?.resolve();
         }
         await expect(frame).toHaveAttribute("height", "1216");
+        await expect(view.getByText("記事中の引用", { exact: true })).toBeVisible();
+        await expect(view.getByRole("link", { name: "引用内リンク" })).toBeHidden();
         await expect
           .poll(() =>
             paragraph.evaluate((element) => {
@@ -254,7 +257,16 @@ for (const long of [false, true]) {
           )
           .toBeLessThan(2);
       } else {
+        const fallbackLink = view.getByRole("link", { name: "引用内リンク" });
+        await fallbackLink.focus();
+        initialWidget?.resolve();
         await expect(frame).toHaveAttribute("height", "1216");
+        await expect(fallbackLink).toBeFocused();
+        const savedQuote = view.getByText("記事中の引用", { exact: true });
+        await savedQuote.click();
+        await expect(fallbackLink).toBeHidden();
+        await savedQuote.click();
+        await expect(fallbackLink).toBeVisible();
         await expect(frame.contentFrame().getByText("公式埋め込みの代わり")).toBeVisible();
         const top = 300;
         await view.evaluate((element, offset) => element.scrollTo({ top: offset }), top);
@@ -272,7 +284,7 @@ for (const long of [false, true]) {
         await expect.poll(() => view.evaluate((element) => element.scrollTop)).toBe(top);
       }
     } else {
-      skippedWidget?.resolve();
+      initialWidget?.resolve();
       await expect(frame).toHaveCount(0);
     }
   });

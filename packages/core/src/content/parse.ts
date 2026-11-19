@@ -72,7 +72,7 @@ function xPostUrl(href: string): string | undefined {
     url.username !== "" ||
     url.password !== "" ||
     !["x.com", "www.x.com", "twitter.com", "www.twitter.com"].includes(url.hostname) ||
-    !/^\/(?:[A-Za-z0-9_]{1,15}|i\/web)\/status\/[0-9]{1,20}\/?$/.test(url.pathname)
+    !/^\/[A-Za-z0-9_]{1,15}\/status\/[0-9]{1,20}\/?$/.test(url.pathname)
   ) {
     return undefined;
   }
@@ -213,8 +213,14 @@ export function parseContent(html: string): ContentNode[] {
   }
   // 公式の引用は、本文のあとに出典のユーザー名と投稿元へのリンクを置く。
   for (const quote of postQuotes) {
-    const posts = new Map<string, ContentElement[]>();
+    const posts = new Map<string, { url: string; links: ContentElement[] }>();
+    // 公式の引用は、空でも本文用の段落を出典より前に置く。
+    const bodyIndex = quote.children.findLastIndex(
+      (child) => typeof child !== "string" && child.tag === "p",
+    );
+    if (bodyIndex === -1) continue;
     for (const [index, child] of quote.children.entries()) {
+      if (index <= bodyIndex + 1) continue;
       if (typeof child === "string" || child.tag !== "a" || child.href === undefined) continue;
       const attribution = quote.children[index - 1];
       const handle =
@@ -224,17 +230,17 @@ export function parseContent(html: string): ContentNode[] {
       if (handle === undefined) continue;
       const post = xPostUrl(child.href);
       if (!post) continue;
-      const [, , , user, kind] = post.split("/");
-      if (kind !== "web" && user?.toLowerCase() !== handle.toLowerCase()) continue;
+      const [, , , user, , id] = post.split("/");
+      if (id === undefined || user?.toLowerCase() !== handle.toLowerCase()) continue;
 
-      const links = posts.get(post) ?? [];
-      links.push(child);
-      posts.set(post, links);
+      const candidate = posts.get(id) ?? { url: post, links: [] };
+      candidate.links.push(child);
+      posts.set(id, candidate);
     }
-    const candidate = posts.size === 1 ? posts.entries().next().value : undefined;
+    const candidate = posts.size === 1 ? posts.values().next().value : undefined;
     if (candidate !== undefined) {
-      const [post, links] = candidate;
-      quote.xPost = post;
+      const { url, links } = candidate;
+      quote.xPost = url;
       // 空の出典リンクだけは別に「X で開く」を出すため、Tab の操作対象を重ねない。
       const unnamed = new Set<ContentNode>(
         links.filter((link) => !hasVisibleContent(link.children)),

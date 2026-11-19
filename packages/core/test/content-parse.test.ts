@@ -45,16 +45,30 @@ describe("sendo が配る形の本文", () => {
     });
   });
 
-  test("アカウント名を含まない公式の投稿リンクも認識する", () => {
+  test("アカウント名を照合できない公式の投稿リンクは通常のリンクとして残す", () => {
     const [quote] = parseContent(
-      '<blockquote data-embed="x"><p>引用</p> — 表示名 (@user) <a href="https://x.com/i/web/status/123"></a></blockquote>',
+      '<blockquote data-embed="x"><p>引用</p> — 表示名 (@user) <a href="https://x.com/i/web/status/123">投稿</a></blockquote>',
     );
-    expect(quote).toMatchObject({ xPost: "https://x.com/i/web/status/123" });
+    expect(quote).not.toHaveProperty("xPost");
+    expect(quote).toMatchObject({
+      children: expect.arrayContaining([
+        expect.objectContaining({ href: "https://x.com/i/web/status/123" }),
+      ]),
+    });
+  });
+
+  test("照合できた同じ投稿への複数のリンクを一つの候補として扱う", () => {
+    const [quote] = parseContent(
+      '<blockquote data-embed="x"><p>引用</p> — (@user) <a href="https://twitter.com/user/status/123"></a> — (@User) <a href="https://x.com/User/status/123?ref=example"></a></blockquote>',
+    );
+    expect(quote).toMatchObject({ xPost: "https://x.com/user/status/123" });
   });
 
   test("引用本文にある X リンクは投稿元と見なさない", () => {
     for (const contents of [
       '<p>引用文 <a href="https://x.com/other/status/998">本文のリンク</a></p>',
+      '— (@user) <a href="https://x.com/user/status/123">冒頭のリンク</a><p>引用文</p>',
+      '<p>引用の前半</p> — (@user) <a href="https://x.com/user/status/123">途中のリンク</a><p>引用の後半</p>',
     ]) {
       const [quote] = parseContent(`<blockquote data-embed="x">${contents}</blockquote>`);
       expect(quote).not.toHaveProperty("xPost");
@@ -64,8 +78,8 @@ describe("sendo が配る形の本文", () => {
   test("出典がない・一致しない・複数ある引用は通常のリンクとして残す", () => {
     for (const body of [
       '<a href="https://x.com/user/status/123">言及した投稿</a>',
-      '— (@other) <a href="https://x.com/user/status/123">別の投稿</a>',
-      '— (@user) <a href="https://x.com/user/status/123">一つめ</a> — (@user) <a href="https://x.com/user/status/456">二つめ</a>',
+      '<p>引用</p> — (@other) <a href="https://x.com/user/status/123">別の投稿</a>',
+      '<p>引用</p> — (@user) <a href="https://x.com/user/status/123">一つめ</a> — (@user) <a href="https://x.com/user/status/456">二つめ</a>',
     ]) {
       const [quote] = parseContent(`<blockquote data-embed="x">${body}</blockquote>`);
       expect(quote).not.toHaveProperty("xPost");
@@ -84,7 +98,7 @@ describe("sendo が配る形の本文", () => {
       "https://x.com/intent/post",
     ]) {
       const [quote] = parseContent(
-        `<blockquote data-embed="x"> — (@user) <a href="${href}">リンク</a></blockquote>`,
+        `<blockquote data-embed="x"><p>引用</p> — (@user) <a href="${href}">リンク</a></blockquote>`,
       );
       expect(quote).not.toHaveProperty("xPost");
     }
