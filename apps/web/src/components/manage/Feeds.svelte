@@ -1,7 +1,8 @@
 <script lang="ts">
-  import { type Feed, type Folder, feedName } from "@sendo-reader/core";
+  import { type Feed, type FeedFetchTimes, type Folder, feedName } from "@sendo-reader/core";
   import { useReader } from "../../lib/context";
   import { describeError } from "../../lib/errors";
+  import { formatDateTime } from "../../lib/format";
   import Dialog from "../Dialog.svelte";
   import Icon from "../Icon.svelte";
   import RemoteImage from "../RemoteImage.svelte";
@@ -24,6 +25,9 @@
   let selectedId = $state<string | null>(null);
   let menuOpen = $state(false);
   let confirming = $state(false);
+  let fetchTimes = $state<FeedFetchTimes | null>(null);
+  let fetchTimesStatus = $state<"loading" | "ready" | "unavailable">("loading");
+  const userId = $derived(reader.user?.id);
   const selected = $derived(reader.feeds.find((feed) => feed.id === selectedId));
   const term = $derived(query.trim().toLowerCase());
   const matches = $derived(
@@ -48,6 +52,30 @@
 
   $effect(() => {
     if (selected === undefined) menuOpen = false;
+  });
+
+  $effect(() => {
+    const feedId = selectedId;
+    fetchTimes = null;
+    fetchTimesStatus = "loading";
+    if (!menuOpen || feedId === null || userId === undefined) return;
+    let active = true;
+    void (async () => {
+      try {
+        const cached = await reader.client.getFeedFetchTimes(feedId);
+        if (!active) return;
+        fetchTimes = cached;
+        const latest = await reader.client.refreshFeedFetchTimes(feedId);
+        if (!active) return;
+        if (latest !== null) fetchTimes = latest;
+        fetchTimesStatus = latest === null ? "unavailable" : "ready";
+      } catch {
+        if (active) fetchTimesStatus = "unavailable";
+      }
+    })();
+    return () => {
+      active = false;
+    };
   });
 
   function hostOf(feed: Feed): string {
@@ -106,6 +134,14 @@
   {#each reader.folders as folder (folder.id)}
     <option value={folder.id}>{folder.name}</option>
   {/each}
+{/snippet}
+
+{#snippet fetchTime(time: number | null)}
+  {#if time === null}
+    <span class="fetch-times-note">No record</span>
+  {:else}
+    <time datetime={new Date(time).toISOString()}>{formatDateTime(time)}</time>
+  {/if}
 {/snippet}
 
 <div class="groups">
@@ -217,6 +253,25 @@
       </div>
     {:else}
       <p class="url">{selected.url}</p>
+      {#if menuOpen}
+        {#if fetchTimes !== null}
+          <dl class="fetch-times">
+            <dt>Last checked</dt>
+            <dd>{@render fetchTime(fetchTimes.lastFetchedAt)}</dd>
+            <dt>Last successful fetch</dt>
+            <dd>{@render fetchTime(fetchTimes.lastSuccessfulFetchAt)}</dd>
+          </dl>
+        {:else if fetchTimesStatus === "loading"}
+          <p class="fetch-times-note" role="status">取得時刻を確認しています…</p>
+        {/if}
+        {#if fetchTimesStatus === "unavailable"}
+          <p class="fetch-times-note" role="status">
+            {fetchTimes === null
+              ? "取得時刻を確認できませんでした。"
+              : "取得時刻を更新できなかったため、前回の記録を表示しています。"}
+          </p>
+        {/if}
+      {/if}
       <label class="move-label" for="selected-feed-folder">Move to</label>
       <select
         id="selected-feed-folder"
@@ -358,6 +413,26 @@
 
   .url {
     overflow-wrap: anywhere;
+  }
+
+  .fetch-times {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 0.375rem 0.75rem;
+    font-size: 0.875rem;
+  }
+
+  .fetch-times dt,
+  .fetch-times-note {
+    color: var(--muted);
+  }
+
+  .fetch-times dd {
+    margin: 0;
+  }
+
+  .fetch-times-note {
+    font-size: 0.875rem;
   }
 
   .move-label {

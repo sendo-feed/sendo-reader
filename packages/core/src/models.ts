@@ -37,6 +37,13 @@ export function feedName(feed: Feed): string {
   return feed.displayName ?? feed.title ?? feed.url;
 }
 
+export interface FeedFetchTimes {
+  /** 失敗も含む、最後の取得試行の時刻 */
+  lastFetchedAt: number | null;
+  /** 304 も含む、最後に取得に成功した時刻 */
+  lastSuccessfulFetchAt: number | null;
+}
+
 export interface Article {
   id: string;
   feedId: string;

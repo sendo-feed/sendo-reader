@@ -32,6 +32,7 @@ describe("手元の DB のスキーマ", () => {
       "article_contents",
       "article_page_contents",
       "articles",
+      "feed_fetch_times",
       "feeds",
       "folders",
       "pending_ops",
