@@ -64,7 +64,7 @@ const NAMED: Record<string, string> = {
   nbsp: " ",
 };
 
-function xPostUrl(href: string): string | undefined {
+function xPostUrl(href: string, allowAnonymous = false): string | undefined {
   const url = new URL(href);
   if (
     url.protocol !== "https:" ||
@@ -72,7 +72,8 @@ function xPostUrl(href: string): string | undefined {
     url.username !== "" ||
     url.password !== "" ||
     !["x.com", "www.x.com", "twitter.com", "www.twitter.com"].includes(url.hostname) ||
-    !/^\/[A-Za-z0-9_]{1,15}\/status\/[0-9]{1,20}\/?$/.test(url.pathname)
+    (!/^\/[A-Za-z0-9_]{1,15}\/status\/[0-9]{1,20}\/?$/.test(url.pathname) &&
+      !(allowAnonymous && /^\/i\/web\/status\/[0-9]{1,20}\/?$/.test(url.pathname)))
   ) {
     return undefined;
   }
@@ -83,6 +84,7 @@ function xPostUrl(href: string): string | undefined {
 export function parseContent(html: string): ContentNode[] {
   const root: ContentNode[] = [];
   const postQuotes = new Set<ContentElement>();
+  const postLinks: ContentElement[] = [];
   /** 開いている要素（外から内へ） */
   const open: ContentElement[] = [];
   /** 中身ごと落としている要素と、その入れ子の数 */
@@ -196,6 +198,9 @@ export function parseContent(html: string): ContentNode[] {
       // 行き先のないリンクは、タグを落として中身だけ残す
       if (href === null) continue;
       element.href = href;
+      if (open.some((parent) => postQuotes.has(parent)) && xPostUrl(href, true) !== undefined) {
+        postLinks.push(element);
+      }
     } else if (name === "blockquote" && read.get("data-embed") === "x") {
       postQuotes.add(element);
     } else if (name === "td" || name === "th") {
@@ -268,6 +273,9 @@ export function parseContent(html: string): ContentNode[] {
       );
       quote.children = quote.children.filter((node) => !unnamed.has(node));
     }
+  }
+  for (const link of postLinks) {
+    if (!hasVisibleContent(link.children)) link.children = ["X で開く"];
   }
   return root;
 }

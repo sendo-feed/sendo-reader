@@ -22,51 +22,66 @@
   const enqueue = createXEmbedQueue();
 </script>
 
-{#snippet render(children: readonly ContentNode[])}
+{#snippet render(children: readonly ContentNode[], parentPath: string)}
   {#each children as node, index (index)}
+    {@const nodePath = `${parentPath}${index}`}
+    {@const childPath = `${nodePath}.`}
     {#if typeof node === "string"}
       {node}
     {:else if node.tag === "br"}
-      <br>
+      <br data-content-node={nodePath}>
     {:else if node.tag === "hr"}
-      <hr>
+      <hr data-content-node={nodePath}>
     {:else if node.tag === "img"}
       <RemoteImage
         src={node.src ?? null}
         alt={node.alt ?? ""}
         width={node.width}
         height={node.height}
+        {nodePath}
         inline
       />
     {:else if node.xPost !== undefined}
       {#key node.xPost}
-        <XPost href={node.xPost} {enqueue}> {@render render(node.children)} </XPost>
+        <XPost href={node.xPost} {enqueue} {nodePath}>
+          {@render render(node.children, childPath)}
+        </XPost>
       {/key}
     {:else if node.tag === "a"}
-      <a href={node.href} target="_blank" rel="noopener noreferrer nofollow"
-        >{@render render(node.children)}</a
+      <a
+        data-content-node={nodePath}
+        href={node.href}
+        target="_blank"
+        rel="noopener noreferrer nofollow"
+        >{@render render(node.children, childPath)}</a
       >
     {:else if node.tag === "table"}
-      <div class="table-scroll">
+      <div class="table-scroll" data-content-node={nodePath}>
         <table>
-          {@render render(node.children)}
+          {@render render(node.children, childPath)}
         </table>
       </div>
     {:else if node.tag === "td"}
-      <td colspan={node.colspan} rowspan={node.rowspan}>{@render render(node.children)}</td>
+      <td data-content-node={nodePath} colspan={node.colspan} rowspan={node.rowspan}>
+        {@render render(node.children, childPath)}
+      </td>
     {:else if node.tag === "th"}
-      <th colspan={node.colspan} rowspan={node.rowspan}>{@render render(node.children)}</th>
+      <th data-content-node={nodePath} colspan={node.colspan} rowspan={node.rowspan}>
+        {@render render(node.children, childPath)}
+      </th>
     {:else if node.tag === "ol"}
-      <ol start={node.start}>
-        {@render render(node.children)}
+      <ol data-content-node={nodePath} start={node.start}>
+        {@render render(node.children, childPath)}
       </ol>
     {:else}
-      <svelte:element this={node.tag}>{@render render(node.children)}</svelte:element>
+      <svelte:element data-content-node={nodePath} this={node.tag}
+        >{@render render(node.children, childPath)}</svelte:element
+      >
     {/if}
   {/each}
 {/snippet}
 
-<div class="body">{@render render(nodes)}</div>
+<div class="body">{@render render(nodes, "")}</div>
 
 <style>
   .body {

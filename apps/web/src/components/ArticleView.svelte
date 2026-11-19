@@ -291,8 +291,19 @@
       let top = saved.top;
       let anchorPost: Element | null = null;
       if (saved.anchor !== undefined && saved.anchor.source === content?.source) {
-        let target: Element | undefined = element.querySelector(".body") ?? undefined;
-        for (const index of saved.anchor.path) target = target?.children[index];
+        const body = element.querySelector(".body");
+        const { kind, path } = saved.anchor;
+        let target: Element | undefined;
+        if (kind === undefined) {
+          target = body ?? undefined;
+          for (const index of path) target = target?.children[index];
+        } else {
+          const node = body?.querySelector(`[data-content-node="${path.join(".")}"]`);
+          target =
+            kind === "quote-summary"
+              ? (node?.querySelector("summary") ?? undefined)
+              : (node ?? undefined);
+        }
         if (target !== undefined) {
           const quote = target.closest<HTMLDetailsElement>("details[data-x-quote]");
           if (quote !== null) {
@@ -362,6 +373,19 @@
         },
         { capture: true, signal: cancel.signal },
       );
+      element.addEventListener(
+        "click",
+        (event) => {
+          // ネイティブの summary は、ポインタでもキーボードでも click の後で開閉する。
+          if (
+            event.target instanceof Element &&
+            event.target.closest("details[data-x-quote] > summary")
+          ) {
+            stop();
+          }
+        },
+        { capture: true, signal: cancel.signal },
+      );
       for (const type of ["wheel", "touchmove"]) {
         scroller?.addEventListener(type, stop, { capture: true, signal: cancel.signal });
       }
@@ -414,20 +438,14 @@
       if (y + dy >= bounds.bottom) break;
       const hit = document.elementFromPoint(x, y + dy);
       if (hit === null || hit === body || !body.contains(hit)) continue;
-      const target = hit.closest("details[data-x-quote]")
-        ? hit
-        : (hit.closest("[data-x-embed]") ?? hit);
-      const path: number[] = [];
-      for (
-        let node = target;
-        node !== body && node.parentElement !== null;
-        node = node.parentElement
-      ) {
-        path.push(Array.prototype.indexOf.call(node.parentElement.children, node));
-      }
+      const summary = hit.closest("details[data-x-quote] > summary");
+      const node = (summary ?? hit).closest<HTMLElement>("[data-content-node]");
+      if (node === null || node.dataset.contentNode === undefined) continue;
+      const target = summary ?? node;
       position.anchor = {
         source: content.source,
-        path: path.reverse(),
+        path: node.dataset.contentNode.split(".").map(Number),
+        kind: summary === null ? "content" : "quote-summary",
         offset: target.getBoundingClientRect().top - viewportTop,
       };
       break;

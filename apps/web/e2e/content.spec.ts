@@ -156,6 +156,10 @@ for (const long of [false, true]) {
     context,
   }) => {
     const { server, blog } = seed();
+    const precedingImage = "https://blog.example/before-paragraph.png";
+    const image = long
+      ? `<img src="${escapeHtml(server.imageUrl(precedingImage))}" alt="前の画像" width="64" height="64">`
+      : "";
     const quotedParagraphs = long
       ? Array.from({ length: 12 }, (_, i) => `<p>記事中の引用の段落 ${i}</p>`).join("")
       : "";
@@ -163,7 +167,7 @@ for (const long of [false, true]) {
       title: "X の投稿を引用した記事",
       summary: "記事の要約",
       content:
-        `<p>投稿の紹介</p><blockquote data-embed="x"><p><a href="https://example.com">引用内リンク</a></p>${quotedParagraphs} — (@user) <a href="https://twitter.com/user/status/123"></a></blockquote><p>記事の続き</p>` +
+        `<p>投稿の紹介</p><blockquote data-embed="x"><p><a href="https://example.com">引用内リンク</a></p>${quotedParagraphs} — (@user) <a href="https://twitter.com/user/status/123"></a></blockquote><p>記事の続き</p>${image}` +
         (long ? Array.from({ length: 50 }, (_, i) => `<p>長い記事の段落 ${i}</p>`).join("") : ""),
     });
     await routeFakeSendo(context, server);
@@ -226,6 +230,10 @@ for (const long of [false, true]) {
         const paragraph = view.getByText("長い記事の段落 12", { exact: true });
         try {
           await expect(frame).toHaveAttribute("height", "0");
+          const previousImage = view.getByRole("img", { name: "前の画像" });
+          await expect
+            .poll(() => previousImage.evaluate((node) => (node as HTMLImageElement).naturalWidth))
+            .toBeGreaterThan(0);
           const saved = await paragraph.evaluate((element) => {
             const pane = element.closest<HTMLElement>(".article-view");
             const toolbar = pane?.querySelector(".toolbar");
@@ -239,6 +247,12 @@ for (const long of [false, true]) {
               history.state?.article?.top === top && history.state.article.anchor !== undefined,
             saved,
           );
+          const imageUrl = await previousImage.getAttribute("src");
+          if (imageUrl === null) throw new Error("本文画像の URL がない");
+          await page.evaluate(async (url) => {
+            for (const key of await caches.keys()) await (await caches.open(key)).delete(url);
+          }, imageUrl);
+          server.imageStatusFor.set(precedingImage, 502);
           await page.reload({ waitUntil: "domcontentloaded" });
           await expect(frame).toHaveAttribute("height", "0");
           await page.locator(".article-list").dispatchEvent("wheel", { deltaY: 100 });
@@ -246,6 +260,7 @@ for (const long of [false, true]) {
           initialWidget?.resolve();
         }
         await expect(frame).toHaveAttribute("height", "1216");
+        await expect(view.getByRole("img", { name: "前の画像" })).toHaveCount(0);
         await expect(view.getByText("記事中の引用", { exact: true })).toBeVisible();
         await expect(view.getByRole("link", { name: "引用内リンク" })).toBeHidden();
         await expect
@@ -324,6 +339,15 @@ for (const long of [false, true]) {
             }),
           )
           .toBeLessThan(2);
+        // スクロールを伴わない開閉でも、復元処理が引用を開き直さない。
+        await summary.evaluate(async (element) => {
+          (element as HTMLElement).click();
+          await new Promise<void>((resolve) =>
+            requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+          );
+        });
+        await expect(savedQuote).toBeHidden();
+        await expect(summary.locator("..")).not.toHaveAttribute("open");
       } else {
         const fallbackLink = view.getByRole("link", { name: "引用内リンク" });
         await fallbackLink.focus();
@@ -487,7 +511,7 @@ test("悪意のある本文でも、スクリプトは動かず、画面のス�
       "<a href=\"javascript:window.pwned = 'href'\">押すな</a>",
       '<a href="data:text/html,<script>opener.pwned = 1</script>">これも</a>',
       '<p id="app" class="toolbar article-view" style="position:fixed;inset:0;z-index:9999;background:red" onclick="window.pwned = \'click\'">段落</p>',
-      '<div onmouseover="window.pwned = \'over\'" contenteditable="true" hidden>残る文字</div>',
+      '<div data-content-node="injected" onmouseover="window.pwned = \'over\'" contenteditable="true" hidden>残る文字</div>',
       "<details open ontoggle=\"window.pwned = 'toggle'\">閉じない</details>",
       "<object data=\"javascript:window.pwned = 'object'\"></object><embed src=\"javascript:window.pwned = 'embed'\">",
       "<math><mtext><script>window.pwned = 'math'</script></mtext></math>",
@@ -524,9 +548,17 @@ test("悪意のある本文でも、スクリプトは動かず、画面のス�
     return { tags: [...tags].sort(), attributes: [...attributes].sort() };
   });
   expect(found.tags).toEqual(["div", "img", "p"]);
-  expect(found.attributes).toEqual(["alt", "class", "decoding", "loading", "src"]);
+  expect(found.attributes).toEqual([
+    "alt",
+    "class",
+    "data-content-node",
+    "decoding",
+    "loading",
+    "src",
+  ]);
   // class は、reader が付けたものだけ（本文の class は使わない）
   expect(await body.locator(".toolbar, .article-view, #app").count()).toBe(0);
+  await expect(body.locator('[data-content-node="injected"]')).toHaveCount(0);
   await expect(page.locator("#app")).toHaveCount(1);
 
   // スクリプトは動いていない

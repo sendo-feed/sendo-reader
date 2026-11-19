@@ -43,6 +43,7 @@ export interface ListAnchor {
 export interface ArticleAnchor {
   source: string;
   path: number[];
+  kind?: "content" | "quote-summary";
   offset: number;
 }
 
@@ -254,7 +255,13 @@ export function positionOf(state: unknown): Position {
       typeof anchor.offset === "number" &&
       Number.isFinite(anchor.offset)
     ) {
-      position.article.anchor = { source: anchor.source, path: anchor.path, offset: anchor.offset };
+      const { source, path, offset, kind } = anchor;
+      position.article.anchor = {
+        source,
+        path,
+        offset,
+        ...(kind === "content" || kind === "quote-summary" ? { kind } : {}),
+      };
     }
   }
   return position;

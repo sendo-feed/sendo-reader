@@ -22,6 +22,7 @@
     width,
     height,
     inline = false,
+    nodePath,
   }: {
     src: string | null;
     fallback?: Snippet;
@@ -29,6 +30,7 @@
     width?: number | undefined;
     height?: number | undefined;
     inline?: boolean;
+    nodePath?: string;
   } = $props();
 
   /** 読み込みに失敗した URL。src が替わったら、もう一度試す */
@@ -41,6 +43,7 @@
     {alt}
     {width}
     {height}
+    data-content-node={nodePath}
     class:inline
     loading="lazy"
     decoding="async"

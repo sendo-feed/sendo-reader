@@ -6,10 +6,12 @@
     href,
     children,
     enqueue,
+    nodePath,
   }: {
     href: string;
     children: Snippet;
     enqueue: ReturnType<typeof createXEmbedQueue>;
+    nodePath: string;
   } = $props();
   const origin = __X_EMBED_ORIGIN__;
   // セッションのクッキーはポートで分かれないため、同じホスト名は使えない。
@@ -104,6 +106,7 @@
 
 <blockquote
   bind:this={block}
+  data-content-node={nodePath}
   data-x-embed={separateHost ? (settled ? "settled" : "waiting") : undefined}
 >
   <div>

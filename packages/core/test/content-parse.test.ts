@@ -98,6 +98,20 @@ describe("sendo が配る形の本文", () => {
     }
   });
 
+  test("埋め込めない X の引用にある空の投稿リンクを読めるようにする", () => {
+    const [quote] = parseContent(
+      '<blockquote data-embed="x"><p>引用</p> — (@user) <a href="https://x.com/user/status/123"></a> — (@user) <a href="https://x.com/user/status/456"> </a> — (@user) <a href="https://x.com/i/web/status/789"></a></blockquote>',
+    );
+    expect(quote).not.toHaveProperty("xPost");
+    for (const path of ["user/status/123", "user/status/456", "i/web/status/789"]) {
+      expect(quote).toMatchObject({
+        children: expect.arrayContaining([
+          expect.objectContaining({ href: `https://x.com/${path}`, children: ["X で開く"] }),
+        ]),
+      });
+    }
+  });
+
   test("X 以外の URL や通常の投稿リンクからは埋め込みを作らない", () => {
     for (const href of [
       "https://x.com.example/user/status/123",
