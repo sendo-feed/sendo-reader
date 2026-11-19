@@ -10,16 +10,14 @@ Cloudflare 版の sendo-reader も、使う人がそれぞれ自分の Cloudflar
 ## 決定
 
 1. **sendo と同じく、各自が GitHub で fork し、Cloudflare の Workers Builds でつなぐ。** fork の `main` に push すると、Cloudflare がビルドしてデプロイする。
-   - 上流の更新は、GitHub の「Sync fork」で取り込む。取り込んだ push で、そのままデプロイされる。自動で取り込むなら、sendo の 7 の sendo-updater が reader の fork も受け持つ
    - Cloudflare の GitHub App の「Repository access」に、reader の fork も入れる。入れていないと、push でビルドが始まらない
    - 手元からも `pnpm run deploy` でデプロイできる
 2. **Worker の名前は `sendo-reader` のままにする。**
    - `wrangler.jsonc` の `name` と違うと、ビルドが失敗する
    - sendo の `READER_URL` と、Google の OAuth クライアントのリダイレクト URI は、この名前の `workers.dev` の URL を前提にしている（sendo の README）
-3. **sendo を先にデプロイする。更新も、sendo、reader の順に取り込む。**
+3. **Sendo Worker と reader は互換性を確認した版に固定する。現行 Sendo に更新する場合は、[コンテナ版](container.md)を使う。**
    - Service binding は、同じアカウントの `sendo` という名前の Worker を指す
    - reader は、sendo の OpenAPI から作った型で API を呼ぶ。新しい reader が古い sendo を呼ぶと、足した API や項目がまだないことがある
-   - sendo-updater（sendo の 7）は、sendo の fork が上流に追いつき、sendo の `main` の先頭で Workers Builds のチェックが成功してから、reader を取り込む。手で取り込むときは、sendo のデプロイを確かめてから reader の「Sync fork」を押す
 4. **Workers Builds の「ルート ディレクトリ」は、リポジトリの一番上（`/`）のままにする。デプロイの手順は一番上の `package.json` の `deploy` に書き、画面のデプロイのコマンドは `pnpm run deploy` にする。**
    - 一番上の `deploy` は、`apps/web` の `deploy`（`vite build && wrangler deploy`）を呼ぶ
    - 画面のビルドのコマンドは空にする。ビルドは `deploy` の中で行う
@@ -29,10 +27,9 @@ Cloudflare 版の sendo-reader も、使う人がそれぞれ自分の Cloudflar
 ## 理由
 
 - **sendo と同じ形にする**
-  - sendo が fork と Workers Builds を選んだ理由は、reader にもそのまま当てはまる。GitHub App はリポジトリを持つアカウントにしか入れられず、上流を直接つなげない。fork なら「Sync fork」1 つで更新がデプロイになり、各自が API トークンを作る必要もない（sendo の[デプロイ](https://github.com/sendo-feed/sendo/blob/94181bb/docs/decisions/deploy.md)の「理由」）
+  - sendo が fork と Workers Builds を選んだ理由は、reader にもそのまま当てはまる。GitHub App はリポジトリを持つアカウントにしか入れられず、上流を直接つなげない。fork の固定したブランチを Workers Builds に渡せるので、各自が API トークンを作る必要もない（sendo の[デプロイ](https://github.com/sendo-feed/sendo/blob/94181bb/docs/decisions/deploy.md)の「理由」）
   - 2 つが同じ手順なら、使う人は sendo と reader を同じやり方で扱える
   - reader は、同じアカウントの sendo を名前で呼ぶ。各自が自分のアカウントに 2 つの fork をつなぐ形なら、何も足さずに満たせる
-- **自動の取り込みも sendo にそろえる**。sendo-updater が sendo のデプロイ成功を待って reader を取り込むため、reader が先に配備されて新しい API を呼ぶ事態を防げる。
 - **ルート ディレクトリを一番上にする**
   - Workers Builds は、Node のバージョンを、ルート ディレクトリに置いた `.node-version` から読む（Cloudflare の文書）。`apps/web` にすると、一番上の `.node-version`（24）が読まれないおそれがある。ロックファイルを親のフォルダまでたどるかも、文書には書かれていない
   - 一番上なら、`pnpm install --frozen-lockfile` がワークスペースの全体を入れる。試したとき、`.node-version` と `packageManager` を読んで Node 24.22.3 と pnpm 11.28.10 で動き、`minimumReleaseAge` と `allowBuilds` も手元と同じに効いた
