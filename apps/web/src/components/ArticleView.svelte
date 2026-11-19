@@ -247,6 +247,7 @@
   /** 本文が出たら戻す、前に見ていた位置（px） */
   let restoreTop: number | null = null;
   let pendingHistoryTop: number | null = null;
+  let restoringScroll = $state(false);
   let cancelRestore: (() => void) | undefined;
   let articleContent = $state<HTMLDivElement>();
 
@@ -267,28 +268,35 @@
 
     let resizeObserver: ResizeObserver | undefined;
     let embedObserver: MutationObserver | undefined;
+    let restoreTimer: ReturnType<typeof setTimeout> | undefined;
+    let appliedTop: number | undefined;
     const cancel = new AbortController();
     const stop = () => {
       resizeObserver?.disconnect();
       embedObserver?.disconnect();
+      clearTimeout(restoreTimer);
       cancel.abort();
       if (cancelRestore === stop) {
         cancelRestore = undefined;
         pendingHistoryTop = null;
+        restoringScroll = false;
       }
     };
     cancelRestore = stop;
     pendingHistoryTop = top;
+    restoringScroll = true;
 
     const restore = () => {
       scrollToTop(scroller, top);
       const offset = scrollTopOf(scroller);
+      appliedTop = offset;
       const viewportTop = layout.pageScroll ? 0 : (scroller?.getBoundingClientRect().top ?? 0);
-      const pending = Array.from(element.querySelectorAll('[data-x-embed="waiting"]')).filter(
+      const preceding = Array.from(element.querySelectorAll("[data-x-embed]")).filter(
         (post) => post.getBoundingClientRect().top - viewportTop + offset < top,
       );
+      const pending = preceding.filter((post) => post.getAttribute("data-x-embed") === "waiting");
       for (const post of pending) post.dispatchEvent(new Event("sendo:open-x-post"));
-      if (pending.length === 0) stop();
+      if (preceding.length === 0 || (pending.length === 0 && offset >= top - 1)) stop();
     };
 
     void tick().then(() => {
@@ -308,6 +316,21 @@
         attributes: true,
         attributeFilter: ["data-x-embed"],
       });
+      restoreTimer = setTimeout(stop, 30_000);
+      document.addEventListener(
+        "scroll",
+        (event) => {
+          const target = layout.pageScroll ? document : scroller;
+          if (
+            event.target === target &&
+            appliedTop !== undefined &&
+            Math.abs(scrollTopOf(scroller) - appliedTop) > 1
+          ) {
+            stop();
+          }
+        },
+        { capture: true, signal: cancel.signal },
+      );
       for (const event of ["wheel", "touchmove"]) {
         window.addEventListener(event, stop, { capture: true, signal: cancel.signal });
       }
@@ -692,6 +715,7 @@
 
 <article
   class="article-view"
+  class:restoring-scroll={restoringScroll}
   aria-live="polite"
   bind:this={scroller}
   ontouchstart={onTouchStart}
@@ -906,6 +930,9 @@
 </Dialog>
 
 <style>
+  .restoring-scroll {
+    overflow-anchor: none;
+  }
   .content-actions {
     display: grid;
   }

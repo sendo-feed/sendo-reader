@@ -187,7 +187,8 @@ test("X の引用は投稿リンクを表示し、設定した隔離フレーム
             widgets: { createTweet: async (id, container, options) => {
               if (id !== "123" || options.dnt !== true) return;
               const post = document.createElement("section");
-              post.style.height = "1200px";
+              post.style.height = "50px";
+              setTimeout(() => { post.style.height = "1200px"; }, 200);
               post.textContent = "公式埋め込みの代わり";
               container.append(post);
               return post;

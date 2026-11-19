@@ -30,15 +30,13 @@
     if (cancelLoad !== undefined) return;
     cancelLoad = enqueue(() => {
       active = true;
-      timer = setTimeout(() => {
-        active = false;
-        finish(0);
-      }, 15_000);
+      timer = setTimeout(() => finish(0), 15_000);
     });
   }
 
   function finish(value: number) {
     height = value;
+    if (value === 0) active = false;
     if (settled) return;
     settled = true;
     clearTimeout(timer);
@@ -88,7 +86,10 @@
 
 <svelte:window onmessage={resize} />
 
-<blockquote bind:this={block} data-x-embed={separateHost && !settled ? "waiting" : undefined}>
+<blockquote
+  bind:this={block}
+  data-x-embed={separateHost ? (settled ? "settled" : "waiting") : undefined}
+>
   {#if src}
     <iframe
       bind:this={frame}

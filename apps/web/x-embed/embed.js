@@ -2,11 +2,19 @@
 const postId = location.hash.slice(1);
 const container = document.querySelector("main");
 
+// 送るのは表示の高さだけ。受け手はこのフレームのオリジンと Window を照合する。
+const notify = (height) => window.parent.postMessage({ type: "sendo:x-post-height", height }, "*");
+
 if (/^[0-9]{1,20}$/.test(postId) && container && window.parent !== window) {
   const widget = document.createElement("script");
   widget.src = "https://platform.twitter.com/widgets.js";
+  widget.onerror = () => notify(0);
   widget.onload = () => {
-    window.twttr?.ready(async ({ widgets }) => {
+    if (!window.twttr) {
+      notify(0);
+      return;
+    }
+    window.twttr.ready(async ({ widgets }) => {
       try {
         const post = await widgets.createTweet(postId, container, {
           dnt: true,
@@ -16,12 +24,13 @@ if (/^[0-9]{1,20}$/.test(postId) && container && window.parent !== window) {
         if (post) {
           new ResizeObserver(() => {
             const height = Math.ceil(container.getBoundingClientRect().height) + 16;
-            // 送るのは表示の高さだけ。受け手はこのフレームのオリジンと Window を照合する。
-            window.parent.postMessage({ type: "sendo:x-post-height", height }, "*");
+            notify(height);
           }).observe(container);
+        } else {
+          notify(0);
         }
       } catch {
-        // 読み込めない投稿は reader にあるリンクから開ける。
+        notify(0);
       }
     });
   };

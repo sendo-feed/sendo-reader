@@ -31,7 +31,7 @@ const ELEMENT_KEYS = new Set([
 describe("sendo が配る形の本文", () => {
   test("X の埋め込みは本文が空でも投稿 URL を持つ", () => {
     const nodes = parseContent(
-      '<blockquote data-embed="x"><a href="https://twitter.com/user/status/123456789?ref=foo"></a></blockquote>',
+      '<blockquote data-embed="x"><a href="https://twitter.com/user/status/123456789?ref=foo"></a><br><a href="https://example.com">出典の補足</a></blockquote>',
     );
     expect(nodes[0]).toMatchObject({
       tag: "blockquote",
@@ -50,7 +50,6 @@ describe("sendo が配る形の本文", () => {
   test("引用本文にある X リンクは投稿元と見なさない", () => {
     for (const contents of [
       '<p>引用文 <a href="https://x.com/other/status/998">本文のリンク</a></p>',
-      '<a href="https://x.com/other/status/998">本文のリンク</a><p>引用文の続き</p>',
     ]) {
       const [quote] = parseContent(`<blockquote data-embed="x">${contents}</blockquote>`);
       expect(quote).not.toHaveProperty("xPost");

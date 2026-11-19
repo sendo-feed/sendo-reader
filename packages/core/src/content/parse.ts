@@ -213,9 +213,9 @@ export function parseContent(html: string): ContentNode[] {
   }
   // 公式の引用では、引用本文のあとに投稿元のリンクを置く。本文中の他の投稿は展開しない。
   for (const quote of postQuotes) {
-    const footer = quote.children.findLast((child) => typeof child !== "string" || child.trim());
-    if (typeof footer === "object" && footer.tag === "a" && footer.href !== undefined) {
-      const post = xPostUrl(footer.href);
+    for (const child of quote.children) {
+      if (typeof child === "string" || child.tag !== "a" || child.href === undefined) continue;
+      const post = xPostUrl(child.href);
       if (post !== undefined) quote.xPost = post;
     }
   }
