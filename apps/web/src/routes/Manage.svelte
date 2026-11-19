@@ -11,6 +11,7 @@
 
   const reader = useReader();
   let query = $state("");
+  let sort = $state<"folders" | "oldest">("folders");
   let addOpen = $state(false);
   let importOpen = $state(false);
   let folderOpen = $state(false);
@@ -42,13 +43,25 @@
       <span class="visually-hidden">Find a feed</span>
       <input type="search" placeholder="Find a feed…" bind:value={query}>
     </label>
-    <button type="button" class="new-folder" onclick={() => editFolder(null)}>
-      <Icon name="plus" />
-      New folder
-    </button>
+    <div class="toolbar-actions">
+      <select aria-label="並び順" bind:value={sort}>
+        <option value="folders">フォルダごと</option>
+        <option value="oldest">最新記事が古い順</option>
+      </select>
+      <button type="button" class="new-folder" onclick={() => editFolder(null)}>
+        <Icon name="plus" />
+        New folder
+      </button>
+    </div>
   </div>
 
-  <Feeds bind:this={feedsView} {query} oneditfolder={editFolder} onadd={() => (addOpen = true)} />
+  <Feeds
+    bind:this={feedsView}
+    {query}
+    oldestFirst={sort === "oldest"}
+    oneditfolder={editFolder}
+    onadd={() => (addOpen = true)}
+  />
 
   <footer>
     <button type="button" class="link" onclick={() => (importOpen = true)}>Import OPML</button>
@@ -135,6 +148,18 @@
     margin: 0.25rem 0 0;
     color: var(--muted);
     font-size: 0.8125rem;
+  }
+
+  .toolbar-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+  }
+
+  .toolbar-actions select {
+    width: auto;
+    max-width: 100%;
   }
 
   .add,

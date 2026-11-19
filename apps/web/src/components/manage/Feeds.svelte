@@ -2,7 +2,7 @@
   import { type Feed, type FeedFetchTimes, type Folder, feedName } from "@sendo-reader/core";
   import { useReader } from "../../lib/context";
   import { describeError } from "../../lib/errors";
-  import { formatDateTime } from "../../lib/format";
+  import { formatArticleAge, formatDate, formatDateTime } from "../../lib/format";
   import Dialog from "../Dialog.svelte";
   import Icon from "../Icon.svelte";
   import RemoteImage from "../RemoteImage.svelte";
@@ -10,10 +10,12 @@
 
   let {
     query,
+    oldestFirst,
     oneditfolder,
     onadd,
   }: {
     query: string;
+    oldestFirst: boolean;
     oneditfolder: (folder: Folder) => void;
     onadd: () => void;
   } = $props();
@@ -27,6 +29,7 @@
   let confirming = $state(false);
   let fetchTimes = $state<FeedFetchTimes | null>(null);
   let fetchTimesStatus = $state<"loading" | "ready" | "unavailable">("loading");
+  let latestArticleDates = $state.raw<Map<string, number> | null>(null);
   const userId = $derived(reader.user?.id);
   const selected = $derived(reader.feeds.find((feed) => feed.id === selectedId));
   const term = $derived(query.trim().toLowerCase());
@@ -35,23 +38,51 @@
       `${feed.displayName ?? ""} ${feed.title ?? ""} ${feed.url}`.toLowerCase().includes(term),
     ),
   );
-  const groups = $derived([
-    ...reader.folders.map((folder) => ({
-      id: folder.id,
-      name: folder.name,
-      folder,
-      feeds: matches.filter((feed) => feed.folderId === folder.id),
-    })),
-    {
-      id: "",
-      name: "No folder",
-      folder: null,
-      feeds: matches.filter((feed) => feed.folderId === null),
-    },
-  ]);
+  const groups = $derived(
+    oldestFirst
+      ? [{ id: null, name: "Feeds", folder: null, feeds: [...matches].sort(compareLatestArticles) }]
+      : [
+          ...reader.folders.map((folder) => ({
+            id: folder.id,
+            name: folder.name,
+            folder,
+            feeds: matches.filter((feed) => feed.folderId === folder.id),
+          })),
+          {
+            id: "",
+            name: "No folder",
+            folder: null,
+            feeds: matches.filter((feed) => feed.folderId === null),
+          },
+        ],
+  );
 
   $effect(() => {
     if (selected === undefined) menuOpen = false;
+  });
+
+  $effect(() => {
+    latestArticleDates = null;
+    if (userId === undefined) return;
+    let active = true;
+    let lastRead = 0;
+    function readLatestArticles() {
+      const read = ++lastRead;
+      void reader.client
+        .listLatestArticleDates()
+        .then((dates) => {
+          if (active && read === lastRead) latestArticleDates = dates;
+        })
+        .catch(() => {});
+    }
+    const off = reader.client.onChange((tables) => {
+      if (tables.has("articles") || tables.has("feeds")) readLatestArticles();
+    });
+    readLatestArticles();
+    return () => {
+      active = false;
+      off();
+    };
   });
 
   $effect(() => {
@@ -84,6 +115,12 @@
     } catch {
       return feed.url;
     }
+  }
+
+  function compareLatestArticles(a: Feed, b: Feed): number {
+    const first = latestArticleDates?.get(a.id) ?? Infinity;
+    const second = latestArticleDates?.get(b.id) ?? Infinity;
+    return first === second ? 0 : first - second;
   }
 
   function toggle(id: string) {
@@ -144,6 +181,19 @@
   {/if}
 {/snippet}
 
+{#snippet latestArticle(feedId: string)}
+  {@const date = latestArticleDates?.get(feedId)}
+  最新記事：
+  {#if date !== undefined}
+    {@const age = formatArticleAge(date)}
+    <time datetime={new Date(date).toISOString()}
+      >{`${formatDate(date)}${age === null ? "" : `（${age}）`}`}</time
+    >
+  {:else}
+    {latestArticleDates === null ? "—" : "同期済みの記事なし"}
+  {/if}
+{/snippet}
+
 <div class="groups">
   {#if reader.feeds.length === 0 && reader.folders.length === 0}
     <div class="empty-start">
@@ -157,36 +207,41 @@
   {:else}
     {#each groups as group (group.id)}
       {#if term === "" || group.feeds.length > 0}
-        {@const closed = term === "" && collapsed.includes(group.id)}
+        {@const groupId = group.id}
+        {@const closed = groupId !== null && term === "" && collapsed.includes(groupId)}
+        {@const groupContentsId =
+          groupId === null ? undefined : `manage-folder-${groupId || "none"}`}
         <section class="folder-group" aria-label={group.name}>
-          <div class="group-heading">
-            <h2>
-              <button
-                type="button"
-                class="group-toggle"
-                aria-expanded={!closed}
-                aria-controls="manage-folder-{group.id || "none"}"
-                onclick={() => toggle(group.id)}
-              >
-                <Icon name={closed ? "chevronRight" : "chevronDown"} />
-                <Icon name={group.folder === null ? "inbox" : "folder"} />
-                <span>{group.name}</span>
-                <span class="count">{group.feeds.length}</span>
-              </button>
-            </h2>
-            {#if group.folder !== null}
-              <button
-                type="button"
-                class="icon-button"
-                aria-label="Folder options: {group.name}"
-                title="Folder options"
-                onclick={() => group.folder !== null && oneditfolder(group.folder)}
-              >
-                <Icon name="more" />
-              </button>
-            {/if}
-          </div>
-          <div id="manage-folder-{group.id || "none"}" hidden={closed}>
+          {#if groupId !== null}
+            <div class="group-heading">
+              <h2>
+                <button
+                  type="button"
+                  class="group-toggle"
+                  aria-expanded={!closed}
+                  aria-controls={groupContentsId}
+                  onclick={() => toggle(groupId)}
+                >
+                  <Icon name={closed ? "chevronRight" : "chevronDown"} />
+                  <Icon name={group.folder === null ? "inbox" : "folder"} />
+                  <span>{group.name}</span>
+                  <span class="count">{group.feeds.length}</span>
+                </button>
+              </h2>
+              {#if group.folder !== null}
+                <button
+                  type="button"
+                  class="icon-button"
+                  aria-label="Folder options: {group.name}"
+                  title="Folder options"
+                  onclick={() => group.folder !== null && oneditfolder(group.folder)}
+                >
+                  <Icon name="more" />
+                </button>
+              {/if}
+            </div>
+          {/if}
+          <div id={groupContentsId} hidden={closed}>
             <ul>
               {#each group.feeds as feed (feed.id)}
                 <li class="feed-row">
@@ -203,6 +258,7 @@
                   <div class="name">
                     <FeedName {feed} />
                     <span class="host">{hostOf(feed)}</span>
+                    <span class="latest-article">{@render latestArticle(feed.id)}</span>
                   </div>
                   <select
                     class="move"
@@ -252,7 +308,7 @@
         <button type="button" class="danger" onclick={unsubscribe}>Unsubscribe</button>
       </div>
     {:else}
-      <p class="url">{selected.url}</p>
+      <p class="detail-latest-article">{@render latestArticle(selected.id)}</p>
       {#if menuOpen}
         {#if fetchTimes !== null}
           <dl class="fetch-times">
@@ -272,6 +328,7 @@
           </p>
         {/if}
       {/if}
+      <p class="url">{selected.url}</p>
       <label class="move-label" for="selected-feed-folder">Move to</label>
       <select
         id="selected-feed-folder"
@@ -371,9 +428,20 @@
   }
 
   .host,
+  .latest-article,
   .url {
     color: var(--muted);
     font-size: 0.75rem;
+  }
+
+  .latest-article {
+    display: block;
+    margin-top: 0.125rem;
+  }
+
+  .detail-latest-article {
+    margin: 0;
+    font-weight: 600;
   }
 
   .move {

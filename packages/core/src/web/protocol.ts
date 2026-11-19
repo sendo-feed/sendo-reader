@@ -21,6 +21,7 @@ export const READER_METHODS = [
   "countPending",
   "listFolders",
   "listFeeds",
+  "listLatestArticleDates",
   "getFeedFetchTimes",
   "listArticles",
   "listSavedPages",
