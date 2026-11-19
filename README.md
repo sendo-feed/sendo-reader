@@ -43,7 +43,7 @@ pnpm dev
 
 ログインするには、手元の Sendo の `.env` に Google の OAuth クライアントと、ログインできるメールを設定しておきます（[Sendo の README](https://github.com/sendo-feed/sendo#ブラウザでログインするgoogle)）。「承認済みのリダイレクト URI」には `http://localhost:5173/api/v1/auth/google/callback` を登録します。
 
-手元の `http://localhost:5173` で更新通知を試すときは、Sendo の `PUBLIC_URL` を空にできます。指定する場合は、ブラウザで開く Vite のオリジンにそろえます。使えるのは HTTPS と、`localhost`・`127.0.0.1`・`[::1]` の HTTP です。
+手元で更新通知を試すには、Sendo と reader の両方で対応版が必要です。Vite を HTTPS で開くときは Sendo の `PUBLIC_URL` をそのオリジンにします。`localhost`・`127.0.0.1`・`[::1]` の HTTP で開くときは `PUBLIC_URL` を空にするか、Vite のオリジンにそろえます。
 
 ## コマンド
 
