@@ -20,13 +20,15 @@
   let {
     nodes,
     awaitingPosition = false,
+    restoringScroll = false,
     scrollRoot = null,
-    rootMargin = "0px",
+    toolbarHeight = 0,
   }: {
     nodes: readonly ContentNode[];
     awaitingPosition?: boolean;
+    restoringScroll?: boolean;
     scrollRoot?: HTMLElement | null;
-    rootMargin?: string;
+    toolbarHeight?: number;
   } = $props();
 
   const enqueue = createXEmbedQueue();
@@ -65,7 +67,15 @@
       />
     {:else if node.xPost !== undefined}
       {#key node.xPost}
-        <XPost href={node.xPost} {enqueue} {nodePath} {awaitingPosition} {scrollRoot} {rootMargin}>
+        <XPost
+          href={node.xPost}
+          {enqueue}
+          {nodePath}
+          {awaitingPosition}
+          {restoringScroll}
+          {scrollRoot}
+          {toolbarHeight}
+        >
           {@render render(node.children, childPath, trackText)}
         </XPost>
       {/key}

@@ -298,6 +298,7 @@
     const restore = () => {
       const viewportTop = articleViewportTop();
       let top = saved.top;
+      let matchedAnchor = false;
       const anchorPosts = new Set<Element>();
       const requiredPosts = new Set<Element>();
       if (saved.anchor !== undefined && saved.anchor.source === content?.source) {
@@ -332,6 +333,9 @@
             }
             target = height > 0 ? (widget ?? node) : node;
             anchorOffset = Math.max(anchorOffset, Math.min(0, 1 - height));
+          } else if (kind === "x-link") {
+            target = node?.querySelector(":scope > a[data-x-link]") ?? node;
+            if (node?.matches("[data-x-embed]")) anchorPosts.add(node);
           } else if (kind === "quote-summary" || kind === "quote-body") {
             const quote = node?.querySelector(":scope > details[data-x-quote]");
             target =
@@ -340,6 +344,7 @@
           }
         }
         if (target !== undefined) {
+          matchedAnchor = true;
           const summary = target.closest<HTMLElement>("details[data-x-quote] > summary");
           for (
             let quote = target.closest<HTMLDetailsElement>("details[data-x-quote]");
@@ -375,7 +380,8 @@
       });
       const pending = preceding.filter(
         (post) =>
-          post.getAttribute("data-x-embed") === "waiting" && (clamped || requiredPosts.has(post)),
+          post.getAttribute("data-x-embed") === "waiting" &&
+          (requiredPosts.has(post) || (clamped && !matchedAnchor)),
       );
       const wanted = new Set(pending);
       for (const [post, queued] of queuedPosts) {
@@ -508,18 +514,23 @@
       // 文字の横の余白を指したときも、引用の外枠ではなく開いた引用の中の位置を記録する。
       const quoteBody = node === quote?.parentElement ? quote : null;
       const widget = hit.matches("iframe[data-x-widget]") ? hit : null;
-      const target = widget ?? summary ?? quoteBody ?? node;
+      const postLink = node.querySelector(":scope > a[data-x-link]");
+      const linkBounds = postLink?.getBoundingClientRect();
+      const link = linkBounds && linkBounds.top <= at && at < linkBounds.bottom ? postLink : null;
+      const target = widget ?? link ?? summary ?? quoteBody ?? node;
       const anchor: NonNullable<ArticlePosition["anchor"]> = {
         source: content.source,
         path: node.dataset.contentNode.split(".").map(Number),
         kind:
           widget !== null
             ? "x-widget"
-            : summary !== null
-              ? "quote-summary"
-              : quoteBody !== null
-                ? "quote-body"
-                : "content",
+            : link !== null
+              ? "x-link"
+              : summary !== null
+                ? "quote-summary"
+                : quoteBody !== null
+                  ? "quote-body"
+                  : "content",
         offset: target.getBoundingClientRect().top - viewportTop,
       };
       if (hit === target && hit.matches("div") && hit.querySelector("[data-content-node]")) {
@@ -1064,10 +1075,9 @@
           <ArticleBody
             nodes={content.nodes}
             {awaitingPosition}
+            {restoringScroll}
             scrollRoot={layout.pageScroll ? null : (scroller ?? null)}
-            rootMargin={layout.pageScroll
-              ? `0px 0px -${toolbarHeight}px`
-              : `-${toolbarHeight}px 0px 0px`}
+            {toolbarHeight}
           />
         {:else if showSummary}
           {#each paragraphs as text, index (index)}

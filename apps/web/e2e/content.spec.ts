@@ -236,6 +236,7 @@ for (const long of [false, true]) {
         });
       });
     }
+    await page.emulateMedia({ reducedMotion: "reduce" });
     await page.goto("/");
     await signIn(page);
     await open(page, "X の投稿を引用した記事");
@@ -313,9 +314,37 @@ for (const long of [false, true]) {
             ),
         );
         await expect(frame).toHaveCount(0);
+        const readingWidget = Promise.withResolvers<void>();
+        waitForWidget = readingWidget.promise;
+        const readingParagraph = view.getByText("記事中の引用の段落 6", { exact: true });
         await view.evaluate((element) => element.scrollTo({ top: 0 }));
+        await expect(frame).toHaveAttribute("height", "0");
+        try {
+          await readingParagraph.evaluate((element) => {
+            const pane = element.closest<HTMLElement>(".article-view");
+            const toolbar = pane?.querySelector(".toolbar");
+            if (!pane || !toolbar) throw new Error("記事のスクロール領域がない");
+            pane.scrollTop +=
+              element.getBoundingClientRect().top - toolbar.getBoundingClientRect().bottom + 4;
+          });
+        } finally {
+          readingWidget.resolve();
+        }
         await expect(frame).toHaveAttribute("height", "1216");
-        await expect(view.getByText("記事中の引用", { exact: true })).toBeVisible();
+        const summary = view.getByText("記事中の引用", { exact: true });
+        await expect(summary.locator("..")).toHaveAttribute("open");
+        await expect
+          .poll(() =>
+            readingParagraph.evaluate((element) => {
+              const toolbar = element.closest(".article-view")?.querySelector(".toolbar");
+              if (!toolbar) throw new Error("記事のツールバーがない");
+              return Math.abs(
+                element.getBoundingClientRect().top - toolbar.getBoundingClientRect().bottom + 4,
+              );
+            }),
+          )
+          .toBeLessThan(2);
+        await summary.click();
         await expect(view.getByRole("link", { name: "引用内リンク" })).toBeHidden();
 
         const widgetOffset = 750;
@@ -349,7 +378,34 @@ for (const long of [false, true]) {
           )
           .toBeLessThan(2);
 
-        const summary = view.getByText("記事中の引用", { exact: true });
+        const postLink = view.locator("a[data-x-link]");
+        const linkTop = await postLink.evaluate((element) => {
+          const pane = element.closest<HTMLElement>(".article-view");
+          const toolbar = pane?.querySelector(".toolbar");
+          if (!pane || !toolbar) throw new Error("記事のスクロール領域がない");
+          pane.scrollTop +=
+            element.getBoundingClientRect().top - toolbar.getBoundingClientRect().bottom + 4;
+          return pane.scrollTop;
+        });
+        await page.waitForFunction(
+          (top) =>
+            history.state?.article?.top === top && history.state.article.anchor?.kind === "x-link",
+          linkTop,
+        );
+        await page.reload({ waitUntil: "domcontentloaded" });
+        await expect(frame).toHaveAttribute("height", "1216");
+        await expect
+          .poll(() =>
+            postLink.evaluate((element) => {
+              const toolbar = element.closest(".article-view")?.querySelector(".toolbar");
+              if (!toolbar) throw new Error("記事のツールバーがない");
+              return Math.abs(
+                element.getBoundingClientRect().top - toolbar.getBoundingClientRect().bottom + 4,
+              );
+            }),
+          )
+          .toBeLessThan(2);
+
         const summaryTop = await summary.evaluate((element) => {
           const pane = element.closest<HTMLElement>(".article-view");
           const toolbar = pane?.querySelector(".toolbar");

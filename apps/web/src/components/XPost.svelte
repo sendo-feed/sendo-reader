@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { Snippet } from "svelte";
+  import { type Snippet, tick } from "svelte";
   import type { createXEmbedQueue, XEmbedRequest } from "../lib/x-embed-queue";
 
   let {
@@ -8,16 +8,18 @@
     enqueue,
     nodePath,
     awaitingPosition,
+    restoringScroll,
     scrollRoot,
-    rootMargin,
+    toolbarHeight,
   }: {
     href: string;
     children: Snippet;
     enqueue: ReturnType<typeof createXEmbedQueue>;
     nodePath: string;
     awaitingPosition: boolean;
+    restoringScroll: boolean;
     scrollRoot: HTMLElement | null;
-    rootMargin: string;
+    toolbarHeight: number;
   } = $props();
   const origin = __X_EMBED_ORIGIN__;
   // セッションのクッキーはポートで分かれないため、同じホスト名は使えない。
@@ -56,9 +58,31 @@
   }
 
   function finish(value: number) {
+    const quote = fallback;
+    const scroller = scrollRoot ?? document.scrollingElement;
+    const quoteBounds = quote?.getBoundingClientRect();
+    const readingTop =
+      scrollRoot === null ? 0 : scrollRoot.getBoundingClientRect().top + toolbarHeight;
+    const readingQuote =
+      !restoringScroll &&
+      quoteBounds !== undefined &&
+      quoteBounds.top <= readingTop + 1 &&
+      quoteBounds.bottom > readingTop + 1;
+    if (value > 0 && value !== height && readingQuote && quote !== undefined && scroller !== null) {
+      const summary = quote.querySelector(":scope > summary");
+      const before = quoteBounds.top + (summary?.getBoundingClientRect().height ?? 0);
+      // フレームと概要の行が加わっても、読んでいる引用の位置を保つ。
+      void tick().then(() => {
+        if (!quote.isConnected) return;
+        const after =
+          quote.getBoundingClientRect().top + (summary?.getBoundingClientRect().height ?? 0);
+        scroller.scrollTop += after - before;
+      });
+    }
     if (value === 0) quoteOpen = true;
     else if (height === 0) {
-      quoteOpen = preserveQuote || (fallback?.contains(document.activeElement) ?? false);
+      quoteOpen =
+        readingQuote || preserveQuote || (quote?.contains(document.activeElement) ?? false);
       preserveQuote = false;
     }
     height = value;
@@ -80,7 +104,12 @@
         inView = entry !== undefined && entry.intersectionRatio > 0;
         updateRequest();
       },
-      { root: scrollRoot, rootMargin, threshold: [0, 0.001] },
+      {
+        root: scrollRoot,
+        rootMargin:
+          scrollRoot === null ? `0px 0px -${toolbarHeight}px` : `-${toolbarHeight}px 0px 0px`,
+        threshold: [0, 0.001],
+      },
     );
     observer.observe(element);
     return () => {
@@ -165,7 +194,7 @@
     <summary hidden={height === 0}>記事中の引用</summary>
     {@render children()}
   </details>
-  <a {href} target="_blank" rel="noopener noreferrer nofollow">X で開く</a>
+  <a {href} data-x-link target="_blank" rel="noopener noreferrer nofollow">X で開く</a>
 </blockquote>
 
 <style>
