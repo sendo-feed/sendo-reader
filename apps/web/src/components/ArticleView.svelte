@@ -227,7 +227,8 @@
         // 記事は先頭から出す（狭い画面では、ページ全体を動かしている）。読み込み直したときや、
         // 戻る・進むで来たときは、本文が出てから、前に見ていた位置に戻す
         scrollToTop(scroller);
-        restorePosition = router.takeArticle(id);
+        const saved = router.takeArticle(id);
+        restorePosition = saved !== null && saved.top > 0 ? saved : null;
         awaitingPosition = restorePosition !== null;
         // 書けなかったら、次に手元が変わったときの読み直しで、手元の DB の状態に戻る
         markOnOpen(id).catch(() => void list.refresh());

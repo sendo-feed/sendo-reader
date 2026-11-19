@@ -126,7 +126,17 @@
     }
     const top = readingViewportTop();
     const readingQuote = !restoringScroll && containsReadingLine(fallback, top);
-    if (value !== height) keepReadingPosition(readingQuote, top);
+    if (value === 0 && height > 0 && !restoringScroll && containsReadingLine(frame, top)) {
+      const scroller = scrollRoot ?? document.scrollingElement;
+      const quote = fallback;
+      void tick().then(() => {
+        if (quote?.isConnected && scroller !== null && !restoringScroll) {
+          scroller.scrollTop += quote.getBoundingClientRect().top - readingViewportTop();
+        }
+      });
+    } else if (value !== height) {
+      keepReadingPosition(readingQuote, top);
+    }
     if (value === 0) quoteOpen = true;
     else if (height === 0) {
       quoteOpen =

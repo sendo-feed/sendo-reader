@@ -371,16 +371,20 @@ for (const long of [false, true]) {
               }),
             )
             .toBeLessThan(2);
+          await view.evaluate((element) => element.scrollTo({ top: 0 }));
+          await page.waitForFunction(() => history.state?.article?.top === 0);
+          await page.reload({ waitUntil: "domcontentloaded" });
+          await expect(view.getByRole("status")).toHaveText("全文を取得しています…");
+          await expect(frame).toHaveAttribute("src", `${embed.origin}/#123`);
         } finally {
           server.onRequest = null;
           pageContent.resolve();
           expandingWidget.resolve();
         }
-        await page.reload({ waitUntil: "domcontentloaded" });
-        await expect(paragraph).toBeVisible();
-
         const readingWidget = Promise.withResolvers<void>();
         waitForWidget = readingWidget.promise;
+        await page.reload({ waitUntil: "domcontentloaded" });
+        await expect(paragraph).toBeVisible();
         const readingParagraph = view.getByText("記事中の引用の段落 6", { exact: true });
         await view.dispatchEvent("wheel", { deltaY: -20 });
         await view.evaluate((element) => element.scrollTo({ top: 0 }));
@@ -626,6 +630,13 @@ for (const long of [false, true]) {
         await context.setOffline(true);
         await expect(view.getByRole("link", { name: "引用内リンク" })).toBeVisible();
         await context.setOffline(false);
+        await frame.evaluate((element) => {
+          const pane = element.closest<HTMLElement>(".article-view");
+          const toolbar = pane?.querySelector(".toolbar");
+          if (!pane || !toolbar) throw new Error("記事のスクロール領域がない");
+          pane.scrollTop +=
+            element.getBoundingClientRect().top - toolbar.getBoundingClientRect().bottom + 500;
+        });
         await frame
           .contentFrame()
           .locator("section")
@@ -634,6 +645,17 @@ for (const long of [false, true]) {
           });
         await expect(frame).toHaveCount(0);
         await expect(view.getByRole("link", { name: "引用内リンク" })).toBeVisible();
+        await expect
+          .poll(() =>
+            view.locator("details[data-x-quote]").evaluate((element) => {
+              const toolbar = element.closest(".article-view")?.querySelector(".toolbar");
+              if (!toolbar) throw new Error("記事のツールバーがない");
+              return Math.abs(
+                element.getBoundingClientRect().top - toolbar.getBoundingClientRect().bottom,
+              );
+            }),
+          )
+          .toBeLessThan(2);
       } else {
         const fallbackLink = view.getByRole("link", { name: "引用内リンク" });
         await fallbackLink.focus();

@@ -263,6 +263,17 @@ export function parseContent(html: string): ContentNode[] {
         index -= 1;
         continue;
       }
+      if (
+        posts.size > 0 &&
+        child !== undefined &&
+        typeof child !== "string" &&
+        child.tag !== "a" &&
+        !hasVisibleContent([child])
+      ) {
+        hasInlineBody = true;
+        index -= 1;
+        continue;
+      }
       if (typeof child === "string" || child?.tag !== "a") break;
       const parts: string[] = [];
       let before = index - 1;
