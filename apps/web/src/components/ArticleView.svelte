@@ -293,6 +293,11 @@
         let target: Element | undefined = element.querySelector(".body") ?? undefined;
         for (const index of saved.anchor.path) target = target?.children[index];
         if (target !== undefined) {
+          const quote = target.closest<HTMLDetailsElement>("details[data-x-quote]");
+          if (quote !== null && target.closest("summary") === null) {
+            quote.open = true;
+            quote.closest("[data-x-embed]")?.dispatchEvent(new Event("sendo:restore-x-quote"));
+          }
           top = Math.max(
             0,
             scrollTopOf(scroller) +
@@ -401,7 +406,9 @@
       if (y + dy >= bounds.bottom) break;
       const hit = document.elementFromPoint(x, y + dy);
       if (hit === null || hit === body || !body.contains(hit)) continue;
-      const target = hit.closest("[data-x-embed]") ?? hit;
+      const target = hit.closest("details[data-x-quote]")
+        ? hit
+        : (hit.closest("[data-x-embed]") ?? hit);
       const path: number[] = [];
       for (
         let node = target;

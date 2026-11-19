@@ -20,6 +20,7 @@
   let frame = $state<HTMLIFrameElement>();
   let fallback = $state<HTMLDetailsElement>();
   let quoteOpen = $state(true);
+  let preserveQuote = false;
   let active = $state(false);
   let settled = $state(false);
   let request: XEmbedRequest | undefined;
@@ -42,7 +43,10 @@
 
   function finish(value: number) {
     if (value === 0) quoteOpen = true;
-    else if (height === 0) quoteOpen = fallback?.contains(document.activeElement) ?? false;
+    else if (height === 0) {
+      quoteOpen = preserveQuote || (fallback?.contains(document.activeElement) ?? false);
+      preserveQuote = false;
+    }
     height = value;
     if (value === 0) active = false;
     if (settled) return;
@@ -61,11 +65,17 @@
       }
     });
     const loadForRestore = () => requestLoad(false);
+    const keepQuoteOpen = () => {
+      preserveQuote = height === 0;
+      quoteOpen = true;
+    };
     observer.observe(element);
     element.addEventListener("sendo:open-x-post", loadForRestore);
+    element.addEventListener("sendo:restore-x-quote", keepQuoteOpen);
     return () => {
       observer.disconnect();
       element.removeEventListener("sendo:open-x-post", loadForRestore);
+      element.removeEventListener("sendo:restore-x-quote", keepQuoteOpen);
       clearTimeout(timer);
       request?.cancel();
     };
@@ -96,17 +106,19 @@
   bind:this={block}
   data-x-embed={separateHost ? (settled ? "settled" : "waiting") : undefined}
 >
-  {#if src}
-    <iframe
-      bind:this={frame}
-      {src}
-      {height}
-      title="X の投稿"
-      sandbox="allow-scripts allow-same-origin"
-      referrerpolicy="no-referrer"
-    ></iframe>
-  {/if}
-  <details bind:this={fallback} bind:open={quoteOpen}>
+  <div>
+    {#if src}
+      <iframe
+        bind:this={frame}
+        {src}
+        {height}
+        title="X の投稿"
+        sandbox="allow-scripts allow-same-origin"
+        referrerpolicy="no-referrer"
+      ></iframe>
+    {/if}
+  </div>
+  <details data-x-quote bind:this={fallback} bind:open={quoteOpen}>
     <summary hidden={height === 0}>記事中の引用</summary>
     {@render children()}
   </details>

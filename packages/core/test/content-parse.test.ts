@@ -59,7 +59,7 @@ describe("sendo が配る形の本文", () => {
 
   test("照合できた同じ投稿への複数のリンクを一つの候補として扱う", () => {
     const [quote] = parseContent(
-      '<blockquote data-embed="x"><p>引用</p> — (@user) <a href="https://twitter.com/user/status/123"></a> — (@User) <a href="https://x.com/User/status/123?ref=example"></a></blockquote>',
+      '<blockquote data-embed="x"><p>引用</p> — 表示名\n (@user) <a href="https://twitter.com/user/status/123"></a> — (@User) <a href="https://x.com/User/status/123?ref=example"></a></blockquote>',
     );
     expect(quote).toMatchObject({ xPost: "https://x.com/user/status/123" });
   });

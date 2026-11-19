@@ -225,7 +225,7 @@ export function parseContent(html: string): ContentNode[] {
       const attribution = quote.children[index - 1];
       const handle =
         typeof attribution === "string"
-          ? /—[^—\r\n]*\(@([A-Za-z0-9_]{1,15})\)\s*$/.exec(attribution)?.[1]
+          ? /—[^—]*\(@([A-Za-z0-9_]{1,15})\)\s*$/.exec(attribution)?.[1]
           : undefined;
       if (handle === undefined) continue;
       const post = xPostUrl(child.href);

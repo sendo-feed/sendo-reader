@@ -156,11 +156,14 @@ for (const long of [false, true]) {
     context,
   }) => {
     const { server, blog } = seed();
+    const quotedParagraphs = long
+      ? Array.from({ length: 12 }, (_, i) => `<p>記事中の引用の段落 ${i}</p>`).join("")
+      : "";
     server.deliver(blog.id, {
       title: "X の投稿を引用した記事",
       summary: "記事の要約",
       content:
-        '<p>投稿の紹介</p><blockquote data-embed="x"><p><a href="https://example.com">引用内リンク</a></p> — (@user) <a href="https://twitter.com/user/status/123"></a></blockquote><p>記事の続き</p>' +
+        `<p>投稿の紹介</p><blockquote data-embed="x"><p><a href="https://example.com">引用内リンク</a></p>${quotedParagraphs} — (@user) <a href="https://twitter.com/user/status/123"></a></blockquote><p>記事の続き</p>` +
         (long ? Array.from({ length: 50 }, (_, i) => `<p>長い記事の段落 ${i}</p>`).join("") : ""),
     });
     await routeFakeSendo(context, server);
@@ -248,6 +251,36 @@ for (const long of [false, true]) {
         await expect
           .poll(() =>
             paragraph.evaluate((element) => {
+              const toolbar = element.closest(".article-view")?.querySelector(".toolbar");
+              if (!toolbar) throw new Error("記事のツールバーがない");
+              return Math.abs(
+                element.getBoundingClientRect().top - toolbar.getBoundingClientRect().bottom + 4,
+              );
+            }),
+          )
+          .toBeLessThan(2);
+
+        await view.getByText("記事中の引用", { exact: true }).click();
+        const savedQuote = view.getByText("記事中の引用の段落 6", { exact: true });
+        const quoteTop = await savedQuote.evaluate((element) => {
+          const pane = element.closest<HTMLElement>(".article-view");
+          const toolbar = pane?.querySelector(".toolbar");
+          if (!pane || !toolbar) throw new Error("記事のスクロール領域がない");
+          pane.scrollTop +=
+            element.getBoundingClientRect().top - toolbar.getBoundingClientRect().bottom + 4;
+          return pane.scrollTop;
+        });
+        await page.waitForFunction(
+          (top) =>
+            history.state?.article?.top === top && history.state.article.anchor !== undefined,
+          quoteTop,
+        );
+        await page.reload({ waitUntil: "domcontentloaded" });
+        await expect(frame).toHaveAttribute("height", "1216");
+        await expect(savedQuote).toBeVisible();
+        await expect
+          .poll(() =>
+            savedQuote.evaluate((element) => {
               const toolbar = element.closest(".article-view")?.querySelector(".toolbar");
               if (!toolbar) throw new Error("記事のツールバーがない");
               return Math.abs(
