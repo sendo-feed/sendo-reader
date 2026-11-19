@@ -92,16 +92,25 @@
       quoteBounds !== undefined &&
       quoteBounds.top <= readingTop + 1 &&
       quoteBounds.bottom > readingTop + 1;
-    if (value > 0 && value !== height && readingQuote && quote !== undefined && scroller !== null) {
-      const summary = quote.querySelector(":scope > summary");
-      const before = quoteBounds.top + (summary?.getBoundingClientRect().height ?? 0);
-      // フレームと概要の行が加わっても、読んでいる引用の位置を保つ。
-      void tick().then(() => {
-        if (!quote.isConnected) return;
-        const after =
+    if (!restoringScroll && value !== height && scroller !== null) {
+      const post = block;
+      let readAnchor: (() => number) | undefined;
+      if (readingQuote && quote !== undefined) {
+        const summary = quote.querySelector(":scope > summary");
+        readAnchor = () =>
           quote.getBoundingClientRect().top + (summary?.getBoundingClientRect().height ?? 0);
-        scroller.scrollTop += after - before;
-      });
+      } else if (post !== undefined && post.getBoundingClientRect().bottom <= readingTop) {
+        // 後ろを読んでいるときは、引用全体の高さの変化を反映する。
+        readAnchor = () => post.getBoundingClientRect().bottom;
+      }
+      if (readAnchor !== undefined) {
+        const anchor = readAnchor;
+        const before = anchor();
+        void tick().then(() => {
+          if (!post?.isConnected || restoringScroll) return;
+          scroller.scrollTop += anchor() - before;
+        });
+      }
     }
     if (value === 0) quoteOpen = true;
     else if (height === 0) {

@@ -256,6 +256,47 @@
   let cancelRestore: (() => void) | undefined;
   let articleContent = $state<HTMLDivElement>();
 
+  function isArticleScrollKey(event: KeyboardEvent): boolean {
+    const target = event.target;
+    const inArticle = target instanceof Node && scroller?.contains(target);
+    const onPage = layout.pageScroll && target === document.body;
+    return Boolean(
+      (inArticle || onPage) &&
+        ["ArrowDown", "ArrowUp", "PageDown", "PageUp", "Home", "End", " "].includes(event.key),
+    );
+  }
+
+  $effect(() => {
+    const pane = scroller;
+    if (!awaitingPosition || pane === undefined) return;
+    const controller = new AbortController();
+    const { signal } = controller;
+    const cancelPending = () => {
+      if (restorePosition === null) return;
+      restorePosition = null;
+      awaitingPosition = false;
+    };
+    for (const type of ["wheel", "touchmove"]) {
+      pane.addEventListener(type, cancelPending, { capture: true, signal });
+    }
+    document.addEventListener(
+      "scroll",
+      (event) => {
+        const target = layout.pageScroll ? document : pane;
+        if (event.target === target && scrollTopOf(pane) > 0) cancelPending();
+      },
+      { capture: true, signal },
+    );
+    window.addEventListener(
+      "keydown",
+      (event) => {
+        if (isArticleScrollKey(event)) cancelPending();
+      },
+      { capture: true, signal },
+    );
+    return () => controller.abort();
+  });
+
   $effect(() => {
     // 本文を確かめている間・取っている間は、高さが決まらないので待つ（取れなかったら、要約で戻す）
     if (
@@ -450,15 +491,7 @@
       window.addEventListener(
         "keydown",
         (event) => {
-          const target = event.target;
-          const inArticle = target instanceof Node && scroller?.contains(target);
-          const onPage = layout.pageScroll && target === document.body;
-          if (
-            (inArticle || onPage) &&
-            ["ArrowDown", "ArrowUp", "PageDown", "PageUp", "Home", "End", " "].includes(event.key)
-          ) {
-            stop();
-          }
+          if (isArticleScrollKey(event)) stop();
         },
         { capture: true, signal: cancel.signal },
       );

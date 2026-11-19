@@ -170,7 +170,7 @@ for (const long of [false, true]) {
               : `<p>記事中の引用の段落 ${i}</p>`,
         ).join("")
       : "";
-    server.deliver(blog.id, {
+    const article = server.deliver(blog.id, {
       title: "X の投稿を引用した記事",
       summary: "記事の要約",
       content:
@@ -314,9 +314,51 @@ for (const long of [false, true]) {
             ),
         );
         await expect(frame).toHaveCount(0);
+
+        const pageContent = Promise.withResolvers<void>();
+        const expandingWidget = Promise.withResolvers<void>();
+        server.onRequest = (path) =>
+          path === `GET /articles/${article.id}/content` ? pageContent.promise : Promise.resolve();
+        waitForWidget = expandingWidget.promise;
+        try {
+          await page.reload({ waitUntil: "domcontentloaded" });
+          await expect(view.getByRole("status")).toHaveText("全文を取得しています…");
+          await expect(frame).toHaveCount(0);
+          await view.dispatchEvent("wheel", { deltaY: 20 });
+          await expect(frame).toHaveAttribute("height", "0");
+          await paragraph.evaluate((element) => {
+            const pane = element.closest<HTMLElement>(".article-view");
+            const toolbar = pane?.querySelector(".toolbar");
+            if (!pane || !toolbar) throw new Error("記事のスクロール領域がない");
+            pane.style.overflowAnchor = "none";
+            pane.scrollTop +=
+              element.getBoundingClientRect().top - toolbar.getBoundingClientRect().bottom + 4;
+          });
+          expandingWidget.resolve();
+          await expect(frame).toHaveAttribute("height", "1216");
+          await expect
+            .poll(() =>
+              paragraph.evaluate((element) => {
+                const toolbar = element.closest(".article-view")?.querySelector(".toolbar");
+                if (!toolbar) throw new Error("記事のツールバーがない");
+                return Math.abs(
+                  element.getBoundingClientRect().top - toolbar.getBoundingClientRect().bottom + 4,
+                );
+              }),
+            )
+            .toBeLessThan(2);
+        } finally {
+          server.onRequest = null;
+          pageContent.resolve();
+          expandingWidget.resolve();
+        }
+        await page.reload({ waitUntil: "domcontentloaded" });
+        await expect(paragraph).toBeVisible();
+
         const readingWidget = Promise.withResolvers<void>();
         waitForWidget = readingWidget.promise;
         const readingParagraph = view.getByText("記事中の引用の段落 6", { exact: true });
+        await view.dispatchEvent("wheel", { deltaY: -20 });
         await view.evaluate((element) => element.scrollTo({ top: 0 }));
         await expect(frame).toHaveAttribute("height", "0");
         try {
