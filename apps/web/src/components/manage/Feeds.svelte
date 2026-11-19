@@ -205,7 +205,12 @@
 <Dialog bind:open={menuOpen} title={selected === undefined ? "Feed options" : feedName(selected)}>
   {#if selected !== undefined}
     {#if confirming}
-      <p>このフィードの購読をやめますか？ スターを付けた記事だけが残ります。</p>
+      {#if selected.url === selected.siteUrl &&
+        /^https:\/\/discord\.com\/channels\/\d+\/\d+$/.test(selected.url)}
+        <p>このチャンネルの購読を解除すると、取り込んだ投稿がスター付きも含めて削除されます。</p>
+      {:else}
+        <p>このフィードの購読をやめますか？ スターを付けた記事だけが残ります。</p>
+      {/if}
       <div class="actions">
         <button type="button" onclick={() => (confirming = false)}>Cancel</button>
         <button type="button" class="danger" onclick={unsubscribe}>Unsubscribe</button>

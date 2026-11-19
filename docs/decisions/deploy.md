@@ -23,7 +23,7 @@ Cloudflare 版の sendo-reader も、使う人がそれぞれ自分の Cloudflar
 4. **Workers Builds の「ルート ディレクトリ」は、リポジトリの一番上（`/`）のままにする。デプロイの手順は一番上の `package.json` の `deploy` に書き、画面のデプロイのコマンドは `pnpm run deploy` にする。**
    - 一番上の `deploy` は、`apps/web` の `deploy`（`vite build && wrangler deploy`）を呼ぶ
    - 画面のビルドのコマンドは空にする。ビルドは `deploy` の中で行う
-   - X の隔離フレームを有効にするときは、先に reader とホスト名が異なる HTTPS 配信先で、[専用の CSP](local-first.md#ページの守り)を付けた埋め込みの静的ページを配信する。次に Workers Builds のビルド変数 `SENDO_X_EMBED_ORIGIN` に配信元を指定する。画面と CSP の両方にビルド時に入るため、変更や解除のあとも再ビルドしてデプロイする。[Cloudflare のビルド時変数](https://developers.cloudflare.com/workers/ci-cd/builds/api-reference/)、[reader の表示の決定](local-first.md#記事の本文)
+   - X の隔離フレームを有効にするときは、先に reader とホスト名が異なる HTTPS 配信先で、[専用の CSP](local-first.md#ページの守り)を付けて、ルート（`/`）で埋め込みの静的ページを、`/embed.js` でそのスクリプトを配信する。次に Workers Builds のビルド変数 `SENDO_X_EMBED_ORIGIN` に配信元を指定する。画面と CSP の両方にビルド時に入るため、変更や解除のあとも再ビルドしてデプロイする。[Cloudflare のビルド時変数](https://developers.cloudflare.com/workers/ci-cd/builds/api-reference/)、[reader の表示の決定](local-first.md#記事の本文)
 5. **main 以外のブランチのビルドは、オフにする。**
 6. **`apps/web/wrangler.jsonc` に `workers_dev: true` と `preview_urls: false` を書く。** sendo の 6 と同じ。
 
