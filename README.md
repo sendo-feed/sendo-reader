@@ -41,9 +41,11 @@ pnpm dev
 
 `http://localhost:5173` で画面が開きます。Sendo のパス（`/api`、`/mcp`、OAuth など。本番の reader のコンテナと同じ一覧）へのリクエストは、Vite の dev サーバーが `http://localhost:8787` の Sendo に中継します。最初の画面で「Google でログイン」を押すと、Sendo の Google のログインを通って戻ってきます。
 
+Vite を HTTPS で開く場合は、Sendo の `PUBLIC_URL` をブラウザで開く Vite のオリジンに設定します。`localhost`・`127.0.0.1`・`[::1]` の HTTP で開く場合は、`PUBLIC_URL` を空にするか、Vite のオリジンにそろえます。この設定はログインの戻り先と更新通知の接続に使います。
+
 ログインするには、手元の Sendo の `.env` に Google の OAuth クライアントと、ログインできるメールを設定しておきます（[Sendo の README](https://github.com/sendo-feed/sendo#ブラウザでログインするgoogle)）。「承認済みのリダイレクト URI」には、ブラウザで開く Vite のオリジンに `/api/v1/auth/google/callback` を付けた URL を登録します。既定では `http://localhost:5173/api/v1/auth/google/callback` です。
 
-手元で更新通知を試すには、Sendo と reader の両方で対応版が必要です。Vite を HTTPS で開くときは Sendo の `PUBLIC_URL` をそのオリジンにします。`localhost`・`127.0.0.1`・`[::1]` の HTTP で開くときは `PUBLIC_URL` を空にするか、Vite のオリジンにそろえます。
+手元で更新通知を試すには、Sendo と reader の両方で対応版が必要です。
 
 ## コマンド
 
