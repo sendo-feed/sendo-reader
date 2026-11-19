@@ -30,7 +30,7 @@
    | `reader.hideReadFeeds` | 真偽 | `false` |
    | `reader.collapsed` | 畳んでいるフォルダの ID の配列（200 個まで） | `[]` |
    | `reader.swipe.listLeft` ／ `listRight` | `"none"` ／ `"read"` ／ `"star"` | `"read"` ／ `"star"` |
-   | `reader.swipe.articleLeft` ／ `articleRight` | `"none"` ／ `"back"` ／ `"next"` ／ `"previous"` | `"none"` ／ `"back"` |
+   | `reader.swipe.articleLeft` ／ `articleRight` | `"none"` ／ `"back"` ／ `"next"` ／ `"previous"` ／ `"star"` | `"none"` ／ `"back"` |
    | `reader.list:<一覧のパス>` | その一覧で変えたもの（`unreadOnly`・`oldestFirst` のうち、変えたものだけ） | なし |
 
    - **「未読」は、一覧の絞り込みの状態で、一覧の種類ではない。** 未読だけを集めた別の画面は持たない。どの一覧（All、フォルダ、フィード）も、未読だけを出すか、既読も出すかを、同じ切り替えで選ぶ。既定は、未読だけ
