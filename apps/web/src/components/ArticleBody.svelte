@@ -20,15 +20,23 @@
   let { nodes }: { nodes: readonly ContentNode[] } = $props();
 
   const enqueue = createXEmbedQueue();
+
+  function hasXPost(content: readonly ContentNode[]): boolean {
+    return content.some(
+      (node) => typeof node !== "string" && (node.xPost !== undefined || hasXPost(node.children)),
+    );
+  }
+
+  const trackText = $derived(__X_EMBED_ORIGIN__ !== "" && hasXPost(nodes));
 </script>
 
-{#snippet render(children: readonly ContentNode[], parentPath: string, quoteText = false)}
+{#snippet render(children: readonly ContentNode[], parentPath: string, trackDirectText = false)}
   {#each children as node, index (index)}
     {@const nodePath = `${parentPath}${index}`}
     {@const childPath = `${nodePath}.`}
     {#if typeof node === "string"}
-      {#if quoteText && node.trim() !== ""}
-        <span data-content-node={nodePath}>{node}</span>
+      {#if trackDirectText && node.trim() !== ""}
+        <span data-content-node={nodePath} data-content-text>{node}</span>
       {:else}
         {node}
       {/if}
@@ -48,7 +56,7 @@
     {:else if node.xPost !== undefined}
       {#key node.xPost}
         <XPost href={node.xPost} {enqueue} {nodePath}>
-          {@render render(node.children, childPath, true)}
+          {@render render(node.children, childPath, trackText)}
         </XPost>
       {/key}
     {:else if node.tag === "a"}
@@ -79,13 +87,17 @@
       </ol>
     {:else}
       <svelte:element data-content-node={nodePath} this={node.tag}
-        >{@render render(node.children, childPath)}</svelte:element
+        >{@render render(
+          node.children,
+          childPath,
+          trackText && ["div", "blockquote", "p", "li"].includes(node.tag),
+        )}</svelte:element
       >
     {/if}
   {/each}
 {/snippet}
 
-<div class="body">{@render render(nodes, "")}</div>
+<div class="body">{@render render(nodes, "", trackText)}</div>
 
 <style>
   .body {

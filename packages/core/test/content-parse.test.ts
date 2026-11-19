@@ -112,6 +112,18 @@ describe("sendo が配る形の本文", () => {
     }
   });
 
+  test("HTTP の投稿リンクは埋め込まずリンクの名前を残す", () => {
+    const [quote] = parseContent(
+      '<blockquote data-embed="x"><p>引用</p> — (@user) <a href="http://twitter.com/user/status/222"></a></blockquote>',
+    );
+    expect(quote).not.toHaveProperty("xPost");
+    expect(quote).toMatchObject({
+      children: expect.arrayContaining([
+        { tag: "a", href: "http://twitter.com/user/status/222", children: ["X で開く"] },
+      ]),
+    });
+  });
+
   test("X 以外の URL や通常の投稿リンクからは埋め込みを作らない", () => {
     for (const href of [
       "https://x.com.example/user/status/123",

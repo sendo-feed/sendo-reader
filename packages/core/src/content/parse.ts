@@ -64,19 +64,21 @@ const NAMED: Record<string, string> = {
   nbsp: " ",
 };
 
-function xPostUrl(href: string, allowAnonymous = false): string | undefined {
+function isXPostAddress(url: URL, allowAnonymous = false): boolean {
+  return (
+    (url.protocol === "http:" || url.protocol === "https:") &&
+    url.port === "" &&
+    url.username === "" &&
+    url.password === "" &&
+    ["x.com", "www.x.com", "twitter.com", "www.twitter.com"].includes(url.hostname) &&
+    (/^\/[A-Za-z0-9_]{1,15}\/status\/[0-9]{1,20}\/?$/.test(url.pathname) ||
+      (allowAnonymous && /^\/i\/web\/status\/[0-9]{1,20}\/?$/.test(url.pathname)))
+  );
+}
+
+function xPostUrl(href: string): string | undefined {
   const url = new URL(href);
-  if (
-    url.protocol !== "https:" ||
-    url.port !== "" ||
-    url.username !== "" ||
-    url.password !== "" ||
-    !["x.com", "www.x.com", "twitter.com", "www.twitter.com"].includes(url.hostname) ||
-    (!/^\/[A-Za-z0-9_]{1,15}\/status\/[0-9]{1,20}\/?$/.test(url.pathname) &&
-      !(allowAnonymous && /^\/i\/web\/status\/[0-9]{1,20}\/?$/.test(url.pathname)))
-  ) {
-    return undefined;
-  }
+  if (url.protocol !== "https:" || !isXPostAddress(url)) return undefined;
   return `https://x.com${url.pathname.replace(/\/$/, "")}`;
 }
 
@@ -198,7 +200,7 @@ export function parseContent(html: string): ContentNode[] {
       // 行き先のないリンクは、タグを落として中身だけ残す
       if (href === null) continue;
       element.href = href;
-      if (open.some((parent) => postQuotes.has(parent)) && xPostUrl(href, true) !== undefined) {
+      if (open.some((parent) => postQuotes.has(parent)) && isXPostAddress(new URL(href), true)) {
         postLinks.push(element);
       }
     } else if (name === "blockquote" && read.get("data-embed") === "x") {

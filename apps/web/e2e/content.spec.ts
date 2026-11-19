@@ -169,8 +169,14 @@ for (const long of [false, true]) {
       title: "X の投稿を引用した記事",
       summary: "記事の要約",
       content:
+        "<div>" +
         `<p>投稿の紹介</p><blockquote data-embed="x"><p><a href="https://example.com">引用内リンク</a></p>${quotedParagraphs} — (@user) <a href="https://twitter.com/user/status/123"></a></blockquote><p>記事の続き</p>${image}` +
-        (long ? Array.from({ length: 50 }, (_, i) => `<p>長い記事の段落 ${i}</p>`).join("") : ""),
+        (long
+          ? Array.from({ length: 50 }, (_, i) =>
+              i === 12 ? "長い記事の段落 12<br>" : `<p>長い記事の段落 ${i}</p>`,
+            ).join("")
+          : "") +
+        "</div>",
     });
     await routeFakeSendo(context, server);
     const headers = await readFile(

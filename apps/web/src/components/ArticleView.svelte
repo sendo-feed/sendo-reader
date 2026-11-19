@@ -444,8 +444,18 @@
     // 余白を指した場合は少し下も調べ、本文の要素が見つからなければ px の位置を使う。
     for (const dy of [0, 16, 32]) {
       if (y + dy >= bounds.bottom) break;
-      const hit = document.elementFromPoint(x, y + dy);
-      if (hit === null || hit === body || !body.contains(hit)) continue;
+      const at = y + dy;
+      let hit = document.elementFromPoint(x, at);
+      if (hit === null || !body.contains(hit)) continue;
+      // 改行で区切った短い文字列の横では、文字列と同じ高さの行を探す。
+      for (const text of hit.querySelectorAll(":scope > [data-content-text]")) {
+        const bounds = text.getBoundingClientRect();
+        if (bounds.top <= at && at < bounds.bottom) {
+          hit = text;
+          break;
+        }
+      }
+      if (hit === body) continue;
       const summary = hit.closest("details[data-x-quote] > summary");
       const node = (summary ?? hit).closest<HTMLElement>("[data-content-node]");
       if (node === null || node.dataset.contentNode === undefined) continue;
