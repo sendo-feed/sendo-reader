@@ -150,6 +150,8 @@ docker build --build-arg SENDO_X_EMBED_ORIGIN=https://embed.example.com -t sendo
 
 配信先の設定があり、対象の引用から投稿が一意に決まると、記事を開いたときに X の公式ウィジェットが表示されます。未設定の場合や読み込めない場合は記事中の引用と投稿リンクが表示されます。公式ウィジェットの表示後も、その下から記事中の引用を開けます。
 
+配備後は、対応版の Sendo が保存した X の引用を含む記事をオンラインで開き、投稿 ID が一意に決まる引用で公式ウィジェットが表示されることを確かめます。専用 HTTPS ホストのルートの応答に `Content-Security-Policy` が付くことも確認します。[配備後の確認](docs/decisions/container.md#決定)
+
 ## ディレクトリ構成
 
 ```text

@@ -22,12 +22,16 @@
   const enqueue = createXEmbedQueue();
 </script>
 
-{#snippet render(children: readonly ContentNode[], parentPath: string)}
+{#snippet render(children: readonly ContentNode[], parentPath: string, quoteText = false)}
   {#each children as node, index (index)}
     {@const nodePath = `${parentPath}${index}`}
     {@const childPath = `${nodePath}.`}
     {#if typeof node === "string"}
-      {node}
+      {#if quoteText && node.trim() !== ""}
+        <span data-content-node={nodePath}>{node}</span>
+      {:else}
+        {node}
+      {/if}
     {:else if node.tag === "br"}
       <br data-content-node={nodePath}>
     {:else if node.tag === "hr"}
@@ -44,7 +48,7 @@
     {:else if node.xPost !== undefined}
       {#key node.xPost}
         <XPost href={node.xPost} {enqueue} {nodePath}>
-          {@render render(node.children, childPath)}
+          {@render render(node.children, childPath, true)}
         </XPost>
       {/key}
     {:else if node.tag === "a"}

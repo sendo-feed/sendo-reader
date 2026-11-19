@@ -161,7 +161,9 @@ for (const long of [false, true]) {
       ? `<img src="${escapeHtml(server.imageUrl(precedingImage))}" alt="前の画像" width="64" height="64">`
       : "";
     const quotedParagraphs = long
-      ? Array.from({ length: 12 }, (_, i) => `<p>記事中の引用の段落 ${i}</p>`).join("")
+      ? Array.from({ length: 12 }, (_, i) =>
+          i === 6 ? "記事中の引用の段落 6<br>" : `<p>記事中の引用の段落 ${i}</p>`,
+        ).join("")
       : "";
     server.deliver(blog.id, {
       title: "X の投稿を引用した記事",

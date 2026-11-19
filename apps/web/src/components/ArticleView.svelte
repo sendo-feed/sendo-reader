@@ -289,7 +289,7 @@
     const restore = () => {
       const viewportTop = articleViewportTop();
       let top = saved.top;
-      let anchorPost: Element | null = null;
+      const anchorPosts = new Set<Element>();
       if (saved.anchor !== undefined && saved.anchor.source === content?.source) {
         const body = element.querySelector(".body");
         const { kind, path } = saved.anchor;
@@ -299,21 +299,29 @@
           for (const index of path) target = target?.children[index];
         } else {
           const node = body?.querySelector(`[data-content-node="${path.join(".")}"]`);
-          target =
-            kind === "quote-summary"
-              ? (node?.querySelector("summary") ?? undefined)
-              : (node ?? undefined);
+          target = node ?? undefined;
+          if (kind !== "content") {
+            const quote = node?.querySelector(":scope > details[data-x-quote]");
+            target =
+              (kind === "quote-summary" ? quote?.querySelector(":scope > summary") : quote) ??
+              undefined;
+          }
         }
         if (target !== undefined) {
-          const quote = target.closest<HTMLDetailsElement>("details[data-x-quote]");
-          if (quote !== null) {
-            anchorPost = quote.closest("[data-x-embed]");
-            const summary = target.closest<HTMLElement>("summary");
-            if (summary === null) {
+          const summary = target.closest<HTMLElement>("details[data-x-quote] > summary");
+          for (
+            let quote = target.closest<HTMLDetailsElement>("details[data-x-quote]");
+            quote !== null;
+            quote =
+              quote.parentElement?.closest<HTMLDetailsElement>("details[data-x-quote]") ?? null
+          ) {
+            const post = quote.closest("[data-x-embed]");
+            if (post !== null) anchorPosts.add(post);
+            if (quote !== summary?.parentElement) {
               if (!quote.open) quote.open = true;
-              anchorPost?.dispatchEvent(new Event("sendo:restore-x-quote"));
+              post?.dispatchEvent(new Event("sendo:restore-x-quote"));
             } else if (summary.hidden) {
-              target = anchorPost ?? quote;
+              target = post ?? quote;
             }
           }
           top = Math.max(
@@ -330,7 +338,7 @@
       appliedTop = offset;
       const preceding = Array.from(element.querySelectorAll("[data-x-embed]")).filter(
         (post) =>
-          post === anchorPost || post.getBoundingClientRect().top - viewportTop + offset < top,
+          anchorPosts.has(post) || post.getBoundingClientRect().top - viewportTop + offset < top,
       );
       const pending = preceding.filter((post) => post.getAttribute("data-x-embed") === "waiting");
       for (const post of pending) post.dispatchEvent(new Event("sendo:open-x-post"));
@@ -441,11 +449,14 @@
       const summary = hit.closest("details[data-x-quote] > summary");
       const node = (summary ?? hit).closest<HTMLElement>("[data-content-node]");
       if (node === null || node.dataset.contentNode === undefined) continue;
-      const target = summary ?? node;
+      const quote = hit.closest("details[data-x-quote]");
+      // 文字の横の余白を指したときも、引用の外枠ではなく開いた引用の中の位置を記録する。
+      const quoteBody = node === quote?.parentElement ? quote : null;
+      const target = summary ?? quoteBody ?? node;
       position.anchor = {
         source: content.source,
         path: node.dataset.contentNode.split(".").map(Number),
-        kind: summary === null ? "content" : "quote-summary",
+        kind: summary !== null ? "quote-summary" : quoteBody !== null ? "quote-body" : "content",
         offset: target.getBoundingClientRect().top - viewportTop,
       };
       break;

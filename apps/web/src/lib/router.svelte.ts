@@ -43,7 +43,7 @@ export interface ListAnchor {
 export interface ArticleAnchor {
   source: string;
   path: number[];
-  kind?: "content" | "quote-summary";
+  kind?: "content" | "quote-summary" | "quote-body";
   offset: number;
 }
 
@@ -260,7 +260,9 @@ export function positionOf(state: unknown): Position {
         source,
         path,
         offset,
-        ...(kind === "content" || kind === "quote-summary" ? { kind } : {}),
+        ...(kind === "content" || kind === "quote-summary" || kind === "quote-body"
+          ? { kind }
+          : {}),
       };
     }
   }
