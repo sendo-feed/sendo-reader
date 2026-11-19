@@ -9,9 +9,9 @@ Cloudflare 版の sendo-reader も、使う人がそれぞれ自分の Cloudflar
 
 ## 決定
 
-1. **使う版を固定した reader の fork を Cloudflare の Workers Builds につなぐ。** ビルド対象のブランチは、旧 Sendo Worker との互換性を確かめたコミットを指す。
+1. **使う版を固定した reader の fork を Cloudflare の Workers Builds につなぐ。** ビルド対象は fork の `main` にし、旧 Sendo Worker との互換性を確かめたコミットに固定する。
    - Cloudflare の GitHub App の「Repository access」に、reader の fork も入れる。入れていないと、push でビルドが始まらない
-   - 手元からも `pnpm run deploy` でデプロイできる
+   - 手元から再配備する場合は、ビルド対象と同じ固定済みのコミットをチェックアウトしてから `pnpm run deploy` を実行する
 2. **Worker の名前は `sendo-reader` のままにする。**
    - `wrangler.jsonc` の `name` と違うと、ビルドが失敗する
    - sendo の `READER_URL` と、Google の OAuth クライアントのリダイレクト URI は、この名前の `workers.dev` の URL を前提にしている（sendo の README）
