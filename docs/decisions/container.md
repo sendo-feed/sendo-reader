@@ -18,7 +18,8 @@ sendo-reader は、[sendo のコンテナ版](https://github.com/sendo-feed/send
    - sendo の `PUBLIC_URL` と `READER_URL` には、どちらも reader のオリジン（例：`https://reader.example.com`）を入れる。`PUBLIC_URL` は欠かせない。コンテナは HTTP だけを受けるので、ないと sendo から見える URL は、中継の先の URL（`http://sendo:8787`）か、ホスト名は合っていても `http` のままのオリジンになり、ログインの戻り先や `__Host-` のクッキーが合わない
    - Google のリダイレクト URI、リーダーアプリ（Google Reader API）のサーバー、MCP の URL も、このオリジンにする
    - 画面を使わない人は、reader のコンテナを外して sendo のポートを出してよい（sendo の[コンテナ版](https://github.com/sendo-feed/sendo/blob/main/docs/decisions/container.md)の 7。このとき OAuth は使えない）。reader は、この形には関わらない
-   - X の埋め込みを有効にする場合は、専用の HTTPS ホストのルート（`/`）で埋め込みページ、`/embed.js` でそのスクリプトを配る（[ローカルファースト](local-first.md#ページの守り)）。reader の配布済みイメージで通常の構成を使うと、引用と投稿リンクを表示する。埋め込みを有効にする場合は、HTTPS の配信元を `SENDO_X_EMBED_ORIGIN` の Docker ビルド引数に渡して reader のイメージをビルドし、Compose の `reader` でそのイメージを使う。配信先の変更と reader の更新に合わせてイメージをビルドし直す。静的ファイルや配信用ヘッダーに変更があった場合は、そのイメージのソースと同じ版の `apps/web/x-embed/` を再配信する。Sendo は `docker compose pull sendo` で更新し、Compose でコンテナを作り直す
+   - X の埋め込みを有効にする場合は、専用の HTTPS ホストのルート（`/`）で埋め込みページ、`/embed.js` でそのスクリプトを配る（[ローカルファースト](local-first.md#ページの守り)）。reader の配布済みイメージで通常の構成を使うと、引用と投稿リンクを表示する。埋め込みを有効にする場合は、HTTPS の配信元を `SENDO_X_EMBED_ORIGIN` の Docker ビルド引数に渡して reader のイメージをビルドし、Compose の `reader` でそのイメージを使う。配信先の変更と reader の更新に合わせてイメージをビルドし直す。静的ファイルや配信用ヘッダーに変更があった場合は、そのイメージのソースと同じ版の `apps/web/x-embed/` を再配信する。投稿 ID や高さ通知の形式を変えるときは旧 reader との互換性を保つ。互換性を変える場合は新しいホストを使い、旧 reader 向けのホストも配信を続ける。Sendo は `docker compose pull sendo` で更新し、Compose でコンテナを作り直す
+   - 配備後は、対応版の Sendo が取得・保存した、X の引用を含む記事で表示を確かめる。保存済み本文での取り扱いは [Sendo の本文の決定](https://github.com/sendo-feed/sendo/blob/main/docs/decisions/content.md)に従う
 3. **reader のコンテナは、画面の静的なファイルを返し、sendo のパスを sendo に中継する。中継するパスは、許す一覧で持つ。**
    - 一覧：`/api/`（の下すべて）、`/mcp`、`/.well-known/oauth-protected-resource/mcp`、`/.well-known/oauth-authorization-server`、`/oauth/token`、`/oauth/register`、`/accounts/ClientLogin`、`/reader/api/0/`（の下すべて）、`/healthz`
    - 一覧にないパスには、静的なファイルか、なければ `index.html` を返す（SPA）
@@ -51,7 +52,7 @@ sendo-reader は、[sendo のコンテナ版](https://github.com/sendo-feed/send
   - sendo が、Cloudflare 版をやめてコンテナだけで動くことになった（sendo の[テックスタック](https://github.com/sendo-feed/sendo/blob/main/docs/decisions/tech-stack.md)の 2、[sendo-feed/sendo#129](https://github.com/sendo-feed/sendo/pull/129)）。Sendo がほかの RSS リーダーと違う価値を出すのは、ページ本文の抽出、言語判定、これから作る LLM・埋め込みなど、CPU を多く使う処理。Cloudflare の無料プランの上限（CPU、1 回の実行のクエリ 50、外への取得 50、D1 の容量と書き込み）にはこれらが収まらず、Cloudflare 版は普通の RSS リーダーの範囲にとどまった。2 つの版を保つ手間も大きかった
   - sendo の Worker がなくなったので、reader Worker から Service binding でつなぐ先がない。reader だけを Cloudflare に残す形は、下の代替案のとおり、使う人が置くものが 2 か所に分かれる
   - 配り方が 1 つになり、fork、Workers Builds、sendo を先にデプロイする順番、sendo-updater が要らなくなる。標準構成では、配布済みの sendo と reader のイメージを取り込んでコンテナを作り直す。埋め込みを有効にした構成では、配信元をビルドに渡すため reader のイメージをビルドし直す（2）
-- **reader のオリジン 1 つに見せる**
+- **画面・API・認証を reader と同じオリジンで使う**
   - コンテナの sendo は、リクエストの URL のオリジンを `PUBLIC_URL` に置き換える。`PUBLIC_URL` を reader のオリジンにすれば、ログインの戻り先（ブラウザから見た `/api/v1/auth/<提供元>/login` の隣）、セッションのクッキー、状態を変えるリクエストの確かめ（`Sec-Fetch-Site` と `Origin`）、OAuth の発行者（issuer）と MCP の宛先、`/mcp` の `Origin` の確かめが、どれも reader のオリジンでそろう
   - sendo の設定は、`PUBLIC_URL` と `READER_URL` が同じオリジンでも受ける（2 つを比べない）。sendo のコードを変えずに済む
   - 画面の CSP（`connect-src 'self'`、`img-src 'self' data:`）を緩めずに済む
