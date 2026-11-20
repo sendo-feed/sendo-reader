@@ -108,7 +108,8 @@ test("購読詳細の時刻は、再取得を待つ間も通信できないと�
   ).toBeVisible();
   await expect(times.nth(0)).toHaveAttribute("datetime", nextCheck);
   await expect(times.nth(1)).toHaveAttribute("datetime", lastSuccessful);
-  await expect(dialog.getByRole("combobox", { name: "Move to" })).toBeEnabled();
+  // フォルダの移動は行の選択でする。窓の中には出さない（同じ画面に 2 か所に出さない）
+  await expect(dialog.getByRole("combobox")).toHaveCount(0);
   await expect(dialog.getByRole("button", { name: "Unsubscribe…", exact: true })).toBeEnabled();
 });
 
