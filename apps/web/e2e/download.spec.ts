@@ -42,11 +42,13 @@ async function openActions(page: Page) {
   await expect(actions(page)).toBeVisible();
 }
 
-async function download(page: Page, name: string) {
+/** Download を押してから、形式（HTML ／ Markdown）を選ぶ */
+async function download(page: Page, format: "HTML" | "Markdown") {
   await openActions(page);
+  await actions(page).getByRole("button", { name: "Download", exact: true }).click();
   const [file] = await Promise.all([
     page.waitForEvent("download"),
-    actions(page).getByRole("button", { name, exact: true }).click(),
+    actions(page).getByRole("button", { name: format, exact: true }).click(),
   ]);
   await expect(actions(page)).not.toBeVisible();
   return { name: file.suggestedFilename(), text: await readFile(await file.path(), "utf8") };
@@ -66,8 +68,7 @@ test("取得した全文を、画像を埋め込んだ HTML と Markdown でダ�
   await page.locator(".article-list .item", { hasText: summaryOnly.title ?? "" }).click();
   await expect(view.getByRole("status")).toContainText("全文を取得できませんでした");
   await openActions(page);
-  await expect(actions(page).getByRole("button", { name: "Download HTML" })).toHaveCount(0);
-  await expect(actions(page).getByRole("button", { name: "Download Markdown" })).toHaveCount(0);
+  await expect(actions(page).getByRole("button", { name: /^Download/ })).toHaveCount(0);
   await page.keyboard.press("Escape");
 
   await page.locator(".article-list .item", { hasText: article.title ?? "" }).click();
@@ -77,7 +78,23 @@ test("取得した全文を、画像を埋め込んだ HTML と Markdown でダ�
   await actions(page).getByRole("button", { name: "Show feed content", exact: true }).click();
   await expect(view.locator(".body")).toHaveText("フィードの本文");
 
-  const markdown = await download(page, "Download Markdown");
+  // 形式ごとの操作は並べず、Download を押してから選ぶ。選ぶ前に戻れる
+  await openActions(page);
+  await expect(actions(page).getByRole("button", { name: /^Download/ })).toHaveText(["Download"]);
+  await actions(page).getByRole("button", { name: "Download", exact: true }).click();
+  await expect(actions(page).getByRole("button", { name: "HTML", exact: true })).toBeFocused();
+  await expect(actions(page).getByRole("button", { name: "Markdown", exact: true })).toBeVisible();
+  await actions(page).getByRole("button", { name: "Back", exact: true }).click();
+  await expect(actions(page).getByRole("button", { name: "Show full text" })).toBeVisible();
+  await expect(actions(page).getByRole("button", { name: "HTML", exact: true })).toHaveCount(0);
+  // 閉じて開き直すと、最初の操作から出る
+  await actions(page).getByRole("button", { name: "Download", exact: true }).click();
+  await page.keyboard.press("Escape");
+  await openActions(page);
+  await expect(actions(page).getByRole("button", { name: "Download", exact: true })).toBeVisible();
+  await page.keyboard.press("Escape");
+
+  const markdown = await download(page, "Markdown");
   expect(markdown.name).toBe("全文の記事_ a_b.md");
   expect(markdown.text).toContain('title: "全文の記事: a/b"');
   expect(markdown.text).toContain('url: "https://blog.example/posts/1"');
@@ -90,7 +107,7 @@ test("取得した全文を、画像を埋め込んだ HTML と Markdown でダ�
   expect(markdown.text).not.toContain("フィードの本文");
   expect(markdown.text).not.toContain("/api/v1/images");
 
-  const html = await download(page, "Download HTML");
+  const html = await download(page, "HTML");
   expect(html.name).toBe("全文の記事_ a_b.html");
   expect(html.text.startsWith("<!doctype html>")).toBe(true);
   expect(html.text).toContain("<h2>元ページの見出し</h2>");
@@ -105,7 +122,7 @@ test("取得した全文を、画像を埋め込んだ HTML と Markdown でダ�
   await context.setOffline(true);
   await page.reload();
   await expect(view.locator(".body")).toContainText("要約にない全文の続き");
-  const offline = await download(page, "Download Markdown");
+  const offline = await download(page, "Markdown");
   expect(offline.text).toContain("## 元ページの見出し");
   expect(offline.text).toMatch(/!\[図\]\(data:image\/png;base64,[A-Za-z0-9+/=]+\)/);
 });
