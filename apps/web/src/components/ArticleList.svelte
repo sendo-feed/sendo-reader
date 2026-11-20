@@ -810,18 +810,6 @@
         <Icon name="filter" />
       </button>
     {/if}
-    {#if kind !== "recentlyRead"}
-      <button
-        type="button"
-        class="icon-button"
-        aria-pressed={options.oldestFirst}
-        aria-label="Oldest first"
-        title="Oldest first"
-        onclick={() => onoption({ oldestFirst: !options.oldestFirst })}
-      >
-        <Icon name="sort" />
-      </button>
-    {/if}
     {#if unread !== null}
       <button
         type="button"

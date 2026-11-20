@@ -44,8 +44,6 @@ export interface Swipes {
 export interface ViewOptions {
   /** 未読だけを出す（All、フォルダ、フィードの一覧） */
   unreadOnly: boolean;
-  /** 古い順に並べる */
-  oldestFirst: boolean;
 }
 
 /** 畳んでいるフォルダを覚えておく数の上限（1 つの項目の値の上限に収める） */
@@ -58,8 +56,6 @@ export interface PrefsValue {
   unreadOnly: boolean;
   /** 一覧を動かして、上へ通り過ぎた未読の記事を既読にする */
   markReadOnScroll: boolean;
-  /** 一覧を古い順に並べる */
-  oldestFirst: boolean;
   /** 左のメニューで、未読のないフィードを隠す */
   hideReadFeeds: boolean;
   /** 広い画面のサイドバーを、アイコンだけで出す */
@@ -70,7 +66,8 @@ export interface PrefsValue {
   swipes: Swipes;
   /**
    * 一覧ごとに変えた設定（鍵は一覧のパス。/feeds/<id> など）。変えていないものは、上の
-   * unreadOnly ／ oldestFirst を既定として使う
+   * unreadOnly を既定として使う。記事の一覧の並び順は選ばせない（settings.md の 2）。前の版が
+   * 預けた oldestFirst は読まずに無視する
    */
   views: Record<string, Partial<ViewOptions>>;
 }
@@ -85,7 +82,6 @@ const DEFAULTS: PrefsValue = {
   textSize: "medium",
   unreadOnly: true,
   markReadOnScroll: true,
-  oldestFirst: false,
   hideReadFeeds: false,
   sidebarCollapsed: false,
   collapsed: [],
@@ -114,7 +110,6 @@ export function parsePrefs(text: string | null): PrefsValue {
     textSize: oneOf(raw.textSize, TEXT_SIZES, DEFAULTS.textSize),
     unreadOnly: flag("unreadOnly"),
     markReadOnScroll: flag("markReadOnScroll"),
-    oldestFirst: flag("oldestFirst"),
     hideReadFeeds: flag("hideReadFeeds"),
     sidebarCollapsed: flag("sidebarCollapsed"),
     collapsed: Array.isArray(raw.collapsed)
@@ -145,7 +140,6 @@ function parseViews(raw: unknown): Record<string, Partial<ViewOptions>> {
     const entry = value as Record<string, unknown>;
     const options: Partial<ViewOptions> = {};
     if (typeof entry.unreadOnly === "boolean") options.unreadOnly = entry.unreadOnly;
-    if (typeof entry.oldestFirst === "boolean") options.oldestFirst = entry.oldestFirst;
     views.push([key, options]);
   }
   return Object.fromEntries(views);
@@ -163,7 +157,6 @@ const SIMPLE_NAMES = {
   textSize: "reader.textSize",
   unreadOnly: "reader.unreadOnly",
   markReadOnScroll: "reader.markReadOnScroll",
-  oldestFirst: "reader.oldestFirst",
   hideReadFeeds: "reader.hideReadFeeds",
   sidebarCollapsed: "reader.sidebarCollapsed",
 } as const;
@@ -331,7 +324,6 @@ class Prefs {
     const own = this.value.views[key] ?? {};
     return {
       unreadOnly: own.unreadOnly ?? this.value.unreadOnly,
-      oldestFirst: own.oldestFirst ?? this.value.oldestFirst,
     };
   }
 

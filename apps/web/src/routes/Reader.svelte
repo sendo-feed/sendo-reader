@@ -138,18 +138,15 @@
     handleLink(event, href);
   }
 
-  /** 開いている一覧の表示の設定（画像を出すか、並び順、未読だけ）。一覧ごとに覚える */
+  /** 開いている一覧の表示の設定（未読だけ）。一覧ごとに覚える。並び順は選ばせない（新しい順） */
   const viewKey = $derived(viewHref(router.view));
   const options = $derived(
-    router.view.kind === "recentlyRead"
-      ? { unreadOnly: false, oldestFirst: false }
-      : prefs.viewOptions(viewKey),
+    router.view.kind === "recentlyRead" ? { unreadOnly: false } : prefs.viewOptions(viewKey),
   );
 
   /** 開いている一覧（購読の管理と設定の画面では null） */
   const listing = $derived.by((): Listing | null => {
     const view = router.view;
-    const order: ArticleQuery = options.oldestFirst ? { order: "oldest" } : {};
     const state: ArticleQuery = options.unreadOnly ? { state: "unread" } : {};
     switch (view.kind) {
       case "manage":
@@ -159,7 +156,7 @@
       case "search":
         return {
           kind: "search",
-          query: { search: router.searchQuery, ...order },
+          query: { search: router.searchQuery },
           title: "Search",
           scope: null,
           unread: null,
@@ -167,7 +164,7 @@
       case "starred":
         return {
           kind: "starred",
-          query: { state: "starred", ...order },
+          query: { state: "starred" },
           title: "Saved",
           scope: null,
           unread: null,
@@ -183,7 +180,7 @@
       case "feed":
         return {
           kind: "feed",
-          query: { feedId: view.id, ...state, ...order },
+          query: { feedId: view.id, ...state },
           title: reader.feedTitle(view.id),
           scope: { feedId: view.id },
           unread: reader.unread.feeds.get(view.id) ?? 0,
@@ -191,7 +188,7 @@
       case "folder":
         return {
           kind: "folder",
-          query: { folderId: view.id, ...state, ...order },
+          query: { folderId: view.id, ...state },
           title: reader.folders.find((f) => f.id === view.id)?.name ?? "Folder",
           scope: { folderId: view.id },
           unread: reader.unread.folders.get(view.id) ?? 0,
@@ -200,7 +197,7 @@
         // 未読は、一覧の種類ではなく、絞り込みの状態（docs/decisions/settings.md の 2）
         return {
           kind: "all",
-          query: { ...state, ...order },
+          query: { ...state },
           title: "All",
           scope: { all: true },
           unread: reader.unread.total,

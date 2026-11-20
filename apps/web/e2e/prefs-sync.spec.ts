@@ -105,7 +105,7 @@ test("前の版が localStorage に置いた設定は、同期してから、sen
         theme: "dark",
         textSize: "large",
         layout: "compact",
-        views: { [`/feeds/${feedId}`]: { oldestFirst: true } },
+        views: { [`/feeds/${feedId}`]: { unreadOnly: false } },
         swipes: { listLeft: "read", listRight: "none", articleLeft: "none", articleRight: "back" },
       }),
     );
@@ -120,7 +120,7 @@ test("前の版が localStorage に置いた設定は、同期してから、sen
       "reader.theme": "light",
       "reader.textSize": "large",
       "reader.swipe.listRight": "none",
-      [`reader.list:/feeds/${feed.id}`]: { oldestFirst: true },
+      [`reader.list:/feeds/${feed.id}`]: { unreadOnly: false },
     });
   await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
   await expect(page.locator("html")).toHaveAttribute("data-text-size", "large");
@@ -133,7 +133,7 @@ test("購読をやめると、そのフィードの一覧の設定を消す", as
   await page.goto("/");
   await signIn(page);
   await page.locator("nav.sidebar").getByRole("link", { name: /Blog/ }).click();
-  await page.getByRole("button", { name: "Oldest first" }).click();
+  await page.getByRole("button", { name: "Unread only" }).click();
   const name = `reader.list:/feeds/${feed.id}`;
   await expect.poll(() => Object.keys(server.settingsOf("desktop"))).toEqual([name]);
 
@@ -167,4 +167,30 @@ test.describe("スマホ", () => {
       .toEqual({ "reader.theme": "dark", "reader.textSize": "small" });
     expect(server.settingsOf("desktop")).toEqual({ "reader.textSize": "large" });
   });
+});
+
+test("前の版が預けた並び順（古い順）は読まずに無視し、新しい順に並べる。預けた値は消さない", async ({
+  page,
+  context,
+}) => {
+  const { server, feed } = seed();
+  server.deliver(feed.id, { title: "2 番目", publishedAt: Date.now() - 2000 });
+  server.putSetting("desktop", "reader.oldestFirst", true);
+  server.putSetting("desktop", `reader.list:/feeds/${feed.id}`, { oldestFirst: true });
+  await routeFakeSendo(context, server);
+  await page.goto("/");
+  await signIn(page);
+  const list = page.locator(".article-list");
+  await expect(list.locator(".title")).toHaveText(["1 番目", "2 番目"]);
+  await expect(list.getByRole("button", { name: "Oldest first" })).toHaveCount(0);
+  await page.locator("nav.sidebar").getByRole("link", { name: /Blog/ }).click();
+  await expect(list.locator(".title")).toHaveText(["1 番目", "2 番目"]);
+  // 未読だけの切り替えは、これまでどおり一覧ごとに預ける（その一覧の項目は置き直される）
+  await list.getByRole("button", { name: "Unread only" }).click();
+  await expect
+    .poll(() => server.settingsOf("desktop"))
+    .toEqual({
+      "reader.oldestFirst": true,
+      [`reader.list:/feeds/${feed.id}`]: { unreadOnly: false },
+    });
 });
