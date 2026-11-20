@@ -10,7 +10,6 @@
   import ArticleBody from "./ArticleBody.svelte";
   import Dialog from "./Dialog.svelte";
   import Icon from "./Icon.svelte";
-  import Appearance from "./settings/Appearance.svelte";
 
   let {
     articleId,
@@ -172,8 +171,8 @@
 
   /**
    * 開いたときに一度だけ、未読なら既読にする。表示が間に合わないうちに次の記事へ移っても
-   * （j を続けて押したとき）、通り過ぎた記事を既読にする。開いている間に「未読に戻す」を
-   * 押したら、そのままにする（記事が替わるまで、もう呼ばない）
+   * （j を続けて押したとき）、通り過ぎた記事を既読にする。開いている間に未読に戻したら
+   * （m）、そのままにする（記事が替わるまで、もう呼ばない）
    */
   async function markOnOpen(id: string) {
     const found = list.find(id) ?? (await reader.client.getArticle(id));
@@ -587,9 +586,6 @@
     }
   }
 
-  /** 文字の大きさとテーマの窓を開いている */
-  let displayOpen = $state(false);
-
   /** 本文が読みづらいときなどに使う補助操作 */
   let actionsOpen = $state(false);
 
@@ -748,15 +744,6 @@
       >
       <button
         type="button"
-        class="icon-button"
-        aria-label={article.readAt === null ? "Mark as read" : "Mark as unread"}
-        title={article.readAt === null ? "Mark as read (m)" : "Mark as unread (m)"}
-        onclick={() => toggle("readAt")}
-      >
-        <Icon name={article.readAt === null ? "check" : "circle"} />
-      </button>
-      <button
-        type="button"
         class="icon-button save"
         aria-pressed={article.starredAt !== null}
         aria-label={article.starredAt === null ? "Save" : "Unsave"}
@@ -769,27 +756,6 @@
         <button type="button" class="icon-button" aria-label="Share" title="Share" onclick={share}>
           <Icon name="share" />
         </button>
-      {/if}
-      <button
-        type="button"
-        class="icon-button aa"
-        aria-label="Appearance"
-        title="Appearance"
-        onclick={() => (displayOpen = true)}
-      >
-        Aa
-      </button>
-      {#if link !== null}
-        <a
-          class="open"
-          href={link}
-          target="_blank"
-          rel="noopener noreferrer"
-          aria-label="Open original"
-          title="Open original (v)"
-        >
-          <Icon name="external" />
-        </a>
       {/if}
       {#if link !== null || hasPageContent}
         <button
@@ -868,10 +834,6 @@
     </div>
   {/if}
 </article>
-
-<Dialog bind:open={displayOpen} title="Appearance">
-  <Appearance reading />
-</Dialog>
 
 <Dialog bind:open={actionsOpen} title="Article actions">
   <div class="content-actions">
@@ -985,8 +947,7 @@
   }
 
   /* 記事の欄が狭いとき（3 カラムで文字を大きくした、など）は、ボタンが縮んで収まる */
-  .toolbar > :global(.icon-button),
-  .open {
+  .toolbar > :global(.icon-button) {
     flex: 0 1 auto;
     min-width: 0;
   }
@@ -1002,29 +963,9 @@
     color: var(--accent);
   }
 
-  .aa {
-    font-size: 1rem;
-    font-weight: 600;
-    letter-spacing: -0.02em;
-  }
-
   .notice {
     color: var(--muted);
     font-size: 0.875rem;
-  }
-
-  .open {
-    display: inline-grid;
-    place-items: center;
-    width: 2.25rem;
-    height: 2.25rem;
-    border-radius: var(--radius-small);
-    color: var(--muted);
-  }
-
-  .open:hover {
-    background: var(--hover);
-    color: var(--text);
   }
 
   .content.fade-in {
@@ -1210,8 +1151,6 @@
       max-width: 3.5rem;
     }
 
-    /* 元の記事へはタイトルから開く（下のバーには、押しやすい数だけ並べる） */
-    .open,
     .close,
     .hint {
       display: none;

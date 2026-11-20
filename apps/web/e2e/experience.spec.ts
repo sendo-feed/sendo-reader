@@ -100,7 +100,6 @@ test("キーボードで、記事を移り、既読とスターを切り替え�
   await page.keyboard.press("s");
   await expect(view.getByRole("button", { name: "Unsave" })).toBeVisible();
   await page.keyboard.press("m");
-  await expect(view.getByRole("button", { name: "Mark as read" })).toBeVisible();
   await expect(unread).toContainText("2");
 
   // Esc で閉じる。記事から記事へ移っても履歴は増やさないので、一覧に戻る
@@ -695,7 +694,10 @@ test("行を長く押す（右クリックする）と記事の操作が出て�
   await expect(page).toHaveURL(new RegExp(`/feeds/${beta.id}$`));
 });
 
-test("記事の画面から、リンクを共有し、文字の大きさを変えられる", async ({ page, context }) => {
+test("記事の画面から、リンクを共有できる。文字を大きくしても、バーのボタンがはみ出さない", async ({
+  page,
+  context,
+}) => {
   const { server } = seed();
   const [first] = [...server.inbox.values()];
   if (first === undefined) throw new Error("unreachable");
@@ -732,12 +734,23 @@ test("記事の画面から、リンクを共有し、文字の大きさを変�
     .poll(() => page.evaluate(() => (window as unknown as { shared: ShareData[] }).shared))
     .toEqual([{ title: "1 番目", url: "https://blog.example/first" }]);
 
-  // 記事を開いたまま、文字の大きさを変える
-  await view.getByRole("button", { name: "Appearance" }).click();
-  await page.getByRole("dialog").getByRole("slider", { name: "Text size" }).fill("4");
+  // 記事の画面には、めったに使わない操作（未読に戻す、表示の設定、元の記事を開く）を出さない。
+  // 元の記事はタイトルから開く
+  for (const name of ["Mark as read", "Mark as unread", "Appearance"]) {
+    await expect(view.getByRole("button", { name, exact: true })).toHaveCount(0);
+  }
+  await expect(view.getByRole("link", { name: "Open original", exact: true })).toHaveCount(0);
+  await expect(view.getByRole("heading", { level: 1 }).getByRole("link")).toHaveAttribute(
+    "href",
+    "https://blog.example/first",
+  );
+
+  // 文字の大きさは Settings で変え、記事に戻る
+  await page.locator("nav.sidebar").getByRole("link", { name: "Settings" }).click();
+  await page.getByRole("slider", { name: "Text size" }).fill("4");
   await expect(page.locator("html")).toHaveAttribute("data-text-size", "xlarge");
-  await expect(page.getByRole("dialog")).not.toContainText("記事の一覧");
-  await page.keyboard.press("Escape");
+  await page.goBack();
+  await expect(view.getByRole("heading", { level: 1 })).toHaveText("1 番目");
 
   // 文字を大きくしても、記事の欄からボタンがはみ出さない（3 カラムの狭い欄でも、狭い画面の
   // 下のバーでも）
@@ -747,7 +760,7 @@ test("記事の画面から、リンクを共有し、文字の大きさを変�
   ] as const) {
     await page.setViewportSize({ width, height: 640 });
     const pane = await view.boundingBox();
-    for (const name of [first, "Appearance"]) {
+    for (const name of [first, "More actions"]) {
       const box = await view.getByRole("button", { name }).boundingBox();
       expect(box?.x).toBeGreaterThanOrEqual(pane?.x ?? 0);
       expect((box?.x ?? 0) + (box?.width ?? 0)).toBeLessThanOrEqual(

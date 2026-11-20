@@ -16,14 +16,10 @@
     const textSize = TEXT_SIZES[index];
     if (textSize !== undefined && textSize !== prefs.value.textSize) prefs.set({ textSize });
   }
-  /** reading なら、読むときに変えたいもの（テーマと文字の大きさ）だけを出す。記事の画面から開く */
-  let { reading = false }: { reading?: boolean } = $props();
 </script>
 
 <section aria-label="Appearance">
-  {#if !reading}
-    <h2>Appearance</h2>
-  {/if}
+  <h2>Appearance</h2>
 
   <fieldset>
     <legend>Theme</legend>
@@ -59,9 +55,7 @@
     </div>
   </fieldset>
 
-  {#if !reading}
-    <ArticlePreview />
-  {/if}
+  <ArticlePreview />
 </section>
 
 <style>
