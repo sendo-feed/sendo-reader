@@ -24,9 +24,9 @@ updates:
       # Svelte の本体と道具は揃えて上げないと噛み合わないことがあるのでまとめる
       svelte:
         patterns: ["svelte", "svelte-check", "@sveltejs/*"]
-      # Vitest は Vite の版に合わせて動くのでまとめる
+      # Vitest は Vite の版に合わせて動くのでまとめる。@vitest/* は vitest と同じ版でないと噛み合わない
       vite:
-        patterns: ["vite", "vitest"]
+        patterns: ["vite", "vitest", "@vitest/*"]
       minor-and-patch:
         update-types: [minor, patch]
     open-pull-requests-limit: 5
