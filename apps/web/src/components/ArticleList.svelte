@@ -351,6 +351,17 @@
     let dx = 0;
     let tracking = false;
     let sideways = false;
+    /** 指で触れている間。この間の contextmenu（長く押したとき）は止める */
+    let touching = false;
+
+    /**
+     * 指で長く押したときに、ブラウザが出すリンクのメニューを止める（Android の Chrome は
+     * -webkit-touch-callout を見ない）。マウスの右クリックは、ブラウザの既定のメニューに任せる
+     */
+    function onContextMenu(event: MouseEvent) {
+      const pointer = (event as PointerEvent).pointerType;
+      if (touching || pointer === "touch" || pointer === "pen") event.preventDefault();
+    }
 
     /** 離したあと、行を元の位置に戻し終えるまでの待ち */
     let settleTimer: ReturnType<typeof setTimeout> | undefined;
@@ -383,6 +394,7 @@
       const touch = event.touches[0];
       // 戻している最中に触れたら、戻し終えたことにして、新しく始める
       if (node.dataset.settling !== undefined) reset();
+      touching = true;
       if (event.touches.length !== 1 || touch === undefined) return reset();
       startX = touch.clientX;
       startY = touch.clientY;
@@ -421,7 +433,13 @@
       else delete node.dataset.armed;
     }
 
+    function onCancel() {
+      touching = false;
+      settle();
+    }
+
     function onEnd() {
+      touching = false;
       const action = swipeAction(dx);
       if (sideways && Math.abs(dx) >= SWIPE && action !== "none") {
         toggle(current, action === "read" ? "readAt" : "starredAt");
@@ -432,7 +450,8 @@
     node.addEventListener("touchstart", onStart, { passive: true });
     node.addEventListener("touchmove", onMove, { passive: true });
     node.addEventListener("touchend", onEnd);
-    node.addEventListener("touchcancel", settle);
+    node.addEventListener("touchcancel", onCancel);
+    node.addEventListener("contextmenu", onContextMenu);
     return {
       update(next: Article) {
         current = next;
@@ -441,7 +460,8 @@
         node.removeEventListener("touchstart", onStart);
         node.removeEventListener("touchmove", onMove);
         node.removeEventListener("touchend", onEnd);
-        node.removeEventListener("touchcancel", settle);
+        node.removeEventListener("touchcancel", onCancel);
+        node.removeEventListener("contextmenu", onContextMenu);
         clearTimeout(settleTimer);
       },
     };

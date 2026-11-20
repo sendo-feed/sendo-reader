@@ -645,8 +645,9 @@ test("行を長く押しても（右クリックしても）、記事の操作�
   expect(prevented).toBe(false);
   await expect(page.getByRole("dialog")).toHaveCount(0);
 
-  // 指で長く押しても、窓は出ない。指を離したあとに押せば、記事が開く
-  await row("A 4").evaluate(async (element) => {
+  // 指で長く押しても、窓は出ず、ブラウザのリンクのメニューも止める（長く押すと、指が触れている
+  // 間に contextmenu が来る）。指を離したあとに押せば、記事が開く
+  const touchPrevented = await row("A 4").evaluate(async (element) => {
     const box = element.getBoundingClientRect();
     const touch = new Touch({
       identifier: 1,
@@ -658,10 +659,14 @@ test("行を長く押しても（右クリックしても）、記事の操作�
       new TouchEvent("touchstart", { bubbles: true, touches: [touch], changedTouches: [touch] }),
     );
     await new Promise((resolve) => setTimeout(resolve, 700));
+    const menu = new MouseEvent("contextmenu", { bubbles: true, cancelable: true });
+    element.querySelector(".item")?.dispatchEvent(menu);
     element.dispatchEvent(
       new TouchEvent("touchend", { bubbles: true, touches: [], changedTouches: [touch] }),
     );
+    return menu.defaultPrevented;
   });
+  expect(touchPrevented).toBe(true);
   await expect(page.getByRole("dialog")).toHaveCount(0);
   await row("A 4").locator(".item").click();
   await expect(page).toHaveURL(/article=/);
