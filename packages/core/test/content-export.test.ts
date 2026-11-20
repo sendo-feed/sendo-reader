@@ -209,6 +209,21 @@ describe("exportArticle（Markdown）", () => {
     ).toBe(["表の名前", "| 名前 | 値 |\n| --- | --- |\n| a\\|b |  |\n| c d |  |"].join("\n\n"));
   });
 
+  it("表のセルの中のコードとリンクの | も、列の区切りにしない", async () => {
+    expect(
+      await markdown(
+        "<table><tr><th>コード</th><th>リンク</th></tr>" +
+          '<tr><td><code>a|b</code></td><td><a href="https://x.example/?q=a|b">c|d</a></td></tr></table>',
+      ),
+    ).toBe("| コード | リンク |\n| --- | --- |\n| `a\\|b` | [c\\|d](https://x.example/?q=a\\|b) |");
+  });
+
+  it("文字の ! と続くリンクを、画像にしない", async () => {
+    expect(await markdown('<p>!<a href="https://x.example/a.png">link</a> すごい!</p>')).toBe(
+      "\\![link](https://x.example/a.png) すごい\\!",
+    );
+  });
+
   it("文字の中の記号と、行の頭の印をエスケープする", async () => {
     expect(
       await markdown(

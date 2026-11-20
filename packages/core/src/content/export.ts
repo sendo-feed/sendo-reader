@@ -282,8 +282,11 @@ const BLOCK_TAGS = new Set([
   ...["figure", "figcaption"],
 ]);
 
-/** 文字の中で、書式として読まれる記号 */
-const MARKDOWN_SPECIAL = /[\\`*_[\]<>~|&]/g;
+/**
+ * 文字の中で、書式として読まれる記号。! は、続くリンクと合わさって画像（![…](…)）に
+ * ならないよう、どこでもエスケープする
+ */
+const MARKDOWN_SPECIAL = /[\\`*_[\]<>~|&!]/g;
 
 function escapeMarkdown(text: string): string {
   return text.replace(MARKDOWN_SPECIAL, "\\$&");
@@ -432,7 +435,7 @@ function markdownTable(
         const cells: string[] = [];
         for (const cell of node.children) {
           if (typeof cell === "string" || (cell.tag !== "td" && cell.tag !== "th")) continue;
-          cells.push(oneLine(markdownInline(cell.children, images)));
+          cells.push(escapeCellPipes(oneLine(markdownInline(cell.children, images))));
           for (let i = 1; i < (cell.colspan ?? 1); i++) cells.push("");
         }
         rows.push(cells);
@@ -553,6 +556,16 @@ function oneLine(text: string): string {
 /** 行の頭で、見出し・引用・リスト・区切り線として読まれる文字をエスケープする */
 function escapeLineStarts(line: string): string {
   return line.replace(/^([#>+=-])/, "\\$1").replace(/^(\d+)([.)])/, "$1\\$2");
+}
+
+/**
+ * 表のセルの | をエスケープする。GFM は、コードや URL の中の | も列の区切りに読む（セルを
+ * 分けてから、\| を | に戻す）。文字の中の | は、もう \| になっている（前の \ が奇数）
+ */
+function escapeCellPipes(cell: string): string {
+  return cell.replace(/(\\*)\|/g, (match, slashes: string) =>
+    slashes.length % 2 === 0 ? `${slashes}\\|` : match,
+  );
 }
 
 /** 見出しの終わりの # は、閉じの印として落とされる */
