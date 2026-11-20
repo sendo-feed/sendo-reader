@@ -329,14 +329,6 @@
         {/if}
       {/if}
       <p class="url">{selected.url}</p>
-      <label class="move-label" for="selected-feed-folder">Move to</label>
-      <select
-        id="selected-feed-folder"
-        value={selected.folderId ?? ""}
-        onchange={(event) => selected !== undefined && move(selected, event)}
-      >
-        {@render folderOptions()}
-      </select>
       <div class="unsubscribe">
         <button type="button" class="link danger" onclick={() => (confirming = true)}>
           Unsubscribe…
@@ -500,12 +492,6 @@
   }
 
   .fetch-times-note {
-    font-size: 0.875rem;
-  }
-
-  .move-label {
-    display: block;
-    margin: 1rem 0 0.375rem;
     font-size: 0.875rem;
   }
 
