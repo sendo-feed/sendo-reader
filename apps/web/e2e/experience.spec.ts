@@ -757,6 +757,11 @@ test("記事の画面から、リンクを共有できる。文字を大きく�
     [360, "Back"],
   ] as const) {
     await page.setViewportSize({ width, height: 640 });
+    // 狭い画面に替わると、記事の欄が右から入ってくる。動き終えてから測る（動いている途中に、
+    // 欄とボタンを別々の時点で測ると、ずれてはみ出して見える）
+    await view.evaluate((element) =>
+      Promise.all(element.getAnimations({ subtree: true }).map((animation) => animation.finished)),
+    );
     const pane = await view.boundingBox();
     for (const name of [first, "More actions"]) {
       const box = await view.getByRole("button", { name }).boundingBox();
