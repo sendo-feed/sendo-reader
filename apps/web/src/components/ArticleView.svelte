@@ -202,6 +202,7 @@
       recordedOpen = null;
       saveError = null;
       actionsOpen = false;
+      exportError = null;
       contentRequest += 1;
       content = null;
       contentState = id === null ? "none" : "checking";
@@ -599,6 +600,51 @@
     else void loadFullText(articleId);
   }
 
+  /** 全文をファイルに書き出している（画像を取っている間、ボタンを押せなくする） */
+  let exporting = $state<"html" | "markdown" | null>(null);
+  let exportError = $state<string | null>(null);
+
+  /**
+   * 手元の全文を、HTML か Markdown の 1 つのファイルにしてダウンロードさせる。フィードの本文を
+   * 出しているときも、書き出すのは全文。書き出しの部品は、使うときだけ読む（最初の JS に入れない）
+   */
+  async function download(format: "html" | "markdown") {
+    const current = article;
+    if (current === null || exporting !== null) return;
+    exporting = format;
+    exportError = null;
+    try {
+      const page = await reader.client.getArticleContent(current.id, "page");
+      if (page.status !== "ready") {
+        exportError = "全文が手元にないため、書き出せませんでした。";
+        return;
+      }
+      const [{ exportArticle, fetchImageAsDataUrl }, { downloadText }] = await Promise.all([
+        import("@sendo-reader/core/export"),
+        import("../lib/download"),
+      ]);
+      const file = await exportArticle(
+        {
+          title: current.title,
+          url: current.url,
+          feedTitle: reader.feedTitle(current.feedId),
+          author: current.author,
+          publishedAt: current.publishedAt,
+        },
+        page.content.nodes,
+        format,
+        (src) => fetchImageAsDataUrl(src),
+      );
+      if (articleId !== current.id) return;
+      downloadText(file.name, file.type, file.text);
+      actionsOpen = false;
+    } catch {
+      exportError = "書き出せませんでした。";
+    } finally {
+      exporting = null;
+    }
+  }
+
   /** 書き込みに失敗したときの知らせ */
   let saveError = $state<string | null>(null);
 
@@ -839,6 +885,17 @@
       >
         {pageNote === null ? "Show full text" : "Retry full text"}
       </button>
+    {/if}
+    {#if hasPageContent}
+      <button type="button" disabled={exporting !== null} onclick={() => download("html")}>
+        {exporting === "html" ? "Downloading…" : "Download HTML"}
+      </button>
+      <button type="button" disabled={exporting !== null} onclick={() => download("markdown")}>
+        {exporting === "markdown" ? "Downloading…" : "Download Markdown"}
+      </button>
+    {/if}
+    {#if exportError !== null}
+      <p class="error" role="alert">{exportError}</p>
     {/if}
   </div>
 </Dialog>

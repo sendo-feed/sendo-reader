@@ -9,7 +9,8 @@
     ".": "./src/index.ts",
     "./web": "./src/web/client.ts",
     "./web/worker": "./src/web/worker.ts",
-    "./web/image-cache": "./src/web/image-cache.ts"
+    "./web/image-cache": "./src/web/image-cache.ts",
+    "./export": "./src/content/export.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
