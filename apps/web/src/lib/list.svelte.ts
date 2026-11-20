@@ -59,6 +59,8 @@ export class ArticleListState {
   readonly #removed = new Map<string, { previous: string | null; next: string | null }>();
   /** 何も出さない一覧にしている（show に null を渡した） */
   #empty = false;
+  /** いちばんあとに始めた、最初からの読み出し（load） */
+  #loading: Promise<void> = Promise.resolve();
   /**
    * 読み出しの世代。条件を変えて読み直すたびに増やし、それより前に始めた読み出し（前の条件の
    * 一覧を元にした読み直しなど）の結果は当てない
@@ -111,7 +113,18 @@ export class ArticleListState {
     return this.load();
   }
 
-  async load(): Promise<void> {
+  /**
+   * 最初から読み直す。読んでいる間に、別の読み直しが始まったら（記事が変わった知らせで refresh が
+   * 読み直した、など）、その読み直しが終わるまで待つ。解けたときには、いちばん新しい読み出しの
+   * 結果が入っている（show のあとに、一覧の位置を戻すため。docs/decisions/ui.md の 1）
+   */
+  load(): Promise<void> {
+    const loading = this.#load();
+    this.#loading = loading;
+    return loading;
+  }
+
+  async #load(): Promise<void> {
     const current = ++this.#generation;
     if (this.#empty) {
       this.#after = undefined;
@@ -123,7 +136,9 @@ export class ArticleListState {
     }
     this.loading = true;
     const page = await this.#client.listArticles({ ...this.#query, limit: PAGE });
-    if (current !== this.#generation) return;
+    // あとから始めた読み出しがある。結果は当てず、そちらが終わるのを待つ（そちらの失敗は、
+    // そちらを呼んだ側に返す）
+    if (current !== this.#generation) return this.#loading.catch(() => {});
     this.#removed.clear();
     this.#after = cursorOf(page.at(-1));
     this.#articles = page;
