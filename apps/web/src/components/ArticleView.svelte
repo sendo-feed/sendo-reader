@@ -201,6 +201,7 @@
       recordedOpen = null;
       saveError = null;
       actionsOpen = false;
+      choosingFormat = false;
       exportError = null;
       contentRequest += 1;
       content = null;
@@ -588,6 +589,18 @@
 
   /** 本文が読みづらいときなどに使う補助操作 */
   let actionsOpen = $state(false);
+  /** 補助操作の窓で、Download を押して、書き出す形式を選んでいる */
+  let choosingFormat = $state(false);
+
+  // 窓を閉じたら、次に開いたときは最初の操作から出す
+  $effect(() => {
+    if (!actionsOpen) choosingFormat = false;
+  });
+
+  /** 形式を選ぶ段に替わったら、最初の形式にフォーカスを移す（押したボタンは消える） */
+  function focusFirst(node: HTMLElement) {
+    node.focus();
+  }
 
   function showContent(source: "feed" | "page") {
     actionsOpen = false;
@@ -837,7 +850,31 @@
 
 <Dialog bind:open={actionsOpen} title="Article actions">
   <div class="content-actions">
-    {#if content?.source === "page" || pageLoading}
+    {#if choosingFormat}
+      <!-- Download を押したあと、書き出す形式を選ぶ（やり方の違いは、押したあとに選ぶ。ui.md の 8） -->
+      <button
+        type="button"
+        disabled={exporting !== null}
+        onclick={() => download("html")}
+        use:focusFirst
+      >
+        {exporting === "html" ? "Downloading…" : "HTML"}
+      </button>
+      <button type="button" disabled={exporting !== null} onclick={() => download("markdown")}>
+        {exporting === "markdown" ? "Downloading…" : "Markdown"}
+      </button>
+      <button
+        type="button"
+        class="link"
+        disabled={exporting !== null}
+        onclick={() => {
+          choosingFormat = false;
+          exportError = null;
+        }}
+      >
+        Back
+      </button>
+    {:else if content?.source === "page" || pageLoading}
       <button type="button" onclick={() => showContent("feed")}>Show feed content</button>
     {:else}
       <button
@@ -848,13 +885,8 @@
         {pageNote === null ? "Show full text" : "Retry full text"}
       </button>
     {/if}
-    {#if hasPageContent}
-      <button type="button" disabled={exporting !== null} onclick={() => download("html")}>
-        {exporting === "html" ? "Downloading…" : "Download HTML"}
-      </button>
-      <button type="button" disabled={exporting !== null} onclick={() => download("markdown")}>
-        {exporting === "markdown" ? "Downloading…" : "Download Markdown"}
-      </button>
+    {#if hasPageContent && !choosingFormat}
+      <button type="button" onclick={() => (choosingFormat = true)}>Download</button>
     {/if}
     {#if exportError !== null}
       <p class="error" role="alert">{exportError}</p>
@@ -869,6 +901,11 @@
 
   .content-actions button {
     padding-block: 0.6rem;
+  }
+
+  .content-actions .link {
+    justify-self: center;
+    padding-block: 0.25rem;
   }
 
   .article-view {
