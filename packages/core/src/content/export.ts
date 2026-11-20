@@ -427,16 +427,33 @@ function markdownTable(
 ): string[] {
   const blocks: string[] = [];
   const rows: string[][] = [];
+  /** 列ごとに、上の行の rowspan があと何行ふさぐか。ふさがれた位置は空のセルにする */
+  const spanned: number[] = [];
   const visit = (nodes: readonly ContentNode[]) => {
     for (const node of nodes) {
       if (typeof node === "string") continue;
       if (node.tag === "caption") blocks.push(...markdownBlocks(node.children, images));
       else if (node.tag === "tr") {
         const cells: string[] = [];
+        const skipSpanned = () => {
+          for (let left = spanned[cells.length] ?? 0; left > 0; left = spanned[cells.length] ?? 0) {
+            spanned[cells.length] = left - 1;
+            cells.push("");
+          }
+        };
         for (const cell of node.children) {
           if (typeof cell === "string" || (cell.tag !== "td" && cell.tag !== "th")) continue;
-          cells.push(escapeCellPipes(oneLine(markdownInline(cell.children, images))));
-          for (let i = 1; i < (cell.colspan ?? 1); i++) cells.push("");
+          skipSpanned();
+          const text = escapeCellPipes(oneLine(markdownInline(cell.children, images)));
+          for (let i = 0; i < (cell.colspan ?? 1); i++) {
+            if ((cell.rowspan ?? 1) > 1) spanned[cells.length] = (cell.rowspan ?? 1) - 1;
+            cells.push(i === 0 ? text : "");
+          }
+        }
+        // 行の終わりより右の、ふさがれた列
+        for (let column = cells.length; column < spanned.length; column++) {
+          const left = spanned[column] ?? 0;
+          if (left > 0) spanned[column] = left - 1;
         }
         rows.push(cells);
       } else if (node.tag === "thead" || node.tag === "tbody" || node.tag === "tfoot") {

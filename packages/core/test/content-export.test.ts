@@ -209,6 +209,27 @@ describe("exportArticle（Markdown）", () => {
     ).toBe(["表の名前", "| 名前 | 値 |\n| --- | --- |\n| a\\|b |  |\n| c d |  |"].join("\n\n"));
   });
 
+  it("rowspan でふさがれた列は、後の行で空のセルにして、列をずらさない", async () => {
+    expect(
+      await markdown(
+        "<table><tr><th>Group</th><th>Value</th><th>Note</th></tr>" +
+          '<tr><td rowspan="2">A</td><td>10</td><td rowspan="3">n</td></tr>' +
+          "<tr><td>20</td></tr>" +
+          '<tr><td colspan="2" rowspan="2">B</td></tr>' +
+          "<tr><td>x</td></tr></table>",
+      ),
+    ).toBe(
+      [
+        "| Group | Value | Note |",
+        "| --- | --- | --- |",
+        "| A | 10 | n |",
+        "|  | 20 |  |",
+        "| B |  |  |",
+        "|  |  | x |",
+      ].join("\n"),
+    );
+  });
+
   it("表のセルの中のコードとリンクの | も、列の区切りにしない", async () => {
     expect(
       await markdown(
