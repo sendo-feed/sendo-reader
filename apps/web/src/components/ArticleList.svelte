@@ -1311,23 +1311,23 @@
     overflow-wrap: anywhere;
   }
 
+  /* 新しい記事の知らせ。読む画面の没入感を優先し、色で塗らず、影も付けない */
   .fresh {
     position: sticky;
     top: 3.75rem;
     z-index: 1;
     align-self: center;
     margin: 0.5rem 0 -2.5rem;
-    border-color: var(--accent);
+    border-color: var(--border-strong);
     border-radius: 999px;
-    background: var(--accent);
-    color: var(--on-accent);
+    background: var(--background);
+    color: var(--muted);
     font-size: 0.8125rem;
-    font-weight: 600;
-    box-shadow: var(--shadow);
   }
 
   .fresh:hover:not(:disabled) {
-    background: var(--accent-strong);
+    background: var(--hover);
+    color: var(--text);
   }
 
   .more {

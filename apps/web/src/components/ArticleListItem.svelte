@@ -68,7 +68,7 @@
     gap: 0.75rem;
     align-items: center;
     height: 6.5rem;
-    padding: 0 1rem 0 1.375rem;
+    padding: 0 1rem;
     color: var(--muted);
     text-decoration: none;
   }
@@ -126,18 +126,6 @@
     outline-offset: -2px;
   }
 
-  /* 未読の印 */
-  .item.unread::before {
-    content: "";
-    position: absolute;
-    top: calc(50% - 0.21875rem);
-    left: 0.5rem;
-    width: 0.4375rem;
-    height: 0.4375rem;
-    border-radius: 50%;
-    background: var(--accent);
-  }
-
   .meta {
     display: flex;
     gap: 0.375rem;
@@ -193,6 +181,7 @@
     overflow-wrap: anywhere;
   }
 
+  /* 未読は、タイトルの色と太さだけで示す（印は付けない。読む画面の没入感を優先する） */
   .item.unread .title {
     color: var(--text);
     font-weight: 600;
