@@ -78,10 +78,7 @@ for (const mobile of [false, true]) {
 
       await list.locator(".item").first().click();
       await expect(page.getByRole("heading", { level: 1 })).toHaveText("読んだ記事 2");
-      await page
-        .locator(".article-view")
-        .getByRole("button", { name: "Mark as unread", exact: true })
-        .click();
+      await page.keyboard.press("m");
       await page.keyboard.press("Escape");
       await expect(list.locator(".title")).toHaveText(["読んだ記事 1", "読んだ記事 0"]);
 
@@ -200,7 +197,7 @@ for (const [direction, expected] of [
     const list = page.locator(".article-list");
     await list.locator(".item", { hasText: "読んだ記事 1" }).click();
     const view = page.locator(".article-view");
-    await view.getByRole("button", { name: "Mark as unread", exact: true }).click();
+    await page.keyboard.press("m");
     await expect(list.locator(".title")).toHaveText(["読んだ記事 2", "読んだ記事 0"]);
     await view.getByRole("button", { name: direction, exact: true }).click();
     await expect(view.getByRole("heading", { level: 1 })).toHaveText(expected);

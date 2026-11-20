@@ -57,24 +57,30 @@ test.describe("速さの予算", () => {
     await page.locator(".article-list .item").first().click();
     const view = page.locator(".article-view");
     await expect(view.getByRole("button", { name: "Save" })).toBeVisible();
+    await expect(page.locator('.article-list .item[aria-current="true"]')).not.toHaveClass(
+      /\bunread\b/,
+    );
     const cdp = await context.newCDPSession(page);
     await cdp.send("Emulation.setCPUThrottlingRate", { rate: CPU_SLOWDOWN });
 
+    // スターは記事のバーのボタンで、既読はキーボード（m）で切り替え、開いている記事の行に出るまで
     for (const [press, expected] of [
-      ["Save", "Unsave"],
-      ["Mark as unread", "Mark as read"],
+      ["Save", '.article-view button[aria-label="Unsave"]'],
+      ["m", '.article-list .item.unread[aria-current="true"]'],
     ] as const) {
       const elapsed = await page.evaluate(
         ({ press, expected }) =>
           new Promise<number>((resolve) => {
-            const find = (label: string) =>
-              [...document.querySelectorAll(".article-view button")].find(
-                (b) => b.getAttribute("aria-label") === label,
-              ) as HTMLButtonElement | undefined;
             const start = performance.now();
-            find(press)?.click();
+            if (press === "m") {
+              window.dispatchEvent(new KeyboardEvent("keydown", { key: "m" }));
+            } else {
+              document
+                .querySelector<HTMLButtonElement>(`.article-view button[aria-label="${press}"]`)
+                ?.click();
+            }
             const check = () => {
-              if (find(expected) !== undefined) resolve(performance.now() - start);
+              if (document.querySelector(expected) !== null) resolve(performance.now() - start);
               else requestAnimationFrame(check);
             };
             check();

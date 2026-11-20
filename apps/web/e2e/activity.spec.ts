@@ -19,10 +19,10 @@ test("表示した記事の開封をオフラインでも記録し、同じ表�
   await context.setOffline(true);
   await articleRow.click();
   await expect(page.getByRole("heading", { name: article.title ?? "" })).toBeVisible();
-  const articleView = page.locator(".article-view");
-  await articleView.getByRole("button", { name: "Mark as unread", exact: true }).click();
+  // 開いたまま未読に戻す（m）
+  await page.keyboard.press("m");
   await expect(
-    articleView.getByRole("button", { name: "Mark as read", exact: true }),
+    page.locator(".article-list .row.unread", { hasText: article.title ?? "" }),
   ).toBeVisible();
   expect(server.activityRequests).toHaveLength(0);
 
