@@ -169,12 +169,11 @@ test("一覧の形・並び順・絞り込みは一覧ごとに覚え、表示�
       ]);
   expect(await rowHeights()).toHaveLength(1);
 
-  // 古い順に並べる
-  await list.getByRole("button", { name: "Oldest first" }).click();
-  await expect(list.locator(".title")).toHaveText(["3 番目", "2 番目", "1 番目"]);
+  // 並び順は選ばせない（新しい順だけ）
+  await expect(list.getByRole("button", { name: "Oldest first" })).toHaveCount(0);
 
   // 未読は、一覧の絞り込みの状態。どの一覧も、はじめは未読だけを出し、切り替えると既読も出す。
-  // 表示の設定は一覧ごとに覚えるので、All で変えた並び順は、ここには及ばない
+  // 表示の設定は一覧ごとに覚えるので、Blog で切り替えた分は、All には及ばない
   await list.getByText("3 番目").click();
   await page.locator("nav.sidebar").getByRole("link", { name: "Blog" }).click();
   await expect(list.locator(".title")).toHaveText(["1 番目"]);
@@ -182,15 +181,14 @@ test("一覧の形・並び順・絞り込みは一覧ごとに覚え、表示�
   await expect(unreadOnly).toHaveAttribute("aria-pressed", "true");
   await unreadOnly.click();
   await expect(list.locator(".title")).toHaveText(["1 番目", "3 番目"]);
-  await unreadOnly.click();
-  await expect(list.locator(".title")).toHaveText(["1 番目"]);
   // All でも、同じ切り替えで既読も出せる
   await page.locator("nav.sidebar").getByRole("link", { name: "All" }).click();
-  await expect(list.locator(".title")).toHaveText(["2 番目", "1 番目"]);
+  await expect(list.locator(".title")).toHaveText(["1 番目", "2 番目"]);
+  await expect(unreadOnly).toHaveAttribute("aria-pressed", "true");
   await unreadOnly.click();
-  await expect(list.locator(".title")).toHaveText(["3 番目", "2 番目", "1 番目"]);
+  await expect(list.locator(".title")).toHaveText(["1 番目", "2 番目", "3 番目"]);
   await unreadOnly.click();
-  await expect(list.locator(".title")).toHaveText(["2 番目", "1 番目"]);
+  await expect(list.locator(".title")).toHaveText(["1 番目", "2 番目"]);
 
   // フォルダを畳み、未読のないフィードを隠す
   const nav = page.locator("nav.sidebar");
@@ -209,13 +207,13 @@ test("一覧の形・並び順・絞り込みは一覧ごとに覚え、表示�
   await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
   await expect(page.locator("html")).toHaveAttribute("data-text-size", "large");
   await expect(page.getByRole("slider", { name: "Text size" })).toHaveValue("3");
-  const oldest = list.getByRole("button", { name: "Oldest first" });
+  // 読み込み直しても、一覧ごとの設定が残る
   await page.goto(`/feeds/${blog.id}`);
-  await expect(list.locator(".title")).toHaveText(["1 番目"]);
-  await expect(oldest).toHaveAttribute("aria-pressed", "false");
+  await expect(list.locator(".title")).toHaveText(["1 番目", "3 番目"]);
+  await expect(unreadOnly).toHaveAttribute("aria-pressed", "false");
   await page.goto("/");
-  await expect(list.locator(".title")).toHaveText(["2 番目", "1 番目"]);
-  await expect(oldest).toHaveAttribute("aria-pressed", "true");
+  await expect(list.locator(".title")).toHaveText(["1 番目", "2 番目"]);
+  await expect(unreadOnly).toHaveAttribute("aria-pressed", "true");
 });
 
 test("狭い画面では、メニューを左から開き、一覧と記事を行き来する", async ({ page, context }) => {
@@ -492,26 +490,26 @@ test("末尾まで出した一覧に、それより古い記事が加わった�
   await expect(list.locator(".title")).toHaveText(["1 番目", "3 番目"]);
 });
 
-test("古い順の一覧でも、出している記事より前に入る記事が加わったら、新しい記事として知らせる", async ({
+test("出している記事より前に入る記事が加わったら、新しい記事として知らせる", async ({
   page,
   context,
 }) => {
   const { server } = seed();
   const [first, , third] = [...server.inbox.values()];
   if (first === undefined || third === undefined) throw new Error("unreachable");
-  server.setArticleState(first.id, { starred: true });
+  server.setArticleState(third.id, { starred: true });
   await routeFakeSendo(context, server);
   await page.goto("/");
   await signIn(page);
   await page.locator("nav.sidebar").getByRole("link", { name: "Saved" }).click();
   const list = page.locator(".article-list");
-  await list.getByRole("button", { name: "Oldest first" }).click();
-  await expect(list.locator(".title")).toHaveText(["1 番目"]);
+  await expect(list.locator(".title")).toHaveText(["3 番目"]);
 
-  server.setArticleState(third.id, { starred: true });
+  // ほかの端末で、出している記事より新しい記事にスターを付けた
+  server.setArticleState(first.id, { starred: true });
   await page.getByRole("button", { name: "Sync now" }).click();
   await list.getByRole("button", { name: "1 new" }).click();
-  await expect(list.locator(".title")).toHaveText(["3 番目", "1 番目"]);
+  await expect(list.locator(".title")).toHaveText(["1 番目", "3 番目"]);
 });
 
 test("一覧を動かして通り過ぎた記事は既読になる。設定で切れる", async ({ page, context }) => {

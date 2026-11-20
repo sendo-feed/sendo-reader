@@ -46,7 +46,7 @@ describe("記事の一覧", () => {
     const rest = await core.listArticles({ state: "read", order: "recentlyRead", after: last });
     expect(rest.map((article) => article.title)).toEqual(["a2", "a1"]);
     const all = [...first, ...rest];
-    for (const order of ["recentlyRead", "newest", "oldest"] as const) {
+    for (const order of ["recentlyRead", "newest"] as const) {
       expect([...all].sort((a, b) => compareArticles(a, b, order)).map((a) => a.id)).toEqual(
         (await core.listArticles({ state: "read", order })).map((a) => a.id),
       );
@@ -110,19 +110,6 @@ describe("記事の一覧", () => {
     expect(rest.map((article) => article.title)).toEqual(["b1", "a1"]);
   });
 
-  test("古い順にも並べられ、続きから読める", async () => {
-    const { core } = await seeded();
-    const first = await core.listArticles({ order: "oldest", limit: 2 });
-    expect(first.map((article) => article.title)).toEqual(["a1", "b1"]);
-    const last = first.at(-1);
-    if (last === undefined) throw new Error("unreachable");
-    const rest = await core.listArticles({
-      order: "oldest",
-      after: { publishedAt: last.publishedAt, id: last.id },
-    });
-    expect(rest.map((article) => article.title)).toEqual(["a2", "c1"]);
-  });
-
   test("ある時刻からあとに既読にした記事を数える", async () => {
     const { core, server, articles } = await seeded();
     // a1 は、いま（server.now）既読にしてある
@@ -164,8 +151,8 @@ describe("記事の一覧", () => {
     // 空なら絞らない。ほかの条件とも組み合わせられる
     expect(await titles("  ")).toHaveLength(4);
     expect(
-      (await core.listArticles({ search: "sqlite", order: "oldest" })).map((a) => a.title),
-    ).toEqual(["同期の設計", "SQLite を OPFS で使う"]);
+      (await core.listArticles({ search: "sqlite", state: "unread" })).map((a) => a.title),
+    ).toEqual(["SQLite を OPFS で使う", "同期の設計"]);
   });
 
   test("数は 1〜200 に収める", async () => {

@@ -15,11 +15,11 @@ export interface ArticleQuery {
    * （大文字と小文字は、ASCII の範囲で区別しない）。空なら絞らない
    */
   search?: string;
-  /** 公開日時の新しい順（既定）・古い順、または既読にした日時の新しい順（既読だけ） */
-  order?: "newest" | "oldest" | "recentlyRead";
+  /** 公開日時の新しい順（既定）、または既読にした日時の新しい順（既読だけ） */
+  order?: "newest" | "recentlyRead";
   /** 1 回に読む数（1〜200、既定は 50） */
   limit?: number;
-  /** 前のページの最後の記事。その続き（新しい順ならこれより古いもの、古い順なら新しいもの）を読む */
+  /** 前のページの最後の記事。その続き（これより古いもの）を読む */
   after?: ArticleCursor;
 }
 
@@ -39,7 +39,7 @@ export function compareArticles(
   const time = (article: ArticleCursor) =>
     order === "recentlyRead" ? (article.readAt ?? 0) : article.publishedAt;
   const difference = time(a) - time(b) || (a.id === b.id ? 0 : a.id > b.id ? 1 : -1);
-  return order === "oldest" ? difference : -difference;
+  return -difference;
 }
 
 const DEFAULT_LIMIT = 50;
@@ -87,13 +87,11 @@ export async function listArticles(db: Executor, query: ArticleQuery = {}): Prom
     );
     params.push(pattern, pattern, pattern);
   }
-  const oldest = query.order === "oldest";
   const column = recentlyRead ? "a.read_at" : "a.published_at";
   if (query.after !== undefined) {
     const time = recentlyRead ? query.after.readAt : query.after.publishedAt;
     if (time === undefined || time === null) throw new RangeError("既読順の続きには readAt が必要");
-    const than = oldest ? ">" : "<";
-    where.push(`(${column}, a.id) ${than} (?, ?)`);
+    where.push(`(${column}, a.id) < (?, ?)`);
     params.push(time, query.after.id);
   }
   const limit = Math.min(Math.max(Math.trunc(query.limit ?? DEFAULT_LIMIT), 1), MAX_LIMIT);
@@ -102,7 +100,7 @@ export async function listArticles(db: Executor, query: ArticleQuery = {}): Prom
   const rows = await db.all<ArticleRow>(
     `select ${ARTICLE_COLUMNS} from articles a
      ${where.length > 0 ? `where ${where.join(" and ")}` : ""}
-     order by ${column} ${oldest ? "asc" : "desc"}, a.id ${oldest ? "asc" : "desc"}
+     order by ${column} desc, a.id desc
      limit ?`,
     params,
   );
