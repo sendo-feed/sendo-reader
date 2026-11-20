@@ -30,6 +30,11 @@ const ALLOWED_TAGS = new Set([
   ...["a", "img"],
 ]);
 
+/** 通すと決めたタグか（本文の木を書き出すときに、重ねて確かめる） */
+export function isContentTag(name: string): boolean {
+  return ALLOWED_TAGS.has(name);
+}
+
 /** 中身が文字として読まれる要素。閉じタグまでを、タグとして読まずに飛ばす */
 const RAW_TEXT_TAGS = new Set(["script", "style", "textarea", "title", "xmp", "noscript"]);
 
