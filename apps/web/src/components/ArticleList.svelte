@@ -29,7 +29,6 @@
     onsearch,
     options,
     onoption,
-    onmenu,
     next,
   }: {
     list: ArticleListState;
@@ -48,8 +47,6 @@
     /** この一覧の表示の設定（一覧ごとに覚える） */
     options: ViewOptions;
     onoption: (patch: Partial<ViewOptions>) => void;
-    /** 行を長く押した（右クリックした）とき。その記事の操作を出す */
-    onmenu: (article: Article) => void;
     /** 一覧の終わりに出す、次へ進むボタン（出さないなら null） */
     next: { label: string; go: () => void } | null;
   } = $props();
@@ -340,15 +337,12 @@
 
   /** これだけ横に動かして離したら、操作する（px） */
   const SWIPE = 72;
-  /** これだけ押し続けたら、その記事の操作を出す（ミリ秒） */
-  const LONG_PRESS = 500;
   /** 離したあと、行が元の位置に戻るまで（ミリ秒）。CSS の transition と揃える */
   const SETTLE = 200;
 
   /**
    * 指で行を横にスワイプする。割り当ては設定で変えられる（既定は、右でスター、左で既読・未読）。
-   * 縦に動かし始めたら、一覧を動かすだけにする（行は touch-action: pan-y）。
-   * 動かさずに長く押す（マウスなら右クリック）と、その記事の操作を出す
+   * 縦に動かし始めたら、一覧を動かすだけにする（行は touch-action: pan-y）
    */
   function swipe(node: HTMLElement, article: Article) {
     let current = article;
@@ -357,37 +351,22 @@
     let dx = 0;
     let tracking = false;
     let sideways = false;
+    /** 指で触れている間。この間の contextmenu（長く押したとき）は止める */
+    let touching = false;
 
-    /** 長く押したら、その記事の操作を出す。そのあとの指を離したときのクリックでは、開かない */
-    let pressTimer: ReturnType<typeof setTimeout> | undefined;
-    let pressed = false;
-
-    function openMenu() {
-      if (pressed) return;
-      pressed = true;
-      reset();
-      onmenu(current);
-    }
-
+    /**
+     * 指で長く押したときに、ブラウザが出すリンクのメニューを止める（Android の Chrome は
+     * -webkit-touch-callout を見ない）。マウスの右クリックは、ブラウザの既定のメニューに任せる
+     */
     function onContextMenu(event: MouseEvent) {
-      event.preventDefault();
-      openMenu();
-      // マウスの右クリックでは、あとにクリックは来ない
-      if (event.button === 2) pressed = false;
-    }
-
-    function onClickCapture(event: MouseEvent) {
-      if (!pressed) return;
-      pressed = false;
-      event.preventDefault();
-      event.stopPropagation();
+      const pointer = (event as PointerEvent).pointerType;
+      if (touching || pointer === "touch" || pointer === "pen") event.preventDefault();
     }
 
     /** 離したあと、行を元の位置に戻し終えるまでの待ち */
     let settleTimer: ReturnType<typeof setTimeout> | undefined;
 
     function reset() {
-      clearTimeout(pressTimer);
       clearTimeout(settleTimer);
       tracking = false;
       sideways = false;
@@ -404,7 +383,6 @@
      */
     function settle() {
       if (node.dataset.swiping === undefined || reducedMotion()) return reset();
-      clearTimeout(pressTimer);
       tracking = false;
       sideways = false;
       node.dataset.settling = "";
@@ -416,14 +394,13 @@
       const touch = event.touches[0];
       // 戻している最中に触れたら、戻し終えたことにして、新しく始める
       if (node.dataset.settling !== undefined) reset();
+      touching = true;
       if (event.touches.length !== 1 || touch === undefined) return reset();
       startX = touch.clientX;
       startY = touch.clientY;
       dx = 0;
       tracking = true;
       sideways = false;
-      pressed = false;
-      pressTimer = setTimeout(openMenu, LONG_PRESS);
     }
 
     function onMove(event: TouchEvent) {
@@ -433,7 +410,6 @@
       const y = touch.clientY - startY;
       if (!sideways) {
         if (Math.abs(x) < 10 && Math.abs(y) < 10) return;
-        clearTimeout(pressTimer);
         if (Math.abs(y) >= Math.abs(x)) return reset();
         sideways = true;
         node.dataset.swiping = "";
@@ -457,7 +433,13 @@
       else delete node.dataset.armed;
     }
 
+    function onCancel() {
+      touching = false;
+      settle();
+    }
+
     function onEnd() {
+      touching = false;
       const action = swipeAction(dx);
       if (sideways && Math.abs(dx) >= SWIPE && action !== "none") {
         toggle(current, action === "read" ? "readAt" : "starredAt");
@@ -468,9 +450,8 @@
     node.addEventListener("touchstart", onStart, { passive: true });
     node.addEventListener("touchmove", onMove, { passive: true });
     node.addEventListener("touchend", onEnd);
-    node.addEventListener("touchcancel", settle);
+    node.addEventListener("touchcancel", onCancel);
     node.addEventListener("contextmenu", onContextMenu);
-    node.addEventListener("click", onClickCapture, { capture: true });
     return {
       update(next: Article) {
         current = next;
@@ -479,10 +460,8 @@
         node.removeEventListener("touchstart", onStart);
         node.removeEventListener("touchmove", onMove);
         node.removeEventListener("touchend", onEnd);
-        node.removeEventListener("touchcancel", settle);
+        node.removeEventListener("touchcancel", onCancel);
         node.removeEventListener("contextmenu", onContextMenu);
-        node.removeEventListener("click", onClickCapture, { capture: true });
-        clearTimeout(pressTimer);
         clearTimeout(settleTimer);
       },
     };
@@ -1310,7 +1289,7 @@
     }
   }
 
-  /* 指で使う画面では、操作は記事の画面・長押し・スワイプに任せる */
+  /* 指で使う画面では、操作は記事の画面とスワイプに任せる */
   @media (hover: none) {
     .actions {
       display: none;

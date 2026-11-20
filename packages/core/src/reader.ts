@@ -142,10 +142,6 @@ export const MAX_FEED_DISPLAY_NAME_LENGTH = 200;
 export interface MarkAllReadOptions {
   /** この時刻（ミリ秒）より前に公開された記事だけ */
   publishedBefore?: number;
-  /** 一覧の並び（公開日時、同じなら id）で、この記事より古い記事だけ */
-  olderThan?: { publishedAt: number; id: string };
-  /** 一覧の並びで、この記事より新しい記事だけ */
-  newerThan?: { publishedAt: number; id: string };
 }
 
 /**
@@ -597,7 +593,7 @@ export class ReaderCore {
    * 何もしない。
    *
    * 既読にした記事の ID を返す（取り消すときは、setReadMany で未読に戻す）。options で、範囲の
-   * 一部に絞れる（「1 日より古いもの」「この記事より上・下」）。
+   * 一部に絞れる（「1 日より古いもの」）。
    */
   async markAllRead(scope: MarkReadScope, options: MarkAllReadOptions = {}): Promise<string[]> {
     this.#requireSignedIn();
@@ -607,14 +603,6 @@ export class ReaderCore {
     if (options.publishedBefore !== undefined) {
       narrowed.push("published_at < ?");
       bounds.push(options.publishedBefore);
-    }
-    for (const [edge, than] of [
-      [options.olderThan, "<"],
-      [options.newerThan, ">"],
-    ] as const) {
-      if (edge === undefined) continue;
-      narrowed.push(`(published_at ${than} ? or (published_at = ? and id ${than} ?))`);
-      bounds.push(edge.publishedAt, edge.publishedAt, edge.id);
     }
     const op = await this.#db.transaction(async (tx) => {
       // 書き込みが DB の列で待っている間にログインし直したら、前のアカウントの操作を積まない

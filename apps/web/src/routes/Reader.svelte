@@ -1,6 +1,5 @@
 <script lang="ts">
   import {
-    type Article,
     type ArticleQuery,
     feedName,
     type MarkReadScope,
@@ -14,7 +13,6 @@
   import ShortcutHelp from "../components/ShortcutHelp.svelte";
   import Sidebar from "../components/Sidebar.svelte";
   import { useReader } from "../lib/context";
-  import { describeError } from "../lib/errors";
   import { layout, reducedMotion } from "../lib/layout.svelte";
   import { ArticleListState, type ListProgress } from "../lib/list.svelte";
   import { prefs } from "../lib/prefs.svelte";
@@ -409,7 +407,6 @@
   /** 開いている一覧の範囲を、まとめて既読にする。range を渡すと、その一部だけ */
   async function markAll(range: Range = {}, reload = false) {
     confirmOpen = false;
-    menuArticle = null;
     if (listing?.scope == null) return;
     const key = queryKey;
     const generation = list.generation;
@@ -429,66 +426,6 @@
       showToast("既読にできませんでした。");
     }
   }
-
-  /** 行を長く押して（右クリックして）操作を出している記事 */
-  let menuArticle = $state<Article | null>(null);
-  let menuOpenFor = $state(false);
-  let menuSavedPageId = $state<string | null>(null);
-
-  function openArticleMenu(article: Article) {
-    menuArticle = article;
-    menuOpenFor = true;
-  }
-
-  $effect(() => {
-    const url = menuArticle?.url;
-    menuSavedPageId = null;
-    if (!menuOpenFor || router.view.kind !== "starred" || url == null) return;
-    let active = true;
-    void reader.client
-      .getSavedPageForUrl(url)
-      .then((page) => {
-        if (active) menuSavedPageId = page?.id ?? null;
-      })
-      .catch(() => {});
-    return () => {
-      active = false;
-    };
-  });
-
-  async function menuUnsavePage(id: string) {
-    menuOpenFor = false;
-    try {
-      await reader.client.unsavePage(id);
-      showToast("リンクの保存を解除しました。");
-    } catch (error) {
-      showToast(describeError(error));
-    }
-  }
-
-  // 窓を閉じたら、記事も外す
-  $effect(() => {
-    if (!menuOpenFor) menuArticle = null;
-  });
-
-  function menuToggle(field: "readAt" | "starredAt") {
-    const article = list.find(menuArticle?.id ?? null);
-    menuOpenFor = false;
-    if (article !== null) list.toggle(article, field).catch(() => {});
-  }
-
-  /** 画面の並びで、その記事より上（above）か下の記事を、まとめて既読にする */
-  function markBeside(above: boolean) {
-    const article = menuArticle;
-    menuOpenFor = false;
-    if (article === null) return;
-    const edge = { publishedAt: article.publishedAt, id: article.id };
-    // 新しい順なら、上にあるのは新しい記事。古い順なら逆
-    const newer = above !== options.oldestFirst;
-    void markAll(newer ? { newerThan: edge } : { olderThan: edge });
-  }
-
-  const menuLink = $derived(toSafeHttpUrl(menuArticle?.url ?? null));
 
   /** 左のメニューに並ぶ順のフィード（フォルダごと、そのあとにフォルダなし） */
   const feedOrder = $derived([
@@ -663,7 +600,6 @@
       onsearch={(query) => router.setSearchQuery(query)}
       {options}
       onoption={(patch) => prefs.setViewOptions(viewKey, patch)}
-      onmenu={openArticleMenu}
       {next}
       {progress}
       onprogress={() => (progressOpen = true)}
@@ -755,42 +691,6 @@
   </div>
 </Dialog>
 
-<Dialog bind:open={menuOpenFor} title={menuArticle?.title ?? "(Untitled)"}>
-  {#if menuArticle !== null}
-    <div class="choices">
-      <button type="button" onclick={() => menuToggle("readAt")}>
-        {menuArticle.readAt === null ? "Mark as read" : "Mark as unread"}
-      </button>
-      <button type="button" onclick={() => menuToggle("starredAt")}>
-        {menuArticle.starredAt === null ? "Save" : "Unsave"}
-      </button>
-      {#if menuSavedPageId !== null}
-        <button
-          type="button"
-          onclick={() => menuSavedPageId !== null && menuUnsavePage(menuSavedPageId)}
-        >
-          Remove saved link
-        </button>
-      {/if}
-      {#if listing?.scope != null}
-        <button type="button" onclick={() => markBeside(true)}>Mark above as read</button>
-        <button type="button" onclick={() => markBeside(false)}>Mark below as read</button>
-      {/if}
-      {#if menuLink !== null}
-        <a
-          class="choice"
-          href={menuLink}
-          target="_blank"
-          rel="noopener noreferrer"
-          onclick={() => (menuOpenFor = false)}
-        >
-          Open original
-        </a>
-      {/if}
-    </div>
-  {/if}
-</Dialog>
-
 {#if toast !== null}
   <div class="toast" class:leaving={toastLeaving} role="status">
     <span>{toast.message}</span>
@@ -872,19 +772,6 @@
 
   .choices button {
     padding-block: 0.6rem;
-  }
-
-  .choice {
-    padding: 0.6rem 0.8rem;
-    border: 1px solid var(--border-strong);
-    border-radius: var(--radius-small);
-    color: inherit;
-    text-align: center;
-    text-decoration: none;
-  }
-
-  .choice:hover {
-    background: var(--hover);
   }
 
   .choices .link {
