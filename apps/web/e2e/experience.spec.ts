@@ -615,7 +615,7 @@ test("一覧を動かしたあとに別の一覧へ替えたら、先頭に戻�
   await expect(list.locator(".row.unread")).toHaveCount(40);
 });
 
-test("行を長く押す（右クリックする）と記事の操作が出て、上・下をまとめて既読にできる。一覧の終わりから次のフィードへ進める", async ({
+test("行を長く押しても（右クリックしても）、記事の操作のメニューは出ない。一覧の終わりから次のフィードへ進める", async ({
   page,
   context,
 }) => {
@@ -633,25 +633,19 @@ test("行を長く押す（右クリックする）と記事の操作が出て�
   const list = page.locator(".article-list");
   const nav = page.locator("nav.sidebar");
   const row = (title: string) => list.locator(".row", { hasText: title });
-  const unreadTitles = () => list.locator(".row.unread .title").allTextContents();
   await nav.getByRole("link", { name: "Alpha" }).click();
   await expect(list.locator(".item")).toHaveCount(5);
 
-  // 右クリックで操作を出し、これより下をまとめて既読にする。取り消せる
-  await row("A 3").click({ button: "right" });
-  await expect(page.getByRole("dialog")).toContainText("A 3");
-  await page.getByRole("button", { name: "Mark below as read" }).click();
-  await expect(page.getByRole("status")).toContainText("2 件を既読にしました。");
-  await expect.poll(unreadTitles).toEqual(["A 1", "A 2", "A 3"]);
-  await page.getByRole("status").getByRole("button", { name: "Undo" }).click();
-  await expect.poll(unreadTitles).toEqual(["A 1", "A 2", "A 3", "A 4", "A 5"]);
+  // 右クリックは、ブラウザの既定のメニューに任せる（reader は止めず、窓も出さない）
+  const prevented = await row("A 3").evaluate((element) => {
+    const event = new MouseEvent("contextmenu", { bubbles: true, cancelable: true, button: 2 });
+    element.querySelector(".item")?.dispatchEvent(event);
+    return event.defaultPrevented;
+  });
+  expect(prevented).toBe(false);
+  await expect(page.getByRole("dialog")).toHaveCount(0);
 
-  // これより上
-  await row("A 3").click({ button: "right" });
-  await page.getByRole("button", { name: "Mark above as read" }).click();
-  await expect.poll(unreadTitles).toEqual(["A 3", "A 4", "A 5"]);
-
-  // 指で長く押しても、同じ操作が出る。指を離しても、記事は開かない
+  // 指で長く押しても、窓は出ない。指を離したあとに押せば、記事が開く
   await row("A 4").evaluate(async (element) => {
     const box = element.getBoundingClientRect();
     const touch = new Touch({
@@ -667,12 +661,13 @@ test("行を長く押す（右クリックする）と記事の操作が出て�
     element.dispatchEvent(
       new TouchEvent("touchend", { bubbles: true, touches: [], changedTouches: [touch] }),
     );
-    element.querySelector<HTMLElement>(".item")?.click();
   });
-  await expect(page.getByRole("dialog")).toContainText("A 4");
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await row("A 4").locator(".item").click();
+  await expect(page).toHaveURL(/article=/);
+  await expect(page.locator(".article-view").getByRole("heading", { level: 1 })).toHaveText("A 4");
+  await page.keyboard.press("Escape");
   await expect(page).not.toHaveURL(/article=/);
-  await page.getByRole("dialog").getByRole("button", { name: "Mark as read", exact: true }).click();
-  await expect.poll(unreadTitles).toEqual(["A 3", "A 5"]);
 
   // 一覧の終わりから、残りを既読にして次のフィードへ進む
   await list.getByRole("button", { name: "Mark all as read, next: Beta" }).click();

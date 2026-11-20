@@ -46,8 +46,7 @@
   <div class="groups">
     <p class="touch">
       指では、一覧の行を右へスワイプすると
-      Save、左へスワイプすると既読・未読。長く押す（右クリック）と、
-      その記事の操作。記事を右へスワイプすると一覧に戻る。スワイプの割り当ては、Settings
+      Save、左へスワイプすると既読・未読。記事を右へスワイプすると一覧に戻る。スワイプの割り当ては、Settings
       で変えられます。
     </p>
     {#each GROUPS as group (group.title)}

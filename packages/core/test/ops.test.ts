@@ -305,32 +305,6 @@ describe("すべて既読", () => {
     expect(server.inbox.get(recent.id)?.readAt).toBeNull();
   });
 
-  test("一覧の並びで、ある記事より新しい・古い記事だけを既読にする", async () => {
-    const { server, core } = await setup();
-    const feed = server.subscribe({ url: "https://a.example/feed" });
-    const t = server.now;
-    const [a, b, c, d] = [
-      server.deliver(feed.id, { publishedAt: t - 1000, id: "a" }),
-      server.deliver(feed.id, { publishedAt: t - 2000, id: "c" }),
-      // 同じ時刻なら、id の大きいほうが新しい（一覧の並びと同じ）
-      server.deliver(feed.id, { publishedAt: t - 2000, id: "b" }),
-      server.deliver(feed.id, { publishedAt: t - 3000, id: "d" }),
-    ];
-    await core.sync();
-
-    expect(
-      await core.markAllRead({ all: true }, { newerThan: { publishedAt: t - 2000, id: "b" } }),
-    ).toEqual(expect.arrayContaining([a.id, b.id]));
-    expect((await core.countUnread()).total).toBe(2);
-    expect(
-      await core.markAllRead({ all: true }, { olderThan: { publishedAt: t - 2000, id: "b" } }),
-    ).toEqual([d.id]);
-    expect((await core.getArticle(c.id))?.readAt).toBeNull();
-    await core.sync();
-    expect(server.inbox.get(c.id)?.readAt).toBeNull();
-    expect([a, b, d].every((row) => server.inbox.get(row.id)?.readAt !== null)).toBe(true);
-  });
-
   test("まだ一度も同期していなければ、何もしない", async () => {
     const { core } = await setup();
     expect(await core.markAllRead({ all: true })).toEqual([]);
