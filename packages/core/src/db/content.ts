@@ -73,39 +73,49 @@ export async function markContentMissing(tx: Executor, articleId: string): Promi
   return rows.length > 0;
 }
 
-/** 先に取っておく記事と、その記事の全文が前に取れなかったか */
+/** 先に取っておく記事と、全文を頼むか */
 export interface PrefetchTarget {
   id: string;
-  /** 前に全文が取れなかった（全文は取り直さず、フィード本文だけを取る） */
-  pageMissed: boolean;
+  /**
+   * 全文は頼まず、フィード本文だけを取る（前に全文が取れなかった記事と、リンクがなく全文を
+   * 抜けない記事）
+   */
+  feedOnly: boolean;
 }
 
 /**
  * 本文を先に取っておく記事を、新しい順に limit 件まで選ぶ（docs/decisions/local-first.md の
- * 「記事の本文」）。未読で、手元に全文がない記事のうち、全文が取れなかった印のない記事と、
- * 印はあるがフィード本文があって手元にまだない記事（代わりのフィード本文を取り損ねた）
+ * 「記事の本文」）。未読で、手元に全文がない記事のうち、全文を頼める記事（リンクがあり、全文が
+ * 取れなかった印がない）と、全文は頼めないがフィード本文があって手元にまだない記事。exclude の
+ * 記事は選ばない
  */
 export async function listContentsToPrefetch(
   db: Executor,
   limit: number,
+  exclude: readonly string[] = [],
 ): Promise<PrefetchTarget[]> {
-  const rows = await db.all<{ id: string; page_missed: number }>(
-    `select a.id, m.article_id is not null as page_missed
+  const rows = await db.all<{ id: string; feed_only: number }>(
+    `select a.id, (m.article_id is not null or a.url is null) as feed_only
      from articles a left join article_page_misses m on m.article_id = a.id
      where a.read_at is null
        and a.id not in (select article_id from article_page_contents)
        and (
-         m.article_id is null
+         (m.article_id is null and a.url is not null)
          or (a.has_content <> 0 and a.id not in (select article_id from article_contents))
        )
+       and a.id not in (select value from json_each(?))
      order by a.published_at desc, a.id desc
      limit ?`,
-    [limit],
+    [JSON.stringify(exclude), limit],
   );
-  return rows.map((row) => ({ id: row.id, pageMissed: row.page_missed !== 0 }));
+  return rows.map((row) => ({ id: row.id, feedOnly: row.feed_only !== 0 }));
 }
 
-/** 全文が取れなかった印を置く。記事が手元から消えていたら、置かない */
+/**
+ * 全文が取れなかった印を置く（先に取るときも、開いたときも）。missed_at は、印を置いた時刻
+ * （調べるときのため。印は時刻では消さず、全文を置いたときに消す）。記事が手元から消えていたら、
+ * 置かない
+ */
 export async function markPageMissing(tx: Executor, articleId: string, now: number): Promise<void> {
   await tx.run(
     `insert into article_page_misses (article_id, missed_at)
@@ -178,4 +188,9 @@ export async function evictContents(
     key = [last.read_at, last.id];
   }
   return total;
+}
+
+/** 全文を置いたら、取れなかった印を消す（あとで全文を消して未読に戻したとき、先読みで取り直す） */
+export async function clearPageMissing(tx: Executor, articleId: string): Promise<void> {
+  await tx.run("delete from article_page_misses where article_id = ?", [articleId]);
 }
