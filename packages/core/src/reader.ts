@@ -1123,7 +1123,8 @@ export class ReaderCore {
   async #makeContentRoom(): Promise<boolean> {
     return this.#db.transaction(async (tx) => {
       const limit = await this.#contentStorageLimit(tx);
-      return limit > 0 && (await evictContents(tx, limit)) < limit;
+      // 上限ちょうどでも空きはないので、上限より少なくなるまで消す
+      return limit > 0 && (await evictContents(tx, limit - 1)) < limit;
     });
   }
 

@@ -571,6 +571,24 @@ describe("手元に置く本文の量の上限", () => {
     expect(await pageIds(db)).toEqual([first.id, next.id, opened.id].sort());
   });
 
+  test("上限ちょうどまで置いてあっても、既読の分を消して先読みを続ける", async () => {
+    const { server, core, feed, db } = await seeded();
+    const read = server.deliver(feed.id, { publishedAt: server.now });
+    server.pageContents.set(read.id, "<p>全文</p>");
+    await core.sync();
+    expect(await core.prefetchArticleContents(10)).toBe(1);
+    await core.setRead(read.id, true);
+    await inflate(db, read.id, 50 * MB);
+    await core.setContentStorageLimit(50 * MB);
+    expect((await core.getContentStorage()).used).toBe(50 * MB);
+
+    const next = server.deliver(feed.id, { publishedAt: server.now - 1 });
+    server.pageContents.set(next.id, "<p>全文</p>");
+    await core.sync();
+    expect(await core.prefetchArticleContents(10)).toBe(1);
+    expect(await pageIds(db)).toEqual([next.id]);
+  });
+
   test("Off なら先に取らず、消しもしない。開いたときは取る", async () => {
     const { server, core, feed } = await seeded();
     const article = server.deliver(feed.id);
