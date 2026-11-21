@@ -1118,7 +1118,7 @@ export class ReaderCore {
 
   /**
    * 手元の本文が上限に届いていたら、既読の分を消して空ける。上限より少なくなれば true（Off なら
-   * false）。最後に読んだ記事（いま開いている記事）の本文は消さない
+   * false）
    */
   async #makeContentRoom(): Promise<boolean> {
     return this.#db.transaction(async (tx) => {
@@ -1201,10 +1201,9 @@ export class ReaderCore {
           return false;
         }
         await putStoredContent(tx, articleId, content, this.#now(), source);
-        // 上限を超えたら、既読の分を消す。いま置いた本文と、最後に読んだ記事（いま開いている
-        // 記事）の本文は消さない（開いて取った本文は、超えていても置く）
+        // 上限を超えたら、既読の分を消す（開いたときに取った本文は、超えていても置く）
         const limit = await this.#contentStorageLimit(tx);
-        if (limit > 0) await evictContents(tx, limit, articleId);
+        if (limit > 0) await evictContents(tx, limit);
         return false;
       });
       // 本文なしに変えたら、記事を読み直してもらう
