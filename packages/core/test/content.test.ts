@@ -496,6 +496,62 @@ describe("全文を先に取っておく", () => {
     expect(await core.prefetchArticleContents(10)).toBe(5);
   });
 
+  test("同じ記事で sendo が 3 回失敗したら、このログインの間は頼まず、古い記事の先読みを止めない", async () => {
+    const { server, core, feed } = await seeded();
+    const ids: string[] = [];
+    for (let i = 0; i < 4; i++) {
+      const article = server.deliver(feed.id, { publishedAt: server.now - i });
+      server.pageContents.set(article.id, "<p>全文</p>");
+      ids.push(article.id);
+    }
+    await core.sync();
+    const oldest = ids[3] as string;
+    // 新しい 3 件が、同期のたびに 500 を返す（3 件続けて失敗するので、その回はやめる）
+    for (let round = 0; round < 3; round++) {
+      server.failNext(null, 500, 500, 500);
+      expect(await core.prefetchArticleContents(10)).toBe(0);
+    }
+    expect(server.pageContentRequests).toEqual([]);
+    // 3 回失敗した記事は頼まず、古い記事を取る
+    expect(await core.prefetchArticleContents(10)).toBe(1);
+    expect(server.pageContentRequests).toEqual([oldest]);
+  });
+
+  test("先読みが終わる間際に頼まれても、取りこぼさずにもう一度回す", async () => {
+    // 1 回に 1 件だけ取る先読みを走らせ、始まりから delay マイクロタスク後に、また頼む。もう一度
+    // 回せば、残りの 1 件（later）も取る
+    async function run(delay: number | null) {
+      const { server, core, feed } = await seeded();
+      const first = server.deliver(feed.id, { publishedAt: server.now });
+      const later = server.deliver(feed.id, { publishedAt: server.now - 1 });
+      for (const article of [first, later]) server.pageContents.set(article.id, "<p>全文</p>");
+      await core.sync();
+      let done = false;
+      const running = core.prefetchArticleContents(1).finally(() => {
+        done = true;
+      });
+      let ticks = 0;
+      let requested: Promise<number> = Promise.resolve(0);
+      while (!done) {
+        if (ticks === delay) requested = core.prefetchArticleContents(1);
+        ticks += 1;
+        await Promise.resolve();
+      }
+      await running;
+      await requested;
+      return { core, later, ticks };
+    }
+    // 先読みが終わるまでのマイクロタスクの数を測り、終わる間際をすべて確かめる
+    const { ticks } = await run(null);
+    for (let delay = Math.max(0, ticks - 40); delay < ticks; delay++) {
+      const { core, later } = await run(delay);
+      // もう一度回した先読みが終わるのを待つ
+      await expect
+        .poll(() => core.getArticleContent(later.id, "page"), { timeout: 1000 })
+        .toMatchObject({ status: "ready" });
+    }
+  });
+
   test("全文が取れなかった記事も、開いて全文が取れたら印を消し、未読に戻せば先読みで取り直す", async () => {
     const { server, core, feed, db } = await seeded();
     const article = server.deliver(feed.id);

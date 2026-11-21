@@ -86,11 +86,13 @@ export interface PrefetchTarget {
 /**
  * 本文を先に取っておく記事を、新しい順に limit 件まで選ぶ（docs/decisions/local-first.md の
  * 「記事の本文」）。未読で、手元に全文がない記事のうち、全文を頼める記事（リンクがあり、全文が
- * 取れなかった印がない）と、全文は頼めないがフィード本文があって手元にまだない記事
+ * 取れなかった印がない）と、全文は頼めないがフィード本文があって手元にまだない記事。exclude の
+ * 記事は選ばない
  */
 export async function listContentsToPrefetch(
   db: Executor,
   limit: number,
+  exclude: readonly string[] = [],
 ): Promise<PrefetchTarget[]> {
   const rows = await db.all<{ id: string; feed_only: number }>(
     `select a.id, (m.article_id is not null or a.url is null) as feed_only
@@ -101,9 +103,10 @@ export async function listContentsToPrefetch(
          (m.article_id is null and a.url is not null)
          or (a.has_content <> 0 and a.id not in (select article_id from article_contents))
        )
+       and a.id not in (select value from json_each(?))
      order by a.published_at desc, a.id desc
      limit ?`,
-    [limit],
+    [JSON.stringify(exclude), limit],
   );
   return rows.map((row) => ({ id: row.id, feedOnly: row.feed_only !== 0 }));
 }

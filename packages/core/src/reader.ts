@@ -151,6 +151,9 @@ export const DEFAULT_PREFETCH_CONTENTS = 30;
 /** 先読みで、sendo がこれだけ続けて失敗したら（5xx など）、その回はやめる */
 const MAX_PREFETCH_FAILURES = 3;
 
+/** 先読みで、同じ記事で sendo がこれだけ失敗したら、このログインの間はその記事を頼まない */
+const MAX_PREFETCH_ATTEMPTS = 3;
+
 /**
  * 先読みで、その記事を飛ばして続けてよい失敗か。届かない（network）とログインの問題
  * （unauthorized）は、ほかの記事でも同じなのでやめる。DB などの ApiError でない失敗もやめる
@@ -226,6 +229,11 @@ export class ReaderCore {
   #prefetching: Promise<number> | null = null;
   /** 先読みが走っている間に、また頼まれた（終わったあとに、もう一度だけ回す） */
   #prefetchAgain = false;
+  /**
+   * 先読みで sendo が失敗した（5xx など）記事と、その回数。MAX_PREFETCH_ATTEMPTS 回失敗したら、
+   * このログインの間は先読みで頼まない（開いたときは取りにいく）。メモリーにだけ持つ
+   */
+  readonly #prefetchFailures = new Map<string, number>();
 
   private constructor(options: ReaderCoreOptions) {
     this.#db = options.db;
@@ -395,6 +403,7 @@ export class ReaderCore {
     this.#feedTimesRefreshes.clear();
     this.#prefetching = null;
     this.#prefetchAgain = false;
+    this.#prefetchFailures.clear();
     return this.#session.signal;
   }
 
@@ -1103,7 +1112,8 @@ export class ReaderCore {
    *
    * 新しく置けた本文の数を返す。届かない（network）かログインの問題（unauthorized）ならそこで
    * やめて投げる（次の同期のあとに続きを取る）。そのほかの失敗（sendo の 5xx など）はその記事を
-   * 飛ばして続け、続けて何件も失敗したらやめる（飛ばした記事は、次の同期のあとにまた頼む）。
+   * 飛ばして続け、続けて何件も失敗したらやめる（飛ばした記事は、次の同期のあとにまた頼む。同じ
+   * 記事が何度も失敗したら、このログインの間は頼まない）。
    * 走っている最中に頼まれたら、その結果を返し、終わったあとにもう一度だけ回す（途中の同期で
    * 届いた記事も取る）
    */
@@ -1113,6 +1123,7 @@ export class ReaderCore {
       return this.#prefetching;
     }
     const session = this.#session.signal;
+    let failed = false;
     const running = (async () => {
       let fetched = 0;
       do {
@@ -1120,12 +1131,20 @@ export class ReaderCore {
         fetched += await this.#prefetchOnce(limit, session);
       } while (this.#prefetchAgain && !session.aborted);
       return fetched;
-    })().finally(() => {
-      if (this.#prefetching === running) {
+    })()
+      .catch((error: unknown) => {
+        failed = true;
+        throw error;
+      })
+      .finally(() => {
+        if (this.#prefetching !== running) return;
         this.#prefetching = null;
+        // ループが最後に見たあとに頼まれていたら、新しく回し直す（失敗して抜けたときは、次の
+        // 同期に任せる）
+        const again = this.#prefetchAgain && !failed && !session.aborted;
         this.#prefetchAgain = false;
-      }
-    });
+        if (again) void this.prefetchArticleContents(limit).catch(() => undefined);
+      });
     this.#prefetching = running;
     return running;
   }
@@ -1134,7 +1153,10 @@ export class ReaderCore {
   async #prefetchOnce(limit: number, session: AbortSignal): Promise<number> {
     if (this.#user === null) return 0;
     if ((await this.#contentStorageLimit()) === 0) return 0;
-    const targets = await listContentsToPrefetch(this.#db, limit);
+    const giveUp = [...this.#prefetchFailures]
+      .filter(([, count]) => count >= MAX_PREFETCH_ATTEMPTS)
+      .map(([id]) => id);
+    const targets = await listContentsToPrefetch(this.#db, limit, giveUp);
     if (targets.length === 0) return 0;
     // まとめて取る前に、一度だけユーザーを確かめる（記事ごとには確かめない）
     await this.#confirmSameUser(session);
@@ -1146,9 +1168,12 @@ export class ReaderCore {
       try {
         if (await this.#prefetchContent(target, session)) fetched += 1;
         failures = 0;
+        this.#prefetchFailures.delete(target.id);
       } catch (error) {
         if (!isSkippablePrefetchError(error)) throw error;
-        // sendo がこの記事だけで失敗した。飛ばして続け、続けて何件も失敗したらやめる
+        // sendo がこの記事だけで失敗した。飛ばして続け、続けて何件も失敗したらやめる。同じ記事が
+        // 何度も失敗したら、このログインの間は頼まない（その記事が古い記事の先読みを止めないように）
+        this.#prefetchFailures.set(target.id, (this.#prefetchFailures.get(target.id) ?? 0) + 1);
         failures += 1;
         if (failures >= MAX_PREFETCH_FAILURES) break;
       }
