@@ -753,6 +753,207 @@ describe("全文を先に取っておく", () => {
   });
 });
 
+describe("開いている一覧から先に取る", () => {
+  /** 全文を頼める記事を、公開の新しい順に count 件届ける */
+  function deliverMany(
+    server: Awaited<ReturnType<typeof setup>>["server"],
+    feedId: string,
+    count: number,
+    newest: number,
+    input: { title?: string } = {},
+  ) {
+    return Array.from({ length: count }, (_, index) => {
+      const article = server.deliver(feedId, { ...input, publishedAt: newest - index * 1000 });
+      server.pageContents.set(article.id, "<p>全文</p>");
+      return article;
+    });
+  }
+
+  test("開いているフィードの記事を、ほかのフィードの新しい記事より先に取る。残っていなければ新しい順", async () => {
+    const { server, core, feed } = await seeded();
+    const other = server.subscribe({ url: "https://example.com/other.xml" });
+    const t = server.now;
+    const [newest] = deliverMany(server, other.id, 1, t);
+    const [a1, a2] = deliverMany(server, feed.id, 2, t - 10_000);
+    const [oldest] = deliverMany(server, other.id, 1, t - 60_000);
+    await core.sync();
+
+    core.setOpenList({ feedId: feed.id });
+    expect(await core.prefetchArticleContents(10)).toBe(4);
+    expect(server.pageContentRequests).toEqual([a1?.id, a2?.id, newest?.id, oldest?.id]);
+  });
+
+  test("開いたあとに既読にした記事のすぐ下から取り、上に届いた新しい記事はあとにする", async () => {
+    const { server, core, feed } = await seeded();
+    const [x1, x2, x3, x4] = deliverMany(server, feed.id, 4, server.now - 10_000);
+    await core.sync();
+    core.setOpenList({});
+    server.advance(1000);
+    // 2 件めを開いて読む（1 件めは飛ばした）。その間に、一覧の上に新しい記事が届く
+    await core.setRead(x2?.id ?? "", true);
+    const [fresh] = deliverMany(server, feed.id, 1, server.now);
+    await core.sync();
+
+    expect(await core.prefetchArticleContents(2)).toBe(2);
+    expect(server.pageContentRequests).toEqual([x3?.id, x4?.id]);
+    // 目印より下を取り終えたら、一覧の上から
+    expect(await core.prefetchArticleContents(10)).toBe(2);
+    expect(server.pageContentRequests).toEqual([x3?.id, x4?.id, fresh?.id, x1?.id]);
+  });
+
+  test("開く前の既読は目印にしない。開いてから読んだら、そのすぐ下から取る", async () => {
+    const { server, core, feed } = await seeded();
+    const [x1, x2, x3, x4, x5] = deliverMany(server, feed.id, 5, server.now - 10_000);
+    await core.sync();
+    // 前に開いたときに 3 件めまで読んで止めた
+    await core.setRead(x3?.id ?? "", true);
+    server.advance(1000);
+    core.setOpenList({ feedId: feed.id });
+
+    expect(await core.prefetchArticleContents(1)).toBe(1);
+    expect(server.pageContentRequests).toEqual([x1?.id]);
+    server.advance(1000);
+    await core.setRead(x1?.id ?? "", true);
+    expect(await core.prefetchArticleContents(1)).toBe(1);
+    expect(server.pageContentRequests).toEqual([x1?.id, x2?.id]);
+    // 開いたあとの既読が x1 だけなら、x1 のすぐ下（x2 は取った、x3 は既読）の x4
+    expect(await core.prefetchArticleContents(1)).toBe(1);
+    expect(server.pageContentRequests).toEqual([x1?.id, x2?.id, x4?.id]);
+    expect(x5).toBeDefined();
+  });
+
+  test("同じ時刻に既読になった記事が並ぶときは、一覧の並びで一番下を目印にする", async () => {
+    const { server, core, feed } = await seeded();
+    const t = server.now - 10_000;
+    const [x1] = deliverMany(server, feed.id, 1, t);
+    const [x3, x4] = deliverMany(server, feed.id, 2, t - 2000);
+    await core.sync();
+    core.setOpenList({});
+    server.advance(1000);
+    // 一覧を動かして、上の 2 件をまとめて既読にした
+    await core.setReadMany([x1?.id ?? "", x3?.id ?? ""], true);
+    // そのあと、公開がその間の記事が届いた（目印が上の x1 なら、これを先に取ってしまう）
+    const [x2] = deliverMany(server, feed.id, 1, t - 1000);
+    await core.sync();
+
+    expect(await core.prefetchArticleContents(10)).toBe(2);
+    expect(server.pageContentRequests).toEqual([x4?.id, x2?.id]);
+  });
+
+  test("Saved と Search も、その一覧の記事を先に取る。言葉が空の Search と、一覧を開いていないときは新しい順", async () => {
+    const { server, core, feed } = await seeded();
+    const t = server.now;
+    const [plain] = deliverMany(server, feed.id, 1, t);
+    const [starred] = deliverMany(server, feed.id, 1, t - 10_000);
+    const [rust] = deliverMany(server, feed.id, 1, t - 20_000, { title: "Rust の話" });
+    const [older] = deliverMany(server, feed.id, 1, t - 30_000);
+    await core.sync();
+    await core.setStarred(starred?.id ?? "", true);
+
+    core.setOpenList({ starred: true });
+    expect(await core.prefetchArticleContents(1)).toBe(1);
+    expect(server.pageContentRequests).toEqual([starred?.id]);
+
+    core.setOpenList({ search: "rust" });
+    expect(await core.prefetchArticleContents(1)).toBe(1);
+    expect(server.pageContentRequests).toEqual([starred?.id, rust?.id]);
+
+    core.setOpenList({ search: "  " });
+    expect(await core.prefetchArticleContents(1)).toBe(1);
+    expect(server.pageContentRequests).toEqual([starred?.id, rust?.id, plain?.id]);
+
+    core.setOpenList(null);
+    expect(await core.prefetchArticleContents(1)).toBe(1);
+    expect(server.pageContentRequests).toEqual([starred?.id, rust?.id, plain?.id, older?.id]);
+  });
+
+  test("最後に知らせた一覧に従う。同じ一覧を知らせ直しても目印は残り、別の一覧を開き直したら消える", async () => {
+    const { server, core, feed } = await seeded();
+    const other = server.subscribe({ url: "https://example.com/other.xml" });
+    const [x1, x2, x3, x4] = deliverMany(server, feed.id, 4, server.now - 10_000);
+    const [o1] = deliverMany(server, other.id, 1, server.now - 100_000);
+    await core.sync();
+    core.setOpenList({ feedId: feed.id });
+    server.advance(1000);
+    await core.setRead(x2?.id ?? "", true);
+
+    // タブが前に出て、同じ一覧を知らせ直した
+    server.advance(1000);
+    core.setOpenList({ feedId: feed.id });
+    expect(await core.prefetchArticleContents(1)).toBe(1);
+    expect(server.pageContentRequests).toEqual([x3?.id]);
+
+    // 別のタブが別の一覧を開いた
+    core.setOpenList({ feedId: other.id });
+    expect(await core.prefetchArticleContents(1)).toBe(1);
+    expect(server.pageContentRequests).toEqual([x3?.id, o1?.id]);
+
+    // もとの一覧に戻ったら、開き直したことになり、前の既読は目印にしない（一覧の上から）
+    server.advance(1000);
+    core.setOpenList({ feedId: feed.id });
+    expect(await core.prefetchArticleContents(1)).toBe(1);
+    expect(server.pageContentRequests).toEqual([x3?.id, o1?.id, x1?.id]);
+    expect(x4).toBeDefined();
+  });
+
+  test("先読みの途中に一覧を替えたら、次の 1 件から新しい一覧に従う", async () => {
+    const { server, core, feed } = await seeded();
+    const other = server.subscribe({ url: "https://example.com/other.xml" });
+    const [a1, a2] = deliverMany(server, feed.id, 2, server.now);
+    const [b1] = deliverMany(server, other.id, 1, server.now - 100_000);
+    await core.sync();
+    core.setOpenList({ feedId: feed.id });
+    server.onRequest = async (path) => {
+      if (path.includes(`/articles/${a1?.id}/content`)) {
+        server.onRequest = null;
+        core.setOpenList({ feedId: other.id });
+      }
+    };
+    expect(await core.prefetchArticleContents(10)).toBe(3);
+    expect(server.pageContentRequests).toEqual([a1?.id, b1?.id, a2?.id]);
+  });
+
+  test("形の違う一覧は受けず、前に知らせた一覧を残す", async () => {
+    const { server, core, feed } = await seeded();
+    const other = server.subscribe({ url: "https://example.com/other.xml" });
+    deliverMany(server, other.id, 1, server.now);
+    const [mine] = deliverMany(server, feed.id, 1, server.now - 100_000);
+    await core.sync();
+    core.setOpenList({ feedId: feed.id });
+    expect(() => core.setOpenList({ feedId: 1 } as never)).toThrow(TypeError);
+    expect(() => core.setOpenList("all" as never)).toThrow(TypeError);
+    expect(await core.prefetchArticleContents(1)).toBe(1);
+    expect(server.pageContentRequests).toEqual([mine?.id]);
+  });
+
+  test.each(["ログアウト", "ユーザーの切り替え"] as const)(
+    "%sで、覚えた一覧を消す",
+    async (action) => {
+      const { server, core, feed } = await seeded();
+      const other = server.subscribe({ url: "https://example.com/other.xml" });
+      const [newest] = deliverMany(server, other.id, 1, server.now);
+      const [mine] = deliverMany(server, feed.id, 1, server.now - 100_000);
+      await core.sync();
+      core.setOpenList({ feedId: feed.id });
+
+      if (action === "ログアウト") {
+        await core.signOut();
+        // ログインし直す（本番と同じく、ログアウトを送ってからログインする）
+        await core.prepareSignIn();
+        server.signInAs();
+        await core.restoreSession();
+      } else {
+        server.signInAs({ id: "user-b", email: "b@example.com" });
+        await core.sync().catch(() => undefined);
+        server.signInAs();
+      }
+      await core.sync();
+      expect(await core.prefetchArticleContents(10)).toBe(2);
+      expect(server.pageContentRequests).toEqual([newest?.id, mine?.id]);
+    },
+  );
+});
+
 describe("手元に置く本文の量の上限", () => {
   const MB = 1024 * 1024;
 

@@ -15,6 +15,7 @@
   import { useReader } from "../lib/context";
   import { layout, reducedMotion } from "../lib/layout.svelte";
   import { ArticleListState, type ListProgress } from "../lib/list.svelte";
+  import { openListScope } from "../lib/open-list";
   import { prefs } from "../lib/prefs.svelte";
   import {
     handleLink,
@@ -233,6 +234,21 @@
   $effect(() => {
     const count = reader.unread.total;
     document.title = `${count > 0 ? `(${count}) ` : ""}${pageTitle} - Sendo`;
+  });
+
+  // 先読みの順のために、開いている一覧を core に知らせる（docs/decisions/local-first.md の
+  // 「記事の本文」）。範囲が変わったときと、タブが前に出たときに知らせる（タブが 2 つあれば、
+  // 最後に知らせたタブの一覧に従う）
+  const openListKey = $derived(JSON.stringify(openListScope(router.view, router.searchQuery)));
+  $effect(() => {
+    const key = openListKey;
+    const report = () => void reader.client.setOpenList(JSON.parse(key)).catch(() => undefined);
+    report();
+    const onVisible = () => {
+      if (document.visibilityState === "visible") report();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => document.removeEventListener("visibilitychange", onVisible);
   });
 
   // 条件が変わったときだけ読み直す（記事を開いたり閉じたりしただけでは読み直さない。

@@ -282,3 +282,56 @@ test("同期のあとに未読の記事の全文を先に取り、開くと待�
   await expect(view.getByRole("status")).toHaveCount(0);
   expect(server.pageContentRequests).toEqual([article.id]);
 });
+
+test("先読みは、最後に一覧を開いた・前に出たタブの一覧から先に取る", async ({ page, context }) => {
+  const server = new FakeSendo();
+  const now = Date.now();
+  const deliver = (feedId: string, title: string, ago: number) => {
+    const article = server.deliver(feedId, { title, publishedAt: now - ago });
+    server.pageContents.set(article.id, `<p>${title} の全文</p>`);
+    return article;
+  };
+  const b = server.subscribe({ url: "https://example.com/b", title: "Feed B" });
+  const c = server.subscribe({ url: "https://example.com/c", title: "Feed C" });
+  const a = server.subscribe({ url: "https://example.com/a", title: "Feed A" });
+  // 新しい順に b1 > b2 > c1 > c2 > a1 > a2
+  const b1 = deliver(b.id, "b1", 1000);
+  deliver(b.id, "b2", 2000);
+  const c1 = deliver(c.id, "c1", 3000);
+  deliver(c.id, "c2", 4000);
+  const a1 = deliver(a.id, "a1", 5000);
+  deliver(a.id, "a2", 6000);
+  // 全文を 1 件ずつ止めて、どの記事を頼んだかを見る
+  const asked: string[] = [];
+  const gates: (() => void)[] = [];
+  server.onRequest = (path) => {
+    const match = /\/articles\/([^/]+)\/content$/.exec(path);
+    if (match === null) return Promise.resolve();
+    asked.push(decodeURIComponent(match[1] ?? ""));
+    return new Promise<void>((resolve) => gates.push(resolve));
+  };
+  await routeFakeSendo(context, server);
+  await page.goto("/");
+  await signIn(page);
+
+  // All を開いているので、一番新しい記事から
+  await expect.poll(() => asked).toEqual([b1.id]);
+  // このタブで Feed A を開き、そのあと別のタブで Feed C を開いた
+  const nav = page.getByRole("navigation", { name: "Feeds", exact: true });
+  await nav.getByRole("link", { name: /Feed A/ }).click();
+  await expect(page.locator(".article-list .item")).toHaveCount(2);
+  const second = await context.newPage();
+  await second.goto(`/feeds/${encodeURIComponent(c.id)}`);
+  await expect(second.locator(".article-list .item")).toHaveCount(2);
+  gates[0]?.();
+  await expect.poll(() => asked).toEqual([b1.id, c1.id]);
+
+  // 前のタブが前に出たら、その一覧（Feed A）に従う
+  await page.bringToFront();
+  await page.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
+  await page.waitForTimeout(500);
+  gates[1]?.();
+  await expect.poll(() => asked).toEqual([b1.id, c1.id, a1.id]);
+  server.onRequest = null;
+  for (const gate of gates) gate();
+});

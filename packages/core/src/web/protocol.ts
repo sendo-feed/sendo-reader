@@ -35,6 +35,7 @@ export const READER_METHODS = [
   "fetchArticleContent",
   "getContentStorage",
   "setContentStorageLimit",
+  "setOpenList",
   "countUnread",
   "countReadSince",
   "setRead",

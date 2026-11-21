@@ -11,9 +11,10 @@ import {
   clearPageMissing,
   evictContents,
   getStoredContent,
-  listContentsToPrefetch,
   markContentMissing,
   markPageMissing,
+  nextContentToPrefetch,
+  type PrefetchList,
   type PrefetchTarget,
   putStoredContent,
   type StoredContent,
@@ -23,6 +24,7 @@ import type { Database, Executor } from "./db/database";
 import { getStoredFeedFetchTimes, putStoredFeedFetchTimes } from "./db/feed-fetch-times";
 import {
   type ArticleQuery,
+  type ArticleScope,
   countReadSince,
   countUnread,
   getArticle,
@@ -31,6 +33,7 @@ import {
   listFeeds,
   listFolders,
   listLatestArticleDates,
+  searchTerms,
 } from "./db/queries";
 import { clearSavedPages, countSavedPages, getSavedPage, listSavedPages } from "./db/saved-pages";
 import { migrate } from "./db/schema";
@@ -241,6 +244,11 @@ export class ReaderCore {
    * 一時的な失敗でも、時間がたてば頼み直す。メモリーにだけ持つ
    */
   readonly #prefetchFailures = new Map<string, { count: number; until: number }>();
+  /**
+   * 画面がいま開いている一覧（先に取る順を決める）。メモリーにだけ持ち、ログアウトとユーザーの
+   * 切り替えで消す。key は、同じ一覧を知らせ直されたかを見分ける
+   */
+  #openList: { list: PrefetchList; key: string } | null = null;
 
   private constructor(options: ReaderCoreOptions) {
     this.#db = options.db;
@@ -411,6 +419,7 @@ export class ReaderCore {
     this.#prefetching = null;
     this.#prefetchAgain = false;
     this.#prefetchFailures.clear();
+    this.#openList = null;
     return this.#session.signal;
   }
 
@@ -1112,8 +1121,27 @@ export class ReaderCore {
   }
 
   /**
+   * 画面がいま開いている一覧を知らせる（docs/decisions/local-first.md の「記事の本文」）。先読みは、
+   * この一覧の、読んでいる位置のすぐ下から先に取る。一覧を出さない画面、言葉が空の Search、
+   * Recently Read では null を渡す（すべての未読から新しい順に取る）。最後に知らせたものに従い、
+   * 同じ一覧を知らせ直したとき（タブが前に出た、未読だけの絞り込みを変えた）は、開いた時刻を
+   * 変えない。走っている先読みも、次の 1 件から従う
+   */
+  setOpenList(scope: ArticleScope | null): void {
+    const normalized = normalizeOpenList(scope);
+    if (normalized === null) {
+      this.#openList = null;
+      return;
+    }
+    const key = JSON.stringify(normalized);
+    if (this.#openList?.key === key) return;
+    this.#openList = { list: { scope: normalized, since: this.#now() }, key };
+  }
+
+  /**
    * 未読で手元に全文がない記事の全文を、1 件ずつ選び直しながら limit 件まで取っておく
-   * （docs/decisions/local-first.md の「記事の本文」）。全文が取れなかった記事は印を置いて先読みでは
+   * （docs/decisions/local-first.md の「記事の本文」）。開いている一覧（setOpenList）があれば、その
+   * 一覧の、読んでいる位置のすぐ下から先に取る。全文が取れなかった記事は印を置いて先読みでは
    * 取り直さず、フィード本文があれば代わりに取っておく。リンクのない記事は全文を頼まない。手元の
    * 本文が上限に届いたら、既読の分を消して空け、空かなければやめる。上限が Off なら取らない。
    *
@@ -1180,8 +1208,12 @@ export class ReaderCore {
     let failures = 0;
     while (tried.length < limit) {
       if (session.aborted) break;
-      const [target] = await listContentsToPrefetch(this.#db, 1, [...giveUp, ...tried]);
-      if (target === undefined) break;
+      const target = await nextContentToPrefetch(
+        this.#db,
+        [...giveUp, ...tried],
+        this.#openList?.list ?? null,
+      );
+      if (target === null) break;
       if (!confirmed) {
         // 取る前に、一度だけユーザーを確かめる（記事ごとには確かめない）
         await this.#confirmSameUser(session);
@@ -1375,6 +1407,31 @@ export class ReaderCore {
  * 手元のデータ（同期で届いた行、まだ送っていない操作、カーソル、ログインしたユーザーなどの設定）を
  * すべて消す。端末ごとの設定（本文を置く量の上限）だけは残す
  */
+/**
+ * 画面が知らせた一覧を、決まった形にする（キーの順をそろえ、ないものは入れない）。言葉が空の
+ * 検索は、一覧を開いていないのと同じ（null）。形が違えば TypeError
+ */
+function normalizeOpenList(scope: ArticleScope | null): ArticleScope | null {
+  if (scope === null) return null;
+  if (typeof scope !== "object") throw new TypeError("開いている一覧は、オブジェクトか null");
+  const optionalString = (value: unknown) => value === undefined || typeof value === "string";
+  if (
+    !optionalString(scope.feedId) ||
+    !optionalString(scope.folderId) ||
+    !optionalString(scope.search) ||
+    !(scope.starred === undefined || typeof scope.starred === "boolean")
+  ) {
+    throw new TypeError("開いている一覧の形が違う");
+  }
+  if (scope.search !== undefined && searchTerms(scope.search).length === 0) return null;
+  const normalized: ArticleScope = {};
+  if (scope.feedId !== undefined) normalized.feedId = scope.feedId;
+  if (scope.folderId !== undefined) normalized.folderId = scope.folderId;
+  if (scope.starred === true) normalized.starred = true;
+  if (scope.search !== undefined) normalized.search = searchTerms(scope.search).join(" ");
+  return normalized;
+}
+
 async function clearAll(tx: Executor): Promise<void> {
   await tx.run("delete from pending_ops");
   // 手元に置いた本文も、記事と一緒に消える（スキーマのトリガー）

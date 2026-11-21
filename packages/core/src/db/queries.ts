@@ -63,23 +63,33 @@ type ArticleRow = {
 const ARTICLE_COLUMNS =
   "a.id, a.feed_id, a.url, a.title, a.summary, a.author, a.thumbnail_url, a.has_content, a.published_at, a.received_at, a.read_at, a.starred_at";
 
-/** 公開日時の新しい順・古い順、または既読にした日時の新しい順に読む。同時刻なら id で決める */
-export async function listArticles(db: Executor, query: ArticleQuery = {}): Promise<Article[]> {
-  const where: string[] = [];
-  const params: SqlValue[] = [];
-  if (query.feedId !== undefined) {
+/**
+ * 一覧の範囲（どの記事を出すか。未読だけの絞り込みと並び順は含まない）。何も指定しなければ、
+ * すべての記事
+ */
+export interface ArticleScope {
+  /** このフィードの記事だけ */
+  feedId?: string | undefined;
+  /** このフォルダのフィードの記事だけ */
+  folderId?: string | undefined;
+  /** スター付きの記事だけ */
+  starred?: boolean | undefined;
+  /** 探す言葉（ArticleQuery の search と同じ） */
+  search?: string | undefined;
+}
+
+/** 範囲の条件を where と params に足す（記事の表の別名は a） */
+export function addScopeConditions(scope: ArticleScope, where: string[], params: SqlValue[]): void {
+  if (scope.feedId !== undefined) {
     where.push("a.feed_id = ?");
-    params.push(query.feedId);
+    params.push(scope.feedId);
   }
-  if (query.folderId !== undefined) {
+  if (scope.folderId !== undefined) {
     where.push("a.feed_id in (select id from feeds where folder_id = ?)");
-    params.push(query.folderId);
+    params.push(scope.folderId);
   }
-  if (query.state === "unread") where.push("a.read_at is null");
-  const recentlyRead = query.order === "recentlyRead";
-  if (query.state === "read" || recentlyRead) where.push("a.read_at is not null");
-  if (query.state === "starred") where.push("a.starred_at is not null");
-  for (const term of searchTerms(query.search)) {
+  if (scope.starred === true) where.push("a.starred_at is not null");
+  for (const term of searchTerms(scope.search)) {
     // % と _ は、そのままの文字として探す
     const pattern = `%${term.replace(/[\\%_]/g, "\\$&")}%`;
     where.push(
@@ -87,6 +97,25 @@ export async function listArticles(db: Executor, query: ArticleQuery = {}): Prom
     );
     params.push(pattern, pattern, pattern);
   }
+}
+
+/** 公開日時の新しい順・古い順、または既読にした日時の新しい順に読む。同時刻なら id で決める */
+export async function listArticles(db: Executor, query: ArticleQuery = {}): Promise<Article[]> {
+  const where: string[] = [];
+  const params: SqlValue[] = [];
+  addScopeConditions(
+    {
+      feedId: query.feedId,
+      folderId: query.folderId,
+      starred: query.state === "starred",
+      search: query.search,
+    },
+    where,
+    params,
+  );
+  if (query.state === "unread") where.push("a.read_at is null");
+  const recentlyRead = query.order === "recentlyRead";
+  if (query.state === "read" || recentlyRead) where.push("a.read_at is not null");
   const column = recentlyRead ? "a.read_at" : "a.published_at";
   if (query.after !== undefined) {
     const time = recentlyRead ? query.after.readAt : query.after.publishedAt;
