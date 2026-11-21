@@ -453,6 +453,24 @@ describe("全文を先に取っておく", () => {
     expect(server.requests).toHaveLength(before);
   });
 
+  test("選んでから順番が来るまでに開いて取った記事は、取り直さずに続ける", async () => {
+    const { server, core, feed } = await seeded();
+    const first = server.deliver(feed.id, { publishedAt: server.now });
+    const second = server.deliver(feed.id, { publishedAt: server.now - 1 });
+    for (const article of [first, second]) server.pageContents.set(article.id, "<p>全文</p>");
+    await core.sync();
+    // 1 件めを取っている間に、2 件めを開いて取る
+    server.onRequest = async (path) => {
+      if (path.includes(`/articles/${first.id}/content`)) {
+        server.onRequest = null;
+        await core.fetchArticleContent(second.id, "page");
+      }
+    };
+    expect(await core.prefetchArticleContents(10)).toBe(2);
+    expect(server.pageContentRequests).toEqual([second.id, first.id]);
+    expect(await core.getArticleContent(second.id, "page")).toMatchObject({ status: "ready" });
+  });
+
   test("届かなくなったら、そこでやめる", async () => {
     const { server, core, feed } = await seeded();
     for (let i = 0; i < 3; i++) {

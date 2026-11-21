@@ -1104,11 +1104,11 @@ export class ReaderCore {
    */
   async #prefetchContent(target: PrefetchTarget, session: AbortSignal): Promise<boolean> {
     const articleId = target.id;
-    if (
-      !target.pageMissed &&
-      (await this.#fetchContent(articleId, session, true, "page")) !== null
-    ) {
-      return true;
+    if (!target.pageMissed) {
+      // 選んでから順番が来るまでに、開いて取っていたら、取り直さない
+      const page = await getStoredContent(this.#db, articleId, "page");
+      if (page?.stored != null) return true;
+      if ((await this.#fetchContent(articleId, session, true, "page")) !== null) return true;
     }
     const feed = await getStoredContent(this.#db, articleId, "feed");
     if (feed === null || !feed.hasContent) return false;

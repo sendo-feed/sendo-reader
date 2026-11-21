@@ -41,9 +41,13 @@ describe("手元の DB のスキーマ", () => {
     await db.run(`insert into article_page_contents (article_id, html, source, fetched_at)
       values ('a2', 'abc', 'page', 1)`);
     await db.run("update article_contents set html = 'x' where article_id = 'a1'");
+    // 本文を置き直す UPSERT（putStoredContent と同じ形）でも、大きさを置き換える
+    await db.run(`insert into article_page_contents (article_id, html, source, fetched_at)
+      values ('a1', 'abcd', 'page', 2)
+      on conflict (article_id) do update set html = excluded.html, fetched_at = excluded.fetched_at`);
     expect(await sizes()).toEqual([
       { article_id: "a1", source: "feed", bytes: 1 },
-      { article_id: "a1", source: "page", bytes: 13 },
+      { article_id: "a1", source: "page", bytes: 4 },
       { article_id: "a2", source: "page", bytes: 3 },
     ]);
     await db.run("delete from articles where id = 'a1'");

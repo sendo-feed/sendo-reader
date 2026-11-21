@@ -219,8 +219,12 @@ const migrations: readonly (readonly string[])[] = [
     ) strict, without rowid`,
     ...(["feed", "page"] as const).flatMap((source) => {
       const table = source === "page" ? "article_page_contents" : "article_contents";
-      const put = `insert or replace into article_content_sizes (article_id, source, bytes)
-         values (new.article_id, '${source}', length(cast(new.html as blob)))`;
+      // 本文の UPSERT（on conflict do update）の中で動くトリガーでは、外の文の衝突の扱いが
+      // 中の文にも当たり、insert or replace が置き換えにならない。消してから入れる
+      const put = `delete from article_content_sizes
+           where article_id = new.article_id and source = '${source}';
+         insert into article_content_sizes (article_id, source, bytes)
+           values (new.article_id, '${source}', length(cast(new.html as blob)))`;
       return [
         `create trigger ${table}_size_insert after insert on ${table} begin ${put}; end`,
         `create trigger ${table}_size_update after update on ${table} begin ${put}; end`,
