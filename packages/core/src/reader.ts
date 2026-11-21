@@ -163,6 +163,12 @@ const MAX_PREFETCH_ATTEMPTS = 3;
  */
 const PREFETCH_RETRY_AFTER_MS = 6 * 60 * 60 * 1000;
 
+/** 開いた時刻を覚えておく一覧の数（タブの数と、その中で開いた一覧の数より十分に多く） */
+const MAX_OPENED_LISTS = 64;
+
+/** 一覧を開いた識別子の長さの上限 */
+const MAX_OPEN_ID_LENGTH = 200;
+
 /**
  * 先読みで、その記事を飛ばして続けてよい失敗か。届かない（network）とログインの問題
  * （unauthorized）は、ほかの記事でも同じなのでやめる。DB などの ApiError でない失敗もやめる
@@ -246,9 +252,14 @@ export class ReaderCore {
   readonly #prefetchFailures = new Map<string, { count: number; until: number }>();
   /**
    * 画面がいま開いている一覧（先に取る順を決める）。メモリーにだけ持ち、ログアウトとユーザーの
-   * 切り替えで消す。key は、同じ一覧を知らせ直されたかを見分ける
+   * 切り替えで消す
    */
-  #openList: { list: PrefetchList; key: string } | null = null;
+  #openList: PrefetchList | null = null;
+  /**
+   * 画面が一覧を開いた時刻（一覧を開くたびの識別子と範囲ごと）。タブが前に出て知らせ直したときに、
+   * 開いた時刻を変えないために覚える。古いものから捨てる
+   */
+  readonly #openedAt = new Map<string, number>();
 
   private constructor(options: ReaderCoreOptions) {
     this.#db = options.db;
@@ -420,6 +431,7 @@ export class ReaderCore {
     this.#prefetchAgain = false;
     this.#prefetchFailures.clear();
     this.#openList = null;
+    this.#openedAt.clear();
     return this.#session.signal;
   }
 
@@ -1124,18 +1136,31 @@ export class ReaderCore {
    * 画面がいま開いている一覧を知らせる（docs/decisions/local-first.md の「記事の本文」）。先読みは、
    * この一覧の、読んでいる位置のすぐ下から先に取る。一覧を出さない画面、言葉が空の Search、
    * Recently Read では null を渡す（すべての未読から新しい順に取る）。最後に知らせたものに従い、
-   * 同じ一覧を知らせ直したとき（タブが前に出た、未読だけの絞り込みを変えた）は、開いた時刻を
-   * 変えない。走っている先読みも、次の 1 件から従う
+   * 走っている先読みも、次の 1 件から従う。
+   *
+   * openId は、画面が一覧を開くたびに替える識別子（タブごとに違う）。同じ識別子で知らせ直したとき
+   * （タブが前に出た）は、開いた時刻を、最初に知らせた時刻のままにする
    */
-  setOpenList(scope: ArticleScope | null): void {
+  setOpenList(scope: ArticleScope | null, openId: string): void {
+    if (typeof openId !== "string" || openId.length > MAX_OPEN_ID_LENGTH) {
+      throw new TypeError("一覧を開いた識別子は、短い文字列");
+    }
     const normalized = normalizeOpenList(scope);
     if (normalized === null) {
       this.#openList = null;
       return;
     }
-    const key = JSON.stringify(normalized);
-    if (this.#openList?.key === key) return;
-    this.#openList = { list: { scope: normalized, since: this.#now() }, key };
+    const key = `${openId}\n${JSON.stringify(normalized)}`;
+    let since = this.#openedAt.get(key);
+    if (since === undefined) {
+      since = this.#now();
+      this.#openedAt.set(key, since);
+      if (this.#openedAt.size > MAX_OPENED_LISTS) {
+        const oldest = this.#openedAt.keys().next().value;
+        if (oldest !== undefined) this.#openedAt.delete(oldest);
+      }
+    }
+    this.#openList = { scope: normalized, since };
   }
 
   /**
@@ -1208,11 +1233,7 @@ export class ReaderCore {
     let failures = 0;
     while (tried.length < limit) {
       if (session.aborted) break;
-      const target = await nextContentToPrefetch(
-        this.#db,
-        [...giveUp, ...tried],
-        this.#openList?.list ?? null,
-      );
+      const target = await nextContentToPrefetch(this.#db, [...giveUp, ...tried], this.#openList);
       if (target === null) break;
       if (!confirmed) {
         // 取る前に、一度だけユーザーを確かめる（記事ごとには確かめない）
@@ -1404,10 +1425,6 @@ export class ReaderCore {
 }
 
 /**
- * 手元のデータ（同期で届いた行、まだ送っていない操作、カーソル、ログインしたユーザーなどの設定）を
- * すべて消す。端末ごとの設定（本文を置く量の上限）だけは残す
- */
-/**
  * 画面が知らせた一覧を、決まった形にする（キーの順をそろえ、ないものは入れない）。言葉が空の
  * 検索は、一覧を開いていないのと同じ（null）。形が違えば TypeError
  */
@@ -1432,6 +1449,10 @@ function normalizeOpenList(scope: ArticleScope | null): ArticleScope | null {
   return normalized;
 }
 
+/**
+ * 手元のデータ（同期で届いた行、まだ送っていない操作、カーソル、ログインしたユーザーなどの設定）を
+ * すべて消す。端末ごとの設定（本文を置く量の上限）だけは残す
+ */
 async function clearAll(tx: Executor): Promise<void> {
   await tx.run("delete from pending_ops");
   // 手元に置いた本文も、記事と一緒に消える（スキーマのトリガー）

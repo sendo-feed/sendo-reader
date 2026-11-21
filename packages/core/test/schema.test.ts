@@ -22,7 +22,8 @@ describe("手元の DB のスキーマ", () => {
 
   test("前の版で置いた本文の大きさを数え、そのあとの置く・消すにも合わせる", async () => {
     const db = await openMemoryDb();
-    await migrate(db, SCHEMA_VERSION - 1);
+    // 本文の大きさの表を足す前の版
+    await migrate(db, SCHEMA_VERSION - 2);
     await db.run(`insert into articles (id, feed_id, published_at, received_at)
       values ('a1', 'feed', 1, 2), ('a2', 'feed', 1, 2)`);
     await db.run(`insert into article_contents (article_id, html, source, fetched_at)
@@ -52,6 +53,27 @@ describe("手元の DB のスキーマ", () => {
     ]);
     await db.run("delete from articles where id = 'a1'");
     expect(await sizes()).toEqual([{ article_id: "a2", source: "page", bytes: 3 }]);
+  });
+
+  test("開いているフィードから先に取る記事を、そのフィードの記事をすべてたどらずに選ぶ", async () => {
+    const db = await openMemoryDb();
+    await migrate(db);
+    const usesIndex = async (sql: string, index: string) => {
+      const plan = await db.all<{ detail: string }>(`explain query plan ${sql}`, ["feed"]);
+      expect(plan.some((row) => row.detail.includes(index))).toBe(true);
+    };
+    // 先に取る記事の候補（未読だけを、公開の新しい順に）
+    await usesIndex(
+      `select a.id from articles a where a.read_at is null and a.feed_id = ?
+       order by a.published_at desc, a.id desc limit 1`,
+      "articles_feed_unread_published_idx",
+    );
+    // 目印（開いたあとに既読になった、そのフィードの記事）
+    await usesIndex(
+      `select a.id from articles a where a.read_at is not null and a.read_at >= 0 and a.feed_id = ?
+       order by a.read_at desc, a.published_at asc, a.id asc limit 1`,
+      "articles_feed_read_idx",
+    );
   });
 
   test("マイグレーションを当てると、版が最新になり、表ができる", async () => {

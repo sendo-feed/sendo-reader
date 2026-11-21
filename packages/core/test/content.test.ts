@@ -778,7 +778,7 @@ describe("開いている一覧から先に取る", () => {
     const [oldest] = deliverMany(server, other.id, 1, t - 60_000);
     await core.sync();
 
-    core.setOpenList({ feedId: feed.id });
+    core.setOpenList({ feedId: feed.id }, "tab:1");
     expect(await core.prefetchArticleContents(10)).toBe(4);
     expect(server.pageContentRequests).toEqual([a1?.id, a2?.id, newest?.id, oldest?.id]);
   });
@@ -787,7 +787,7 @@ describe("開いている一覧から先に取る", () => {
     const { server, core, feed } = await seeded();
     const [x1, x2, x3, x4] = deliverMany(server, feed.id, 4, server.now - 10_000);
     await core.sync();
-    core.setOpenList({});
+    core.setOpenList({}, "tab:1");
     server.advance(1000);
     // 2 件めを開いて読む（1 件めは飛ばした）。その間に、一覧の上に新しい記事が届く
     await core.setRead(x2?.id ?? "", true);
@@ -808,7 +808,7 @@ describe("開いている一覧から先に取る", () => {
     // 前に開いたときに 3 件めまで読んで止めた
     await core.setRead(x3?.id ?? "", true);
     server.advance(1000);
-    core.setOpenList({ feedId: feed.id });
+    core.setOpenList({ feedId: feed.id }, "tab:1");
 
     expect(await core.prefetchArticleContents(1)).toBe(1);
     expect(server.pageContentRequests).toEqual([x1?.id]);
@@ -828,7 +828,7 @@ describe("開いている一覧から先に取る", () => {
     const [x1] = deliverMany(server, feed.id, 1, t);
     const [x3, x4] = deliverMany(server, feed.id, 2, t - 2000);
     await core.sync();
-    core.setOpenList({});
+    core.setOpenList({}, "tab:1");
     server.advance(1000);
     // 一覧を動かして、上の 2 件をまとめて既読にした
     await core.setReadMany([x1?.id ?? "", x3?.id ?? ""], true);
@@ -840,60 +840,116 @@ describe("開いている一覧から先に取る", () => {
     expect(server.pageContentRequests).toEqual([x4?.id, x2?.id]);
   });
 
-  test("Saved と Search も、その一覧の記事を先に取る。言葉が空の Search と、一覧を開いていないときは新しい順", async () => {
+  test("Saved と Search も、その一覧の記事を先に取る。一覧を閉じたときと、言葉が空の Search は新しい順", async () => {
     const { server, core, feed } = await seeded();
     const t = server.now;
     const [plain] = deliverMany(server, feed.id, 1, t);
     const [starred] = deliverMany(server, feed.id, 1, t - 10_000);
     const [rust] = deliverMany(server, feed.id, 1, t - 20_000, { title: "Rust の話" });
     const [older] = deliverMany(server, feed.id, 1, t - 30_000);
+    const [rust2] = deliverMany(server, feed.id, 1, t - 40_000, { title: "Rust その 2" });
+    const [oldest] = deliverMany(server, feed.id, 1, t - 50_000);
     await core.sync();
     await core.setStarred(starred?.id ?? "", true);
 
-    core.setOpenList({ starred: true });
+    core.setOpenList({ starred: true }, "tab:1");
     expect(await core.prefetchArticleContents(1)).toBe(1);
-    expect(server.pageContentRequests).toEqual([starred?.id]);
-
-    core.setOpenList({ search: "rust" });
+    core.setOpenList({ search: "rust" }, "tab:2");
     expect(await core.prefetchArticleContents(1)).toBe(1);
     expect(server.pageContentRequests).toEqual([starred?.id, rust?.id]);
 
-    core.setOpenList({ search: "  " });
+    // 一覧を出さない画面に移ったら、Search に残っている記事（rust2）より、新しい記事から
+    core.setOpenList(null, "tab:3");
     expect(await core.prefetchArticleContents(1)).toBe(1);
-    expect(server.pageContentRequests).toEqual([starred?.id, rust?.id, plain?.id]);
+    expect(server.pageContentRequests.at(-1)).toBe(plain?.id);
 
-    core.setOpenList(null);
+    // 言葉が空の Search は、All（読んだ記事のすぐ下の oldest）ではなく、新しい順（older）
+    core.setOpenList({ search: "  " }, "tab:4");
+    server.advance(1000);
+    await core.setRead(rust2?.id ?? "", true);
     expect(await core.prefetchArticleContents(1)).toBe(1);
-    expect(server.pageContentRequests).toEqual([starred?.id, rust?.id, plain?.id, older?.id]);
+    expect(server.pageContentRequests.at(-1)).toBe(older?.id);
+    expect(oldest).toBeDefined();
   });
 
-  test("最後に知らせた一覧に従う。同じ一覧を知らせ直しても目印は残り、別の一覧を開き直したら消える", async () => {
+  test("前に出たタブが知らせ直しても目印は残り、別のタブの一覧に替わっても、戻れば続きから取る。開き直したら一覧の上から", async () => {
     const { server, core, feed } = await seeded();
     const other = server.subscribe({ url: "https://example.com/other.xml" });
     const [x1, x2, x3, x4] = deliverMany(server, feed.id, 4, server.now - 10_000);
     const [o1] = deliverMany(server, other.id, 1, server.now - 100_000);
     await core.sync();
-    core.setOpenList({ feedId: feed.id });
+    core.setOpenList({ feedId: feed.id }, "tab-a:1");
     server.advance(1000);
     await core.setRead(x2?.id ?? "", true);
 
     // タブが前に出て、同じ一覧を知らせ直した
     server.advance(1000);
-    core.setOpenList({ feedId: feed.id });
+    core.setOpenList({ feedId: feed.id }, "tab-a:1");
     expect(await core.prefetchArticleContents(1)).toBe(1);
     expect(server.pageContentRequests).toEqual([x3?.id]);
 
     // 別のタブが別の一覧を開いた
-    core.setOpenList({ feedId: other.id });
+    core.setOpenList({ feedId: other.id }, "tab-b:1");
     expect(await core.prefetchArticleContents(1)).toBe(1);
     expect(server.pageContentRequests).toEqual([x3?.id, o1?.id]);
 
-    // もとの一覧に戻ったら、開き直したことになり、前の既読は目印にしない（一覧の上から）
+    // 前のタブに戻った。一覧は読み込み直していないので、読んだ x2 の下（x3 は取った）から
     server.advance(1000);
-    core.setOpenList({ feedId: feed.id });
+    core.setOpenList({ feedId: feed.id }, "tab-a:1");
     expect(await core.prefetchArticleContents(1)).toBe(1);
-    expect(server.pageContentRequests).toEqual([x3?.id, o1?.id, x1?.id]);
-    expect(x4).toBeDefined();
+    expect(server.pageContentRequests).toEqual([x3?.id, o1?.id, x4?.id]);
+
+    // 同じ一覧を開き直したら（読み込み直した、別の一覧から戻った）、前の既読は目印にしない
+    server.advance(1000);
+    core.setOpenList({ feedId: feed.id }, "tab-a:2");
+    expect(await core.prefetchArticleContents(1)).toBe(1);
+    expect(server.pageContentRequests).toEqual([x3?.id, o1?.id, x4?.id, x1?.id]);
+  });
+
+  test("目印は開いている一覧の記事だけ。ほかの一覧の記事をあとに読んでも、一覧の中の位置から取る", async () => {
+    const { server, core, feed } = await seeded();
+    const other = server.subscribe({ url: "https://example.com/other.xml" });
+    const t = server.now - 10_000;
+    const [x1, x2, x3, x4] = deliverMany(server, feed.id, 4, t);
+    // 公開が x3 と x4 の間の、ほかのフィードの記事
+    const [y1] = deliverMany(server, other.id, 1, t - 2500);
+    await core.sync();
+    core.setOpenList({ feedId: feed.id }, "tab:1");
+    server.advance(1000);
+    await core.setRead(x2?.id ?? "", true);
+    server.advance(1000);
+    await core.setRead(y1?.id ?? "", true);
+
+    expect(await core.prefetchArticleContents(1)).toBe(1);
+    expect(server.pageContentRequests).toEqual([x3?.id]);
+    expect([x1, x4]).toHaveLength(2);
+  });
+
+  test("目印より下に取る記事がなければ、ほかの一覧の新しい記事より、開いている一覧の上から取る", async () => {
+    const { server, core, feed } = await seeded();
+    const other = server.subscribe({ url: "https://example.com/other.xml" });
+    const [newest] = deliverMany(server, other.id, 1, server.now);
+    const [x1, x2] = deliverMany(server, feed.id, 2, server.now - 10_000);
+    await core.sync();
+    core.setOpenList({ feedId: feed.id }, "tab:1");
+    server.advance(1000);
+    // 一覧の一番下を読んだ
+    await core.setRead(x2?.id ?? "", true);
+
+    expect(await core.prefetchArticleContents(2)).toBe(2);
+    expect(server.pageContentRequests).toEqual([x1?.id, newest?.id]);
+  });
+
+  test("開いた時刻と同じ時刻に既読になった記事も、目印にする", async () => {
+    const { server, core, feed } = await seeded();
+    const [x1, x2, x3] = deliverMany(server, feed.id, 3, server.now - 10_000);
+    await core.sync();
+    core.setOpenList({}, "tab:1");
+    await core.setRead(x2?.id ?? "", true);
+
+    expect(await core.prefetchArticleContents(1)).toBe(1);
+    expect(server.pageContentRequests).toEqual([x3?.id]);
+    expect(x1).toBeDefined();
   });
 
   test("先読みの途中に一覧を替えたら、次の 1 件から新しい一覧に従う", async () => {
@@ -902,11 +958,11 @@ describe("開いている一覧から先に取る", () => {
     const [a1, a2] = deliverMany(server, feed.id, 2, server.now);
     const [b1] = deliverMany(server, other.id, 1, server.now - 100_000);
     await core.sync();
-    core.setOpenList({ feedId: feed.id });
+    core.setOpenList({ feedId: feed.id }, "tab:1");
     server.onRequest = async (path) => {
       if (path.includes(`/articles/${a1?.id}/content`)) {
         server.onRequest = null;
-        core.setOpenList({ feedId: other.id });
+        core.setOpenList({ feedId: other.id }, "tab:2");
       }
     };
     expect(await core.prefetchArticleContents(10)).toBe(3);
@@ -919,9 +975,10 @@ describe("開いている一覧から先に取る", () => {
     deliverMany(server, other.id, 1, server.now);
     const [mine] = deliverMany(server, feed.id, 1, server.now - 100_000);
     await core.sync();
-    core.setOpenList({ feedId: feed.id });
-    expect(() => core.setOpenList({ feedId: 1 } as never)).toThrow(TypeError);
-    expect(() => core.setOpenList("all" as never)).toThrow(TypeError);
+    core.setOpenList({ feedId: feed.id }, "tab:1");
+    expect(() => core.setOpenList({ feedId: 1 } as never, "tab:2")).toThrow(TypeError);
+    expect(() => core.setOpenList("all" as never, "tab:2")).toThrow(TypeError);
+    expect(() => core.setOpenList({}, 1 as never)).toThrow(TypeError);
     expect(await core.prefetchArticleContents(1)).toBe(1);
     expect(server.pageContentRequests).toEqual([mine?.id]);
   });
@@ -934,7 +991,7 @@ describe("開いている一覧から先に取る", () => {
       const [newest] = deliverMany(server, other.id, 1, server.now);
       const [mine] = deliverMany(server, feed.id, 1, server.now - 100_000);
       await core.sync();
-      core.setOpenList({ feedId: feed.id });
+      core.setOpenList({ feedId: feed.id }, "tab:1");
 
       if (action === "ログアウト") {
         await core.signOut();
