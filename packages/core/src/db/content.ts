@@ -125,27 +125,24 @@ export async function storedContentBytes(db: Executor): Promise<number> {
 
 /**
  * 手元の本文が limit（バイト）を超えていたら、既読でスターのない記事の本文から、読んだのが古い
- * 順に消して、limit 以下に収める（docs/decisions/local-first.md の「記事の本文」）。消さないのは、
- * 未読とスターの記事の本文、最後に読んだ記事（画面は開いた時点で既読にするので、いま開いている
- * 記事）の本文、keep の記事（いま置いた本文）の本文。収まらなければ、超えたまま。消したあとの
- * 合計を返す
+ * 順に消して、limit 以下に収める（docs/decisions/local-first.md の「記事の本文」）。未読とスターの
+ * 記事の本文と、protect の記事（最後に開いた記事、いま置いた本文の記事）の本文は消さない。
+ * 収まらなければ、超えたまま。消したあとの合計を返す
  */
 export async function evictContents(
   tx: Executor,
   limit: number,
-  keep: string | null = null,
+  protect: readonly string[] = [],
 ): Promise<number> {
   let total = await storedContentBytes(tx);
   if (total <= limit) return total;
   const rows = await tx.all<{ article_id: string; source: string; bytes: number }>(
     `select s.article_id, s.source, s.bytes from article_content_sizes s
      join articles a on a.id = s.article_id
-     where a.read_at is not null and a.starred_at is null and a.id is not ?
-       and a.id is not (
-         select id from articles where read_at is not null order by read_at desc, id desc limit 1
-       )
+     where a.read_at is not null and a.starred_at is null
+       and a.id not in (select value from json_each(?))
      order by a.read_at, a.id, s.source`,
-    [keep],
+    [JSON.stringify(protect)],
   );
   for (const row of rows) {
     if (total <= limit) break;
