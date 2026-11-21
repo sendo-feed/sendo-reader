@@ -11,9 +11,10 @@ import {
   clearPageMissing,
   evictContents,
   getStoredContent,
-  listContentsToPrefetch,
   markContentMissing,
   markPageMissing,
+  nextContentToPrefetch,
+  type PrefetchList,
   type PrefetchTarget,
   putStoredContent,
   type StoredContent,
@@ -23,6 +24,7 @@ import type { Database, Executor } from "./db/database";
 import { getStoredFeedFetchTimes, putStoredFeedFetchTimes } from "./db/feed-fetch-times";
 import {
   type ArticleQuery,
+  type ArticleScope,
   countReadSince,
   countUnread,
   getArticle,
@@ -31,6 +33,7 @@ import {
   listFeeds,
   listFolders,
   listLatestArticleDates,
+  searchTerms,
 } from "./db/queries";
 import { clearSavedPages, countSavedPages, getSavedPage, listSavedPages } from "./db/saved-pages";
 import { migrate } from "./db/schema";
@@ -160,6 +163,12 @@ const MAX_PREFETCH_ATTEMPTS = 3;
  */
 const PREFETCH_RETRY_AFTER_MS = 6 * 60 * 60 * 1000;
 
+/** 一覧を開いた時刻を覚えておくタブの数（開いているタブの数より十分に多く） */
+const MAX_OPEN_TABS = 32;
+
+/** タブの識別子の長さの上限 */
+const MAX_TAB_ID_LENGTH = 200;
+
 /**
  * 先読みで、その記事を飛ばして続けてよい失敗か。届かない（network）とログインの問題
  * （unauthorized）は、ほかの記事でも同じなのでやめる。DB などの ApiError でない失敗もやめる
@@ -241,6 +250,17 @@ export class ReaderCore {
    * 一時的な失敗でも、時間がたてば頼み直す。メモリーにだけ持つ
    */
   readonly #prefetchFailures = new Map<string, { count: number; until: number }>();
+  /**
+   * 画面がいま開いている一覧（先に取る順を決める）。メモリーにだけ持ち、ログアウトとユーザーの
+   * 切り替えで消す
+   */
+  #openList: PrefetchList | null = null;
+  /**
+   * タブごとに、最後に開いた一覧（開いた回の番号と範囲）と、それを開いた時刻。タブが前に出て
+   * 知らせ直したときに、開いた時刻を変えないために覚える。最近知らせたタブから残し、古いタブから
+   * 捨てる
+   */
+  readonly #openedAt = new Map<string, { seq: number; key: string; since: number }>();
 
   private constructor(options: ReaderCoreOptions) {
     this.#db = options.db;
@@ -411,6 +431,8 @@ export class ReaderCore {
     this.#prefetching = null;
     this.#prefetchAgain = false;
     this.#prefetchFailures.clear();
+    this.#openList = null;
+    this.#openedAt.clear();
     return this.#session.signal;
   }
 
@@ -1112,8 +1134,48 @@ export class ReaderCore {
   }
 
   /**
+   * 画面がいま開いている一覧を知らせる（docs/decisions/local-first.md の「記事の本文」）。先読みは、
+   * この一覧の、読んでいる位置のすぐ下から先に取る。一覧を出さない画面、言葉が空の Search、
+   * Recently Read では null を渡す（すべての未読から新しい順に取る）。最後に知らせたものに従い、
+   * 走っている先読みも、次の 1 件から従う。
+   *
+   * opened は、知らせたタブ（tab）と、そのタブで一覧を開いた回の番号（seq。一覧を開くたびに替える）。
+   * 同じタブが同じ回のまま知らせ直したとき（タブが前に出た）は、開いた時刻を、その回に最初に
+   * 知らせた時刻のままにする
+   */
+  setOpenList(scope: ArticleScope | null, opened: OpenedList): void {
+    if (
+      typeof opened !== "object" ||
+      opened === null ||
+      typeof opened.tab !== "string" ||
+      opened.tab.length > MAX_TAB_ID_LENGTH ||
+      !Number.isSafeInteger(opened.seq)
+    ) {
+      throw new TypeError("一覧を開いたタブと回の番号の形が違う");
+    }
+    const normalized = normalizeOpenList(scope);
+    if (normalized === null) {
+      this.#openList = null;
+      return;
+    }
+    const key = JSON.stringify(normalized);
+    const last = this.#openedAt.get(opened.tab);
+    const since =
+      last !== undefined && last.seq === opened.seq && last.key === key ? last.since : this.#now();
+    // 最近知らせたタブを後ろに並べ直し、多すぎたら一番前（長く知らせていないタブ）から捨てる
+    this.#openedAt.delete(opened.tab);
+    this.#openedAt.set(opened.tab, { seq: opened.seq, key, since });
+    if (this.#openedAt.size > MAX_OPEN_TABS) {
+      const oldest = this.#openedAt.keys().next().value;
+      if (oldest !== undefined) this.#openedAt.delete(oldest);
+    }
+    this.#openList = { scope: normalized, since };
+  }
+
+  /**
    * 未読で手元に全文がない記事の全文を、1 件ずつ選び直しながら limit 件まで取っておく
-   * （docs/decisions/local-first.md の「記事の本文」）。全文が取れなかった記事は印を置いて先読みでは
+   * （docs/decisions/local-first.md の「記事の本文」）。開いている一覧（setOpenList）があれば、その
+   * 一覧の、読んでいる位置のすぐ下から先に取る。全文が取れなかった記事は印を置いて先読みでは
    * 取り直さず、フィード本文があれば代わりに取っておく。リンクのない記事は全文を頼まない。手元の
    * 本文が上限に届いたら、既読の分を消して空け、空かなければやめる。上限が Off なら取らない。
    *
@@ -1180,8 +1242,8 @@ export class ReaderCore {
     let failures = 0;
     while (tried.length < limit) {
       if (session.aborted) break;
-      const [target] = await listContentsToPrefetch(this.#db, 1, [...giveUp, ...tried]);
-      if (target === undefined) break;
+      const target = await nextContentToPrefetch(this.#db, [...giveUp, ...tried], this.#openList);
+      if (target === null) break;
       if (!confirmed) {
         // 取る前に、一度だけユーザーを確かめる（記事ごとには確かめない）
         await this.#confirmSameUser(session);
@@ -1369,6 +1431,37 @@ export class ReaderCore {
       }
     }
   }
+}
+
+/** 一覧を開いたタブと、そのタブで一覧を開いた回の番号（setOpenList） */
+export interface OpenedList {
+  tab: string;
+  seq: number;
+}
+
+/**
+ * 画面が知らせた一覧を、決まった形にする（キーの順をそろえ、ないものは入れない）。言葉が空の
+ * 検索は、一覧を開いていないのと同じ（null）。形が違えば TypeError
+ */
+function normalizeOpenList(scope: ArticleScope | null): ArticleScope | null {
+  if (scope === null) return null;
+  if (typeof scope !== "object") throw new TypeError("開いている一覧は、オブジェクトか null");
+  const optionalString = (value: unknown) => value === undefined || typeof value === "string";
+  if (
+    !optionalString(scope.feedId) ||
+    !optionalString(scope.folderId) ||
+    !optionalString(scope.search) ||
+    !(scope.starred === undefined || typeof scope.starred === "boolean")
+  ) {
+    throw new TypeError("開いている一覧の形が違う");
+  }
+  if (scope.search !== undefined && searchTerms(scope.search).length === 0) return null;
+  const normalized: ArticleScope = {};
+  if (scope.feedId !== undefined) normalized.feedId = scope.feedId;
+  if (scope.folderId !== undefined) normalized.folderId = scope.folderId;
+  if (scope.starred === true) normalized.starred = true;
+  if (scope.search !== undefined) normalized.search = searchTerms(scope.search).join(" ");
+  return normalized;
 }
 
 /**

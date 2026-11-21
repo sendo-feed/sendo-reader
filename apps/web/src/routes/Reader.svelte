@@ -15,6 +15,7 @@
   import { useReader } from "../lib/context";
   import { layout, reducedMotion } from "../lib/layout.svelte";
   import { ArticleListState, type ListProgress } from "../lib/list.svelte";
+  import { openListScope } from "../lib/open-list";
   import { prefs } from "../lib/prefs.svelte";
   import {
     handleLink,
@@ -233,6 +234,32 @@
   $effect(() => {
     const count = reader.unread.total;
     document.title = `${count > 0 ? `(${count}) ` : ""}${pageTitle} - Sendo`;
+  });
+
+  // 先読みの順のために、開いている一覧を core に知らせる（docs/decisions/local-first.md の
+  // 「記事の本文」）。一覧を開いた（範囲が変わった、同じ一覧を読み直した）ときと、タブ・窓が
+  // 前に出たときに知らせる。裏に
+  // あるタブは知らせない（タブが 2 つあれば、最後に開いた・前に出たタブの一覧に従う）。一覧を開く
+  // たびに回の番号を替え、core はタブごとに開いた時刻を覚える（前に出ただけなら、開いた時刻を変えない）
+  const openListKey = $derived(JSON.stringify(openListScope(router.view, router.searchQuery)));
+  const tab = crypto.randomUUID();
+  let openSeq = 0;
+  $effect(() => {
+    const key = openListKey;
+    void list.reloaded;
+    openSeq += 1;
+    const opened = { tab, seq: openSeq };
+    const report = () => {
+      if (document.visibilityState !== "visible") return;
+      void reader.client.setOpenList(JSON.parse(key), opened).catch(() => undefined);
+    };
+    report();
+    document.addEventListener("visibilitychange", report);
+    window.addEventListener("focus", report);
+    return () => {
+      document.removeEventListener("visibilitychange", report);
+      window.removeEventListener("focus", report);
+    };
   });
 
   // 条件が変わったときだけ読み直す（記事を開いたり閉じたりしただけでは読み直さない。

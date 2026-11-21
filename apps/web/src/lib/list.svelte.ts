@@ -48,6 +48,11 @@ export class ArticleListState {
   done = $state(0);
   /** 条件を替えて開き直すたびに増える。一覧の部品は、これを見て先頭に戻す */
   opened = $state(0);
+  /**
+   * 利用者が同じ一覧を読み直す（All をもう一度押す、引いて更新する、新しい記事を読み込む）たびに
+   * 増える。開き直したのと同じく、先読みの目印を置き直す（docs/decisions/local-first.md の「記事の本文」）
+   */
+  reloaded = $state(0);
   /** キーボードで選んでいる記事（開いてはいない） */
   cursorId = $state<string | null>(null);
 

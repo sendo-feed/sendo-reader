@@ -1,4 +1,5 @@
-import type { Executor } from "./database";
+import type { Executor, SqlValue } from "./database";
+import { type ArticleScope, addScopeConditions } from "./queries";
 
 export type ContentSource = "feed" | "page";
 
@@ -83,32 +84,77 @@ export interface PrefetchTarget {
   feedOnly: boolean;
 }
 
+/** 先に取る順を決める、画面が開いている一覧 */
+export interface PrefetchList {
+  /** 一覧の範囲 */
+  scope: ArticleScope;
+  /** 一覧を開いた（画面が知らせた）時刻。これより後に既読になった記事だけを目印にする */
+  since: number;
+}
+
 /**
- * 本文を先に取っておく記事を、新しい順に limit 件まで選ぶ（docs/decisions/local-first.md の
- * 「記事の本文」。先読みは 1 件ずつ選び直す）。未読で、手元に全文がない記事のうち、全文を頼める記事（リンクがあり、全文が
- * 取れなかった印がない）と、全文は頼めないがフィード本文があって手元にまだない記事。exclude の
- * 記事は選ばない
+ * 先に取る記事の条件（記事の表の別名は a）。未読で、手元に全文がない記事のうち、全文を頼める
+ * 記事（リンクがあり、全文が取れなかった印がない）と、全文は頼めないがフィード本文があって手元に
+ * まだない記事。除く記事（json の配列）は選ばない
  */
-export async function listContentsToPrefetch(
+const PREFETCH_CONDITIONS = `a.read_at is null
+  and a.id not in (select article_id from article_page_contents)
+  and (
+    (m.article_id is null and a.url is not null)
+    or (a.has_content <> 0 and a.id not in (select article_id from article_contents))
+  )
+  and a.id not in (select value from json_each(?))`;
+
+/**
+ * 本文を次に先に取っておく記事を 1 件選ぶ（docs/decisions/local-first.md の「記事の本文」。先読みは
+ * 1 件ずつ選び直す）。なければ null。exclude の記事は選ばない。
+ *
+ * 開いている一覧（list）があり、その一覧に先に取る記事が残っていれば、その一覧から選ぶ。一覧の中では、
+ * 開いたあとに既読になった、その一覧の記事のうち、既読の時刻が一番新しいもの（同じなら、一覧の
+ * 並びで一番下）を目印にし、一覧の並び（公開の新しい順、同じなら ID）で目印より下の、一番上の記事を
+ * 取る。目印がないか、目印より下になければ、一覧の一番上。一覧になければ（一覧を開いていないときも）、
+ * すべての先に取る記事から一番新しいもの
+ */
+export async function nextContentToPrefetch(
   db: Executor,
-  limit: number,
   exclude: readonly string[] = [],
-): Promise<PrefetchTarget[]> {
-  const rows = await db.all<{ id: string; feed_only: number }>(
-    `select a.id, (m.article_id is not null or a.url is null) as feed_only
-     from articles a left join article_page_misses m on m.article_id = a.id
-     where a.read_at is null
-       and a.id not in (select article_id from article_page_contents)
-       and (
-         (m.article_id is null and a.url is not null)
-         or (a.has_content <> 0 and a.id not in (select article_id from article_contents))
-       )
-       and a.id not in (select value from json_each(?))
-     order by a.published_at desc, a.id desc
-     limit ?`,
-    [JSON.stringify(exclude), limit],
-  );
-  return rows.map((row) => ({ id: row.id, feedOnly: row.feed_only !== 0 }));
+  list: PrefetchList | null = null,
+): Promise<PrefetchTarget | null> {
+  const excluded = JSON.stringify(exclude);
+  const pick = async (where: string[], params: SqlValue[]) => {
+    const [row] = await db.all<{ id: string; feed_only: number }>(
+      `select a.id, (m.article_id is not null or a.url is null) as feed_only
+       from articles a left join article_page_misses m on m.article_id = a.id
+       where ${[PREFETCH_CONDITIONS, ...where].join(" and ")}
+       order by a.published_at desc, a.id desc
+       limit 1`,
+      [excluded, ...params],
+    );
+    return row === undefined ? null : { id: row.id, feedOnly: row.feed_only !== 0 };
+  };
+
+  if (list !== null) {
+    const scope: string[] = [];
+    const scopeParams: SqlValue[] = [];
+    addScopeConditions(list.scope, scope, scopeParams);
+    const [anchor] = await db.all<{ id: string; published_at: number }>(
+      `select a.id, a.published_at from articles a
+       where ${["a.read_at is not null", "a.read_at > ?", ...scope].join(" and ")}
+       order by a.read_at desc, a.published_at asc, a.id asc
+       limit 1`,
+      [list.since, ...scopeParams],
+    );
+    if (anchor !== undefined) {
+      const below = await pick(
+        [...scope, "(a.published_at, a.id) < (?, ?)"],
+        [...scopeParams, anchor.published_at, anchor.id],
+      );
+      if (below !== null) return below;
+    }
+    const top = await pick(scope, scopeParams);
+    if (top !== null) return top;
+  }
+  return pick([], []);
 }
 
 /**

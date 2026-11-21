@@ -543,6 +543,7 @@
     // 読み直す直前までに通り過ぎた行も、まとめて既読にする
     clearTimeout(flushTimer);
     if (passed.size > 0) void flushPassed();
+    list.reloaded += 1;
     finishedScroll = null;
     completed = false;
     const loading = list.load();
