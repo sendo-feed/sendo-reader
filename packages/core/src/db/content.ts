@@ -154,8 +154,8 @@ export async function evictContents(
 ): Promise<number> {
   let total = await storedContentBytes(tx);
   const protectJson = JSON.stringify(protect);
-  // 既読の時刻は 0 以上なので、(-1, '') より後から読み始める
-  let key: [number, string] = [-1, ""];
+  // 索引の先頭から読む（既読の時刻が 1970 年より前で負でも、記事の ID は空でないので入る）
+  let key: [number, string] = [Number.MIN_SAFE_INTEGER, ""];
   while (total > limit) {
     const rows = await tx.all<{ id: string; read_at: number; bytes: number }>(
       EVICTABLE_CONTENTS_SQL,
