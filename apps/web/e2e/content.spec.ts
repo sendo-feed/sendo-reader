@@ -152,7 +152,7 @@ test("要約だけの記事と、本文が配られる前からある記事は�
   page,
   context,
 }) => {
-  const { server, blog } = seed();
+  const { server, blog, full } = seed();
   // sendo を更新する前に取り込んだ記事（hasContent が false）
   server.deliver(blog.id, { title: "前からある記事", summary: "前からある記事の要約" });
   const errors: string[] = [];
@@ -168,7 +168,9 @@ test("要約だけの記事と、本文が配られる前からある記事は�
     await expect(view.locator(".body")).toHaveCount(0);
     await expect(view.locator(".content-note")).toHaveCount(0);
   }
-  // 本文のない記事の本文は、取りにいかない
+  // 本文のない記事のフィード本文は、取りにいかない（本文のある記事は、全文が取れないので
+  // 先読みでフィード本文を取る。取りにいったことを確かめてから、ほかを取っていないことを見る）
+  await expect.poll(() => server.contentRequests).toContain(full.id);
   const withContent = [...server.inbox.values()].filter((row) => row.content !== null);
   expect(server.contentRequests.every((id) => withContent.some((row) => row.id === id))).toBe(true);
   expect(errors).toEqual([]);
@@ -234,7 +236,7 @@ test("手元にある本文は、オフラインでも出る。手元になけ�
   await expect(view.locator(".content-note", { hasText: "つながったら読めます" })).toHaveCount(0);
 });
 
-test("未読の新しい記事の本文は、開く前に取っておき、オフラインでも読める", async ({
+test("全文が取れない未読の記事は、開く前にフィード本文を取っておき、オフラインでも読める", async ({
   page,
   context,
 }) => {
@@ -243,7 +245,9 @@ test("未読の新しい記事の本文は、開く前に取っておき、オ�
   await page.goto("/");
   await signIn(page);
   await expect(page.locator(".article-list .item")).toHaveCount(2);
+  // 先に全文を頼み、取れなかったので、代わりにフィード本文を取る
   await expect.poll(() => server.contentRequests).toEqual([full.id]);
+  expect(server.pageContentRequests).toContain(full.id);
   // 本文の中の画像は、表示するまで取らない
   expect(server.imageRequests).toEqual([]);
 

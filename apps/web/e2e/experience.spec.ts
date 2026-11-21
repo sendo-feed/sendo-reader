@@ -912,9 +912,10 @@ test("見出しを押すと一覧の先頭に戻る。先頭で下に引くと�
   await expect(list.locator(".row:not(.unread)")).toHaveCount(0);
   await expect(list.locator(".pull-busy")).toHaveCount(0);
 
-  // 一覧の途中では、下に動かしても更新しない（裏で全文を先に取るリクエストは数えない）
+  // 一覧の途中では、下に動かしても更新しない（数えるのは同期だけ。裏の先読みの本文の取得や、
+  // ユーザーの確かめは数えない）
   await page.evaluate(() => window.scrollTo({ top: 300 }));
-  const syncRequests = () => server.requests.filter((request) => !request.includes("/content"));
+  const syncRequests = () => server.requests.filter((request) => request.startsWith("GET /sync"));
   const requests = syncRequests().length;
   await drag(200);
   await page.waitForTimeout(500);

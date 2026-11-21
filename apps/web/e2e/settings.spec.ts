@@ -495,15 +495,17 @@ test("すでに取り消された項目の404は一覧から外し、OAuthの許
   expect(server.tokens.size).toBe(2);
 });
 
-test("Reading の Offline で全文を置く量の上限を選べる。既定は 200MB で、この端末だけに残す", async ({
+test("Reading の Offline で全文を置く量の上限を選べる。既定は 200MB で、この端末だけに残す。Off なら先に取らない", async ({
   page,
   context,
 }) => {
   const server = new FakeSendo();
+  const feed = server.subscribe({ url: "https://example.com/feed", title: "Blog" });
   await routeFakeSendo(context, server);
   await page.goto("/settings");
   await signIn(page);
-  await page.getByRole("tab", { name: "Reading", exact: true }).click();
+  const openReading = () => page.getByRole("tab", { name: "Reading", exact: true }).click();
+  await openReading();
   const limit = page.getByRole("combobox", { name: "Storage limit" });
   await expect(limit.locator("option:checked")).toHaveText("200MB");
   await expect(limit.locator("option")).toHaveText([
@@ -514,18 +516,35 @@ test("Reading の Offline で全文を置く量の上限を選べる。既定は
     "500MB",
     "1GB",
   ]);
-  await expect(page.getByText(/^いま .+ を使っています。$/)).toBeVisible();
-
-  const before = server.requests.length;
-  await limit.selectOption({ label: "Off" });
-  await expect(limit.locator("option:checked")).toHaveText("Off");
-  await page.reload();
-  await page.getByRole("tab", { name: "Reading", exact: true }).click();
-  await expect(limit.locator("option:checked")).toHaveText("Off");
-  // sendo には預けない
-  expect(server.requests.slice(before).filter((request) => request.includes("/settings"))).toEqual(
-    [],
+  // 記事がないので、使っている量は 0
+  await expect(page.getByText(/^いま .+ を使っています。$/)).toHaveText(
+    "いま 0KB を使っています。",
   );
+
+  await limit.selectOption({ label: "Off" });
+  // 手元に書き込み終わるまで、読み込み直して確かめる
+  await expect(async () => {
+    await page.reload();
+    await openReading();
+    await expect(limit.locator("option:checked")).toHaveText("Off", { timeout: 1000 });
+  }).toPass();
+
+  // Off のあとに全文のある記事が届いても、同期のあとに先に取らない
+  const article = server.deliver(feed.id, { title: "届いた記事" });
+  server.pageContents.set(article.id, "<p>全文</p>");
+  const syncsAfter = (from: number) =>
+    server.requests.slice(from).filter((request) => request.startsWith("GET /sync")).length;
+  for (let round = 0; round < 2; round++) {
+    // 起動したときの同期を 2 回分待つ（1 回めのあとの先読みが走り終わる間を取る）
+    const from = server.requests.length;
+    await page.reload();
+    await expect.poll(() => syncsAfter(from)).toBeGreaterThan(0);
+  }
+  expect(server.pageContentRequests).toEqual([]);
+  expect(server.contentRequests).toEqual([]);
+  // 同期を終えても、上限は sendo に預けない
+  expect(server.settingsRequests).toEqual([]);
+  expect([...server.settings.keys()].filter((key) => key.includes("content"))).toEqual([]);
 });
 
 test("Offline の欄を開いている間に裏の先読みで本文が増えると、タブを替えずに使っている量が増える", async ({

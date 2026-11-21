@@ -1020,6 +1020,10 @@ describe("手元に置く本文の量の上限", () => {
     const { server, core } = await seeded();
     await expect(core.setContentStorageLimit(123)).rejects.toBeInstanceOf(RangeError);
     await core.setContentStorageLimit(500 * MB);
+    // 同期を終えても、sendo には預けない
+    await core.sync();
+    expect(server.settingsRequests).toEqual([]);
+    expect([...server.settings.keys()]).toEqual([]);
     const before = server.requests.length;
     await core.signOut();
     expect(
