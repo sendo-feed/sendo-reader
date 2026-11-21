@@ -104,6 +104,13 @@ const LOGOUT_PENDING_KEY = "auth.logoutPending";
  */
 const CONTENT_STORAGE_LIMIT_KEY = "content.storageLimit";
 
+/**
+ * 最後に開いた記事（いま開いている記事）の ID を置く設定の鍵。開封の記録を積むときに覚え、
+ * その記事の本文は上限のために消さない（docs/decisions/local-first.md の「記事の本文」）。
+ * sendo には預けず、ログアウトで消える
+ */
+const LAST_OPENED_KEY = "content.lastOpened";
+
 const ALL_TABLES: ReadonlySet<Table> = new Set<Table>([
   "folders",
   "feeds",
@@ -557,19 +564,27 @@ export class ReaderCore {
     return this.#write({ kind: "setSavedPage", id, page: null }, ["savedPages"]);
   }
 
-  /** 記事の開封の記録を積む。既読の状態やフィード記事の同期とは独立して送る。 */
-  recordArticleOpen(
+  /**
+   * 記事の開封の記録を積む。既読の状態やフィード記事の同期とは独立して送る。あわせて、最後に
+   * 開いた記事（いま開いている記事）として手元に覚え、その本文を上限のために消さない
+   * （docs/decisions/local-first.md の「記事の本文」。画面が開封の記録を積む前は守られない）
+   */
+  async recordArticleOpen(
     articleId: string,
     id: string = crypto.randomUUID(),
     openedAt = this.#now(),
   ): Promise<void> {
-    return this.#write(
-      {
+    this.#requireSignedIn();
+    const session = this.#session.signal;
+    await this.#db.transaction(async (tx) => {
+      throwIfSessionEnded(session);
+      await this.#enqueue(tx, {
         kind: "recordArticleOpens",
         events: [{ id, articleId, occurredAt: new Date(openedAt).toISOString() }],
-      },
-      [],
-    );
+      });
+      // いま開いている記事として覚える（上限のために、この記事の本文を消さない）
+      await setSetting(tx, LAST_OPENED_KEY, articleId);
+    });
   }
 
   /** 記事を既読（true）／未読（false）にする */
@@ -1118,13 +1133,13 @@ export class ReaderCore {
 
   /**
    * 手元の本文が上限に届いていたら、既読の分を消して空ける。上限より少なくなれば true（Off なら
-   * false）
+   * false）。最後に開いた記事（いま開いている記事）の本文は消さない
    */
   async #makeContentRoom(): Promise<boolean> {
     return this.#db.transaction(async (tx) => {
       const limit = await this.#contentStorageLimit(tx);
       // 上限ちょうどでも空きはないので、上限より少なくなるまで消す
-      return limit > 0 && (await evictContents(tx, limit - 1)) < limit;
+      return limit > 0 && (await evictContents(tx, limit - 1, await protectedArticles(tx))) < limit;
     });
   }
 
@@ -1151,7 +1166,9 @@ export class ReaderCore {
     }
     const used = await this.#db.transaction(async (tx) => {
       await setSetting(tx, CONTENT_STORAGE_LIMIT_KEY, String(limit));
-      return limit > 0 ? evictContents(tx, limit) : storedContentBytes(tx);
+      return limit > 0
+        ? evictContents(tx, limit, await protectedArticles(tx))
+        : storedContentBytes(tx);
     });
     if (limit > 0 && this.#prefetchContents > 0 && this.#user !== null) {
       void this.prefetchArticleContents(this.#prefetchContents).catch(() => undefined);
@@ -1201,9 +1218,10 @@ export class ReaderCore {
           return false;
         }
         await putStoredContent(tx, articleId, content, this.#now(), source);
-        // 上限を超えたら、既読の分を消す（開いたときに取った本文は、超えていても置く）
+        // 上限を超えたら、既読の分を消す。いま置いた本文と、最後に開いた記事（いま開いている
+        // 記事）の本文は消さない（開いて取った本文は、超えていても置く）
         const limit = await this.#contentStorageLimit(tx);
-        if (limit > 0) await evictContents(tx, limit);
+        if (limit > 0) await evictContents(tx, limit, await protectedArticles(tx, articleId));
         return false;
       });
       // 本文なしに変えたら、記事を読み直してもらう
@@ -1286,6 +1304,15 @@ export function normalizeFolderName(value: string): string {
     out += char;
   }
   return out;
+}
+
+/**
+ * 上限のために本文を消さない記事（未読とスターのほかに）。最後に開いた記事（いま開いている記事）
+ * と、keep（いま本文を置いた記事。開封の記録より先に本文が届くことがある）
+ */
+async function protectedArticles(tx: Executor, keep?: string): Promise<string[]> {
+  const opened = await getSetting(tx, LAST_OPENED_KEY);
+  return [opened, keep].filter((id): id is string => typeof id === "string");
 }
 
 /** 書き込みを始めたときのログインが、もう終わっていたら投げる */

@@ -521,15 +521,16 @@ describe("手元に置く本文の量の上限", () => {
     });
   });
 
-  test("超えたら、既読でスターのない記事の本文から、読んだのが古い順に消す。未読とスターは残す", async () => {
+  test("超えたら、既読でスターのない記事の本文から、読んだのが古い順に消す。未読・スター・最後に開いた記事は残す", async () => {
     const { server, core, feed, db } = await seeded();
     const ids: string[] = [];
-    for (let i = 0; i < 5; i++) {
+    for (let i = 0; i < 6; i++) {
       const article = server.deliver(feed.id, { publishedAt: server.now - i });
       server.pageContents.set(article.id, "<p>全文</p>");
       ids.push(article.id);
     }
-    const [readFirst, readSecond, starred, unread, opened] = ids as [
+    const [readFirst, readSecond, starred, unread, latest, opened] = ids as [
+      string,
       string,
       string,
       string,
@@ -537,28 +538,27 @@ describe("手元に置く本文の量の上限", () => {
       string,
     ];
     await core.sync();
-    expect(await core.prefetchArticleContents(10)).toBe(5);
+    expect(await core.prefetchArticleContents(10)).toBe(6);
     for (const id of ids) await inflate(db, id, 15 * MB);
-    // 読んだ順：readFirst → starred → readSecond
-    await core.setRead(readFirst, true);
-    server.now += 1000;
-    await core.setRead(starred, true);
+    // 読んだ順：readFirst → starred → readSecond → latest
+    for (const id of [readFirst, starred, readSecond, latest]) {
+      server.now += 1000;
+      await core.setRead(id, true);
+    }
     await core.setStarred(starred, true);
-    server.now += 1000;
-    await core.setRead(readSecond, true);
+    await core.recordArticleOpen(latest);
 
-    // 75MB を 50MB に。既読でスターのない、読んだのが古い記事から 2 件を消す
+    // 90MB を 50MB に。既読でスターのない、読んだのが古い記事から消す。最後に開いた latest は
+    // 消さないので、収まらずに超えたまま
+    expect(await core.setContentStorageLimit(50 * MB)).toEqual({ limit: 50 * MB, used: 60 * MB });
+    expect(await pageIds(db)).toEqual([starred, unread, latest, opened].sort());
+
+    // 別の記事を開くと、latest は最後に開いた記事でなくなり、消せる
+    server.now += 1000;
+    await core.setRead(opened, true);
+    await core.recordArticleOpen(opened);
     expect(await core.setContentStorageLimit(50 * MB)).toEqual({ limit: 50 * MB, used: 45 * MB });
     expect(await pageIds(db)).toEqual([starred, unread, opened].sort());
-
-    // あとから既読にした記事の分は、次に本文を置いたときに消す
-    await core.setRead(opened, true);
-    const late = server.deliver(feed.id, { publishedAt: server.now - 10 });
-    server.pageContents.set(late.id, "<p>全文</p>");
-    await core.sync();
-    await inflate(db, starred, 40 * MB);
-    await core.fetchArticleContent(late.id, "page");
-    expect(await pageIds(db)).toEqual([starred, unread, late.id].sort());
   });
 
   test("未読とスターの本文で上限に届いたら、先読みをやめる", async () => {
@@ -577,11 +577,16 @@ describe("手元に置く本文の量の上限", () => {
     expect(await core.prefetchArticleContents(10)).toBe(0);
     expect(server.pageContentRequests).toEqual([]);
 
-    // 開いたときに取った本文は、上限を超えていても置く
+    // 開いたときに取った本文は、上限を超えていても置く（画面と同じく、既読にし、開封の記録を積んでから取る）
     const opened = server.deliver(feed.id, { publishedAt: server.now - 2 });
     server.pageContents.set(opened.id, "<p>全文</p>");
     await core.sync();
+    await core.setRead(opened.id, true);
+    await core.recordArticleOpen(opened.id);
     expect((await core.fetchArticleContent(opened.id, "page"))?.source).toBe("page");
+    // 先に取るための空き作りでも、最後に開いた記事（いま開いている記事）の本文は消さない
+    expect(await core.prefetchArticleContents(10)).toBe(0);
+    expect(await core.getArticleContent(opened.id, "page")).toMatchObject({ status: "ready" });
 
     // 上限を上げれば、続きを取る
     await core.setContentStorageLimit(100 * MB);
@@ -589,22 +594,193 @@ describe("手元に置く本文の量の上限", () => {
     expect(await pageIds(db)).toEqual([first.id, next.id, opened.id].sort());
   });
 
+  test("未読で上限が埋まっていても、開いて取った本文は残し、前に開いた記事の分から消す", async () => {
+    const { server, core, feed, db } = await seeded();
+    const unread = server.deliver(feed.id, { publishedAt: server.now });
+    server.pageContents.set(unread.id, "<p>未読の全文</p>");
+    const first = server.deliver(feed.id, { content: "<p>1</p>", publishedAt: server.now - 1 });
+    const second = server.deliver(feed.id, { content: "<p>2</p>", publishedAt: server.now - 2 });
+    for (const article of [first, second]) server.pageContents.set(article.id, "<p>全文</p>");
+    await core.sync();
+    await core.setContentStorageLimit(50 * MB);
+    await core.fetchArticleContent(unread.id, "page");
+    await inflate(db, unread.id, 50 * MB);
+
+    // 画面と同じ順：既読にし、開封の記録を積んでから、フィード本文と全文を取る
+    const open = async (id: string) => {
+      server.now += 1000;
+      await core.setRead(id, true);
+      await core.recordArticleOpen(id);
+      await core.fetchArticleContent(id);
+      await core.fetchArticleContent(id, "page");
+    };
+    await open(first.id);
+    expect(await core.getArticleContent(first.id)).toMatchObject({ status: "ready" });
+    expect(await core.getArticleContent(first.id, "page")).toMatchObject({ status: "ready" });
+
+    // 次に開いた記事の本文は残り、前に開いた記事（読んだのが古い）の分から消える
+    await open(second.id);
+    expect(await core.getArticleContent(second.id)).toMatchObject({ status: "ready" });
+    expect(await core.getArticleContent(second.id, "page")).toMatchObject({ status: "ready" });
+    expect(await core.getArticleContent(first.id)).toEqual({ status: "missing" });
+    expect(await core.getArticleContent(first.id, "page")).toEqual({ status: "missing" });
+    expect(await pageIds(db)).toEqual([unread.id, second.id].sort());
+  });
+
   test("上限ちょうどまで置いてあっても、既読の分を消して先読みを続ける", async () => {
     const { server, core, feed, db } = await seeded();
-    const read = server.deliver(feed.id, { publishedAt: server.now });
-    server.pageContents.set(read.id, "<p>全文</p>");
+    const older = server.deliver(feed.id, { publishedAt: server.now });
+    const latest = server.deliver(feed.id, { publishedAt: server.now - 1 });
+    for (const article of [older, latest]) server.pageContents.set(article.id, "<p>全文</p>");
     await core.sync();
-    expect(await core.prefetchArticleContents(10)).toBe(1);
-    await core.setRead(read.id, true);
-    await inflate(db, read.id, 50 * MB);
+    expect(await core.prefetchArticleContents(10)).toBe(2);
+    await core.setRead(older.id, true);
+    server.now += 1000;
+    await core.setRead(latest.id, true);
+    await inflate(db, older.id, 10 * MB);
+    await inflate(db, latest.id, 40 * MB);
     await core.setContentStorageLimit(50 * MB);
     expect((await core.getContentStorage()).used).toBe(50 * MB);
 
-    const next = server.deliver(feed.id, { publishedAt: server.now - 1 });
+    const next = server.deliver(feed.id, { publishedAt: server.now - 2 });
     server.pageContents.set(next.id, "<p>全文</p>");
     await core.sync();
     expect(await core.prefetchArticleContents(10)).toBe(1);
-    expect(await pageIds(db)).toEqual([next.id]);
+    expect(await pageIds(db)).toEqual([latest.id, next.id].sort());
+  });
+
+  test("記事を開いたあとの先読みは、開いた記事の本文を消さず、ほかの既読の分を古い順に消して続ける", async () => {
+    const { server, core, feed, db } = await seeded();
+    const unread = server.deliver(feed.id, { publishedAt: server.now });
+    const older = server.deliver(feed.id, { publishedAt: server.now - 1 });
+    const opened = server.deliver(feed.id, { publishedAt: server.now - 2 });
+    for (const article of [unread, older, opened]) {
+      server.pageContents.set(article.id, "<p>全文</p>");
+    }
+    await core.sync();
+    await core.setContentStorageLimit(50 * MB);
+    await core.fetchArticleContent(unread.id, "page");
+    await core.fetchArticleContent(older.id, "page");
+    await core.setRead(older.id, true);
+    await inflate(db, unread.id, 40 * MB);
+    await inflate(db, older.id, 10 * MB);
+
+    // 画面と同じ順：既読にし、開封の記録を積んでから取る
+    server.now += 1000;
+    await core.setRead(opened.id, true);
+    await core.recordArticleOpen(opened.id);
+    await core.fetchArticleContent(opened.id, "page");
+    await inflate(db, opened.id, 5 * MB);
+
+    // 開いたあとの同期で届いた記事を先に取る。older を消して空け、opened は残す
+    const next = server.deliver(feed.id, { publishedAt: server.now - 3 });
+    server.pageContents.set(next.id, "<p>全文</p>");
+    await core.sync();
+    expect(await core.prefetchArticleContents(10)).toBe(1);
+    expect(await pageIds(db)).toEqual([unread.id, opened.id, next.id].sort());
+
+    // ほかの既読を消しても空かないときは、開いた記事の本文を消さずに、先に取るのをやめる
+    await inflate(db, next.id, 6 * MB);
+    const more = server.deliver(feed.id, { publishedAt: server.now - 4 });
+    server.pageContents.set(more.id, "<p>全文</p>");
+    await core.sync();
+    expect(await core.prefetchArticleContents(10)).toBe(0);
+    expect(await pageIds(db)).toEqual([unread.id, opened.id, next.id].sort());
+  });
+
+  test("A を開いて全文を待つ間に B を開き、あとで A の全文が届いても、B の本文は消えない", async () => {
+    const { server, core, feed, db } = await seeded();
+    const unread = server.deliver(feed.id, { publishedAt: server.now });
+    const a = server.deliver(feed.id, { content: "<p>A</p>", publishedAt: server.now - 1 });
+    const b = server.deliver(feed.id, { content: "<p>B</p>", publishedAt: server.now - 2 });
+    for (const article of [unread, a, b]) server.pageContents.set(article.id, "<p>全文</p>");
+    await core.sync();
+    await core.setContentStorageLimit(50 * MB);
+    await core.fetchArticleContent(unread.id, "page");
+    await inflate(db, unread.id, 50 * MB);
+
+    // A を開いてフィード本文を取る（全文はまだ届かない）
+    server.now += 1000;
+    await core.setRead(a.id, true);
+    await core.recordArticleOpen(a.id);
+    await core.fetchArticleContent(a.id);
+    // B を開いて、フィード本文を取る
+    server.now += 1000;
+    await core.setRead(b.id, true);
+    await core.recordArticleOpen(b.id);
+    await core.fetchArticleContent(b.id);
+    // 遅れて A の全文が届く
+    await core.fetchArticleContent(a.id, "page");
+    expect(await core.getArticleContent(b.id)).toMatchObject({ status: "ready" });
+    expect(await core.getArticleContent(a.id, "page")).toMatchObject({ status: "ready" });
+  });
+
+  test("既読の記事を開き直したときも、開いたまますべて既読にしたときも、開いている記事の本文は消えない", async () => {
+    const { server, core, feed, db } = await seeded();
+    const unread = server.deliver(feed.id, { publishedAt: server.now });
+    const reopened = server.deliver(feed.id, { publishedAt: server.now - 1 });
+    const other = server.deliver(feed.id, { publishedAt: server.now - 2 });
+    for (const article of [unread, reopened, other]) {
+      server.pageContents.set(article.id, "<p>全文</p>");
+    }
+    await core.sync();
+    expect(await core.prefetchArticleContents(10)).toBe(3);
+    await core.setContentStorageLimit(50 * MB);
+    await inflate(db, unread.id, 40 * MB);
+    await inflate(db, reopened.id, 5 * MB);
+    await inflate(db, other.id, 5 * MB);
+    // reopened を先に、other をあとに読んでおく
+    await core.setRead(reopened.id, true);
+    server.now += 1000;
+    await core.setRead(other.id, true);
+
+    // Recently Read から reopened を開き直す（既読の時刻は変わらない）
+    server.now += 1000;
+    await core.setRead(reopened.id, true);
+    await core.recordArticleOpen(reopened.id);
+    const next = server.deliver(feed.id, { publishedAt: server.now - 3 });
+    server.pageContents.set(next.id, "<p>全文</p>");
+    await core.sync();
+    // 空き作りは、読んだのが古い reopened ではなく、other を消す
+    expect(await core.prefetchArticleContents(10)).toBe(1);
+    expect(await pageIds(db)).toEqual([unread.id, reopened.id, next.id].sort());
+
+    // 開いたまま、すべて既読にする。最後に読んだ記事はほかに移るが、開いている reopened は残る
+    server.now += 1000;
+    await core.markAllRead({ all: true });
+    await inflate(db, next.id, 10 * MB);
+    expect((await core.setContentStorageLimit(50 * MB)).used).toBeLessThanOrEqual(50 * MB);
+    expect(await pageIds(db)).toContain(reopened.id);
+  });
+
+  test("既読の時刻がほかの記事と同じでも、開いている記事の本文は消えない", async () => {
+    const { server, core, feed, db } = await seeded();
+    const ids: string[] = [];
+    for (let i = 0; i < 3; i++) {
+      const article = server.deliver(feed.id, { publishedAt: server.now - i });
+      server.pageContents.set(article.id, "<p>全文</p>");
+      ids.push(article.id);
+    }
+    await core.sync();
+    expect(await core.prefetchArticleContents(10)).toBe(3);
+    for (const id of ids) await inflate(db, id, 20 * MB);
+    // 3 件を同じ時刻に既読にし、消す順で先頭に来る（ID が一番小さい）記事を開く
+    await core.setReadMany(ids, true);
+    const first = [...ids].sort()[0] as string;
+    await core.recordArticleOpen(first);
+    expect((await core.setContentStorageLimit(50 * MB)).used).toBe(40 * MB);
+    expect(await pageIds(db)).toContain(first);
+  });
+
+  test("最後に開いた記事は手元だけに覚え、ログアウトで消える", async () => {
+    const { server, core, feed, db } = await seeded();
+    const article = server.deliver(feed.id);
+    await core.sync();
+    await core.recordArticleOpen(article.id);
+    const opened = () => db.all("select value from settings where key = 'content.lastOpened'");
+    expect(await opened()).toEqual([{ value: article.id }]);
+    await core.signOut();
+    expect(await opened()).toEqual([]);
   });
 
   test("Off なら先に取らず、消しもしない。開いたときは取る", async () => {
