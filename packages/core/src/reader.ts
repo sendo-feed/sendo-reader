@@ -10,9 +10,10 @@ import {
   type ContentSource,
   evictContents,
   getStoredContent,
-  listPagesToPrefetch,
+  listContentsToPrefetch,
   markContentMissing,
   markPageMissing,
+  type PrefetchTarget,
   putStoredContent,
   type StoredContent,
   storedContentBytes,
@@ -1079,15 +1080,15 @@ export class ReaderCore {
     const running = (async () => {
       if (this.#user === null) return 0;
       if ((await this.#contentStorageLimit()) === 0) return 0;
-      const ids = await listPagesToPrefetch(this.#db, limit);
-      if (ids.length === 0) return 0;
+      const targets = await listContentsToPrefetch(this.#db, limit);
+      if (targets.length === 0) return 0;
       // まとめて取る前に、一度だけユーザーを確かめる（記事ごとには確かめない）
       await this.#confirmSameUser(session);
       let fetched = 0;
-      for (const id of ids) {
+      for (const target of targets) {
         if (session.aborted) break;
         if (!(await this.#makeContentRoom())) break;
-        if (await this.#prefetchContent(id, session)) fetched += 1;
+        if (await this.#prefetchContent(target, session)) fetched += 1;
       }
       return fetched;
     })().finally(() => {
@@ -1097,9 +1098,18 @@ export class ReaderCore {
     return running;
   }
 
-  /** 1 件の全文を取っておく。取れなければ、フィード本文があれば代わりに取る。置けたら true */
-  async #prefetchContent(articleId: string, session: AbortSignal): Promise<boolean> {
-    if ((await this.#fetchContent(articleId, session, true, "page")) !== null) return true;
+  /**
+   * 1 件の全文を取っておく。取れなければ、フィード本文があれば代わりに取る。前に全文が取れなかった
+   * 記事は、全文を取り直さず、フィード本文だけを取る。置けたら true
+   */
+  async #prefetchContent(target: PrefetchTarget, session: AbortSignal): Promise<boolean> {
+    const articleId = target.id;
+    if (
+      !target.pageMissed &&
+      (await this.#fetchContent(articleId, session, true, "page")) !== null
+    ) {
+      return true;
+    }
     const feed = await getStoredContent(this.#db, articleId, "feed");
     if (feed === null || !feed.hasContent) return false;
     if (feed.stored !== null) return true;

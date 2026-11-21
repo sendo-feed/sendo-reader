@@ -73,21 +73,36 @@ export async function markContentMissing(tx: Executor, articleId: string): Promi
   return rows.length > 0;
 }
 
+/** 先に取っておく記事と、その記事の全文が前に取れなかったか */
+export interface PrefetchTarget {
+  id: string;
+  /** 前に全文が取れなかった（全文は取り直さず、フィード本文だけを取る） */
+  pageMissed: boolean;
+}
+
 /**
- * 全文を先に取っておく記事（未読で、手元に全文がなく、先に取ろうとして取れなかった印もない）を、
- * 新しい順に limit 件まで選ぶ（docs/decisions/local-first.md の「記事の本文」）
+ * 本文を先に取っておく記事を、新しい順に limit 件まで選ぶ（docs/decisions/local-first.md の
+ * 「記事の本文」）。未読で、手元に全文がない記事のうち、全文が取れなかった印のない記事と、
+ * 印はあるがフィード本文があって手元にまだない記事（代わりのフィード本文を取り損ねた）
  */
-export async function listPagesToPrefetch(db: Executor, limit: number): Promise<string[]> {
-  const rows = await db.all<{ id: string }>(
-    `select id from articles
-     where read_at is null
-       and id not in (select article_id from article_page_contents)
-       and id not in (select article_id from article_page_misses)
-     order by published_at desc, id desc
+export async function listContentsToPrefetch(
+  db: Executor,
+  limit: number,
+): Promise<PrefetchTarget[]> {
+  const rows = await db.all<{ id: string; page_missed: number }>(
+    `select a.id, m.article_id is not null as page_missed
+     from articles a left join article_page_misses m on m.article_id = a.id
+     where a.read_at is null
+       and a.id not in (select article_id from article_page_contents)
+       and (
+         m.article_id is null
+         or (a.has_content <> 0 and a.id not in (select article_id from article_contents))
+       )
+     order by a.published_at desc, a.id desc
      limit ?`,
     [limit],
   );
-  return rows.map((row) => row.id);
+  return rows.map((row) => ({ id: row.id, pageMissed: row.page_missed !== 0 }));
 }
 
 /** 全文が取れなかった印を置く。記事が手元から消えていたら、置かない */

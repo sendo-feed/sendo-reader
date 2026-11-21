@@ -435,6 +435,24 @@ describe("全文を先に取っておく", () => {
     expect(server.pageContentRequests).toHaveLength(3);
   });
 
+  test("全文が取れず、代わりのフィード本文が届かなかった記事は、次はフィード本文だけを取りにいく", async () => {
+    const { server, core, feed } = await seeded();
+    const article = server.deliver(feed.id, { content: "<p>フィード本文</p>" });
+    await core.sync();
+    // ユーザーの確認と全文は届き（全文はない）、フィード本文が届かない
+    server.failNext(null, null, "network");
+    await expect(core.prefetchArticleContents(10)).rejects.toMatchObject({ kind: "network" });
+    expect(await core.getArticleContent(article.id)).toEqual({ status: "missing" });
+
+    expect(await core.prefetchArticleContents(10)).toBe(1);
+    expect(await core.getArticleContent(article.id)).toMatchObject({ status: "ready" });
+    expect(server.pageContentRequests).toEqual([article.id]);
+    // 置けたら、もう取りにいかない
+    const before = server.requests.length;
+    expect(await core.prefetchArticleContents(10)).toBe(0);
+    expect(server.requests).toHaveLength(before);
+  });
+
   test("届かなくなったら、そこでやめる", async () => {
     const { server, core, feed } = await seeded();
     for (let i = 0; i < 3; i++) {
