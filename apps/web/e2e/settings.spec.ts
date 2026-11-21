@@ -559,3 +559,71 @@ test("Offline の欄を開いている間に裏の先読みで本文が増える
     "true",
   );
 });
+
+declare global {
+  interface Window {
+    failSetContentStorageLimit: boolean;
+  }
+}
+
+test("Offline の上限を変えられなかったら、選択欄が前の値に戻り、エラーを出す", async ({
+  page,
+  context,
+}) => {
+  const server = new FakeSendo();
+  await routeFakeSendo(context, server);
+  // ワーカーへの上限の変更だけを、失敗の応答に差し替える（ワーカーの中の失敗は、外から起こせない）
+  await page.addInitScript(() => {
+    window.failSetContentStorageLimit = false;
+    window.Worker = class extends Worker {
+      constructor(url: string | URL, options?: WorkerOptions) {
+        super(url, options);
+        const post = this.postMessage.bind(this);
+        this.postMessage = (
+          message: unknown,
+          options: Transferable[] | StructuredSerializeOptions = [],
+        ) => {
+          const call = message as { type: string; method?: string; id?: number };
+          if (
+            window.failSetContentStorageLimit &&
+            call.type === "call" &&
+            call.method === "setContentStorageLimit"
+          ) {
+            const result = { ok: false, error: { name: "Error", message: "書き込めなかった" } };
+            queueMicrotask(() =>
+              this.dispatchEvent(
+                new MessageEvent("message", { data: { type: "result", id: call.id, result } }),
+              ),
+            );
+            return;
+          }
+          if (Array.isArray(options)) post(message, options);
+          else post(message, options);
+        };
+      }
+    };
+  });
+  await page.goto("/settings");
+  await signIn(page);
+  await page.getByRole("tab", { name: "Reading", exact: true }).click();
+  const limit = page.getByRole("combobox", { name: "Storage limit" });
+  await expect(limit.locator("option:checked")).toHaveText("200MB");
+
+  await page.evaluate(() => {
+    window.failSetContentStorageLimit = true;
+  });
+  await limit.selectOption({ label: "Off" });
+  await expect(page.getByRole("alert")).toHaveText(
+    "上限を変えられませんでした。もう一度お試しください。",
+  );
+  await expect(limit.locator("option:checked")).toHaveText("200MB");
+  await expect(limit).toHaveValue(String(200 * 1024 * 1024));
+
+  // 変えられたら、エラーを消す
+  await page.evaluate(() => {
+    window.failSetContentStorageLimit = false;
+  });
+  await limit.selectOption({ label: "Off" });
+  await expect(limit.locator("option:checked")).toHaveText("Off");
+  await expect(page.getByRole("alert")).toHaveCount(0);
+});
