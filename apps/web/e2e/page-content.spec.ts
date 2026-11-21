@@ -288,6 +288,9 @@ test("先読みは、最後に一覧を開いた・前に出たタブの一覧�
   context,
 }) => {
   const server = new FakeSendo();
+  // 既読の時刻は、同期で sendo の時刻に置き換わる。開いた時刻（ブラウザーの時計）と比べるので、
+  // 偽の sendo の時計を、本番と同じく今の時刻にそろえる
+  Object.defineProperty(server, "now", { get: () => Date.now() });
   const now = Date.now();
   const deliver = (feedId: string, title: string, ago: number) => {
     const article = server.deliver(feedId, { title, publishedAt: now - ago });
