@@ -914,7 +914,16 @@ test("見出しを押すと一覧の先頭に戻る。先頭で下に引くと�
 
   // 一覧の途中では、下に動かしても更新しない（数えるのは同期だけ。裏の先読みの本文の取得や、
   // ユーザーの確かめは数えない）
+  const scrolledAt = server.requests.length;
   await page.evaluate(() => window.scrollTo({ top: 300 }));
+  // 通り過ぎた記事を既読にして送り、そのあとの同期が終わるのを待ってから数え始める
+  await expect
+    .poll(() => {
+      const after = server.requests.slice(scrolledAt);
+      const sent = after.findIndex((request) => request.startsWith("PATCH "));
+      return sent >= 0 && after.slice(sent).some((request) => request.startsWith("GET /sync"));
+    })
+    .toBe(true);
   const syncRequests = () => server.requests.filter((request) => request.startsWith("GET /sync"));
   const requests = syncRequests().length;
   await drag(200);

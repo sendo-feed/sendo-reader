@@ -522,12 +522,16 @@ test("Reading の Offline で全文を置く量の上限を選べる。既定は
   );
 
   await limit.selectOption({ label: "Off" });
-  // 手元に書き込み終わるまで、読み込み直して確かめる
+  // 書き込んだタブは閉じずに、別のタブで、手元に書き込み終わるまで確かめる
+  const other = await context.newPage();
+  await other.goto("/settings");
+  const otherLimit = other.getByRole("combobox", { name: "Storage limit" });
   await expect(async () => {
-    await page.reload();
-    await openReading();
-    await expect(limit.locator("option:checked")).toHaveText("Off", { timeout: 1000 });
+    await other.reload();
+    await other.getByRole("tab", { name: "Reading", exact: true }).click();
+    await expect(otherLimit.locator("option:checked")).toHaveText("Off", { timeout: 1000 });
   }).toPass();
+  await other.close();
 
   // Off のあとに全文のある記事が届いても、同期のあとに先に取らない
   const article = server.deliver(feed.id, { title: "届いた記事" });
