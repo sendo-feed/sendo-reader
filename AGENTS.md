@@ -35,6 +35,7 @@ Sendo の公式リーダー。`packages/core`（同期エンジン）と `apps/w
   - `src/db/`：DB の窓口（`database.ts`）、スキーマとマイグレーション（`schema.ts`。足すだけにし、出したものは書き換えない）、画面のための読み出し（`queries.ts`）、sqlite-wasm の実装（`sqlite-wasm.ts`）
   - `src/settings.ts`：sendo に預ける設定の、名前と値の決まり（`reader.` で始める、一覧ごとの設定の名前）。項目の中身（どんな項目があるか、既定は何か）は画面（`apps/web/src/lib/prefs.svelte.ts`）が決める。手元の置き場所は `src/db/synced-settings.ts`（端末の種類・名前・値。手元だけの値を置く `settings` の表とは別）
   - `src/content/parse.ts`：記事の本文の HTML（信頼できない）を、通すタグと属性だけの木（`ContentNode`）にする。通すものを変えるときは、ここと `test/content-parse.test.ts` を直す。手元の置き場所は `src/db/content.ts`（`article_contents` の表。記事を消すと、トリガーで一緒に消える）。本文は差分同期に載らず、記事ごとに取る（`ReaderCore` の `getArticleContent` は手元だけ、`fetchArticleContent` は、なければ sendo から取る）
+  - `src/content/storage.ts`：手元に置く本文の量の上限（選べる値と既定。端末ごとの設定で、sendo に預けない）。同期のあとに未読の記事の全文を先に取るのは `ReaderCore` の `prefetchArticleContents`、上限を超えたときに既読の分から消すのは `src/db/content.ts`（本文の大きさは、トリガーで `article_content_sizes` の表に写す）
   - `src/content/export.ts`：取得した全文を、1 つのファイル（HTML か Markdown）に書き出す（`@sendo-reader/core/export`。画面は使うときだけ読み込む）。入力は `ContentNode` の木で、HTML の文字列は使わない。画像は sendo の中継から取って data: URI で埋め込む。書き出したファイルは画面に出さず、ダウンロードさせるだけ
   - `src/online.ts`：sendo に問い合わせないとできない操作（フィードの候補探し、購読、OPML の取り込み）。手元にすぐ反映できないので、画面では待っている間の表示を出す
   - `src/sync/`：差分同期（`pull.ts`）と操作キュー（`ops.ts` が操作ごとの「手元への反映・送り方・戻し方」、`queue.ts` が積む・まとめる・送る）。操作は手元への反映と同じトランザクションで積み、同期で届いた行の上に重ね直す。どの操作も冪等にする

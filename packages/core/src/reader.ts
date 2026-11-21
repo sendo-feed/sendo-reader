@@ -2,12 +2,20 @@ import { disconnectDiscord, getDiscord, unsubscribeDiscord } from "./account";
 import { ApiError, createSendoApi, type SendoApi } from "./api/client";
 import { hasVisibleContent, parseContent } from "./content/parse";
 import {
+  CONTENT_STORAGE_LIMITS,
+  type ContentStorage,
+  parseContentStorageLimit,
+} from "./content/storage";
+import {
   type ContentSource,
+  evictContents,
   getStoredContent,
-  listContentToPrefetch,
+  listPagesToPrefetch,
   markContentMissing,
+  markPageMissing,
   putStoredContent,
   type StoredContent,
+  storedContentBytes,
 } from "./db/content";
 import type { Database, Executor } from "./db/database";
 import { getStoredFeedFetchTimes, putStoredFeedFetchTimes } from "./db/feed-fetch-times";
@@ -89,6 +97,12 @@ const USER_KEY = "auth.user";
  */
 const LOGOUT_PENDING_KEY = "auth.logoutPending";
 
+/**
+ * 手元に置く本文の量の上限（バイト）を置く設定の鍵。端末ごとの設定なので、sendo に預けず、
+ * ログアウトしても消さない（docs/decisions/settings.md の 4）
+ */
+const CONTENT_STORAGE_LIMIT_KEY = "content.storageLimit";
+
 const ALL_TABLES: ReadonlySet<Table> = new Set<Table>([
   "folders",
   "feeds",
@@ -112,15 +126,16 @@ export interface ReaderCoreOptions {
    */
   onDataCleared?: () => Promise<void>;
   /**
-   * 同期のあとに、未読の新しい記事の本文を、この数まで先に取っておく（オフラインでも読める
-   * ように）。既定は 0（取らない。開いたときに取る）
+   * 同期のあとに、未読の新しい記事の全文を先に取っておく（開いたときに待たず、オフラインでも
+   * 読めるように）。1 回の同期のあとに取る数。既定は 0（取らない。開いたときに取る）
    */
   prefetchContents?: number;
 }
 
 /**
- * 先に取っておく本文の数の目安（Web の既定）。本文 1 件につき sendo へのリクエストを 1 回使い、
- * 手元の容量も使うので、数を絞る。本文の中の画像は、表示するまで取らない
+ * 1 回の同期のあとに先に取る全文の数（Web の既定）。全文をまだ抜いていない記事は、sendo が
+ * そのリクエストの中で元のサイトに取りにいくので、まとめて頼まない。残りは次の同期のあとに取る。
+ * 本文の中の画像は、表示するまで取らない
  */
 export const DEFAULT_PREFETCH_CONTENTS = 30;
 
@@ -1050,23 +1065,29 @@ export class ReaderCore {
   }
 
   /**
-   * 未読の新しい limit 件のうち、sendo に本文があって手元にまだない記事の本文を、1 つずつ取って
-   * おく。取った数を返す。届かなくなったら、そこでやめる（次の同期のあとに、続きを取る）。
-   * すでに取っている最中なら、その結果を返す
+   * 未読の新しい記事のうち、手元に全文がない記事の全文を、limit 件まで 1 件ずつ取っておく
+   * （docs/decisions/local-first.md の「記事の本文」）。全文が取れなかった記事は印を置いて先読みでは
+   * 取り直さず、フィード本文があれば代わりに取っておく。手元の本文が上限に届いたら、既読の分を
+   * 消して空け、空かなければやめる。上限が Off なら取らない。
+   *
+   * 全文かフィード本文を置けた数を返す。届かなくなったら、そこでやめる（次の同期のあとに、
+   * 続きを取る）。すでに取っている最中なら、その結果を返す
    */
   prefetchArticleContents(limit: number = DEFAULT_PREFETCH_CONTENTS): Promise<number> {
     if (this.#prefetching !== null) return this.#prefetching;
     const session = this.#session.signal;
     const running = (async () => {
       if (this.#user === null) return 0;
-      const ids = await listContentToPrefetch(this.#db, limit);
+      if ((await this.#contentStorageLimit()) === 0) return 0;
+      const ids = await listPagesToPrefetch(this.#db, limit);
       if (ids.length === 0) return 0;
       // まとめて取る前に、一度だけユーザーを確かめる（記事ごとには確かめない）
       await this.#confirmSameUser(session);
       let fetched = 0;
       for (const id of ids) {
         if (session.aborted) break;
-        if ((await this.#fetchContent(id, session, true)) !== null) fetched += 1;
+        if (!(await this.#makeContentRoom())) break;
+        if (await this.#prefetchContent(id, session)) fetched += 1;
       }
       return fetched;
     })().finally(() => {
@@ -1074,6 +1095,57 @@ export class ReaderCore {
     });
     this.#prefetching = running;
     return running;
+  }
+
+  /** 1 件の全文を取っておく。取れなければ、フィード本文があれば代わりに取る。置けたら true */
+  async #prefetchContent(articleId: string, session: AbortSignal): Promise<boolean> {
+    if ((await this.#fetchContent(articleId, session, true, "page")) !== null) return true;
+    const feed = await getStoredContent(this.#db, articleId, "feed");
+    if (feed === null || !feed.hasContent) return false;
+    if (feed.stored !== null) return true;
+    return (await this.#fetchContent(articleId, session, true, "feed")) !== null;
+  }
+
+  /**
+   * 手元の本文が上限に届いていたら、既読の分を消して空ける。上限より少なくなれば true（Off なら
+   * false）
+   */
+  async #makeContentRoom(): Promise<boolean> {
+    return this.#db.transaction(async (tx) => {
+      const limit = await this.#contentStorageLimit(tx);
+      return limit > 0 && (await evictContents(tx, limit)) < limit;
+    });
+  }
+
+  async #contentStorageLimit(db: Executor = this.#db): Promise<number> {
+    return parseContentStorageLimit(await getSetting(db, CONTENT_STORAGE_LIMIT_KEY));
+  }
+
+  /** 手元に置いた本文の量と、その上限（端末ごとの設定。sendo には預けない） */
+  async getContentStorage(): Promise<ContentStorage> {
+    const [limit, used] = await Promise.all([
+      this.#contentStorageLimit(),
+      storedContentBytes(this.#db),
+    ]);
+    return { limit, used };
+  }
+
+  /**
+   * 手元に置く本文の量の上限を変える（CONTENT_STORAGE_LIMITS のどれか。0 は Off）。超えていれば、
+   * 既読の分を消す。先に取れるようになったら、続きを取りにいく（待たない）
+   */
+  async setContentStorageLimit(limit: number): Promise<ContentStorage> {
+    if (!CONTENT_STORAGE_LIMITS.includes(limit)) {
+      throw new RangeError("本文を置く量の上限は、決めた値のどれか");
+    }
+    const used = await this.#db.transaction(async (tx) => {
+      await setSetting(tx, CONTENT_STORAGE_LIMIT_KEY, String(limit));
+      return limit > 0 ? evictContents(tx, limit) : storedContentBytes(tx);
+    });
+    if (limit > 0 && this.#prefetchContents > 0 && this.#user !== null) {
+      void this.prefetchArticleContents(this.#prefetchContents).catch(() => undefined);
+    }
+    return { limit, used };
   }
 
   /**
@@ -1111,8 +1183,16 @@ export class ReaderCore {
       const changed = await this.#db.transaction(async (tx) => {
         // 取っている間にログアウトしたり、ユーザーが替わったりしたら、置かない
         throwIfSessionEnded(session);
-        if (content === null) return source === "feed" && markContentMissing(tx, articleId);
+        if (content === null) {
+          if (source === "feed") return markContentMissing(tx, articleId);
+          // 全文が取れなかった。先読みでは取り直さない（開いたときは取りにいく）
+          await markPageMissing(tx, articleId, this.#now());
+          return false;
+        }
         await putStoredContent(tx, articleId, content, this.#now(), source);
+        // 上限を超えたら、既読の分を消す（開いたときに取った本文は、超えていても置く）
+        const limit = await this.#contentStorageLimit(tx);
+        if (limit > 0) await evictContents(tx, limit);
         return false;
       });
       // 本文なしに変えたら、記事を読み直してもらう
@@ -1152,7 +1232,7 @@ export class ReaderCore {
 
 /**
  * 手元のデータ（同期で届いた行、まだ送っていない操作、カーソル、ログインしたユーザーなどの設定）を
- * すべて消す
+ * すべて消す。端末ごとの設定（本文を置く量の上限）だけは残す
  */
 async function clearAll(tx: Executor): Promise<void> {
   await tx.run("delete from pending_ops");
@@ -1162,7 +1242,8 @@ async function clearAll(tx: Executor): Promise<void> {
   await tx.run("delete from folders");
   await tx.run("delete from synced_settings");
   await clearSavedPages(tx);
-  await tx.run("delete from settings");
+  // 本文を置く量の上限は、端末ごとの設定なので残す
+  await tx.run("delete from settings where key <> ?", [CONTENT_STORAGE_LIMIT_KEY]);
 }
 
 /**

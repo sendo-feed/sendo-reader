@@ -198,6 +198,41 @@ const migrations: readonly (readonly string[])[] = [
        delete from feed_fetch_times where feed_id = old.id;
      end`,
   ],
+  [
+    // 先に取ろうとして、全文が取れなかった記事（page_content_unavailable）。先読みでは取り直さない
+    // （docs/decisions/local-first.md の「記事の本文」）。開いたときは、これまでどおり取りにいく
+    `create table article_page_misses (
+      article_id text primary key,
+      missed_at integer not null
+    ) strict, without rowid`,
+    `create trigger articles_delete_page_miss after delete on articles
+     begin
+       delete from article_page_misses where article_id = old.id;
+     end`,
+    // 手元の本文の大きさ（UTF-8 のバイト数）。上限と比べるたびに本文の表を読まないよう、本文の
+    // 表とは別の小さな表に、トリガーで写しておく。本文を置く・消すどの文からも、ずれない
+    `create table article_content_sizes (
+      article_id text not null,
+      source text not null,
+      bytes integer not null,
+      primary key (article_id, source)
+    ) strict, without rowid`,
+    ...(["feed", "page"] as const).flatMap((source) => {
+      const table = source === "page" ? "article_page_contents" : "article_contents";
+      const put = `insert or replace into article_content_sizes (article_id, source, bytes)
+         values (new.article_id, '${source}', length(cast(new.html as blob)))`;
+      return [
+        `create trigger ${table}_size_insert after insert on ${table} begin ${put}; end`,
+        `create trigger ${table}_size_update after update on ${table} begin ${put}; end`,
+        `create trigger ${table}_size_delete after delete on ${table}
+         begin
+           delete from article_content_sizes where article_id = old.article_id and source = '${source}';
+         end`,
+        `insert into article_content_sizes (article_id, source, bytes)
+         select article_id, '${source}', length(cast(html as blob)) from ${table}`,
+      ];
+    }),
+  ],
 ];
 
 export const SCHEMA_VERSION = migrations.length;

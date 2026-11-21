@@ -200,7 +200,7 @@ export function runReaderWorker(options: ReaderWorkerOptions = {}): void {
       ...(options.fetch === undefined ? {} : { fetch: options.fetch }),
       // 手元の DB を消すとき（ログアウト、ユーザーの切り替え）に、画像のキャッシュも消す
       onDataCleared: clearImageCache,
-      // 同期のあとに、未読の新しい記事の本文を取っておく（オフラインでも読めるように）
+      // 同期のあとに、未読の新しい記事の全文を取っておく（開いたときに待たず、オフラインでも読めるように）
       prefetchContents: DEFAULT_PREFETCH_CONTENTS,
     });
     let updates: SyncUpdates | null = null;

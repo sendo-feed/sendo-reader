@@ -74,20 +74,59 @@ export async function markContentMissing(tx: Executor, articleId: string): Promi
 }
 
 /**
- * 本文を先に取っておく記事（未読で、sendo に本文があり、手元にまだない）を、新しい順に選ぶ。
- * 見るのは、未読の新しい limit 件だけ（それより古い未読は、開いたときに取る）
+ * 全文を先に取っておく記事（未読で、手元に全文がなく、先に取ろうとして取れなかった印もない）を、
+ * 新しい順に limit 件まで選ぶ（docs/decisions/local-first.md の「記事の本文」）
  */
-export async function listContentToPrefetch(db: Executor, limit: number): Promise<string[]> {
+export async function listPagesToPrefetch(db: Executor, limit: number): Promise<string[]> {
   const rows = await db.all<{ id: string }>(
-    `select id from (
-       select id, has_content, published_at from articles
-       where read_at is null
-       order by published_at desc, id desc
-       limit ?
-     )
-     where has_content <> 0 and id not in (select article_id from article_contents)
-     order by published_at desc, id desc`,
+    `select id from articles
+     where read_at is null
+       and id not in (select article_id from article_page_contents)
+       and id not in (select article_id from article_page_misses)
+     order by published_at desc, id desc
+     limit ?`,
     [limit],
   );
   return rows.map((row) => row.id);
+}
+
+/** 全文が取れなかった印を置く。記事が手元から消えていたら、置かない */
+export async function markPageMissing(tx: Executor, articleId: string, now: number): Promise<void> {
+  await tx.run(
+    `insert into article_page_misses (article_id, missed_at)
+     select id, ? from articles where id = ?
+     on conflict (article_id) do nothing`,
+    [now, articleId],
+  );
+}
+
+/** 手元に置いた本文（全文とフィード本文）の合計の大きさ（UTF-8 のバイト数） */
+export async function storedContentBytes(db: Executor): Promise<number> {
+  const [row] = await db.all<{ bytes: number }>(
+    "select coalesce(sum(bytes), 0) as bytes from article_content_sizes",
+  );
+  return row?.bytes ?? 0;
+}
+
+/**
+ * 手元の本文が limit（バイト）を超えていたら、既読でスターのない記事の本文から、読んだのが古い
+ * 順に消して、limit 以下に収める。未読とスターの記事の本文は消さない（収まらなければ、超えた
+ * まま）。消したあとの合計を返す
+ */
+export async function evictContents(tx: Executor, limit: number): Promise<number> {
+  let total = await storedContentBytes(tx);
+  if (total <= limit) return total;
+  const rows = await tx.all<{ article_id: string; source: string; bytes: number }>(
+    `select s.article_id, s.source, s.bytes from article_content_sizes s
+     join articles a on a.id = s.article_id
+     where a.read_at is not null and a.starred_at is null
+     order by a.read_at, a.id, s.source`,
+  );
+  for (const row of rows) {
+    if (total <= limit) break;
+    const table = row.source === "page" ? "article_page_contents" : "article_contents";
+    await tx.run(`delete from ${table} where article_id = ?`, [row.article_id]);
+    total -= row.bytes;
+  }
+  return total;
 }

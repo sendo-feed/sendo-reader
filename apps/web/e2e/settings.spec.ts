@@ -494,3 +494,36 @@ test("すでに取り消された項目の404は一覧から外し、OAuthの許
   expect(server.grants.size).toBe(0);
   expect(server.tokens.size).toBe(2);
 });
+
+test("Reading の Offline で全文を置く量の上限を選べる。既定は 200MB で、この端末だけに残す", async ({
+  page,
+  context,
+}) => {
+  const server = new FakeSendo();
+  await routeFakeSendo(context, server);
+  await page.goto("/settings");
+  await signIn(page);
+  await page.getByRole("tab", { name: "Reading", exact: true }).click();
+  const limit = page.getByRole("combobox", { name: "Storage limit" });
+  await expect(limit.locator("option:checked")).toHaveText("200MB");
+  await expect(limit.locator("option")).toHaveText([
+    "Off",
+    "50MB",
+    "100MB",
+    "200MB",
+    "500MB",
+    "1GB",
+  ]);
+  await expect(page.getByText(/^いま .+ を使っています。$/)).toBeVisible();
+
+  const before = server.requests.length;
+  await limit.selectOption({ label: "Off" });
+  await expect(limit.locator("option:checked")).toHaveText("Off");
+  await page.reload();
+  await page.getByRole("tab", { name: "Reading", exact: true }).click();
+  await expect(limit.locator("option:checked")).toHaveText("Off");
+  // sendo には預けない
+  expect(server.requests.slice(before).filter((request) => request.includes("/settings"))).toEqual(
+    [],
+  );
+});
