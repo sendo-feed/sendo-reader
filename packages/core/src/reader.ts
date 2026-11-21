@@ -564,7 +564,11 @@ export class ReaderCore {
     return this.#write({ kind: "setSavedPage", id, page: null }, ["savedPages"]);
   }
 
-  /** 記事の開封の記録を積む。既読の状態やフィード記事の同期とは独立して送る。 */
+  /**
+   * 記事の開封の記録を積む。既読の状態やフィード記事の同期とは独立して送る。あわせて、最後に
+   * 開いた記事（いま開いている記事）として手元に覚え、その本文を上限のために消さない
+   * （docs/decisions/local-first.md の「記事の本文」。画面が開封の記録を積む前は守られない）
+   */
   async recordArticleOpen(
     articleId: string,
     id: string = crypto.randomUUID(),
