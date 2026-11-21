@@ -527,3 +527,103 @@ test("Reading の Offline で全文を置く量の上限を選べる。既定は
     [],
   );
 });
+
+test("Offline の欄を開いている間に裏の先読みで本文が増えると、タブを替えずに使っている量が増える", async ({
+  page,
+  context,
+}) => {
+  const server = new FakeSendo();
+  const feed = server.subscribe({ url: "https://example.com/feed", title: "Blog" });
+  for (let i = 0; i < 3; i++) {
+    const article = server.deliver(feed.id, { title: `記事 ${i}` });
+    server.pageContents.set(article.id, `<p>${"全文".repeat(2000)}</p>`);
+  }
+  await routeFakeSendo(context, server);
+  // 裏の先読みの取得を止めておき、欄を開いてから通す
+  let release!: () => void;
+  const blocked = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  server.onRequest = (path) => (path.endsWith("/content") ? blocked : Promise.resolve());
+  await page.goto("/settings");
+  await signIn(page);
+  await page.getByRole("tab", { name: "Reading", exact: true }).click();
+  const used = page.getByText(/^いま .+ を使っています。$/);
+  await expect(used).toHaveText("いま 0KB を使っています。");
+
+  release();
+  server.onRequest = null;
+  await expect(used).not.toHaveText("いま 0KB を使っています。", { timeout: 10_000 });
+  await expect(page.getByRole("tab", { name: "Reading", exact: true })).toHaveAttribute(
+    "aria-selected",
+    "true",
+  );
+});
+
+declare global {
+  interface Window {
+    failSetContentStorageLimit: boolean;
+  }
+}
+
+test("Offline の上限を変えられなかったら、選択欄が前の値に戻り、エラーを出す", async ({
+  page,
+  context,
+}) => {
+  const server = new FakeSendo();
+  await routeFakeSendo(context, server);
+  // ワーカーへの上限の変更だけを、失敗の応答に差し替える（ワーカーの中の失敗は、外から起こせない）
+  await page.addInitScript(() => {
+    window.failSetContentStorageLimit = false;
+    window.Worker = class extends Worker {
+      constructor(url: string | URL, options?: WorkerOptions) {
+        super(url, options);
+        const post = this.postMessage.bind(this);
+        this.postMessage = (
+          message: unknown,
+          options: Transferable[] | StructuredSerializeOptions = [],
+        ) => {
+          const call = message as { type: string; method?: string; id?: number };
+          if (
+            window.failSetContentStorageLimit &&
+            call.type === "call" &&
+            call.method === "setContentStorageLimit"
+          ) {
+            const result = { ok: false, error: { name: "Error", message: "書き込めなかった" } };
+            queueMicrotask(() =>
+              this.dispatchEvent(
+                new MessageEvent("message", { data: { type: "result", id: call.id, result } }),
+              ),
+            );
+            return;
+          }
+          if (Array.isArray(options)) post(message, options);
+          else post(message, options);
+        };
+      }
+    };
+  });
+  await page.goto("/settings");
+  await signIn(page);
+  await page.getByRole("tab", { name: "Reading", exact: true }).click();
+  const limit = page.getByRole("combobox", { name: "Storage limit" });
+  await expect(limit.locator("option:checked")).toHaveText("200MB");
+
+  await page.evaluate(() => {
+    window.failSetContentStorageLimit = true;
+  });
+  await limit.selectOption({ label: "Off" });
+  await expect(page.getByRole("alert")).toHaveText(
+    "上限を変えられませんでした。もう一度お試しください。",
+  );
+  await expect(limit.locator("option:checked")).toHaveText("200MB");
+  await expect(limit).toHaveValue(String(200 * 1024 * 1024));
+
+  // 変えられたら、エラーを消す
+  await page.evaluate(() => {
+    window.failSetContentStorageLimit = false;
+  });
+  await limit.selectOption({ label: "Off" });
+  await expect(limit.locator("option:checked")).toHaveText("Off");
+  await expect(page.getByRole("alert")).toHaveCount(0);
+});

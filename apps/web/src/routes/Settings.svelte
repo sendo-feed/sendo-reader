@@ -127,7 +127,12 @@
           {/key}
         {:else}
           <p class="note">
-            {device}向けの設定です。変更は自動で保存し、同期で同じ種類の端末に引き継ぎます。
+            {#if category === "Reading"}
+              {device}向けの設定です。変更は自動で保存し、Offline
+              のほかは、同期で同じ種類の端末に引き継ぎます。
+            {:else}
+              {device}向けの設定です。変更は自動で保存し、同期で同じ種類の端末に引き継ぎます。
+            {/if}
           </p>
           {#if category === "Appearance"}
             <Appearance />
