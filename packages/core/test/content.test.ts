@@ -496,7 +496,7 @@ describe("全文を先に取っておく", () => {
     expect(await core.prefetchArticleContents(10)).toBe(5);
   });
 
-  test("同じ記事で sendo が 3 回失敗したら、このログインの間は頼まず、古い記事の先読みを止めない", async () => {
+  test("同じ記事で sendo が 3 回失敗したら、しばらく頼まず、古い記事の先読みを止めない。時間がたてば頼み直す", async () => {
     const { server, core, feed } = await seeded();
     const ids: string[] = [];
     for (let i = 0; i < 4; i++) {
@@ -515,6 +515,11 @@ describe("全文を先に取っておく", () => {
     // 3 回失敗した記事は頼まず、古い記事を取る
     expect(await core.prefetchArticleContents(10)).toBe(1);
     expect(server.pageContentRequests).toEqual([oldest]);
+    // sendo が直っても、しばらくは頼まない。6 時間たてば頼み直す
+    expect(await core.prefetchArticleContents(10)).toBe(0);
+    server.now += 6 * 60 * 60 * 1000;
+    expect(await core.prefetchArticleContents(10)).toBe(3);
+    expect(server.pageContentRequests).toEqual([oldest, ...ids.slice(0, 3)]);
   });
 
   test("先読みが終わる間際に頼まれても、取りこぼさずにもう一度回す", async () => {
