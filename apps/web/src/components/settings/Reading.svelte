@@ -1,5 +1,6 @@
 <script lang="ts">
   import { prefs } from "../../lib/prefs.svelte";
+  import OfflineStorage from "./OfflineStorage.svelte";
   import Swipes from "./Swipes.svelte";
 </script>
 
@@ -17,6 +18,7 @@
   <p id="mark-read-note">一覧を下へスクロールすると、画面の上を通り過ぎた記事を既読にします。</p>
 </section>
 <Swipes />
+<OfflineStorage />
 
 <style>
   section {

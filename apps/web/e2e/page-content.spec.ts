@@ -27,15 +27,16 @@ test("記事を開くと全文を自動取得し、切り替え・オフライ�
 }) => {
   const { server, article } = seed();
   await routeFakeSendo(context, server);
-  await page.goto("/");
-  await signIn(page);
-  const view = page.locator(".article-view");
-
+  // 同期のあとに裏で先に取る全文も、ここで止める（開いたときは、その取得を待つ）
   let release!: () => void;
   const blocked = new Promise<void>((resolve) => {
     release = resolve;
   });
   server.onRequest = (path) => (path.endsWith("/content") ? blocked : Promise.resolve());
+  await page.goto("/");
+  await signIn(page);
+  const view = page.locator(".article-view");
+
   await page.locator(".article-list .item", { hasText: article.title ?? "" }).click();
   await expect(view.getByRole("status")).toHaveText("全文を取得しています…");
   await expect(view.locator(".summary")).toHaveText("短い要約");
@@ -226,5 +227,31 @@ test("開いたときの全文の自動取得が届かなくても知らせず�
   server.onRequest = null;
   await page.evaluate(() => window.dispatchEvent(new Event("online")));
   await expect(view.locator(".body")).toContainText("要約にない全文の続き");
+  expect(server.pageContentRequests).toEqual([article.id]);
+});
+
+test("同期のあとに未読の記事の全文を先に取り、開くと待たずに出る。オフラインでも出る", async ({
+  page,
+  context,
+}) => {
+  const { server, article } = seed();
+  await routeFakeSendo(context, server);
+  await page.goto("/");
+  await signIn(page);
+  // 開く前に、裏で全文を取りにくる
+  await expect.poll(() => server.pageContentRequests).toEqual([article.id]);
+
+  server.onRequest = () => Promise.reject(new TypeError("offline"));
+  await context.setOffline(true);
+  const view = page.locator(".article-view");
+  await page.locator(".article-list .item", { hasText: article.title ?? "" }).click();
+  // 取った全文が手元に置かれるまでの間に開いたときだけ、読み込み直す
+  await expect(async () => {
+    if (!(await view.locator(".body").textContent())?.includes("要約にない全文の続き")) {
+      await page.reload();
+    }
+    await expect(view.locator(".body")).toContainText("要約にない全文の続き", { timeout: 1000 });
+  }).toPass();
+  await expect(view.getByRole("status")).toHaveCount(0);
   expect(server.pageContentRequests).toEqual([article.id]);
 });

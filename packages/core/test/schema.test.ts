@@ -20,6 +20,40 @@ describe("手元の DB のスキーマ", () => {
     expect(plan.some((row) => row.detail.includes("TEMP B-TREE"))).toBe(false);
   });
 
+  test("前の版で置いた本文の大きさを数え、そのあとの置く・消すにも合わせる", async () => {
+    const db = await openMemoryDb();
+    await migrate(db, SCHEMA_VERSION - 1);
+    await db.run(`insert into articles (id, feed_id, published_at, received_at)
+      values ('a1', 'feed', 1, 2), ('a2', 'feed', 1, 2)`);
+    await db.run(`insert into article_contents (article_id, html, source, fetched_at)
+      values ('a1', '<p>あ</p>', 'feed', 1)`);
+    await db.run(`insert into article_page_contents (article_id, html, source, fetched_at)
+      values ('a1', '<p>全文</p>', 'page', 1)`);
+    await migrate(db);
+    const sizes = () =>
+      db.all(
+        "select article_id, source, bytes from article_content_sizes order by article_id, source",
+      );
+    expect(await sizes()).toEqual([
+      { article_id: "a1", source: "feed", bytes: 10 },
+      { article_id: "a1", source: "page", bytes: 13 },
+    ]);
+    await db.run(`insert into article_page_contents (article_id, html, source, fetched_at)
+      values ('a2', 'abc', 'page', 1)`);
+    await db.run("update article_contents set html = 'x' where article_id = 'a1'");
+    // 本文を置き直す UPSERT（putStoredContent と同じ形）でも、大きさを置き換える
+    await db.run(`insert into article_page_contents (article_id, html, source, fetched_at)
+      values ('a1', 'abcd', 'page', 2)
+      on conflict (article_id) do update set html = excluded.html, fetched_at = excluded.fetched_at`);
+    expect(await sizes()).toEqual([
+      { article_id: "a1", source: "feed", bytes: 1 },
+      { article_id: "a1", source: "page", bytes: 4 },
+      { article_id: "a2", source: "page", bytes: 3 },
+    ]);
+    await db.run("delete from articles where id = 'a1'");
+    expect(await sizes()).toEqual([{ article_id: "a2", source: "page", bytes: 3 }]);
+  });
+
   test("マイグレーションを当てると、版が最新になり、表ができる", async () => {
     const db = await openMemoryDb();
     await migrate(db);
@@ -29,8 +63,10 @@ describe("手元の DB のスキーマ", () => {
       "select name from sqlite_schema where type = 'table' order by name",
     );
     expect(tables.map((t) => t.name)).toEqual([
+      "article_content_sizes",
       "article_contents",
       "article_page_contents",
+      "article_page_misses",
       "articles",
       "feed_fetch_times",
       "feeds",

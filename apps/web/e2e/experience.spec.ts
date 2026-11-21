@@ -912,12 +912,13 @@ test("見出しを押すと一覧の先頭に戻る。先頭で下に引くと�
   await expect(list.locator(".row:not(.unread)")).toHaveCount(0);
   await expect(list.locator(".pull-busy")).toHaveCount(0);
 
-  // 一覧の途中では、下に動かしても更新しない
+  // 一覧の途中では、下に動かしても更新しない（裏で全文を先に取るリクエストは数えない）
   await page.evaluate(() => window.scrollTo({ top: 300 }));
-  const requests = server.requests.length;
+  const syncRequests = () => server.requests.filter((request) => !request.includes("/content"));
+  const requests = syncRequests().length;
   await drag(200);
   await page.waitForTimeout(500);
-  expect(server.requests.length).toBe(requests);
+  expect(syncRequests()).toHaveLength(requests);
 });
 
 test("引いて更新の同期を待っている間に読み進めたら、同期が終わっても先頭に戻さない", async ({
