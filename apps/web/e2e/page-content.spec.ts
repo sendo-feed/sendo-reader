@@ -99,38 +99,49 @@ test("全文がない・通信できないときもフィード本文を残し�
 test("取得中に記事を替えても、前の記事の全文を出さない", async ({ page, context }) => {
   const { server, article, feed } = seed();
   const next = server.deliver(feed.id, { title: "別の記事", summary: "別の記事の要約" });
+  // 先読みは新しい順に 1 件ずつ取って置くので、より古いこの記事を頼んだら、article の全文は
+  // 置き終わっている
+  const older = server.deliver(feed.id, { title: "古い記事", publishedAt: server.now - 60_000 });
+  server.pageContents.set(older.id, "<p>古い記事の全文</p>");
   await routeFakeSendo(context, server);
-  await page.goto("/");
-  await signIn(page);
-  const view = page.locator(".article-view");
+  // 裏の先読みが先に全文を取らないよう、ログインの前から止めておく
   let release!: () => void;
   const blocked = new Promise<void>((resolve) => {
     release = resolve;
   });
   server.onRequest = (path) =>
     path.includes(`${article.id}/content`) ? blocked : Promise.resolve();
+  await page.goto("/");
+  await signIn(page);
+  const view = page.locator(".article-view");
   await page.locator(".article-list .item", { hasText: article.title ?? "" }).click();
   await expect(view.getByRole("status")).toHaveText("全文を取得しています…");
   await page.locator(".article-list .item", { hasText: next.title ?? "" }).click();
   await expect(view.locator(".summary")).toHaveText("別の記事の要約");
   release();
   server.onRequest = null;
-  // 先に始めた取得が終わっても、今の記事を保つ
-  await expect.poll(() => server.pageContentRequests).toContain(article.id);
+  // 先に始めた取得が終わって置かれても、今の記事を保つ（画面に届くまで少し待つ）
+  await expect.poll(() => server.pageContentRequests).toContain(older.id);
+  await page.waitForTimeout(300);
   await expect(view.locator(".summary")).toHaveText("別の記事の要約");
   await expect(view.locator(".body")).toHaveCount(0);
 });
 
 test("自動取得中にフィードへ切り替えたら、取得後も選んだ本文を保つ", async ({ page, context }) => {
-  const { server, article } = seed();
+  const { server, article, feed } = seed();
+  // 先読みは新しい順に 1 件ずつ取って置くので、より古いこの記事を頼んだら、article の全文は
+  // 置き終わっている
+  const older = server.deliver(feed.id, { title: "古い記事", publishedAt: server.now - 60_000 });
+  server.pageContents.set(older.id, "<p>古い記事の全文</p>");
   await routeFakeSendo(context, server);
-  await page.goto("/");
-  await signIn(page);
+  // 裏の先読みが先に全文を取らないよう、ログインの前から止めておく
   let release!: () => void;
   const blocked = new Promise<void>((resolve) => {
     release = resolve;
   });
   server.onRequest = (path) => (path.endsWith("/content") ? blocked : Promise.resolve());
+  await page.goto("/");
+  await signIn(page);
   await page.locator(".article-list .item", { hasText: article.title ?? "" }).click();
   const view = page.locator(".article-view");
   await expect(view.getByRole("status")).toHaveText("全文を取得しています…");
@@ -138,7 +149,8 @@ test("自動取得中にフィードへ切り替えたら、取得後も選ん�
   await expect(view.locator(".summary")).toHaveText("短い要約");
   release();
   server.onRequest = null;
-  await expect.poll(() => server.pageContentRequests).toEqual([article.id]);
+  await expect.poll(() => server.pageContentRequests).toContain(older.id);
+  await page.waitForTimeout(300);
   await expect(view.locator(".summary")).toHaveText("短い要約");
   await expect(view.locator(".body")).toHaveCount(0);
   await chooseContent(page, "Show full text");
@@ -148,7 +160,7 @@ test("自動取得中にフィードへ切り替えたら、取得後も選ん�
   await view.getByRole("button", { name: "Close", exact: true }).click();
   await page.locator(".article-list .item", { hasText: article.title ?? "" }).click();
   await expect(view.locator(".body")).toContainText("要約にない全文の続き");
-  expect(server.pageContentRequests).toEqual([article.id]);
+  expect(server.pageContentRequests.filter((id) => id === article.id)).toHaveLength(1);
 });
 
 test("全文の取得が遅くても要約を先に出し、スマホでも全文と原文への導線を使える", async ({
@@ -214,14 +226,21 @@ test("開いたときの全文の自動取得が届かなくても知らせず�
 }) => {
   const { server, article } = seed();
   await routeFakeSendo(context, server);
-  await page.goto("/");
-  await signIn(page);
+  // 裏の先読みも届かないよう、ログインの前から止めておく
   server.onRequest = (path) =>
     path.endsWith("/content") ? Promise.reject(new TypeError("offline")) : Promise.resolve();
+  await page.goto("/");
+  await signIn(page);
   await page.locator(".article-list .item", { hasText: article.title ?? "" }).click();
   const view = page.locator(".article-view");
   await expect(view.locator(".summary")).toHaveText("短い要約");
   await expect(view.getByRole("status")).toHaveCount(0);
+  // 取りにいったが、届かなかった（届かなかった要求は pageContentRequests に入らない）
+  await expect
+    .poll(() =>
+      server.requests.some((request) => request.includes(`/articles/${article.id}/content`)),
+    )
+    .toBe(true);
   expect(server.pageContentRequests).toEqual([]);
 
   server.onRequest = null;
@@ -240,16 +259,24 @@ test("同期のあとに未読の記事の全文を先に取り、開くと待�
   await signIn(page);
   // 開く前に、裏で全文を取りにくる
   await expect.poll(() => server.pageContentRequests).toEqual([article.id]);
+  // オフラインで読み込み直せるよう、Service Worker が画面を担うのを待つ
+  await page.evaluate(() => navigator.serviceWorker.ready);
+  await page.reload();
+  await expect
+    .poll(() => page.evaluate(() => navigator.serviceWorker.controller !== null))
+    .toBe(true);
 
   server.onRequest = () => Promise.reject(new TypeError("offline"));
   await context.setOffline(true);
   const view = page.locator(".article-view");
   await page.locator(".article-list .item", { hasText: article.title ?? "" }).click();
-  // 取った全文が手元に置かれるまでの間に開いたときだけ、読み込み直す
+  // 取った全文が手元に置かれるまでの間に開いたときだけ、読み込み直す（全文がないときは
+  // .body がないので、数で見る。中身を読むと、できるまで待ち続ける）
   await expect(async () => {
-    if (!(await view.locator(".body").textContent())?.includes("要約にない全文の続き")) {
-      await page.reload();
-    }
+    const shown =
+      (await view.locator(".body").count()) > 0 &&
+      ((await view.locator(".body").textContent()) ?? "").includes("要約にない全文の続き");
+    if (!shown) await page.reload();
     await expect(view.locator(".body")).toContainText("要約にない全文の続き", { timeout: 1000 });
   }).toPass();
   await expect(view.getByRole("status")).toHaveCount(0);
