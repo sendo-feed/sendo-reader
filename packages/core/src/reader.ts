@@ -135,8 +135,8 @@ export interface ReaderCoreOptions {
    */
   onDataCleared?: () => Promise<void>;
   /**
-   * 同期のあとに、未読の新しい記事の全文を先に取っておく（開いたときに待たず、オフラインでも
-   * 読めるように）。1 回の同期のあとに取る数。既定は 0（取らない。開いたときに取る）
+   * 同期のあとに、未読の記事の全文を 1 件ずつ選び直しながら先に取っておく（開いたときに待たず、
+   * オフラインでも読めるように）。1 回の同期のあとに頼む数。既定は 0（取らない。開いたときに取る）
    */
   prefetchContents?: number;
 }
@@ -433,7 +433,7 @@ export class ReaderCore {
       },
     );
     this.#syncing = running;
-    // 同期を終えたら、裏で、未読の新しい記事の本文を取っておく（同期の結果は待たせない）
+    // 同期を終えたら、裏で、未読の記事の全文を取っておく（同期の結果は待たせない）
     if (this.#prefetchContents > 0) {
       running.then(
         () => void this.prefetchArticleContents(this.#prefetchContents).catch(() => undefined),
@@ -1112,7 +1112,7 @@ export class ReaderCore {
   }
 
   /**
-   * 未読の新しい記事のうち、手元に全文がない記事の全文を、limit 件まで 1 件ずつ取っておく
+   * 未読で手元に全文がない記事の全文を、1 件ずつ選び直しながら limit 件まで取っておく
    * （docs/decisions/local-first.md の「記事の本文」）。全文が取れなかった記事は印を置いて先読みでは
    * 取り直さず、フィード本文があれば代わりに取っておく。リンクのない記事は全文を頼まない。手元の
    * 本文が上限に届いたら、既読の分を消して空け、空かなければやめる。上限が Off なら取らない。
@@ -1121,22 +1121,31 @@ export class ReaderCore {
    * やめて投げる（次の同期のあとに続きを取る）。そのほかの失敗（sendo の 5xx など）はその記事を
    * 飛ばして続け、続けて何件も失敗したらやめる（飛ばした記事は、次の同期のあとにまた頼む。同じ
    * 記事が何度も失敗したら、しばらく頼まない）。
-   * 走っている最中に頼まれたら、その結果を返し、終わったあとにもう一度だけ回す（途中の同期で
-   * 届いた記事も取る）
+   * 1 回に頼むのは limit 件まで（試した記事の数で数え、途中の同期で届いた記事もその中に入る）。
+   * 走っている最中に頼まれたら、その結果を返す。選び直しで、途中で届いた記事は同じ回に入るが、
+   * 回が終わる間際に頼まれたときは、件数が残っていれば同じ回の続きとしてもう一度回す
    */
   prefetchArticleContents(limit: number = DEFAULT_PREFETCH_CONTENTS): Promise<number> {
     if (this.#prefetching !== null) {
       this.#prefetchAgain = true;
       return this.#prefetching;
     }
+    return this.#startPrefetch(limit, []);
+  }
+
+  /**
+   * 先読みの回を始める。tried は、この回で試した記事（回し直しにも引き継ぎ、選び直さない。頼んだ
+   * 数もここで数えるので、回し直しても limit 件を超えない）
+   */
+  #startPrefetch(limit: number, tried: string[]): Promise<number> {
     const session = this.#session.signal;
     let failed = false;
     const running = (async () => {
       let fetched = 0;
       do {
         this.#prefetchAgain = false;
-        fetched += await this.#prefetchOnce(limit, session);
-      } while (this.#prefetchAgain && !session.aborted);
+        fetched += await this.#prefetchOnce(limit, session, tried);
+      } while (this.#prefetchAgain && !session.aborted && tried.length < limit);
       return fetched;
     })()
       .catch((error: unknown) => {
@@ -1146,36 +1155,40 @@ export class ReaderCore {
       .finally(() => {
         if (this.#prefetching !== running) return;
         this.#prefetching = null;
-        // ループが最後に見たあとに頼まれていたら、新しく回し直す（失敗して抜けたときは、次の
-        // 同期に任せる）
-        const again = this.#prefetchAgain && !failed && !session.aborted;
+        // ループが最後に見たあとに頼まれていたら、同じ回の続きとして回し直す（件数と試した記事を
+        // 引き継ぐ。失敗して抜けたときと、件数を使い切ったときは、次の同期に任せる）
+        const again = this.#prefetchAgain && !failed && !session.aborted && tried.length < limit;
         this.#prefetchAgain = false;
-        if (again) void this.prefetchArticleContents(limit).catch(() => undefined);
+        if (again) void this.#startPrefetch(limit, tried).catch(() => undefined);
       });
     this.#prefetching = running;
     return running;
   }
 
-  /** 先読みを 1 回回す。新しく置けた本文の数を返す */
-  async #prefetchOnce(limit: number, session: AbortSignal): Promise<number> {
+  /**
+   * 先読みを 1 回回す。1 件取るたびに、手元から次の 1 件を選び直す（docs/decisions/local-first.md の
+   * 「記事の本文」）。既読になった記事は選ばれず、途中の同期で届いた記事も同じ回に入る。頼むのは
+   * limit 件まで（頼んだ数で数える）。この回で試した記事は、この回では選び直さない。新しく置けた
+   * 本文の数を返す
+   */
+  async #prefetchOnce(limit: number, session: AbortSignal, tried: string[]): Promise<number> {
     if (this.#user === null) return 0;
     if ((await this.#contentStorageLimit()) === 0) return 0;
-    const now = this.#now();
-    const giveUp: string[] = [];
-    for (const [id, failure] of this.#prefetchFailures) {
-      // 頼まない期間が過ぎたら、数え直す（覚えたものが増え続けないよう、ここで消す）
-      if (failure.until !== 0 && failure.until <= now) this.#prefetchFailures.delete(id);
-      else if (failure.until !== 0) giveUp.push(id);
-    }
-    const targets = await listContentsToPrefetch(this.#db, limit, giveUp);
-    if (targets.length === 0) return 0;
-    // まとめて取る前に、一度だけユーザーを確かめる（記事ごとには確かめない）
-    await this.#confirmSameUser(session);
+    const giveUp = this.#prefetchGiveUp();
+    let confirmed = false;
     let fetched = 0;
     let failures = 0;
-    for (const target of targets) {
+    while (tried.length < limit) {
       if (session.aborted) break;
+      const [target] = await listContentsToPrefetch(this.#db, 1, [...giveUp, ...tried]);
+      if (target === undefined) break;
+      if (!confirmed) {
+        // 取る前に、一度だけユーザーを確かめる（記事ごとには確かめない）
+        await this.#confirmSameUser(session);
+        confirmed = true;
+      }
       if (!(await this.#makeContentRoom())) break;
+      tried.push(target.id);
       try {
         if (await this.#prefetchContent(target, session)) fetched += 1;
         failures = 0;
@@ -1196,6 +1209,17 @@ export class ReaderCore {
       }
     }
     return fetched;
+  }
+
+  /** 何度も失敗して、しばらく先読みで頼まない記事（頼まない期間が過ぎた記録は、ここで消す） */
+  #prefetchGiveUp(): string[] {
+    const now = this.#now();
+    const giveUp: string[] = [];
+    for (const [id, failure] of this.#prefetchFailures) {
+      if (failure.until !== 0 && failure.until <= now) this.#prefetchFailures.delete(id);
+      else if (failure.until !== 0) giveUp.push(id);
+    }
+    return giveUp;
   }
 
   /**

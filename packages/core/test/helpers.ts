@@ -12,7 +12,12 @@ export async function openMemoryDb(): Promise<Database> {
 
 /** 偽の sendo と、それにつないだ ReaderCore を用意する（既定では、既定のユーザーでログインしておく） */
 export async function setup(
-  options: { signIn?: boolean; onDataCleared?: () => Promise<void> } = {},
+  options: {
+    signIn?: boolean;
+    onDataCleared?: () => Promise<void>;
+    /** 同期のあとに先読みを頼む数（本番の Web は DEFAULT_PREFETCH_CONTENTS）。既定は 0 */
+    prefetchContents?: number;
+  } = {},
 ) {
   const server = new FakeSendo();
   const db = await openMemoryDb();
@@ -22,6 +27,9 @@ export async function setup(
     fetch: server.fetch,
     now: () => server.now,
     ...(options.onDataCleared === undefined ? {} : { onDataCleared: options.onDataCleared }),
+    ...(options.prefetchContents === undefined
+      ? {}
+      : { prefetchContents: options.prefetchContents }),
   });
   if (options.signIn ?? true) {
     server.signInAs();
