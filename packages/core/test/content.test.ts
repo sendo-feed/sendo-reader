@@ -965,16 +965,17 @@ describe("開いている一覧から先に取る", () => {
     expect(server.pageContentRequests).toEqual([x1?.id, newest?.id]);
   });
 
-  test("開いた時刻と同じ時刻に既読になった記事も、目印にする", async () => {
+  test("開いた時刻と同じ時刻に既読になった記事は、目印にしない（読み直す直前にまとめて既読にした記事）", async () => {
     const { server, core, feed } = await seeded();
     const [x1, x2, x3] = deliverMany(server, feed.id, 3, server.now - 10_000);
     await core.sync();
-    core.setOpenList({}, { tab: "tab", seq: 1 });
+    // 一覧を読み直す直前に通り過ぎた x2 を既読にし、同じ時刻に読み直した一覧を知らせた
     await core.setRead(x2?.id ?? "", true);
+    core.setOpenList({}, { tab: "tab", seq: 1 });
 
     expect(await core.prefetchArticleContents(1)).toBe(1);
-    expect(server.pageContentRequests).toEqual([x3?.id]);
-    expect(x1).toBeDefined();
+    expect(server.pageContentRequests).toEqual([x1?.id]);
+    expect(x3).toBeDefined();
   });
 
   test("先読みの途中に一覧を替えたら、次の 1 件から新しい一覧に従う", async () => {

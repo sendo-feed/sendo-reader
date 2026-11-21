@@ -139,7 +139,7 @@ export async function nextContentToPrefetch(
     addScopeConditions(list.scope, scope, scopeParams);
     const [anchor] = await db.all<{ id: string; published_at: number }>(
       `select a.id, a.published_at from articles a
-       where ${["a.read_at is not null", "a.read_at >= ?", ...scope].join(" and ")}
+       where ${["a.read_at is not null", "a.read_at > ?", ...scope].join(" and ")}
        order by a.read_at desc, a.published_at asc, a.id asc
        limit 1`,
       [list.since, ...scopeParams],

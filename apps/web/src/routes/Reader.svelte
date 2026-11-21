@@ -237,7 +237,8 @@
   });
 
   // 先読みの順のために、開いている一覧を core に知らせる（docs/decisions/local-first.md の
-  // 「記事の本文」）。一覧を開いた（範囲が変わった）ときと、タブ・窓が前に出たときに知らせる。裏に
+  // 「記事の本文」）。一覧を開いた（範囲が変わった、同じ一覧を読み直した）ときと、タブ・窓が
+  // 前に出たときに知らせる。裏に
   // あるタブは知らせない（タブが 2 つあれば、最後に開いた・前に出たタブの一覧に従う）。一覧を開く
   // たびに回の番号を替え、core はタブごとに開いた時刻を覚える（前に出ただけなら、開いた時刻を変えない）
   const openListKey = $derived(JSON.stringify(openListScope(router.view, router.searchQuery)));
@@ -245,6 +246,7 @@
   let openSeq = 0;
   $effect(() => {
     const key = openListKey;
+    void list.reloaded;
     openSeq += 1;
     const opened = { tab, seq: openSeq };
     const report = () => {

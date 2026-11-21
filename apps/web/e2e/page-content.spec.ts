@@ -362,3 +362,58 @@ test("先読みは、最後に一覧を開いた・前に出たタブの一覧�
   server.onRequest = null;
   for (const gate of gates.values()) gate();
 });
+
+test("一覧を読み直したら、先読みは前に読んだ位置の下ではなく、一覧の上から取る", async ({
+  page,
+  context,
+}) => {
+  const server = new FakeSendo();
+  // 既読の時刻は、同期で sendo の時刻に置き換わる。偽の sendo の時計を今の時刻にそろえる
+  Object.defineProperty(server, "now", { get: () => Date.now() });
+  const feed = server.subscribe({ url: "https://example.com/feed", title: "Blog" });
+  const now = Date.now();
+  const deliver = (title: string, ago: number) => {
+    const article = server.deliver(feed.id, { title, publishedAt: now - ago });
+    server.pageContents.set(article.id, `<p>${title} の全文</p>`);
+    return article;
+  };
+  const x1 = deliver("x1", 10_000);
+  deliver("x2", 20_000);
+  const x3 = deliver("x3", 30_000);
+  const x4 = deliver("x4", 40_000);
+  deliver("x5", 50_000);
+  const asked: string[] = [];
+  const gates = new Map<string, () => void>();
+  const release = (id: string) => gates.get(id)?.();
+  server.onRequest = (path) => {
+    const match = /\/articles\/([^/]+)\/content$/.exec(path);
+    if (match === null) return Promise.resolve();
+    const id = decodeURIComponent(match[1] ?? "");
+    asked.push(id);
+    return new Promise<void>((resolve) => gates.set(id, resolve));
+  };
+  await routeFakeSendo(context, server);
+  await page.goto("/");
+  await signIn(page);
+  await expect.poll(() => asked).toEqual([x1.id]);
+
+  // x3 を開いて読んだので、その下の x4 を取る
+  const list = page.locator(".article-list");
+  await list.locator(".item", { hasText: "x3" }).click();
+  await expect.poll(() => asked).toEqual([x1.id, x3.id]);
+  release(x3.id);
+  release(x1.id);
+  await expect.poll(() => asked).toEqual([x1.id, x3.id, x4.id]);
+
+  // 新しい記事が届き、一覧を読み直した（上から読み始める）
+  const fresh = deliver("fresh", 0);
+  await page.getByRole("button", { name: "Sync now" }).click();
+  await list.getByRole("button", { name: "1 new" }).click();
+  await expect(list.locator(".item", { hasText: "fresh" })).toBeVisible();
+  await page.waitForTimeout(500);
+  release(x4.id);
+  // 読んだ x3 の下（x5）ではなく、一覧の上（fresh）から
+  await expect.poll(() => asked).toEqual([x1.id, x3.id, x4.id, fresh.id]);
+  server.onRequest = null;
+  for (const gate of gates.values()) gate();
+});
