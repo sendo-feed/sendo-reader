@@ -433,7 +433,7 @@ export class ReaderCore {
       },
     );
     this.#syncing = running;
-    // 同期を終えたら、裏で、未読の新しい記事の本文を取っておく（同期の結果は待たせない）
+    // 同期を終えたら、裏で、未読の記事の全文を取っておく（同期の結果は待たせない）
     if (this.#prefetchContents > 0) {
       running.then(
         () => void this.prefetchArticleContents(this.#prefetchContents).catch(() => undefined),
@@ -1121,22 +1121,31 @@ export class ReaderCore {
    * やめて投げる（次の同期のあとに続きを取る）。そのほかの失敗（sendo の 5xx など）はその記事を
    * 飛ばして続け、続けて何件も失敗したらやめる（飛ばした記事は、次の同期のあとにまた頼む。同じ
    * 記事が何度も失敗したら、しばらく頼まない）。
-   * 走っている最中に頼まれたら、その結果を返し、終わったあとにもう一度だけ回す（途中の同期で
-   * 届いた記事も取る）
+   * 1 回に頼むのは limit 件まで（試した記事の数で数え、途中の同期で届いた記事もその中に入る）。
+   * 走っている最中に頼まれたら、その結果を返す。選び直しで、途中で届いた記事は同じ回に入るが、
+   * 回が終わる間際に頼まれたときは、件数が残っていれば同じ回の続きとしてもう一度回す
    */
   prefetchArticleContents(limit: number = DEFAULT_PREFETCH_CONTENTS): Promise<number> {
     if (this.#prefetching !== null) {
       this.#prefetchAgain = true;
       return this.#prefetching;
     }
+    return this.#startPrefetch(limit, []);
+  }
+
+  /**
+   * 先読みの回を始める。tried は、この回で試した記事（回し直しにも引き継ぎ、選び直さない。頼んだ
+   * 数もここで数えるので、回し直しても limit 件を超えない）
+   */
+  #startPrefetch(limit: number, tried: string[]): Promise<number> {
     const session = this.#session.signal;
     let failed = false;
     const running = (async () => {
       let fetched = 0;
       do {
         this.#prefetchAgain = false;
-        fetched += await this.#prefetchOnce(limit, session);
-      } while (this.#prefetchAgain && !session.aborted);
+        fetched += await this.#prefetchOnce(limit, session, tried);
+      } while (this.#prefetchAgain && !session.aborted && tried.length < limit);
       return fetched;
     })()
       .catch((error: unknown) => {
@@ -1146,11 +1155,11 @@ export class ReaderCore {
       .finally(() => {
         if (this.#prefetching !== running) return;
         this.#prefetching = null;
-        // ループが最後に見たあとに頼まれていたら、新しく回し直す（失敗して抜けたときは、次の
-        // 同期に任せる）
-        const again = this.#prefetchAgain && !failed && !session.aborted;
+        // ループが最後に見たあとに頼まれていたら、同じ回の続きとして回し直す（件数と試した記事を
+        // 引き継ぐ。失敗して抜けたときと、件数を使い切ったときは、次の同期に任せる）
+        const again = this.#prefetchAgain && !failed && !session.aborted && tried.length < limit;
         this.#prefetchAgain = false;
-        if (again) void this.prefetchArticleContents(limit).catch(() => undefined);
+        if (again) void this.#startPrefetch(limit, tried).catch(() => undefined);
       });
     this.#prefetching = running;
     return running;
@@ -1162,11 +1171,10 @@ export class ReaderCore {
    * limit 件まで（頼んだ数で数える）。この回で試した記事は、この回では選び直さない。新しく置けた
    * 本文の数を返す
    */
-  async #prefetchOnce(limit: number, session: AbortSignal): Promise<number> {
+  async #prefetchOnce(limit: number, session: AbortSignal, tried: string[]): Promise<number> {
     if (this.#user === null) return 0;
     if ((await this.#contentStorageLimit()) === 0) return 0;
     const giveUp = this.#prefetchGiveUp();
-    const tried: string[] = [];
     let confirmed = false;
     let fetched = 0;
     let failures = 0;
