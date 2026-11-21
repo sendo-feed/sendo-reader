@@ -527,3 +527,35 @@ test("Reading の Offline で全文を置く量の上限を選べる。既定は
     [],
   );
 });
+
+test("Offline の欄を開いている間に裏の先読みで本文が増えると、タブを替えずに使っている量が増える", async ({
+  page,
+  context,
+}) => {
+  const server = new FakeSendo();
+  const feed = server.subscribe({ url: "https://example.com/feed", title: "Blog" });
+  for (let i = 0; i < 3; i++) {
+    const article = server.deliver(feed.id, { title: `記事 ${i}` });
+    server.pageContents.set(article.id, `<p>${"全文".repeat(2000)}</p>`);
+  }
+  await routeFakeSendo(context, server);
+  // 裏の先読みの取得を止めておき、欄を開いてから通す
+  let release!: () => void;
+  const blocked = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  server.onRequest = (path) => (path.endsWith("/content") ? blocked : Promise.resolve());
+  await page.goto("/settings");
+  await signIn(page);
+  await page.getByRole("tab", { name: "Reading", exact: true }).click();
+  const used = page.getByText(/^いま .+ を使っています。$/);
+  await expect(used).toHaveText("いま 0KB を使っています。");
+
+  release();
+  server.onRequest = null;
+  await expect(used).not.toHaveText("いま 0KB を使っています。", { timeout: 10_000 });
+  await expect(page.getByRole("tab", { name: "Reading", exact: true })).toHaveAttribute(
+    "aria-selected",
+    "true",
+  );
+});
