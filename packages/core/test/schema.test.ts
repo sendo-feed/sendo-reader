@@ -23,7 +23,7 @@ describe("手元の DB のスキーマ", () => {
   test("前の版で置いた本文の大きさを数え、そのあとの置く・消すにも合わせる", async () => {
     const db = await openMemoryDb();
     // 本文の大きさの表を足す前の版
-    await migrate(db, SCHEMA_VERSION - 2);
+    await migrate(db, 13);
     await db.run(`insert into articles (id, feed_id, published_at, received_at)
       values ('a1', 'feed', 1, 2), ('a2', 'feed', 1, 2)`);
     await db.run(`insert into article_contents (article_id, html, source, fetched_at)

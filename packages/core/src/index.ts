@@ -52,6 +52,7 @@ export {
   type ChangeListener,
   MAX_FEED_DISPLAY_NAME_LENGTH,
   MAX_FOLDER_NAME_LENGTH,
+  type OpenedList,
   ReaderCore,
   type ReaderCoreOptions,
   type SyncResult,

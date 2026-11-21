@@ -283,7 +283,10 @@ test("同期のあとに未読の記事の全文を先に取り、開くと待�
   expect(server.pageContentRequests).toEqual([article.id]);
 });
 
-test("先読みは、最後に一覧を開いた・前に出たタブの一覧から先に取る", async ({ page, context }) => {
+test("先読みは、最後に一覧を開いた・前に出たタブの一覧の、読んだ記事のすぐ下から取る。裏のタブは知らせない", async ({
+  page,
+  context,
+}) => {
   const server = new FakeSendo();
   const now = Date.now();
   const deliver = (feedId: string, title: string, ago: number) => {
@@ -294,21 +297,25 @@ test("先読みは、最後に一覧を開いた・前に出たタブの一覧�
   const b = server.subscribe({ url: "https://example.com/b", title: "Feed B" });
   const c = server.subscribe({ url: "https://example.com/c", title: "Feed C" });
   const a = server.subscribe({ url: "https://example.com/a", title: "Feed A" });
-  // 新しい順に b1 > b2 > c1 > c2 > a1 > a2
+  // 新しい順に b1 > b2 > c1 > c2 > a1 > a2 > a3 > a4
   const b1 = deliver(b.id, "b1", 1000);
   deliver(b.id, "b2", 2000);
   const c1 = deliver(c.id, "c1", 3000);
   deliver(c.id, "c2", 4000);
-  const a1 = deliver(a.id, "a1", 5000);
-  deliver(a.id, "a2", 6000);
+  deliver(a.id, "a1", 5000);
+  const a2 = deliver(a.id, "a2", 6000);
+  const a3 = deliver(a.id, "a3", 7000);
+  const a4 = deliver(a.id, "a4", 8000);
   // 全文を 1 件ずつ止めて、どの記事を頼んだかを見る
   const asked: string[] = [];
-  const gates: (() => void)[] = [];
+  const gates = new Map<string, () => void>();
+  const release = (id: string) => gates.get(id)?.();
   server.onRequest = (path) => {
     const match = /\/articles\/([^/]+)\/content$/.exec(path);
     if (match === null) return Promise.resolve();
-    asked.push(decodeURIComponent(match[1] ?? ""));
-    return new Promise<void>((resolve) => gates.push(resolve));
+    const id = decodeURIComponent(match[1] ?? "");
+    asked.push(id);
+    return new Promise<void>((resolve) => gates.set(id, resolve));
   };
   await routeFakeSendo(context, server);
   await page.goto("/");
@@ -316,22 +323,39 @@ test("先読みは、最後に一覧を開いた・前に出たタブの一覧�
 
   // All を開いているので、一番新しい記事から
   await expect.poll(() => asked).toEqual([b1.id]);
-  // このタブで Feed A を開き、そのあと別のタブで Feed C を開いた
+  // このタブで Feed A を開き、a2 を開いて読んだ（開いた記事の全文も、ここで止まる）
   const nav = page.getByRole("navigation", { name: "Feeds", exact: true });
   await nav.getByRole("link", { name: /Feed A/ }).click();
-  await expect(page.locator(".article-list .item")).toHaveCount(2);
+  await page.locator(".article-list .item", { hasText: "a2" }).click();
+  await expect.poll(() => asked).toEqual([b1.id, a2.id]);
+  release(a2.id);
+
+  // 裏にある別のタブで Feed C を開いても、知らせない（読んだ a2 のすぐ下の a3 を取る）
   const second = await context.newPage();
+  await second.addInitScript(() => {
+    const shown = () => ((window as { shown?: boolean }).shown ? "visible" : "hidden");
+    Object.defineProperty(Document.prototype, "visibilityState", { get: shown });
+    Object.defineProperty(Document.prototype, "hidden", { get: () => shown() === "hidden" });
+  });
   await second.goto(`/feeds/${encodeURIComponent(c.id)}`);
   await expect(second.locator(".article-list .item")).toHaveCount(2);
-  gates[0]?.();
-  await expect.poll(() => asked).toEqual([b1.id, c1.id]);
+  release(b1.id);
+  await expect.poll(() => asked).toEqual([b1.id, a2.id, a3.id]);
 
-  // 前のタブが前に出たら、その一覧（Feed A）に従う
-  await page.bringToFront();
+  // 別のタブが前に出たら、その一覧（Feed C）に従う
+  await second.evaluate(() => {
+    (window as { shown?: boolean }).shown = true;
+    document.dispatchEvent(new Event("visibilitychange"));
+  });
+  await second.waitForTimeout(500);
+  release(a3.id);
+  await expect.poll(() => asked).toEqual([b1.id, a2.id, a3.id, c1.id]);
+
+  // 前のタブが前に出たら、その一覧に戻り、開き直していないので、読んだ a2 の下（a3 は取った）から
   await page.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
   await page.waitForTimeout(500);
-  gates[1]?.();
-  await expect.poll(() => asked).toEqual([b1.id, c1.id, a1.id]);
+  release(c1.id);
+  await expect.poll(() => asked).toEqual([b1.id, a2.id, a3.id, c1.id, a4.id]);
   server.onRequest = null;
-  for (const gate of gates) gate();
+  for (const gate of gates.values()) gate();
 });

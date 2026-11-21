@@ -163,11 +163,11 @@ const MAX_PREFETCH_ATTEMPTS = 3;
  */
 const PREFETCH_RETRY_AFTER_MS = 6 * 60 * 60 * 1000;
 
-/** 開いた時刻を覚えておく一覧の数（タブの数と、その中で開いた一覧の数より十分に多く） */
-const MAX_OPENED_LISTS = 64;
+/** 一覧を開いた時刻を覚えておくタブの数（開いているタブの数より十分に多く） */
+const MAX_OPEN_TABS = 32;
 
-/** 一覧を開いた識別子の長さの上限 */
-const MAX_OPEN_ID_LENGTH = 200;
+/** タブの識別子の長さの上限 */
+const MAX_TAB_ID_LENGTH = 200;
 
 /**
  * 先読みで、その記事を飛ばして続けてよい失敗か。届かない（network）とログインの問題
@@ -256,10 +256,11 @@ export class ReaderCore {
    */
   #openList: PrefetchList | null = null;
   /**
-   * 画面が一覧を開いた時刻（一覧を開くたびの識別子と範囲ごと）。タブが前に出て知らせ直したときに、
-   * 開いた時刻を変えないために覚える。古いものから捨てる
+   * タブごとに、最後に開いた一覧（開いた回の番号と範囲）と、それを開いた時刻。タブが前に出て
+   * 知らせ直したときに、開いた時刻を変えないために覚える。最近知らせたタブから残し、古いタブから
+   * 捨てる
    */
-  readonly #openedAt = new Map<string, number>();
+  readonly #openedAt = new Map<string, { seq: number; key: string; since: number }>();
 
   private constructor(options: ReaderCoreOptions) {
     this.#db = options.db;
@@ -1138,27 +1139,35 @@ export class ReaderCore {
    * Recently Read では null を渡す（すべての未読から新しい順に取る）。最後に知らせたものに従い、
    * 走っている先読みも、次の 1 件から従う。
    *
-   * openId は、画面が一覧を開くたびに替える識別子（タブごとに違う）。同じ識別子で知らせ直したとき
-   * （タブが前に出た）は、開いた時刻を、最初に知らせた時刻のままにする
+   * opened は、知らせたタブ（tab）と、そのタブで一覧を開いた回の番号（seq。一覧を開くたびに替える）。
+   * 同じタブが同じ回のまま知らせ直したとき（タブが前に出た）は、開いた時刻を、その回に最初に
+   * 知らせた時刻のままにする
    */
-  setOpenList(scope: ArticleScope | null, openId: string): void {
-    if (typeof openId !== "string" || openId.length > MAX_OPEN_ID_LENGTH) {
-      throw new TypeError("一覧を開いた識別子は、短い文字列");
+  setOpenList(scope: ArticleScope | null, opened: OpenedList): void {
+    if (
+      typeof opened !== "object" ||
+      opened === null ||
+      typeof opened.tab !== "string" ||
+      opened.tab.length > MAX_TAB_ID_LENGTH ||
+      !Number.isSafeInteger(opened.seq)
+    ) {
+      throw new TypeError("一覧を開いたタブと回の番号の形が違う");
     }
     const normalized = normalizeOpenList(scope);
     if (normalized === null) {
       this.#openList = null;
       return;
     }
-    const key = `${openId}\n${JSON.stringify(normalized)}`;
-    let since = this.#openedAt.get(key);
-    if (since === undefined) {
-      since = this.#now();
-      this.#openedAt.set(key, since);
-      if (this.#openedAt.size > MAX_OPENED_LISTS) {
-        const oldest = this.#openedAt.keys().next().value;
-        if (oldest !== undefined) this.#openedAt.delete(oldest);
-      }
+    const key = JSON.stringify(normalized);
+    const last = this.#openedAt.get(opened.tab);
+    const since =
+      last !== undefined && last.seq === opened.seq && last.key === key ? last.since : this.#now();
+    // 最近知らせたタブを後ろに並べ直し、多すぎたら一番前（長く知らせていないタブ）から捨てる
+    this.#openedAt.delete(opened.tab);
+    this.#openedAt.set(opened.tab, { seq: opened.seq, key, since });
+    if (this.#openedAt.size > MAX_OPEN_TABS) {
+      const oldest = this.#openedAt.keys().next().value;
+      if (oldest !== undefined) this.#openedAt.delete(oldest);
     }
     this.#openList = { scope: normalized, since };
   }
@@ -1422,6 +1431,12 @@ export class ReaderCore {
       }
     }
   }
+}
+
+/** 一覧を開いたタブと、そのタブで一覧を開いた回の番号（setOpenList） */
+export interface OpenedList {
+  tab: string;
+  seq: number;
 }
 
 /**

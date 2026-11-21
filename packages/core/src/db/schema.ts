@@ -239,7 +239,7 @@ const migrations: readonly (readonly string[])[] = [
     }),
   ],
   [
-    // 開いている一覧（フィード・フォルダ）から先に取る記事を選ぶとき（db/content.ts）、記事の多い
+    // 開いているフィードから先に取る記事を選ぶとき（db/content.ts）、記事の多い
     // フィードでも、そのフィードの記事をすべてたどらずに、未読と、既読の新しい順を読む
     "create index articles_feed_unread_published_idx on articles (feed_id, published_at, id) where read_at is null",
     "create index articles_feed_read_idx on articles (feed_id, read_at) where read_at is not null",

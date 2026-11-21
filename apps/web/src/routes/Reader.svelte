@@ -237,23 +237,27 @@
   });
 
   // 先読みの順のために、開いている一覧を core に知らせる（docs/decisions/local-first.md の
-  // 「記事の本文」）。一覧を開いた（範囲が変わった）ときと、タブが前に出たときに知らせる。裏にある
-  // タブは知らせない（タブが 2 つあれば、最後に開いた・前に出たタブの一覧に従う）。一覧を開く
-  // たびに識別子を替え、core はそれごとに開いた時刻を覚える（前に出ただけなら、開いた時刻を変えない）
+  // 「記事の本文」）。一覧を開いた（範囲が変わった）ときと、タブ・窓が前に出たときに知らせる。裏に
+  // あるタブは知らせない（タブが 2 つあれば、最後に開いた・前に出たタブの一覧に従う）。一覧を開く
+  // たびに回の番号を替え、core はタブごとに開いた時刻を覚える（前に出ただけなら、開いた時刻を変えない）
   const openListKey = $derived(JSON.stringify(openListScope(router.view, router.searchQuery)));
-  const tabId = crypto.randomUUID();
-  let openCount = 0;
+  const tab = crypto.randomUUID();
+  let openSeq = 0;
   $effect(() => {
     const key = openListKey;
-    openCount += 1;
-    const openId = `${tabId}:${openCount}`;
+    openSeq += 1;
+    const opened = { tab, seq: openSeq };
     const report = () => {
       if (document.visibilityState !== "visible") return;
-      void reader.client.setOpenList(JSON.parse(key), openId).catch(() => undefined);
+      void reader.client.setOpenList(JSON.parse(key), opened).catch(() => undefined);
     };
     report();
     document.addEventListener("visibilitychange", report);
-    return () => document.removeEventListener("visibilitychange", report);
+    window.addEventListener("focus", report);
+    return () => {
+      document.removeEventListener("visibilitychange", report);
+      window.removeEventListener("focus", report);
+    };
   });
 
   // 条件が変わったときだけ読み直す（記事を開いたり閉じたりしただけでは読み直さない。
