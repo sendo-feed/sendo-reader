@@ -1,6 +1,7 @@
 import { describe, expect, test } from "vitest";
 import { ApiError, type Table } from "../src";
 import { MAX_CONTENT_LENGTH } from "../src/api/client";
+import { EVICTABLE_CONTENTS_SQL } from "../src/db/content";
 import { setup } from "./helpers";
 
 const contentRows = (db: Awaited<ReturnType<typeof setup>>["db"]) =>
@@ -781,6 +782,50 @@ describe("手元に置く本文の量の上限", () => {
     expect(await opened()).toEqual([{ value: article.id }]);
     await core.signOut();
     expect(await opened()).toEqual([]);
+  });
+
+  test("消す本文は、既読の索引の順に読み、並べ替えない", async () => {
+    const { db } = await seeded();
+    const plan = await db.all<{ detail: string }>(`explain query plan ${EVICTABLE_CONTENTS_SQL}`, [
+      -1,
+      "",
+      "[]",
+      64,
+    ]);
+    expect(plan.some((row) => row.detail.includes("articles_read_idx"))).toBe(true);
+    expect(plan.some((row) => row.detail.includes("TEMP B-TREE"))).toBe(false);
+  });
+
+  test("上限を大きく下げると、何回かに分けて、上限以下になるまで読んだのが古い順に消す", async () => {
+    const { server, core, feed, db } = await seeded();
+    const ids: string[] = [];
+    for (let i = 0; i < 150; i++) {
+      const article = server.deliver(feed.id, { publishedAt: server.now - i });
+      server.pageContents.set(article.id, "<p>全文</p>");
+      ids.push(article.id);
+    }
+    await core.sync();
+    await core.setContentStorageLimit(1024 * MB);
+    expect(await core.prefetchArticleContents(200)).toBe(150);
+    for (const id of ids) await inflate(db, id, 1 * MB);
+    // 読んだ順に 1 件ずつ既読にし、途中の 1 件にスターを付け、最後に読んだ 1 件を開く
+    for (const id of ids) {
+      server.now += 1000;
+      await core.setRead(id, true);
+    }
+    const starred = ids[10] as string;
+    await core.setStarred(starred, true);
+    const opened = ids[149] as string;
+    await core.recordArticleOpen(opened);
+
+    // 150MB を 50MB に。読んだのが古い順に、スターと開いた記事をよけて 100 件消す
+    expect((await core.setContentStorageLimit(50 * MB)).used).toBe(50 * MB);
+    const kept = await pageIds(db);
+    expect(kept).toHaveLength(50);
+    expect(kept).toContain(starred);
+    expect(kept).toContain(opened);
+    const expected = [starred, ...ids.filter((id) => id !== starred).slice(-49)];
+    expect(kept).toEqual([...expected].sort());
   });
 
   test("Off なら先に取らず、消しもしない。開いたときは取る", async () => {

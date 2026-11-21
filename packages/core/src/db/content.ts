@@ -124,9 +124,27 @@ export async function storedContentBytes(db: Executor): Promise<number> {
 }
 
 /**
+ * 消してよい本文のある記事を、読んだのが古い順に、key より後から batch 件まで選ぶ。既読の索引
+ * （articles_read_idx）の順に読むので、並べ替えずに、必要な分だけを読む。消してよいのは、既読で
+ * スターがなく、守る記事（json の配列）でない記事の本文
+ */
+export const EVICTABLE_CONTENTS_SQL = `select a.id, a.read_at,
+    (select sum(s.bytes) from article_content_sizes s where s.article_id = a.id) as bytes
+  from articles a
+  where a.read_at is not null and (a.read_at, a.id) > (?, ?)
+    and a.starred_at is null
+    and a.id not in (select value from json_each(?))
+    and exists (select 1 from article_content_sizes s where s.article_id = a.id)
+  order by a.read_at, a.id
+  limit ?`;
+
+/** 1 回に選ぶ記事の数。上限をわずかに超えたときは 1 回で足り、大きく下げたときは何回かに分ける */
+const EVICT_BATCH = 64;
+
+/**
  * 手元の本文が limit（バイト）を超えていたら、既読でスターのない記事の本文から、読んだのが古い
- * 順に消して、limit 以下に収める（docs/decisions/local-first.md の「記事の本文」）。未読とスターの
- * 記事の本文と、protect の記事（最後に開いた記事、いま置いた本文の記事）の本文は消さない。
+ * 順に記事ごと消して、limit 以下に収める（docs/decisions/local-first.md の「記事の本文」）。未読と
+ * スターの記事の本文と、protect の記事（最後に開いた記事、いま置いた本文の記事）の本文は消さない。
  * 収まらなければ、超えたまま。消したあとの合計を返す
  */
 export async function evictContents(
@@ -135,20 +153,29 @@ export async function evictContents(
   protect: readonly string[] = [],
 ): Promise<number> {
   let total = await storedContentBytes(tx);
-  if (total <= limit) return total;
-  const rows = await tx.all<{ article_id: string; source: string; bytes: number }>(
-    `select s.article_id, s.source, s.bytes from article_content_sizes s
-     join articles a on a.id = s.article_id
-     where a.read_at is not null and a.starred_at is null
-       and a.id not in (select value from json_each(?))
-     order by a.read_at, a.id, s.source`,
-    [JSON.stringify(protect)],
-  );
-  for (const row of rows) {
-    if (total <= limit) break;
-    const table = row.source === "page" ? "article_page_contents" : "article_contents";
-    await tx.run(`delete from ${table} where article_id = ?`, [row.article_id]);
-    total -= row.bytes;
+  const protectJson = JSON.stringify(protect);
+  // 既読の時刻は 0 以上なので、(-1, '') より後から読み始める
+  let key: [number, string] = [-1, ""];
+  while (total > limit) {
+    const rows = await tx.all<{ id: string; read_at: number; bytes: number }>(
+      EVICTABLE_CONTENTS_SQL,
+      [key[0], key[1], protectJson, EVICT_BATCH],
+    );
+    const doomed: string[] = [];
+    for (const row of rows) {
+      if (total <= limit) break;
+      doomed.push(row.id);
+      total -= row.bytes;
+    }
+    const ids = JSON.stringify(doomed);
+    for (const table of ["article_contents", "article_page_contents"]) {
+      await tx.run(`delete from ${table} where article_id in (select value from json_each(?))`, [
+        ids,
+      ]);
+    }
+    const last = rows.at(-1);
+    if (last === undefined || rows.length < EVICT_BATCH) break;
+    key = [last.read_at, last.id];
   }
   return total;
 }
