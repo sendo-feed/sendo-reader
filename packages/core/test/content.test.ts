@@ -467,9 +467,93 @@ describe("全文を先に取っておく", () => {
         await core.fetchArticleContent(second.id, "page");
       }
     };
-    expect(await core.prefetchArticleContents(10)).toBe(2);
+    // 置けたのは 1 件め（2 件めは開いたときに置いたので、数えない）
+    expect(await core.prefetchArticleContents(10)).toBe(1);
     expect(server.pageContentRequests).toEqual([second.id, first.id]);
     expect(await core.getArticleContent(second.id, "page")).toMatchObject({ status: "ready" });
+  });
+
+  test("1 件の記事で sendo が失敗しても、その記事を飛ばして続ける。続けて失敗したらやめる", async () => {
+    const { server, core, feed } = await seeded();
+    const ids: string[] = [];
+    for (let i = 0; i < 6; i++) {
+      const article = server.deliver(feed.id, { publishedAt: server.now - i });
+      server.pageContents.set(article.id, "<p>全文</p>");
+      ids.push(article.id);
+    }
+    await core.sync();
+    // ユーザーの確認は通り、1 件めの全文が 500 を返す
+    server.failNext(null, 500);
+    expect(await core.prefetchArticleContents(2)).toBe(1);
+    expect(await core.getArticleContent(ids[1] as string, "page")).toMatchObject({
+      status: "ready",
+    });
+    // 飛ばした記事は、次にまた頼む。3 件続けて失敗したら、その回はやめる
+    server.failNext(null, 500, 503, 500);
+    server.pageContentRequests.length = 0;
+    expect(await core.prefetchArticleContents(10)).toBe(0);
+    expect(server.pageContentRequests).toEqual([]);
+    expect(await core.prefetchArticleContents(10)).toBe(5);
+  });
+
+  test("全文が取れなかった記事も、開いて全文が取れたら印を消し、未読に戻せば先読みで取り直す", async () => {
+    const { server, core, feed, db } = await seeded();
+    const article = server.deliver(feed.id);
+    await core.sync();
+    expect(await core.prefetchArticleContents(10)).toBe(0);
+    const misses = () => db.all("select article_id from article_page_misses");
+    expect(await misses()).toEqual([{ article_id: article.id }]);
+
+    // あとで全文が抜けるようになり、開いて取る
+    server.pageContents.set(article.id, "<p>全文</p>");
+    await core.setRead(article.id, true);
+    await core.recordArticleOpen(article.id);
+    expect((await core.fetchArticleContent(article.id, "page"))?.source).toBe("page");
+    expect(await misses()).toEqual([]);
+
+    // 全文を手元から消して未読に戻すと、先読みは全文を頼む
+    await db.run("delete from article_page_contents where article_id = ?", [article.id]);
+    await core.setRead(article.id, false);
+    server.pageContentRequests.length = 0;
+    expect(await core.prefetchArticleContents(10)).toBe(1);
+    expect(server.pageContentRequests).toEqual([article.id]);
+  });
+
+  test("先読みの途中で同期して届いた記事も、走っている先読みが終わったあとに取る", async () => {
+    const { server, core, feed } = await seeded();
+    const first = server.deliver(feed.id, { publishedAt: server.now - 10 });
+    server.pageContents.set(first.id, "<p>全文</p>");
+    await core.sync();
+    const later = server.deliver(feed.id, { publishedAt: server.now });
+    server.pageContents.set(later.id, "<p>全文</p>");
+    // 1 件めを取っている間に同期し、同期のあとの先読みを頼む（画面では同期のたびに頼む）
+    let second: Promise<number> | undefined;
+    server.onRequest = async (path) => {
+      if (path.includes(`/articles/${first.id}/content`)) {
+        server.onRequest = null;
+        await core.sync();
+        second = core.prefetchArticleContents(10);
+      }
+    };
+    const fetched = await core.prefetchArticleContents(10);
+    expect(fetched).toBe(2);
+    expect(await second).toBe(2);
+    expect(server.pageContentRequests).toEqual([first.id, later.id]);
+  });
+
+  test("リンクのない記事には全文を頼まず、フィード本文があればそれを取る", async () => {
+    const { server, core, feed } = await seeded();
+    const noLink = server.deliver(feed.id, { url: null, publishedAt: server.now });
+    const noLinkWithFeed = server.deliver(feed.id, {
+      url: null,
+      content: "<p>フィード本文</p>",
+      publishedAt: server.now - 1,
+    });
+    await core.sync();
+    expect(await core.prefetchArticleContents(10)).toBe(1);
+    expect(server.pageContentRequests).toEqual([]);
+    expect(server.contentRequests).toEqual([noLinkWithFeed.id]);
+    expect(await core.getArticleContent(noLink.id)).toEqual({ status: "none" });
   });
 
   test("届かなくなったら、そこでやめる", async () => {

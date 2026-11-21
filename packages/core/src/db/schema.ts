@@ -199,8 +199,9 @@ const migrations: readonly (readonly string[])[] = [
      end`,
   ],
   [
-    // 先に取ろうとして、全文が取れなかった記事（page_content_unavailable）。先読みでは取り直さない
-    // （docs/decisions/local-first.md の「記事の本文」）。開いたときは、これまでどおり取りにいく
+    // 全文が取れなかった記事（page_content_unavailable。先に取るときも、開いたときも置く）。先読み
+    // では取り直さない（docs/decisions/local-first.md の「記事の本文」）。開いたときは、これまで
+    // どおり取りにいき、取れたら印を消す
     `create table article_page_misses (
       article_id text primary key,
       missed_at integer not null
