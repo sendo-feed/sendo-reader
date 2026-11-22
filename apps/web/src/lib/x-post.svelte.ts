@@ -8,8 +8,11 @@
  *   読者の設定（reader.xPosts）で切ってあるとき、読書位置が決まる前（setReady の前）、オフラインの
  *   間、文書が裏に回っている間は、始めない
  * - 同時に読み込む（rendered か失敗を待つ）のは 4 つまで。空いたら、表示範囲に入っているものから
- *   始める。読み込み中に表示範囲から出たものは、iframe を外して元の引用に戻し、数から外す
- *   （入り直したら、最初から読み込む）
+ *   始める。読み込み中に表示範囲から出たもの（裏に回ったときも）は、iframe を外して数から外し、
+ *   元の引用に戻す。覚えた高さの枠を取っていたものは、その高さの空の枠に戻す（入り直したら、最初から
+ *   読み込む）
+ * - 読み込み直し・戻る・進むで記事を開いたときは、前に出した投稿の高さの枠を、読み込む前から取る
+ *   （embeds.md の 5）。読み込めなくなったら（オフライン、設定を切った）、失敗したら、元の引用に戻す
  * - 成功は、最初の rendered。失敗は、failed か、表示範囲に入ったまま 10 秒たったとき。失敗した投稿は、
  *   その記事を開いている間（reset まで）、やり直さない
  * - メッセージは、送り元のオリジンが隔離フレームのオリジンで、送り元の窓がその投稿の iframe のもの
@@ -116,15 +119,17 @@ export class XPostLoader {
     };
     const onOffline = () => {
       this.#online = false;
-      // 読み込み中のものは、失敗にせず取り消す。つながったら、表示範囲に入っているものから始め直す
+      // 読み込み中のものは、失敗にせず取り消す。覚えた高さの枠も、元の引用に戻す（embeds.md の 5）。
+      // つながったら、表示範囲に入っているものから、元の引用から読み込む
       this.#cancelLoading();
+      this.#dropReserved();
     };
     const onVisibility = () => {
       this.#shown = document.visibilityState === "visible";
-      // 裏に回った間は、ブラウザーが枠の描画を止め、rendered が来ない。読み込み中のものは、失敗に
-      // せず取り消し、前に出たら、表示範囲に入っているものから始め直す
+      // 裏に回った間は、ブラウザーが枠の描画を止め、rendered が来ない。表示範囲から出たのと同じに、
+      // 読み込み中のものは失敗にせず外し、前に出たら、表示範囲に入っているものから始め直す
       if (this.#shown) this.#pump();
-      else this.#cancelLoading();
+      else for (const post of this.#posts) if (post.phase === "loading") this.#release(post);
     };
     window.addEventListener("message", onMessage);
     document.addEventListener("visibilitychange", onVisibility);
@@ -182,6 +187,7 @@ export class XPostLoader {
     for (const post of this.#posts) {
       if (post.phase === "loading" || post.phase === "shown") this.#cancel(post);
     }
+    this.#dropReserved();
   }
 
   /** 記事が替わった。失敗の覚えと、出した投稿の大きさを捨てる */
@@ -256,7 +262,7 @@ export class XPostLoader {
       if (post === undefined) continue;
       post.visible = entry.isIntersecting;
       // 読み込み中に出たら、iframe を外して数から外す（Chromium は、画面の外の枠を解決させない）
-      if (!post.visible && post.phase === "loading") this.#cancel(post);
+      if (!post.visible && post.phase === "loading") this.#release(post);
     }
     this.#pump();
   }
@@ -288,6 +294,33 @@ export class XPostLoader {
     for (const post of this.#posts) if (post.phase === "loading") this.#cancel(post);
   }
 
+  /**
+   * 読み込み中の投稿が、表示範囲から出た（裏に回った）。iframe を外して、数から外す（失敗にはしない）。
+   * 覚えた高さの枠を取っていた投稿は、その高さの空の枠に戻し（位置を動かさない）、大きさも覚えたまま
+   * にする。ほかは、元の引用に戻す（embeds.md の 4、5）
+   */
+  #release(post: XPostFrame): void {
+    // 同じ投稿がほかで失敗していたら、もう読み込まないので、元の引用に戻す
+    if (post.reserved === null || this.#failed.has(post.id)) {
+      this.#cancel(post);
+      return;
+    }
+    this.#stopTimer(post);
+    post.phase = "idle";
+    post.frame = null;
+    post.src = null;
+    post.height = null;
+  }
+
+  /** 読み込んでいない投稿の、覚えた高さの枠を外して、元の引用に戻す（読み込めなくなった） */
+  #dropReserved(): void {
+    for (const post of this.#posts) {
+      if (post.phase !== "idle" || post.reserved === null) continue;
+      post.reserved = null;
+      this.#sizes.delete(post.id);
+    }
+  }
+
   /** 読み込みを取り消して、元の引用に戻す（失敗にはしない） */
   #cancel(post: XPostFrame): void {
     // 元の引用に戻すので、大きさも忘れる（出しているときに、位置と一緒に覚え直す）
@@ -308,8 +341,12 @@ export class XPostLoader {
     post.height = null;
     post.reserved = null;
     this.#failed.add(post.id);
-    // 失敗した投稿の大きさは覚えない
+    // 失敗した投稿の大きさは覚えない。同じ投稿がほかにもあれば（同じ投稿を 2 回引いた記事）、
+    // やり直さないので、覚えた高さの空の枠も元の引用に戻す
     this.#sizes.delete(post.id);
+    for (const other of this.#posts) {
+      if (other.id === post.id && other.phase === "idle") other.reserved = null;
+    }
     this.#pump();
   }
 
