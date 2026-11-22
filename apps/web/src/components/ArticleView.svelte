@@ -9,6 +9,7 @@
   import { handleLink, router, viewHref } from "../lib/router.svelte";
   import { xEmbedOrigin } from "../lib/x-embed";
   import { setXPostLoader, XPostLoader } from "../lib/x-post.svelte";
+  import type { XPostSize } from "../lib/x-post-size";
   import ArticleBody from "./ArticleBody.svelte";
   import Dialog from "./Dialog.svelte";
   import Icon from "./Icon.svelte";
@@ -266,7 +267,10 @@
         // 記事は先頭から出す（狭い画面では、ページ全体を動かしている）。読み込み直したときや、
         // 戻る・進むで来たときは、本文が出てから、前に見ていた位置に戻す
         scrollToTop(scroller);
-        restoreTop = router.takeArticle(id);
+        const entered = router.takeArticle(id);
+        restoreTop = entered?.top ?? null;
+        // 前に出した X の投稿の大きさ。位置を戻す前に、その高さの枠を取る（embeds.md の 5）
+        xPosts?.restore(entered?.xPosts ?? []);
         // 書けなかったら、次に手元が変わったときの読み直しで、手元の DB の状態に戻る
         markOnOpen(id).catch(() => void list.refresh());
         void load(id);
@@ -316,6 +320,11 @@
   /** いま見ている位置（px） */
   export function scrollTop(): number {
     return scrollTopOf(scroller);
+  }
+
+  /** 出した X の投稿の大きさ。位置と一緒に、履歴の項目に覚える（embeds.md の 5） */
+  export function xPostSizes(): XPostSize[] {
+    return xPosts?.sizes() ?? [];
   }
 
   $effect(() => {

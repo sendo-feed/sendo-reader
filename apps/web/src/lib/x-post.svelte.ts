@@ -16,11 +16,14 @@
  *   だけを受ける
  */
 import { getContext, setContext } from "svelte";
+import { MAX_X_POST_SIZES, type XPostSize } from "./x-post-size";
 
 /** 同時に読み込む数の上限 */
 export const X_POST_LOADING_LIMIT = 4;
 /** 表示範囲に入ったまま、これだけたっても rendered が来なければ、失敗にする（ms） */
 export const X_POST_TIMEOUT_MS = 10_000;
+/** 枠の幅の上限（px）。X のウィジェットは 550px で止まる（XPost.svelte の CSS と同じ） */
+export const X_POST_MAX_WIDTH = 550;
 /** 受ける高さの上限（px） */
 export const X_POST_MAX_HEIGHT = 4000;
 
@@ -53,6 +56,11 @@ export class XPostFrame {
   attempt = $state(0);
   /** ウィジェットの高さ（px）。null の間は、元の引用を出し、iframe は場所を取らない */
   height = $state<number | null>(null);
+  /**
+   * 覚えた高さ（px。embeds.md の 5）。読み込み直し・戻る・進むで記事を開いたときに、前に出したときと
+   * 同じ幅なら、出るまで（height が付くまで）元の引用の代わりに、この高さの枠を取る
+   */
+  reserved = $state<number | null>(null);
 
   phase: "idle" | "loading" | "shown" | "failed" = "idle";
   /** 表示範囲に入っている */
@@ -90,6 +98,10 @@ export class XPostLoader {
   #observer: IntersectionObserver | null = null;
   #root: Element | null = null;
   #margin = "0px";
+  /** 記事を開いたときに読み戻した、前に出した投稿の大きさ。読書位置が決まるまで、枠を取るのに使う */
+  #restoring: Map<string, XPostSize> | null = null;
+  /** この記事で出した投稿の大きさ。位置と一緒に、履歴の項目に覚える */
+  #sizes = new Map<string, XPostSize>();
 
   constructor(origin: string) {
     this.#origin = origin;
@@ -151,6 +163,8 @@ export class XPostLoader {
       this.#cancelLoading();
       return;
     }
+    // 覚えた高さの枠を取るのは、位置を戻すまで。そのあとに替わった本文には当てない
+    this.#restoring = null;
     this.#observe();
   }
 
@@ -170,14 +184,43 @@ export class XPostLoader {
     }
   }
 
-  /** 記事が替わった。失敗の覚えを捨てる */
+  /** 記事が替わった。失敗の覚えと、出した投稿の大きさを捨てる */
   reset(): void {
     this.#failed.clear();
+    this.#sizes.clear();
+    this.#restoring = null;
+  }
+
+  /**
+   * 記事を開いたときに、履歴の項目から読み戻した投稿の大きさを渡す。読書位置が決まるまでに出た
+   * 投稿は、同じ幅なら、その高さの枠を取る。まだ出していない投稿の大きさも、次に覚えるときまで残す
+   */
+  restore(sizes: readonly XPostSize[]): void {
+    this.#restoring = sizes.length > 0 ? new Map(sizes.map((size) => [size.id, size])) : null;
+    this.#sizes = new Map(sizes.map((size) => [size.id, size]));
+  }
+
+  /**
+   * 出した投稿の大きさ（履歴の項目に覚える）。元の引用に戻した投稿のものは、書かない（元の引用の
+   * 高さで決まった位置と、食い違う）。本文から消えた投稿のものは残る（その本文を出すときにだけ当たる）。
+   * 上限を超えたら、新しく覚えたものを残す
+   */
+  sizes(): XPostSize[] {
+    return [...this.#sizes.values()].slice(-MAX_X_POST_SIZES);
   }
 
   /** 本文の中の投稿を登録する */
   add(id: string, element: Element): XPostFrame {
     const post = new XPostFrame(id, element, this.#origin);
+    // 覚えた高さの枠は、読み込めるときで、幅が前と同じときだけ取る（幅が違うと、高さも違う）
+    const remembered = this.#restoring?.get(id);
+    if (remembered !== undefined && this.#enabled && this.#online) {
+      if (frameWidth(element) === remembered.width) post.reserved = remembered.height;
+    }
+    // 枠を取らなかった投稿は、元の引用を出すので、大きさを覚えておかない。枠を取ったら、覚え直す
+    // （位置が決まる前に本文が替わり、同じ投稿を登録し直したとき）
+    if (post.reserved === null) this.#sizes.delete(id);
+    else if (remembered !== undefined) this.#sizes.set(id, remembered);
     this.#posts.add(post);
     this.#byElement.set(element, post);
     this.#observer?.observe(element);
@@ -247,11 +290,14 @@ export class XPostLoader {
 
   /** 読み込みを取り消して、元の引用に戻す（失敗にはしない） */
   #cancel(post: XPostFrame): void {
+    // 元の引用に戻すので、大きさも忘れる（出しているときに、位置と一緒に覚え直す）
+    if (post.phase !== "idle" || post.reserved !== null) this.#sizes.delete(post.id);
     this.#stopTimer(post);
     post.phase = "idle";
     post.frame = null;
     post.src = null;
     post.height = null;
+    post.reserved = null;
   }
 
   #fail(post: XPostFrame): void {
@@ -260,8 +306,19 @@ export class XPostLoader {
     post.frame = null;
     post.src = null;
     post.height = null;
+    post.reserved = null;
     this.#failed.add(post.id);
+    // 失敗した投稿の大きさは覚えない
+    this.#sizes.delete(post.id);
     this.#pump();
+  }
+
+  /** 表示範囲の中で受けた大きさを覚える（画面の外で受けた高さは、覚えない） */
+  #remember(post: XPostFrame, height: number): void {
+    if (!post.visible || post.frame === null) return;
+    const width = Math.round(post.frame.getBoundingClientRect().width);
+    this.#sizes.delete(post.id);
+    this.#sizes.set(post.id, { id: post.id, width, height });
   }
 
   #stopTimer(post: XPostFrame): void {
@@ -288,15 +345,23 @@ export class XPostLoader {
         this.#stopTimer(post);
         post.phase = "shown";
         post.height = height;
+        post.reserved = null;
+        this.#remember(post, height);
         this.#pump();
       } else if (post.phase === "shown") {
         // 2 回目からは、高さを付け直すだけ
         post.height = height;
+        this.#remember(post, height);
       }
     } else if (type === FAILED) {
       if (post.phase === "loading") this.#fail(post);
     }
   }
+}
+
+/** 投稿の枠の幅（px、整数）。本文の幅に合わせ、上限は 550px */
+function frameWidth(element: Element): number {
+  return Math.round(Math.min(element.getBoundingClientRect().width, X_POST_MAX_WIDTH));
 }
 
 const KEY = Symbol("x-post-loader");
