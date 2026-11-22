@@ -298,15 +298,24 @@ export class ArticleListState {
    */
   async toggle(article: Article, field: "readAt" | "starredAt"): Promise<void> {
     const on = article[field] === null;
-    this.patch(article.id, { [field]: on ? Date.now() : null });
+    const value = on ? Date.now() : null;
+    this.patch(article.id, { [field]: value });
     try {
       if (field === "readAt") await this.#client.setRead(article.id, on);
       else await this.#client.setStarred(article.id, on);
     } catch (error) {
-      this.patch(article.id, { [field]: article[field] });
+      this.revert(article.id, field, value, article[field]);
       await this.refreshAfterFailure();
       throw error;
     }
+  }
+
+  /**
+   * 書けなかった楽観的な更新を、押す前の値に戻す。そのあとに別の操作（続けて押した、読み直した）
+   * で値が替わっていたら、そちらを残す
+   */
+  revert(id: string, field: "readAt" | "starredAt", value: number | null, previous: number | null) {
+    if (this.find(id)?.[field] === value) this.patch(id, { [field]: previous });
   }
 
   /**
@@ -334,7 +343,9 @@ export class ArticleListState {
       await this.#client.setReadMany([...targets], true);
     } catch (error) {
       this.#articles = this.articles.map((article) =>
-        targets.has(article.id) ? { ...article, readAt: null } : article,
+        targets.has(article.id) && article.readAt === readAt
+          ? { ...article, readAt: null }
+          : article,
       );
       await this.refreshAfterFailure();
       throw error;

@@ -1,4 +1,4 @@
-import { type BrowserContext, expect, type Page, test } from "@playwright/test";
+import { type BrowserContext, expect, type Locator, type Page, test } from "@playwright/test";
 import { PROTOCOL_VERSION } from "../../../packages/core/src/web/protocol";
 import { FakeSendo, routeFakeSendo, signIn } from "./fake-sendo";
 
@@ -15,6 +15,7 @@ function seed() {
   const server = new FakeSendo();
   const feed = server.subscribe({ url: "https://blog.example/feed", title: "Blog" });
   server.deliver(feed.id, { title: "最初の記事" });
+  server.deliver(feed.id, { title: "二つめの記事" });
   return server;
 }
 
@@ -160,9 +161,10 @@ test("使っている途中で版の違う代表に替わったら、操作の�
   await tab.goto("/");
   await tab.locator(".article-list .item", { hasText: "最初の記事" }).click();
   const view = tab.locator(".article-view");
-  const row = tab.locator(".article-list .row", { hasText: "最初の記事" });
-  /** 記事の画面と一覧の行の、スターのボタンの名前（Save か Unsave） */
-  const saveButtons = async () => [
+  const firstRow = tab.locator(".article-list .row", { hasText: "最初の記事" });
+  const secondRow = tab.locator(".article-list .row", { hasText: "二つめの記事" });
+  /** 記事の画面と、開いている記事の一覧の行の、スターのボタンの名前（Save か Unsave） */
+  const saveButtons = (row: Locator) => async () => [
     await view.getByRole("button", { name: /^(Save|Unsave)$/ }).getAttribute("aria-label"),
     await row.getByRole("button", { name: /^(Save|Unsave)$/ }).getAttribute("aria-label"),
   ];
@@ -177,13 +179,18 @@ test("使っている途中で版の違う代表に替わったら、操作の�
   await expect(alert).toBeVisible();
   // 失敗した操作は、記事の画面でも一覧でも、押す前の表示に戻る（読み直しもできないので、手元の
   // 表示で戻す）
-  await expect.poll(saveButtons).toEqual(["Save", "Save"]);
+  await expect.poll(saveButtons(firstRow)).toEqual(["Save", "Save"]);
+  // 開いたときの既読も書けないので、一覧の行は未読に戻る
+  await expect(secondRow).toHaveClass(/\bunread\b/);
+  await secondRow.click();
+  await expect(view.getByRole("heading", { level: 1 })).toHaveText("二つめの記事");
+  await expect(secondRow).toHaveClass(/\bunread\b/);
 
   // 版の違うタブを閉じたらすぐ押しても、押した向きに切り替わる
   await other.close();
   await expect(alert).toHaveCount(0);
   await tab.keyboard.press("s");
-  await expect.poll(saveButtons).toEqual(["Unsave", "Unsave"]);
+  await expect.poll(saveButtons(secondRow)).toEqual(["Unsave", "Unsave"]);
   await tab.reload();
   await expect(view.getByRole("button", { name: "Unsave", exact: true })).toBeVisible();
 });

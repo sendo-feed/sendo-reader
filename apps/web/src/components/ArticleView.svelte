@@ -261,9 +261,9 @@
     try {
       await reader.client.setRead(id, true);
     } catch (error) {
-      // 押す前（開く前）の表示に戻す
-      list.patch(id, { readAt: null });
-      if (article?.id === id) article = { ...article, readAt: null };
+      // 開く前の表示に戻す（そのあとに別の操作で替わっていたら、そちらを残す）
+      list.revert(id, "readAt", readAt, null);
+      if (article?.id === id && article.readAt === readAt) article = { ...article, readAt: null };
       throw error;
     }
   }
@@ -627,7 +627,8 @@
     const current = article;
     if (current === null) return;
     const on = current[field] === null;
-    const change = { [field]: on ? Date.now() : null };
+    const value = on ? Date.now() : null;
+    const change = { [field]: value };
     article = { ...current, ...change };
     list.patch(current.id, change);
     saveError = null;
@@ -639,8 +640,11 @@
       // （版の違うタブのために代表とやり取りできないときは、読み直しも失敗するので、戻した表示の
       // ままにする）
       saveError = "保存できませんでした。";
-      list.patch(current.id, { [field]: current[field] });
-      if (articleId === current.id) article = current;
+      // 押したあとに別の操作（続けて押した、読み直した）で替わっていたら、そちらを残す
+      list.revert(current.id, field, value, current[field]);
+      if (article?.id === current.id && article[field] === value) {
+        article = { ...article, [field]: current[field] };
+      }
       void list.refreshAfterFailure();
       if (articleId === current.id) await load(current.id).catch(() => {});
     }

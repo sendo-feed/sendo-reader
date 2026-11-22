@@ -78,7 +78,7 @@
   });
 
   function confirm(signal?: AbortSignal): Promise<void> {
-    return confirmAccount(reader.user, () => void reader.client.syncNow(), signal);
+    return confirmAccount(reader.user, () => void reader.client.syncNow().catch(() => {}), signal);
   }
 </script>
 
