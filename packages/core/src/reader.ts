@@ -1544,8 +1544,14 @@ export class ReaderCore {
     if (existing !== undefined) return existing;
     const running = (async () => {
       if (!confirmed) await this.#confirmSameUser(session);
-      const fetched = await this.#api.articleTranslation(articleId, session);
-      if (fetched === null) return null;
+      const received = await this.#api.articleTranslation(articleId, session);
+      if (received === null) return null;
+      // 木にして出すもの（文字か画像）が残らない本文は、本文を訳さなかった印として置く（原文の
+      // 本文を出し、先読みでは全文を取る。docs/decisions/translation.md の 8、10）
+      const fetched: StoredTranslatedContent =
+        received.html !== null && !hasVisibleContent(parseContent(received.html))
+          ? { html: null, source: null, translatedAt: received.translatedAt }
+          : received;
       await this.#db.transaction(async (tx) => {
         // 取っている間にログアウトしたり、ユーザーが替わったりしたら、置かない
         throwIfSessionEnded(session);
