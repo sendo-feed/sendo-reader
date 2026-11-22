@@ -165,7 +165,7 @@ describe("その場の翻訳を頼む", () => {
     expect(await core.getArticle(article.id)).toMatchObject({ translation: { status: "queued" } });
   });
 
-  test("訳せなかったあとでほかの人が頼んで訳文が届いたら、失敗の文を出さず、訳文で出す", async () => {
+  test("訳せなかったあとでほかの人が頼んだら、この端末の頼みは忘れる（その翻訳が失敗しても失敗の文を出さない）", async () => {
     const { server, core, article } = await seeded();
     await core.requestTranslation(article.id);
     server.setTranslation(article.id, untranslated);
@@ -175,13 +175,15 @@ describe("その場の翻訳を頼む", () => {
     // ほかの端末が頼んだ
     server.setTranslation(article.id, { ...queued, status: "translating" });
     await core.sync();
-    expect((await core.getArticle(article.id))?.translationRequest).toBe("requested");
+    expect(await core.getArticle(article.id)).toMatchObject({
+      translation: { status: "translating" },
+    });
+    expect((await core.getArticle(article.id))?.translationRequest).toBeUndefined();
 
-    server.setTranslation(article.id, translated(server.now));
+    // その翻訳も訳せずに戻った。この端末は頼んでいないので、失敗の文は出さない
+    server.setTranslation(article.id, untranslated);
     await core.sync();
-    const done = await core.getArticle(article.id);
-    expect(done?.translation?.status).toBe("translated");
-    expect(done?.translationRequest).toBeUndefined();
+    expect((await core.getArticle(article.id))?.translationRequest).toBeUndefined();
   });
 
   test("ログアウトすると、頼んだ印と頼んだ記事を消す", async () => {

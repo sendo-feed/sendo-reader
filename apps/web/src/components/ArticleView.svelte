@@ -361,8 +361,8 @@
       (article.translation.status === "queued" || article.translation.status === "untranslated"),
   );
   /** 頼んで、sendo の返事を待っている記事（記事ごと。ほかの記事の Translate は止めない） */
-  let translatingId = $state<string | null>(null);
-  const translating = $derived(translatingId !== null && translatingId === articleId);
+  let translatingIds = $state<string[]>([]);
+  const translating = $derived(articleId !== null && translatingIds.includes(articleId));
   /** 頼めなかった理由（日本語の文） */
   let translateError = $state<string | null>(null);
   /** オフラインのときは頼めない（sendo に届かないとできない操作。決定の 6） */
@@ -384,14 +384,14 @@
   async function translate(): Promise<void> {
     const id = articleId;
     if (id === null || !canTranslate || translating || !online) return;
-    translatingId = id;
+    translatingIds = [...translatingIds, id];
     translateError = null;
     try {
       await reader.client.requestTranslation(id);
     } catch (error) {
       if (articleId === id) translateError = describeTranslationError(error);
     } finally {
-      if (translatingId === id) translatingId = null;
+      translatingIds = translatingIds.filter((other) => other !== id);
     }
   }
 
@@ -1023,7 +1023,7 @@
           </p>
           {#if translateError !== null}
             <p class="content-note" role="alert">{translateError}</p>
-          {:else if article.translationRequest === "failed"}
+          {:else if article.translationRequest === "failed" && !translating}
             <p class="content-note" role="alert">{TRANSLATION_FAILED}</p>
           {/if}
         </header>

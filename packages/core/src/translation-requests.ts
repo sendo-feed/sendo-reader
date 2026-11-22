@@ -72,8 +72,9 @@ export class TranslationRequests {
         if (!request.failed) changed = true;
         request.failed = true;
       } else if (request.failed) {
-        // 訳せなかったあとで、ほかの人が頼んだ（translating）。失敗の文は出さず、訳文を待つ
-        request.failed = false;
+        // 失敗の文を出したら忘れる（決定の 6）。そのあとにほかの人が頼んだ翻訳は、この端末で
+        // 頼んだものではないので、失敗の文も、開いている見出しの入れ替えもしない（決定の 3）
+        this.#requests.delete(id);
         changed = true;
       }
     }
