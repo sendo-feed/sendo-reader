@@ -5,7 +5,15 @@
  * 読まれるので、CSP を厳しくする（ほかのオリジンへの通信と、インラインのスクリプトを許さない）。
  * 本番は、reader のコンテナのサーバー（server/static.ts）が、画面のすべての応答に付ける。
  * 手元は、Vite の dev サーバーと preview が付ける。
+ *
+ * X の投稿の隔離フレームのオリジンが設定してあるときだけ、frame-src にそのオリジンを 1 つ足す
+ * （docs/decisions/embeds.md の 2）。ほかのディレクティブは変えない。
  */
+
+export type SecurityHeadersOptions = {
+  /** X の投稿の隔離フレームのオリジン（x-embed-origin.ts で確かめたもの）。未設定なら null */
+  xEmbedOrigin?: string | null;
+};
 
 /** 本番の CSP。ほかのオリジンへの通信と、インラインのスクリプトを許さない */
 const productionDirectives: Record<string, string[]> = {
@@ -38,17 +46,26 @@ const developmentDirectives: Record<string, string[]> = {
   "trusted-types": [],
 };
 
-export function contentSecurityPolicy(mode: "production" | "development"): string {
-  const directives = mode === "production" ? productionDirectives : developmentDirectives;
+export function contentSecurityPolicy(
+  mode: "production" | "development",
+  options: SecurityHeadersOptions = {},
+): string {
+  const directives: Record<string, string[]> = {
+    ...(mode === "production" ? productionDirectives : developmentDirectives),
+  };
+  if (options.xEmbedOrigin) directives["frame-src"] = [options.xEmbedOrigin];
   return Object.entries(directives)
     .filter(([, values]) => values.length > 0)
     .map(([name, values]) => `${name} ${values.join(" ")}`)
     .join("; ");
 }
 
-export function securityHeaders(mode: "production" | "development"): Record<string, string> {
+export function securityHeaders(
+  mode: "production" | "development",
+  options: SecurityHeadersOptions = {},
+): Record<string, string> {
   return {
-    "Content-Security-Policy": contentSecurityPolicy(mode),
+    "Content-Security-Policy": contentSecurityPolicy(mode, options),
     "X-Content-Type-Options": "nosniff",
     // 記事のリンクを開いたときに、reader の URL を相手のサイトに送らない
     "Referrer-Policy": "no-referrer",
