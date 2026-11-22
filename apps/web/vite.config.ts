@@ -4,7 +4,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { svelte } from "@sveltejs/vite-plugin-svelte";
-import { defineConfig, type Plugin } from "vite";
+import { createLogger, defineConfig, type Logger, type Plugin } from "vite";
 import { VitePWA } from "vite-plugin-pwa";
 import {
   IMAGE_CACHE_MAX_AGE_SECONDS,
@@ -171,6 +171,24 @@ function securityHeadersPlugin(): Plugin[] {
  */
 const SENDO_DEV_URL = process.env.SENDO_DEV_URL || "http://localhost:8787";
 
+/**
+ * e2e では、偽の通知のサーバーを、通知のテスト（e2e/sync-updates.spec.ts）の間だけ立てる。ほかの
+ * テストの間は、ワーカーがつなぎにいくたびに中継の先に断られ（ECONNREFUSED）、そのたびに Vite が
+ * エラーとスタックを出して、e2e のログが読めなくなる。e2e（playwright.config.ts が
+ * E2E_QUIET_UPDATES_REFUSED を付ける）のときだけ、その断りのログを出さない。ワーカーは届かなければ
+ * 間隔を延ばしてやり直すので、テストの結果には関わらない。ほかのエラーは、そのまま出す
+ */
+function e2eLogger(): Logger {
+  const logger = createLogger();
+  const error = logger.error.bind(logger);
+  logger.error = (message, options) => {
+    const code = (options?.error as NodeJS.ErrnoException | null | undefined)?.code;
+    if (message.includes("ws proxy error") && code === "ECONNREFUSED") return;
+    error(message, options);
+  };
+  return logger;
+}
+
 /** Workbox が、1 回の取得の間、プラグインの呼び出しに渡して回す入れ物 */
 type GenerationState = { state?: { generation?: string } };
 
@@ -234,6 +252,7 @@ function appVersion(): { commit: string; builtAt: string } {
 }
 
 export default defineConfig({
+  ...(process.env.E2E_QUIET_UPDATES_REFUSED === "1" ? { customLogger: e2eLogger() } : {}),
   define: { __APP_VERSION__: JSON.stringify(appVersion()) },
   plugins: [
     svelte(),

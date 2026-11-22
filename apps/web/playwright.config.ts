@@ -25,6 +25,7 @@ export default defineConfig({
     command: "pnpm exec vite preview --port 4173 --strictPort",
     port: 4173,
     reuseExistingServer: !process.env.CI,
-    env: { SENDO_DEV_URL: `http://127.0.0.1:${FAKE_UPDATES_PORT}` },
+    // E2E_QUIET_UPDATES_REFUSED：偽の通知のサーバーがないときの、中継の断りのログを出さない（vite.config.ts）
+    env: { SENDO_DEV_URL: `http://127.0.0.1:${FAKE_UPDATES_PORT}`, E2E_QUIET_UPDATES_REFUSED: "1" },
   },
 });
