@@ -561,6 +561,54 @@
           "folders"
         ]
       },
+      "ArticleTranslation": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "訳したタイトル"
+          },
+          "summary": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "訳した要約"
+          },
+          "model": {
+            "type": "string",
+            "description": "訳したモデル"
+          },
+          "translatedAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "訳した時刻"
+          }
+        },
+        "required": [
+          "title",
+          "summary",
+          "model",
+          "translatedAt"
+        ]
+      },
+      "TranslationRequestAccepted": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "translating"
+            ]
+          }
+        },
+        "required": [
+          "status"
+        ]
+      },
       "Folder": {
         "type": "object",
         "properties": {
@@ -963,13 +1011,69 @@
                   false
                 ],
                 "description": "受信箱にある記事"
+              },
+              "translation": {
+                "$ref": "#/components/schemas/SyncArticleTranslation"
               }
             },
             "required": [
-              "deleted"
+              "deleted",
+              "translation"
             ]
           }
         ]
+      },
+      "SyncArticleTranslation": {
+        "type": [
+          "object",
+          "null"
+        ],
+        "properties": {
+          "language": {
+            "type": "string",
+            "description": "訳すかどうかを決めたときの、記事の主言語（ISO 639-1。判定できなければ und）"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "queued",
+              "translating",
+              "translated",
+              "untranslated"
+            ],
+            "description": "翻訳の状態。queued は自動の翻訳を待っている、translating は訳している、translated は訳文がある、untranslated は訳せなかった（求めればその場で訳せる）"
+          },
+          "title": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "訳したタイトル（プレーンテキスト。表示する側でエスケープする）。訳文がなければ null"
+          },
+          "summary": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "訳した要約（プレーンテキスト）。訳文がなければ null"
+          },
+          "translatedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "訳した時刻。訳文がなければ null。変わったら、手元の訳した本文を GET /articles/{id}/translation で取り直す"
+          }
+        },
+        "required": [
+          "language",
+          "status",
+          "title",
+          "summary",
+          "translatedAt"
+        ],
+        "description": "Sendo の翻訳（docs/decisions/translation.md の 14）。訳さない記事（日本語の記事、Discord の投稿）と、訳すかどうかを決めていない記事（決める前の記事、取り込んでから 1 日のうちに決まらなかった記事、翻訳を使わない Sendo の記事）は null。翻訳が変わると、記事が差分としてもう一度届く"
       },
       "SyncRemovedArticle": {
         "type": "object",
@@ -1745,7 +1849,7 @@
     "/integrations/discord/subscriptions": {
       "post": {
         "summary": "Discord のチャンネルを購読する",
-        "description": "Discord のチャンネル URL を指定する。購読したあとの投稿を受信箱に取り込む。",
+        "description": "Discord のチャンネル URL を指定する。直近の投稿を最大 20 件と、購読したあとの投稿を受信箱に取り込む。",
         "security": [
           {
             "sessionCookie": []
@@ -2159,7 +2263,7 @@
     "/articles/{id}/content": {
       "get": {
         "summary": "記事の本文",
-        "description": "記事の本文（HTML）を返す。出どころは 2 つあり、source で選ぶ。\n- feed（既定）：フィードに入っていた本文。記事の hasContent が true のときだけ、取りにいく。\n- page：記事のページから抜いた本文。まだ抜いていなければ、このリクエストの中でページを取りにいって抜く（数秒かかることがある）。抜けなかったら 404（page_content_unavailable）で、1 日たつまで取りにいき直さない。\nHTML は Sendo がサニタイズしてある（決めたタグと属性だけ。スクリプトやスタイルはない）。それでも外部から来たデータなので、クライアントの側でも、信頼できない HTML として扱う。\n本文の中の画像は、中継を通る URL（/api/v1/images?…。オリジンは付けない）に書き換えてある。リンクは絶対の URL。\n本文は、いったん返したらあとから変わらないので、手元に置いてよい。",
+        "description": "記事の本文（HTML）を返す。出どころは 2 つあり、source で選ぶ。\n- feed（既定）：フィードに入っていた本文。記事の hasContent が true のときだけ、取りにいく。\n- page：記事のページから抜いた本文。まだ抜いていなければ、このリクエストの中でページを取りにいって抜く（数秒かかることがある）。抜けなかったら 404（page_content_unavailable）で、1 日たつまで取りにいき直さない。\nHTML は Sendo がサニタイズしてある（決めたタグと属性だけ。スクリプトやスタイルはない）。それでも外部から来たデータなので、クライアントの側でも、信頼できない HTML として扱う。\n本文の中の画像は、中継を通る URL（/api/v1/images?…。オリジンは付けない）に書き換えてある。リンクは絶対の URL。\n引用（blockquote）の data-x-post 属性は、X の投稿の引用の印で、値は投稿の ID（数字だけの文字列）。Sendo が、引用の中の投稿のリンクから付けたもので、そのリンクと同じ投稿を指す。\n本文は、いったん返したらあとから変わらないので、手元に置いてよい。",
         "parameters": [
           {
             "schema": {
@@ -2469,6 +2573,104 @@
           },
           "400": {
             "description": "クエリが正しくない",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/articles/{id}/translation": {
+      "get": {
+        "summary": "記事の訳文",
+        "description": "Sendo が日本語に訳した、記事のタイトルと要約を返す（docs/decisions/translation.md の 13）。\n訳文は外部から来たデータを LLM が訳したもので、プレーンテキスト。表示する側でエスケープする。\n訳し直すと替わる。translatedAt が変わったら取り直す。",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "訳文",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArticleTranslation"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "記事がない（not_found）か、訳文がない（no_translation）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "記事をその場で訳す",
+        "description": "訳文のない記事（翻訳の状態が queued か untranslated）を、Claude API でその場で訳す（docs/decisions/translation.md の 5）。\n受け付けたら 202 を返し、裏で訳す。訳し終えると、GET /articles/{id}/translation で訳文が取れる（訳し終えなければ 404 の no_translation）。費用がかかるので、読む人が求めたときだけ呼ぶ。",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "受け付けた。状態は translating になった",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TranslationRequestAccepted"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "記事がない（not_found）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "訳せない記事（translation_not_supported：日本語の記事、Discord の投稿、訳すかどうかをまだ決めていない記事）か、もう訳しているか訳し終えた（translation_exists）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Sendo で翻訳が使えない（translation_unavailable：API キーがない）",
             "content": {
               "application/json": {
                 "schema": {

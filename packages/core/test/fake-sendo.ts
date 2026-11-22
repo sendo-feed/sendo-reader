@@ -87,6 +87,11 @@ interface InboxRow {
   receivedAt: number;
   readAt: number | null;
   starredAt: number | null;
+  /**
+   * 翻訳（sendo の docs/decisions/sync.md の 10）。応答にそのまま載せる（形の崩れた値も試せるよう、
+   * 形を決めない）。翻訳のない記事は null
+   */
+  translation: unknown;
   seq: number;
   /** 既読・未読が最後に変わったときの番号（カーソルを境界にした「まとめて既読」に使う） */
   readSeq: number;
@@ -366,6 +371,8 @@ export class FakeSendo {
       thumbnailUrl?: string | null;
       /** 本文の HTML（sendo がサニタイズしたあとの形で渡す） */
       content?: string | null;
+      /** 翻訳（応答の形のまま） */
+      translation?: unknown;
     } = {},
   ): InboxRow {
     const seq = this.#bump("articles");
@@ -382,11 +389,22 @@ export class FakeSendo {
       receivedAt: this.now,
       readAt: null,
       starredAt: null,
+      translation: input.translation ?? null,
       seq,
       readSeq: seq,
     };
     this.inbox.set(row.id, row);
     return row;
+  }
+
+  /**
+   * 記事の翻訳が変わったことにする（応答の形のまま渡す）。sendo の訳文の表のトリガーと同じく、
+   * 受信箱の行に新しい番号を振り、既読の番号は変えない
+   */
+  setTranslation(id: string, translation: unknown): void {
+    const row = this.#mustGet(this.inbox, id);
+    row.translation = translation;
+    row.seq = this.#bump("articles");
   }
 
   /**
@@ -418,6 +436,8 @@ export class FakeSendo {
   contentSource = "feed";
   /** 本文を配る前の版の sendo のふりをする（記事に hasContent を付けない） */
   omitHasContent = false;
+  /** 翻訳に対応する前の版の sendo のふりをする（記事に translation を付けない） */
+  omitTranslation = false;
 
   /** 画像の中継が返す状態（200 なら 1×1 の PNG）。502 は配信元から取れない、など */
   imageStatus = 200;
@@ -1197,6 +1217,7 @@ export class FakeSendo {
               receivedAt: iso(item.row.receivedAt),
               readAt: item.row.readAt === null ? null : iso(item.row.readAt),
               starredAt: item.row.starredAt === null ? null : iso(item.row.starredAt),
+              ...(this.omitTranslation ? {} : { translation: item.row.translation }),
               deleted: false,
             },
       ),

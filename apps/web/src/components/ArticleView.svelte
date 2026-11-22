@@ -7,6 +7,7 @@
   import type { ArticleListState } from "../lib/list.svelte";
   import { type ArticleSwipe, prefs } from "../lib/prefs.svelte";
   import { handleLink, router, viewHref } from "../lib/router.svelte";
+  import { translationLabel } from "../lib/translation";
   import ArticleBody from "./ArticleBody.svelte";
   import Dialog from "./Dialog.svelte";
   import Icon from "./Icon.svelte";
@@ -659,6 +660,8 @@
 
   /** 記事の URL は、http ／ https のものだけをリンクにする（記事のデータは信頼できない） */
   const link = $derived(article === null ? null : toSafeHttpUrl(article.url));
+  // 元の言語と翻訳の状態のラベル（docs/decisions/translation.md の 1）
+  const translation = $derived(article === null ? null : translationLabel(article.translation));
 
   const feedHref = $derived(
     article === null ? "/" : viewHref({ kind: "feed", id: article.feedId }),
@@ -815,6 +818,9 @@
             </time>
             {#if article.author !== null}
               <span>・ {article.author}</span>
+            {/if}
+            {#if translation !== null}
+              <span class="translation">・ {translation}</span>
             {/if}
           </p>
         </header>

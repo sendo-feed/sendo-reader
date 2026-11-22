@@ -514,7 +514,7 @@ export interface paths {
         put?: never;
         /**
          * Discord のチャンネルを購読する
-         * @description Discord のチャンネル URL を指定する。購読したあとの投稿を受信箱に取り込む。
+         * @description Discord のチャンネル URL を指定する。直近の投稿を最大 20 件と、購読したあとの投稿を受信箱に取り込む。
          */
         post: {
             parameters: {
@@ -888,6 +888,7 @@ export interface paths {
          *     - page：記事のページから抜いた本文。まだ抜いていなければ、このリクエストの中でページを取りにいって抜く（数秒かかることがある）。抜けなかったら 404（page_content_unavailable）で、1 日たつまで取りにいき直さない。
          *     HTML は Sendo がサニタイズしてある（決めたタグと属性だけ。スクリプトやスタイルはない）。それでも外部から来たデータなので、クライアントの側でも、信頼できない HTML として扱う。
          *     本文の中の画像は、中継を通る URL（/api/v1/images?…。オリジンは付けない）に書き換えてある。リンクは絶対の URL。
+         *     引用（blockquote）の data-x-post 属性は、X の投稿の引用の印で、値は投稿の ID（数字だけの文字列）。Sendo が、引用の中の投稿のリンクから付けたもので、そのリンクと同じ投稿を指す。
          *     本文は、いったん返したらあとから変わらないので、手元に置いてよい。
          */
         get: {
@@ -1152,6 +1153,111 @@ export interface paths {
         };
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/articles/{id}/translation": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 記事の訳文
+         * @description Sendo が日本語に訳した、記事のタイトルと要約を返す（docs/decisions/translation.md の 13）。
+         *     訳文は外部から来たデータを LLM が訳したもので、プレーンテキスト。表示する側でエスケープする。
+         *     訳し直すと替わる。translatedAt が変わったら取り直す。
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description 訳文 */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ArticleTranslation"];
+                    };
+                };
+                /** @description 記事がない（not_found）か、訳文がない（no_translation） */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        /**
+         * 記事をその場で訳す
+         * @description 訳文のない記事（翻訳の状態が queued か untranslated）を、Claude API でその場で訳す（docs/decisions/translation.md の 5）。
+         *     受け付けたら 202 を返し、裏で訳す。訳し終えると、GET /articles/{id}/translation で訳文が取れる（訳し終えなければ 404 の no_translation）。費用がかかるので、読む人が求めたときだけ呼ぶ。
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description 受け付けた。状態は translating になった */
+                202: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["TranslationRequestAccepted"];
+                    };
+                };
+                /** @description 記事がない（not_found） */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description 訳せない記事（translation_not_supported：日本語の記事、Discord の投稿、訳すかどうかをまだ決めていない記事）か、もう訳しているか訳し終えた（translation_exists） */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Sendo で翻訳が使えない（translation_unavailable：API キーがない） */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
         delete?: never;
         options?: never;
         head?: never;
@@ -2457,6 +2563,23 @@ export interface components {
                 unread: number;
             }[];
         };
+        ArticleTranslation: {
+            /** @description 訳したタイトル */
+            title: string | null;
+            /** @description 訳した要約 */
+            summary: string | null;
+            /** @description 訳したモデル */
+            model: string;
+            /**
+             * Format: date-time
+             * @description 訳した時刻
+             */
+            translatedAt: string;
+        };
+        TranslationRequestAccepted: {
+            /** @enum {string} */
+            status: "translating";
+        };
         Folder: {
             id: string;
             name: string;
@@ -2574,7 +2697,27 @@ export interface components {
              * @enum {boolean}
              */
             deleted: false;
+            translation: components["schemas"]["SyncArticleTranslation"];
         };
+        /** @description Sendo の翻訳（docs/decisions/translation.md の 14）。訳さない記事（日本語の記事、Discord の投稿）と、訳すかどうかを決めていない記事（決める前の記事、取り込んでから 1 日のうちに決まらなかった記事、翻訳を使わない Sendo の記事）は null。翻訳が変わると、記事が差分としてもう一度届く */
+        SyncArticleTranslation: {
+            /** @description 訳すかどうかを決めたときの、記事の主言語（ISO 639-1。判定できなければ und） */
+            language: string;
+            /**
+             * @description 翻訳の状態。queued は自動の翻訳を待っている、translating は訳している、translated は訳文がある、untranslated は訳せなかった（求めればその場で訳せる）
+             * @enum {string}
+             */
+            status: "queued" | "translating" | "translated" | "untranslated";
+            /** @description 訳したタイトル（プレーンテキスト。表示する側でエスケープする）。訳文がなければ null */
+            title: string | null;
+            /** @description 訳した要約（プレーンテキスト）。訳文がなければ null */
+            summary: string | null;
+            /**
+             * Format: date-time
+             * @description 訳した時刻。訳文がなければ null。変わったら、手元の訳した本文を GET /articles/{id}/translation で取り直す
+             */
+            translatedAt: string | null;
+        } | null;
         SyncRemovedArticle: {
             /** @description 記事の ID */
             id: string;

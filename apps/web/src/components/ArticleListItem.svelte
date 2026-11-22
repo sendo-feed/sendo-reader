@@ -12,6 +12,7 @@
     thumbnailUrl = null,
     href,
     current = false,
+    translationLabel = null,
     onopen,
   }: {
     title: string;
@@ -23,6 +24,8 @@
     thumbnailUrl?: string | null;
     href?: string;
     current?: boolean;
+    /** 元の言語と翻訳の状態のラベル（lib/translation.ts）。翻訳のない記事は null */
+    translationLabel?: string | null;
     onopen?: (event: MouseEvent) => void;
   } = $props();
 </script>
@@ -41,6 +44,9 @@
       <span class="feed-icon"><RemoteImage src={feedIconUrl} /></span>
       <span class="feed">{feedTitle}</span>
       <span class="time">{time}</span>
+      {#if translationLabel !== null}
+        <span class="translation">{translationLabel}</span>
+      {/if}
     </span>
   </span>
   {#if thumbnailUrl !== null}
@@ -167,6 +173,17 @@
 
   /* フィードの名前と時刻の間の区切り */
   .time::before {
+    content: "/ ";
+  }
+
+  /* 翻訳のラベル。色で分けず、時刻と同じ控えめな文字で出す（docs/decisions/translation.md の 1） */
+  .translation {
+    flex: none;
+    color: var(--faint);
+    white-space: nowrap;
+  }
+
+  .translation::before {
     content: "/ ";
   }
 

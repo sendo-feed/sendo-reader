@@ -263,14 +263,20 @@ async function writeArticle(tx: Executor, article: Article): Promise<void> {
   await tx.run(
     `insert into articles (
        id, feed_id, url, title, summary, author, thumbnail_url, has_content, published_at,
-       received_at, read_at, starred_at, read_synced
-     ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
+       received_at, read_at, starred_at, translation_status, translation_language,
+       translation_title, translation_summary, translated_at, read_synced
+     ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
      on conflict (id) do update set
        feed_id = excluded.feed_id, url = excluded.url, title = excluded.title,
        summary = excluded.summary, author = excluded.author,
        thumbnail_url = excluded.thumbnail_url, has_content = excluded.has_content,
        published_at = excluded.published_at, received_at = excluded.received_at,
-       read_at = excluded.read_at, starred_at = excluded.starred_at, read_synced = 0`,
+       read_at = excluded.read_at, starred_at = excluded.starred_at,
+       translation_status = excluded.translation_status,
+       translation_language = excluded.translation_language,
+       translation_title = excluded.translation_title,
+       translation_summary = excluded.translation_summary,
+       translated_at = excluded.translated_at, read_synced = 0`,
     [
       article.id,
       article.feedId,
@@ -284,6 +290,11 @@ async function writeArticle(tx: Executor, article: Article): Promise<void> {
       article.receivedAt,
       article.readAt,
       article.starredAt,
+      article.translation?.status ?? null,
+      article.translation?.language ?? null,
+      article.translation?.title ?? null,
+      article.translation?.summary ?? null,
+      article.translation?.translatedAt ?? null,
     ],
   );
 }
