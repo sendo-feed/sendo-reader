@@ -101,8 +101,9 @@
       const url = discordAuthorizationUrl(await account.connectDiscord("/settings", signal));
       signal.throwIfAborted();
       if (url === null) throw new ApiError("server", "Discord の認可 URL の形式が違います");
-      location.assign(url);
       redirecting = true;
+      // DB のワーカーを止めてから移る（lib/back-forward-cache.ts）
+      await reader.leave(url);
     });
   }
 

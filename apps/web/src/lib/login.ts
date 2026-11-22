@@ -1,6 +1,6 @@
-import type { ReaderClient } from "@sendo-reader/core/web";
 import { bookmarkletLoginRetryPath, bookmarkletReturnTo } from "./bookmarklet";
 import { router } from "./router.svelte";
+import type { ReaderState } from "./state.svelte";
 
 /**
  * Google でのログイン（docs/decisions/local-first.md の 6）。sendo のログインの入口へページごと
@@ -24,22 +24,27 @@ export function currentReturnTo(): string {
 
 /**
  * Google でログインする。ログアウトを sendo に送れていなければ先に送り（送れなければ投げる）、
- * sendo のログインの入口へ移る。
+ * DB のワーカーを止めてから（ReaderState の leave）、sendo のログインの入口へ移る。
  */
 export async function startSignIn(
-  client: ReaderClient,
+  reader: Pick<ReaderState, "client" | "leave">,
   returnTo = currentReturnTo(),
 ): Promise<void> {
-  await client.prepareSignIn();
-  goToSignIn(returnTo);
+  await reader.client.prepareSignIn();
+  await reader.leave(signInUrl(returnTo));
 }
 
 /**
- * sendo のログインの入口へ移る。手元のデータを使わない画面（OAuth の許可の画面）から使う。
- * reader の画面からは、送れていないログアウトを先に送る startSignIn を使う
+ * sendo のログインの入口へ移る。手元のデータを使わない画面（OAuth の許可の画面。DB のワーカーを
+ * 起こさない）から使う。reader の画面からは、送れていないログアウトを先に送り、ワーカーを止めてから
+ * 移る startSignIn を使う
  */
 export function goToSignIn(returnTo: string): void {
-  location.assign(`${LOGIN_PATH}?${new URLSearchParams({ returnTo })}`);
+  location.assign(signInUrl(returnTo));
+}
+
+function signInUrl(returnTo: string): string {
+  return `${LOGIN_PATH}?${new URLSearchParams({ returnTo })}`;
 }
 
 /** sendo がログインに失敗して戻すときの理由（sendo の src/api/login.ts）と、画面に出す文 */
