@@ -1,4 +1,4 @@
-import { describe, expect, test } from "vitest";
+import { afterEach, describe, expect, test, vi } from "vitest";
 import { ApiError } from "../src";
 import { TRANSLATION_MARK_MS, TRANSLATION_WATCH_MS } from "../src/translation-requests";
 import { setup } from "./helpers";
@@ -17,6 +17,10 @@ const translated = (at: number) => ({
   translatedAt: new Date(at).toISOString(),
 });
 const untranslated = { ...queued, status: "untranslated" };
+
+afterEach(() => {
+  vi.useRealTimers();
+});
 
 async function seeded(translation: unknown = queued) {
   const context = await setup();
@@ -142,6 +146,42 @@ describe("その場の翻訳を頼む", () => {
     });
     server.now += TRANSLATION_WATCH_MS;
     expect((await core.getArticle(article.id))?.translationRequest).toBeUndefined();
+  });
+
+  test("1 分で印が外れたら、記事が変わったと知らせる（画面が読み直して Translate をまた出す）", async () => {
+    const { server, core, article } = await seeded();
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const changes: string[][] = [];
+    core.onChange((tables) => changes.push([...tables]));
+    await core.requestTranslation(article.id);
+    expect(changes).toEqual([["articles"]]);
+
+    server.now += TRANSLATION_MARK_MS - 1;
+    vi.advanceTimersByTime(TRANSLATION_MARK_MS - 1);
+    expect(changes).toHaveLength(1);
+    server.now += 1;
+    vi.advanceTimersByTime(1);
+    expect(changes).toEqual([["articles"], ["articles"]]);
+    expect(await core.getArticle(article.id)).toMatchObject({ translation: { status: "queued" } });
+  });
+
+  test("訳せなかったあとでほかの人が頼んで訳文が届いたら、失敗の文を出さず、訳文で出す", async () => {
+    const { server, core, article } = await seeded();
+    await core.requestTranslation(article.id);
+    server.setTranslation(article.id, untranslated);
+    await core.sync();
+    expect((await core.getArticle(article.id))?.translationRequest).toBe("failed");
+
+    // ほかの端末が頼んだ
+    server.setTranslation(article.id, { ...queued, status: "translating" });
+    await core.sync();
+    expect((await core.getArticle(article.id))?.translationRequest).toBe("requested");
+
+    server.setTranslation(article.id, translated(server.now));
+    await core.sync();
+    const done = await core.getArticle(article.id);
+    expect(done?.translation?.status).toBe("translated");
+    expect(done?.translationRequest).toBeUndefined();
   });
 
   test("ログアウトすると、頼んだ印と頼んだ記事を消す", async () => {

@@ -52,11 +52,10 @@ export class TranslationRequests {
     syncNumber: number,
     read: (ids: string[]) => Promise<Article[]>,
   ): Promise<boolean> {
-    this.#expire();
-    const due = [...this.#requests].filter(([, r]) => r.afterSync < syncNumber && !r.failed);
-    if (due.length === 0) return false;
+    let changed = this.#expire();
+    const due = [...this.#requests].filter(([, r]) => r.afterSync < syncNumber);
+    if (due.length === 0) return changed;
     const articles = new Map((await read(due.map(([id]) => id))).map((a) => [a.id, a]));
-    let changed = false;
     for (const [id, request] of due) {
       // 読んでいる間に、頼み直した ／ 消した
       if (this.#requests.get(id) !== request) continue;
@@ -70,7 +69,11 @@ export class TranslationRequests {
         this.#requests.delete(id);
         changed = true;
       } else if (translation.status === "untranslated") {
+        if (!request.failed) changed = true;
         request.failed = true;
+      } else if (request.failed) {
+        // 訳せなかったあとで、ほかの人が頼んだ（translating）。失敗の文は出さず、訳文を待つ
+        request.failed = false;
         changed = true;
       }
     }
@@ -103,7 +106,9 @@ export class TranslationRequests {
     }
     const translation = article.translation;
     if (translation == null) return article;
-    if (request.failed) return { ...article, translationRequest: "failed" };
+    if (request.failed && translation.status === "untranslated") {
+      return { ...article, translationRequest: "failed" };
+    }
     const marked = request.marked && this.#now() - request.acceptedAt < TRANSLATION_MARK_MS;
     if (marked && translation.translatedAt === null) {
       return {

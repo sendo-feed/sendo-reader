@@ -405,6 +405,52 @@ test.describe("Translate", () => {
     }
   });
 
+  test("返る前にほかの記事に移っても止まらず、戻ると届いた状態で出る", async ({
+    page,
+    context,
+  }) => {
+    const server = new FakeSendo();
+    const feed = server.subscribe({ url: "https://blog.example/feed.xml", title: "Blog" });
+    const now = Date.now();
+    const article = server.deliver(feed.id, {
+      title: "Feature Toggles",
+      publishedAt: now - 1000,
+      translation: queued,
+    });
+    server.deliver(feed.id, { title: "Other", publishedAt: now - 2000, translation: queued });
+    let release = () => {};
+    server.translationRequestGate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    await routeFakeSendo(context, server);
+    await page.goto("/");
+    await signIn(page);
+    const list = page.locator(".article-list");
+    const view = page.locator(".article-view");
+    await list.getByRole("button", { name: "Unread only" }).click();
+    await list.locator(".item").filter({ hasText: "Feature Toggles" }).click();
+    await view.getByRole("button", { name: "Translate", exact: true }).click();
+    await expect.poll(() => server.translationRequests).toEqual([article.id]);
+
+    // 返る前にほかの記事に移る。そちらの Translate は押せる
+    await list.locator(".item").filter({ hasText: "Other" }).click();
+    await expect(view.getByRole("heading", { level: 1 })).toHaveText("Other");
+    await expect(view.getByRole("button", { name: "Translate", exact: true })).toBeEnabled();
+    release();
+
+    await list.locator(".item").filter({ hasText: "Feature Toggles" }).click();
+    await expect(view.locator("header .translation")).toHaveText("・ EN · Translating");
+    server.setTranslation(article.id, {
+      language: "en",
+      status: "translated",
+      title: "フィーチャートグル",
+      summary: null,
+      translatedAt: new Date(now).toISOString(),
+    });
+    await page.getByRole("button", { name: "Sync now" }).click();
+    await expect(view.getByRole("heading", { level: 1 })).toHaveText("フィーチャートグル");
+  });
+
   test("ほかのタブでも Translating になり、押せなくなる", async ({ page, context }) => {
     const { view } = await open(page, context);
     const other = await context.newPage();

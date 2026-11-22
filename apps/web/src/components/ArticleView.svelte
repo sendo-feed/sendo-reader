@@ -351,15 +351,18 @@
     });
   });
 
-  /** その場の翻訳を頼める（訳文がない、頼んだ印がない。docs/decisions/translation.md の 4） */
+  /**
+   * その場の翻訳を頼める（訳文がない。docs/decisions/translation.md の 4）。頼んだ印のある間は、
+   * core が状態を translating にして返すので出ない。印が外れたら（1 分）、届いた状態でまた出す
+   */
   const canTranslate = $derived(
     article !== null &&
       article.translation != null &&
-      (article.translation.status === "queued" || article.translation.status === "untranslated") &&
-      article.translationRequest !== "requested",
+      (article.translation.status === "queued" || article.translation.status === "untranslated"),
   );
-  /** 頼んで、sendo の返事を待っている */
-  let translating = $state(false);
+  /** 頼んで、sendo の返事を待っている記事（記事ごと。ほかの記事の Translate は止めない） */
+  let translatingId = $state<string | null>(null);
+  const translating = $derived(translatingId !== null && translatingId === articleId);
   /** 頼めなかった理由（日本語の文） */
   let translateError = $state<string | null>(null);
   /** オフラインのときは頼めない（sendo に届かないとできない操作。決定の 6） */
@@ -381,14 +384,14 @@
   async function translate(): Promise<void> {
     const id = articleId;
     if (id === null || !canTranslate || translating || !online) return;
-    translating = true;
+    translatingId = id;
     translateError = null;
     try {
       await reader.client.requestTranslation(id);
     } catch (error) {
       if (articleId === id) translateError = describeTranslationError(error);
     } finally {
-      translating = false;
+      if (translatingId === id) translatingId = null;
     }
   }
 
