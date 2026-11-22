@@ -3,6 +3,7 @@ import { mount } from "svelte";
 import App from "./App.svelte";
 import { watchAppUpdate } from "./lib/app-update";
 import { AUTHORIZE_PATH } from "./lib/authorize";
+import { releaseOnBackForwardCache } from "./lib/back-forward-cache";
 import { readerContext } from "./lib/context";
 import { startReader } from "./lib/reader";
 import { ReaderState } from "./lib/state.svelte";
@@ -23,7 +24,11 @@ if (location.pathname === AUTHORIZE_PATH) {
   // 戻る・進むで、ブラウザに位置を戻させない。狭い画面では、一覧と記事が同じページを動かすので、
   // 一覧の位置は画面の側で戻す（routes/Reader.svelte。docs/decisions/ui.md の 6）
   history.scrollRestoration = "manual";
-  const state = new ReaderState(startReader());
+  const reader = startReader();
+  // bfcache に入るときにワーカーを止め、戻ったら読み込み直す。Safari は、ワーカーごとページを
+  // 止めて残すので、代表のロックを持ったまま、次に開いたページを待たせる（lib/back-forward-cache.ts）
+  releaseOnBackForwardCache({ window, release: reader.stop, reload: () => location.reload() });
+  const state = new ReaderState(reader.client);
   // 設定の正は手元の DB（docs/decisions/settings.md）。つないで、読み直す
   prefs.connect(state.client);
   mount(App, { target, context: readerContext(state) });
