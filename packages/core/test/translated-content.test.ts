@@ -1,4 +1,4 @@
-import { describe, expect, test } from "vitest";
+import { describe, expect, test, vi } from "vitest";
 import { ApiError } from "../src";
 import { setup } from "./helpers";
 
@@ -142,6 +142,32 @@ describe("訳した本文を取る", () => {
     expect(await translationRows(db)).toEqual([
       { article_id: article.id, html: "<p>新しい訳</p>", translated_at: T2 },
     ]);
+    expect(await core.getTranslatedContent(article.id, T2)).toMatchObject({ status: "ready" });
+  });
+
+  test("前の時刻の取得の途中で新しい時刻を頼んだら、前の取得が古い訳文を返しても、取り直して新しい本文を返す", async () => {
+    const { server, core, article } = await seeded();
+    server.translatedContents.set(article.id, "<p>古い訳</p>");
+    let release = () => {};
+    server.translationResponseGate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    // 開いた記事の T1 の本文を取っている。偽の sendo は、受けたその場で T1 の応答を作る
+    const first = core.fetchTranslatedContent(article.id, T1);
+    await vi.waitFor(() => expect(server.translationContentRequests).toHaveLength(1));
+    // 取っている間に sendo で訳し直し、同期で T2 が届いた。画面は T2 の本文を頼む
+    server.setTranslation(article.id, translated(T2));
+    server.translatedContents.set(article.id, "<p>新しい訳</p>");
+    await core.sync();
+    const second = core.fetchTranslatedContent(article.id, T2);
+    // 前の取得は、T1 の訳文を返す
+    release();
+    expect(await first).toMatchObject({ content: { nodes: [{ children: ["古い訳"] }] } });
+    expect(await second).toMatchObject({
+      status: "ready",
+      content: { nodes: [{ tag: "p", children: ["新しい訳"] }] },
+    });
+    expect(server.translationContentRequests).toEqual([article.id, article.id]);
     expect(await core.getTranslatedContent(article.id, T2)).toMatchObject({ status: "ready" });
   });
 

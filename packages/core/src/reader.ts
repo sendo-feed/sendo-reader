@@ -1231,7 +1231,12 @@ export class ReaderCore {
     const found = await getStoredTranslatedContent(this.#db, articleId);
     if (found === null) return { status: "stale" };
     if (found.stored?.translatedAt === translatedAt) return toTranslatedContent(found.stored);
-    const fetched = await this.#fetchTranslatedContent(articleId, session);
+    let fetched = await this.#fetchTranslatedContent(articleId, session);
+    // 前の時刻を頼んだ取得に合流して、頼んだ時刻より古い訳文が返った（取っている間に、同期で
+    // 新しい時刻が届いた）。その取得は終わったので、一度だけ取り直す
+    if (fetched !== null && fetched.translatedAt < translatedAt) {
+      fetched = await this.#fetchTranslatedContent(articleId, session);
+    }
     if (fetched === null || fetched.translatedAt !== translatedAt) return { status: "stale" };
     return toTranslatedContent(fetched);
   }

@@ -445,6 +445,11 @@ export class FakeSendo {
   readonly translatedContents = new Map<string, string | null>();
   /** 訳文を取りに来たリクエスト（記事の ID） */
   readonly translationContentRequests: string[] = [];
+  /**
+   * 訳文の応答を作ってから、返す前に待つ（その時点の訳文を返すのが遅れた場面を作る）。一度
+   * 使ったら外す
+   */
+  translationResponseGate: Promise<void> | null = null;
   /** その場の翻訳を頼まれた記事（POST /articles/{id}/translation） */
   readonly translationRequests: string[] = [];
   /** その場の翻訳の求めに、決めた失敗を返す（null なら sendo と同じに答える） */
@@ -862,7 +867,7 @@ export class FakeSendo {
    * 訳文を返す（sendo の GET /articles/{id}/translation）。訳した時刻のない記事は 404
    * （no_translation）
    */
-  #getTranslation(id: string): Response {
+  async #getTranslation(id: string): Promise<Response> {
     this.translationContentRequests.push(id);
     const row = this.inbox.get(id);
     if (row === undefined) return error(404, "not_found", "article does not exist");
@@ -875,7 +880,7 @@ export class FakeSendo {
       return error(404, "no_translation", "the article is not translated");
     }
     const content = this.translatedContents.get(id) ?? null;
-    return json(200, {
+    const response = json(200, {
       title: translation.title ?? null,
       summary: translation.summary ?? null,
       content,
@@ -883,6 +888,10 @@ export class FakeSendo {
       model: "claude-test",
       translatedAt: translation.translatedAt,
     });
+    const gate = this.translationResponseGate;
+    this.translationResponseGate = null;
+    await gate;
+    return response;
   }
 
   /**
