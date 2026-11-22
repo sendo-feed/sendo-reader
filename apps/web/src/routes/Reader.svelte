@@ -310,7 +310,13 @@
       position.list = anchor === null ? undefined : { key: queryKey, anchor };
     }
     if (articleId !== null && articleView !== undefined) {
-      position.article = { id: articleId, top: articleView.scrollTop() };
+      const xPosts = articleView.xPostSizes();
+      position.article = {
+        id: articleId,
+        top: articleView.scrollTop(),
+        // X の投稿を出していない記事では、今までと同じ形で書く
+        ...(xPosts.length > 0 ? { xPosts } : {}),
+      };
     }
     return Object.keys(position).length > 0 ? position : null;
   }

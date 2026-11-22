@@ -32,7 +32,10 @@
     };
   });
 
-  const shown = $derived(post !== null && post.height !== null);
+  /** 枠の高さ。出たらその高さ、出るまでは覚えた高さ（embeds.md の 5）。どちらもなければ null */
+  const boxHeight = $derived(post === null ? null : (post.height ?? post.reserved));
+  /** 元の引用の代わりに、枠を出している */
+  const shown = $derived(boxHeight !== null);
 </script>
 
 <div class="x-post" bind:this={element}>
@@ -45,12 +48,15 @@
         referrerpolicy="no-referrer"
         title="X の投稿"
         class:shown
-        style:height={post.height === null ? undefined : `${post.height}px`}
+        style:height={boxHeight === null ? undefined : `${boxHeight}px`}
         onload={(event) => {
           if (event.currentTarget instanceof HTMLIFrameElement) post?.hello(event.currentTarget);
         }}
       ></iframe>
     {/key}
+  {:else if boxHeight !== null}
+    <!-- 覚えた高さの空の枠。表示範囲に入ったら、ここで読み込む -->
+    <div class="reserved" style:height={`${boxHeight}px`}></div>
   {/if}
   <blockquote hidden={shown}>{@render children()}</blockquote>
   {#if href !== null}
@@ -86,6 +92,12 @@
 
   iframe.shown {
     margin-bottom: 0.5em;
+  }
+
+  /* 出たときの iframe と同じ場所を取る */
+  .reserved {
+    max-width: 550px;
+    margin: 0 0 0.5em;
   }
 
   .open {

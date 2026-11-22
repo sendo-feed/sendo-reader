@@ -31,10 +31,11 @@ test.afterAll(async () => {
 /**
  * 偽の widgets.js（隔離フレームの中で動く）。投稿ごとの答え方は how で決める
  * - render:<高さ>：すぐに、その高さの要素で解決する
+ * - render:<高さ>:<遅れ>：遅れ（ms）のあとに、その高さの要素で解決する
  * - undefined：すぐに undefined で解決する（存在しない投稿）
  * - manual：テストが __settle で決めるまで、解決しない
  */
-type How = `render:${number}` | "undefined" | "manual";
+type How = `render:${number}` | `render:${number}:${number}` | "undefined" | "manual";
 
 function fakeWidgets(behavior: Record<string, How>): string {
   return `
@@ -58,7 +59,10 @@ window.twttr = {
           resolve(tweet);
         };
         window.__resize = (height) => { tweet.style.height = height + "px"; };
-        if (how.startsWith("render:")) window.__settle(Number(how.slice(7)));
+        if (how.startsWith("render:")) {
+          const [, height, delay] = how.split(":");
+          setTimeout(() => window.__settle(Number(height)), Number(delay ?? 0));
+        }
         else if (how === "undefined") window.__settle(undefined);
       });
     },
@@ -130,7 +134,7 @@ async function openArticle(
   context: BrowserContext,
   content: string,
   behavior: Record<string, How> = { "*": "render:240" },
-  extra: (server: FakeSendo, feedId: string) => void = () => {},
+  extra: (server: FakeSendo, feedId: string, articleId: string) => void = () => {},
 ): Promise<Opened> {
   const server = new FakeSendo();
   const feed = server.subscribe({ url: "https://blog.example/feed.xml", title: "Blog" });
@@ -139,7 +143,7 @@ async function openArticle(
     summary: "要約",
     content,
   });
-  extra(server, feed.id);
+  extra(server, feed.id, article.id);
   const requested = await routeX(page, context, behavior);
   const violations = await collectViolations(page);
   await routeFakeSendo(context, server);
@@ -776,4 +780,278 @@ test("隔離フレームのオリジンが未設定なら、設定の項目を�
   await expect
     .poll(() => server.settingsOf("desktop"))
     .toEqual({ "reader.xPosts": false, "reader.markReadOnScroll": false });
+});
+
+/** 履歴の項目に書いた、記事の位置 */
+function articleState(page: Page): Promise<unknown> {
+  return page.evaluate(() => (history.state as { article?: unknown } | null)?.article);
+}
+
+/** 本文の段落（filler の n 番目）の、画面の中の上の端 */
+async function paragraphTop(page: Page, n: number): Promise<number> {
+  const box = await page
+    .locator(".article-view .body p", { hasText: new RegExp(`^段落 ${n}。`) })
+    .boundingBox();
+  if (box === null) throw new Error(`段落 ${n} が見えない`);
+  return box.y;
+}
+
+/** 投稿のウィジェットが出るのを待つ（元の引用が隠れ、iframe に高さが付く） */
+async function expectShown(page: Page, n: number): Promise<void> {
+  await expect(post(page, n).locator("blockquote")).toHaveAttribute("hidden", "");
+  await expect(post(page, n).locator("iframe")).toBeVisible();
+}
+
+/** 投稿を表示範囲に入れて、出るのを待つ */
+async function showPost(page: Page, n: number): Promise<void> {
+  await post(page, n).scrollIntoViewIfNeeded();
+  await expectShown(page, n);
+}
+
+/** 記事から設定の画面に移る（履歴の項目を足す。戻るで、記事の項目に戻る） */
+async function leaveToSettings(page: Page): Promise<void> {
+  await page.locator("nav.sidebar").getByRole("link", { name: "Settings" }).click();
+  await expect(page.getByRole("heading", { name: "Settings", level: 1 })).toBeVisible();
+}
+
+/** 位置を書くのは、動かし終えて少ししてから */
+const letRemember = (page: Page) => page.waitForTimeout(600);
+
+/** 投稿が 3 つあり、下に長く続く記事 */
+const THREE_POSTS = `${filler(2)}${quote(1)}${filler(3, 2)}${quote(2)}${filler(3, 5)}${quote(3)}${filler(40, 8)}`;
+const THREE_HEIGHTS: Record<string, How> = {
+  [postId(1)]: "render:240:300",
+  [postId(2)]: "render:320:300",
+  [postId(3)]: "render:400:300",
+};
+
+/** 3 つの投稿を出しながら、段落 20 が見えるところまで読む。段落 20 の位置を返す */
+async function readPastThreePosts(page: Page): Promise<number> {
+  for (const n of [1, 2, 3]) await showPost(page, n);
+  await page
+    .locator(".article-view .body p", { hasText: /^段落 20。/ })
+    .evaluate((node) => node.scrollIntoView({ block: "center" }));
+  await letRemember(page);
+  return paragraphTop(page, 20);
+}
+
+test.describe("読書位置（覚えた高さ）", () => {
+  test("表示範囲の中で出した投稿の大きさを、位置と一緒に覚える。失敗と読み込み中は覚えない", async ({
+    page,
+    context,
+  }) => {
+    await openArticle(page, context, `${quote(1)}${quote(2)}${quote(3)}${filler(40)}`, {
+      [postId(1)]: "render:240",
+      [postId(2)]: "manual",
+      [postId(3)]: "undefined",
+    });
+    await expectShown(page, 1);
+    const width = Math.round((await post(page, 1).locator("iframe").boundingBox())?.width ?? 0);
+    await scrollTo(page, 10);
+    await letRemember(page);
+    expect(await articleState(page)).toMatchObject({
+      top: 10,
+      xPosts: [{ id: postId(1), width, height: 240 }],
+    });
+  });
+
+  test("受けるたびに覚え直す。表示範囲の外で受けた高さは、覚えない", async ({ page, context }) => {
+    await openArticle(page, context, `${quote(1)}${filler(60)}`, { "*": "render:240" });
+    await expectShown(page, 1);
+    const inner = await frameOf(page, 1);
+    const resize = (height: number) =>
+      inner.evaluate(
+        (h) => (window as unknown as { __resize: (h: number) => void }).__resize(h),
+        height,
+      );
+    await resize(320);
+    await expect
+      .poll(async () => (await post(page, 1).locator("iframe").boundingBox())?.height)
+      .toBe(320);
+    await scrollTo(page, 5);
+    await letRemember(page);
+    expect(await articleState(page)).toMatchObject({ xPosts: [{ id: postId(1), height: 320 }] });
+    // 表示範囲の外で、高さが変わった
+    await scrollToEnd(page);
+    await resize(400);
+    await page.waitForTimeout(300);
+    await scrollTo(page, 3000);
+    await letRemember(page);
+    expect(await articleState(page)).toMatchObject({ xPosts: [{ id: postId(1), height: 320 }] });
+  });
+
+  test("X の投稿のない記事では、今までと同じ形で書く", async ({ page, context }) => {
+    await openArticle(page, context, filler(60));
+    await expect(page.locator(".article-view .body")).toBeVisible();
+    await scrollTo(page, 500);
+    await letRemember(page);
+    const state = await articleState(page);
+    expect(Object.keys(state as object).sort()).toEqual(["id", "top"]);
+  });
+
+  test("読み込み直すと、覚えた高さの枠を取ってから位置を戻し、同じ段落が同じところにある", async ({
+    page,
+    context,
+  }) => {
+    await openArticle(page, context, THREE_POSTS, THREE_HEIGHTS);
+    const before = await readPastThreePosts(page);
+    await page.reload();
+    await expect(page.locator(".article-view h1")).toHaveText("X の投稿を引いた記事");
+    // 3 つとも、元の引用の代わりに、覚えた高さの枠を取る
+    for (const { n, height } of [
+      { n: 1, height: 240 },
+      { n: 2, height: 320 },
+      { n: 3, height: 400 },
+    ]) {
+      const box = post(page, n).locator(".reserved");
+      await expect(box).toHaveCount(1);
+      expect((await box.boundingBox())?.height).toBe(height);
+      await expect(post(page, n).locator("blockquote")).toBeHidden();
+    }
+    await expect.poll(() => paragraphTop(page, 20)).not.toBe(Number.NaN);
+    expect(Math.abs((await paragraphTop(page, 20)) - before)).toBeLessThanOrEqual(16);
+    // 読者が何もしないあいだ、見えている本文が動かない
+    // （1px 未満は、ブラウザーのスクロールの補正の端数）
+    const settled = await paragraphTop(page, 20);
+    for (let i = 0; i < 3; i++) {
+      await page.waitForTimeout(1000);
+      expect(Math.abs((await paragraphTop(page, 20)) - settled)).toBeLessThan(1);
+    }
+  });
+
+  test("戻るで記事に戻ったときも、覚えた高さの枠を取って、同じ段落に戻る", async ({
+    page,
+    context,
+  }) => {
+    await openArticle(page, context, THREE_POSTS, THREE_HEIGHTS);
+    const before = await readPastThreePosts(page);
+    await leaveToSettings(page);
+    await page.goBack();
+    await expect(page.locator(".article-view h1")).toHaveText("X の投稿を引いた記事");
+    await expect(post(page, 3).locator(".reserved")).toHaveCount(1);
+    await expect
+      .poll(async () => Math.abs((await paragraphTop(page, 20)) - before))
+      .toBeLessThanOrEqual(16);
+  });
+
+  test("幅が違えば、枠を取らずに元の引用を出す", async ({ page, context }) => {
+    await openArticle(page, context, `${quote(1)}${filler(60)}`, { "*": "render:240" });
+    await expectShown(page, 1);
+    await scrollTo(page, 2000);
+    await letRemember(page);
+    // 枠の幅が変わる（狭い画面）
+    await page.setViewportSize({ width: 390, height: 844 });
+    await context.route("https://platform.twitter.com/**", (route) => route.abort("failed"));
+    await page.reload();
+    await expect(page.locator(".article-view h1")).toHaveText("X の投稿を引いた記事");
+    await expect(page.locator(".article-view .body")).toBeVisible();
+    await page.waitForTimeout(500);
+    await expect(post(page, 1).locator(".reserved")).toHaveCount(0);
+    await expect(post(page, 1).locator("blockquote")).toBeAttached();
+    await expect(post(page, 1).locator("blockquote")).not.toHaveAttribute("hidden", "");
+  });
+
+  test("設定を切ってあれば、枠を取らずに元の引用を出す", async ({ page, context }) => {
+    const { server } = await openArticle(page, context, `${quote(1)}${filler(60)}`, {
+      "*": "render:240",
+    });
+    await expectShown(page, 1);
+    await scrollTo(page, 2000);
+    await letRemember(page);
+    server.putSetting("desktop", "reader.xPosts", false);
+    await page.getByRole("button", { name: "Sync now" }).click();
+    await page.reload();
+    await expect(page.locator(".article-view h1")).toHaveText("X の投稿を引いた記事");
+    await expect
+      .poll(() => page.locator(".article-view").evaluate((node) => node.scrollTop))
+      .toBeGreaterThan(1000);
+    await expect(post(page, 1).locator(".reserved")).toHaveCount(0);
+    await expect(post(page, 1).locator("blockquote")).not.toHaveAttribute("hidden", "");
+  });
+
+  test("オフラインなら、戻ったときに枠を取らずに元の引用を出す", async ({ page, context }) => {
+    await openArticle(page, context, `${quote(1)}${filler(60)}`, { "*": "render:240" });
+    await expectShown(page, 1);
+    await scrollTo(page, 2000);
+    await letRemember(page);
+    await leaveToSettings(page);
+    await context.setOffline(true);
+    await page.goBack();
+    await expect(page.locator(".article-view h1")).toHaveText("X の投稿を引いた記事");
+    await expect(post(page, 1)).toBeAttached();
+    await page.waitForTimeout(500);
+    await expect(post(page, 1).locator(".reserved")).toHaveCount(0);
+    await expect(post(page, 1).locator("blockquote")).not.toHaveAttribute("hidden", "");
+  });
+
+  test("覚えた高さは、ほかの記事の同じ投稿に当てない", async ({ page, context }) => {
+    await openArticle(
+      page,
+      context,
+      `${quote(1)}${filler(60)}`,
+      { "*": "render:240" },
+      (server, feedId) =>
+        server.deliver(feedId, {
+          title: "次の記事",
+          summary: "要約",
+          content: `${filler(1)}${quote(1)}`,
+          publishedAt: 0,
+        }),
+    );
+    await expectShown(page, 1);
+    await scrollTo(page, 2000);
+    await letRemember(page);
+    await page.keyboard.press("j");
+    await expect(page.locator(".article-view h1")).toHaveText("次の記事");
+    await expect(post(page, 1)).toBeAttached();
+    await expect(post(page, 1).locator(".reserved")).toHaveCount(0);
+  });
+
+  test("位置を戻したあとに替えた本文には、覚えた高さを当てない", async ({ page, context }) => {
+    const behavior: Record<string, How> = { "*": "render:240" };
+    // 開いたときに、全文を自動で取って出す
+    await openArticle(
+      page,
+      context,
+      `${quote(1)}<p>フィードの本文</p>${filler(60)}`,
+      behavior,
+      (server, _feedId, articleId) =>
+        server.pageContents.set(articleId, `${quote(1)}<p>全文の本文</p>${filler(60)}`),
+    );
+    await expect(page.getByText("全文の本文")).toBeVisible();
+    await expectShown(page, 1);
+    await scrollTo(page, 2000);
+    await letRemember(page);
+    await page.reload();
+    await expect(page.getByText("全文の本文")).toBeAttached();
+    await expect(post(page, 1).locator(".reserved")).toHaveCount(1);
+    // ここからは、読み込みが終わらない
+    behavior["*"] = "manual";
+    await page.getByRole("button", { name: "More actions" }).click();
+    await page.getByRole("button", { name: "Show feed content" }).click();
+    await expect(page.getByText("フィードの本文")).toBeAttached();
+    await expect(post(page, 1).locator(".reserved")).toHaveCount(0);
+    await expect(post(page, 1).locator("blockquote")).not.toHaveAttribute("hidden", "");
+  });
+
+  test("読み込み中の投稿を速く通り過ぎても、見えている本文が動かない", async ({
+    page,
+    context,
+  }) => {
+    await openArticle(page, context, `${filler(20)}${quote(1)}${quote(2)}${filler(60, 20)}`, {
+      "*": "manual",
+    });
+    // 投稿を表示範囲に入れて読み込みを始め、すぐに下へ通り過ぎる
+    await post(page, 1).scrollIntoViewIfNeeded();
+    await expect(iframes(page)).toHaveCount(2);
+    await page
+      .locator(".article-view .body p", { hasText: /^段落 40。/ })
+      .evaluate((node) => node.scrollIntoView({ block: "center" }));
+    const top = await paragraphTop(page, 40);
+    await expect(iframes(page)).toHaveCount(0);
+    for (let i = 0; i < 3; i++) {
+      await page.waitForTimeout(500);
+      expect(await paragraphTop(page, 40)).toBe(top);
+    }
+  });
 });
