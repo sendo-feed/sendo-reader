@@ -19,6 +19,7 @@ export {
   type ContentStorage,
   DEFAULT_CONTENT_STORAGE_LIMIT,
 } from "./content/storage";
+export { xPostUrl } from "./content/x-post";
 export type { Database, Executor, Row, SqlValue } from "./db/database";
 export {
   type ArticleCursor,

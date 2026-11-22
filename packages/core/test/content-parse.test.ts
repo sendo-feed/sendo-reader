@@ -26,6 +26,7 @@ const tags = (html: string) => elements(parseContent(html)).map((element) => ele
 /** 画面に渡す木の、要素の項目として出てよい名前 */
 const ELEMENT_KEYS = new Set([
   ...["tag", "children", "href", "src", "alt", "width", "height", "colspan", "rowspan", "start"],
+  "xPost",
 ]);
 
 describe("sendo が配る形の本文", () => {
@@ -110,6 +111,124 @@ describe("sendo が配る形の本文", () => {
     expect(
       parseContent("&lt;script&gt;alert(1)&lt;/script&gt; &#39;a&#x27; &copy; &amp;amp;"),
     ).toEqual(["<script>alert(1)</script> 'a' &copy; &amp;"]);
+  });
+});
+
+describe("X の投稿の印（data-x-post）", () => {
+  const ID = "1234567890123456789";
+
+  test("印の付いた引用は、投稿の ID を文字列で持ち、中身は今と同じに残す", () => {
+    expect(
+      parseContent(
+        `<blockquote data-x-post="${ID}"><p>文</p>— 名前 (@user) <a href="https://x.com/user/status/${ID}">日付</a></blockquote>`,
+      ),
+    ).toEqual([
+      {
+        tag: "blockquote",
+        xPost: ID,
+        children: [
+          { tag: "p", children: ["文"] },
+          "— 名前 (@user) ",
+          { tag: "a", href: `https://x.com/user/status/${ID}`, children: ["日付"] },
+        ],
+      },
+    ]);
+    // 数にすると桁があふれる値も、そのまま
+    expect(parseContent('<blockquote data-x-post="99999999999999999999"></blockquote>')).toEqual([
+      { tag: "blockquote", xPost: "99999999999999999999", children: [] },
+    ]);
+    expect(parseContent('<blockquote data-x-post="0">a</blockquote>')).toEqual([
+      { tag: "blockquote", xPost: "0", children: ["a"] },
+    ]);
+  });
+
+  test("ID の形でない値は、印のない、ふつうの引用にする", () => {
+    for (const value of [
+      "",
+      "abc",
+      "123a",
+      "１２３",
+      "123456789012345678901",
+      " 123",
+      "123 ",
+      "+123",
+      "-123",
+      "1.5",
+      "1e3",
+    ]) {
+      expect(
+        parseContent(`<blockquote data-x-post="${value}"><p>文</p></blockquote>`),
+        value,
+      ).toEqual([{ tag: "blockquote", children: [{ tag: "p", children: ["文"] }] }]);
+    }
+    // 値のない属性
+    expect(parseContent("<blockquote data-x-post><p>文</p></blockquote>")).toEqual([
+      { tag: "blockquote", children: [{ tag: "p", children: ["文"] }] },
+    ]);
+  });
+
+  test("属性の名前の大文字、同じ属性の 2 つめ、文字参照は、ブラウザーと同じに読む", () => {
+    expect(parseContent('<BLOCKQUOTE DATA-X-POST="123">a</BLOCKQUOTE>')).toEqual([
+      { tag: "blockquote", xPost: "123", children: ["a"] },
+    ]);
+    // 同じ名前は、最初のものを採る
+    expect(parseContent('<blockquote data-x-post="x" data-x-post="123">a</blockquote>')).toEqual([
+      { tag: "blockquote", children: ["a"] },
+    ]);
+    expect(parseContent('<blockquote data-x-post="123" data-x-post="x">a</blockquote>')).toEqual([
+      { tag: "blockquote", xPost: "123", children: ["a"] },
+    ]);
+    expect(parseContent('<blockquote data-x-post="&#49;&#50;">a</blockquote>')).toEqual([
+      { tag: "blockquote", xPost: "12", children: ["a"] },
+    ]);
+  });
+
+  test("blockquote でない要素の印と、ほかの data-* 属性は通さない", () => {
+    const nodes = parseContent(
+      `<p data-x-post="${ID}">a</p><div data-x-post="${ID}">b</div><q data-x-post="${ID}">c</q>` +
+        `<blockquote data-x-post="${ID}" data-id="1" data-content-node="0.1" class="twitter-tweet">d</blockquote>`,
+    );
+    expect(nodes).toEqual([
+      { tag: "p", children: ["a"] },
+      { tag: "div", children: ["b"] },
+      { tag: "q", children: ["c"] },
+      { tag: "blockquote", xPost: ID, children: ["d"] },
+    ]);
+  });
+
+  test("入れ子の引用は、それぞれの印をそれぞれのノードに持つ", () => {
+    expect(
+      parseContent(
+        '<blockquote data-x-post="111"><p>外</p><blockquote data-x-post="222"><p>内</p></blockquote></blockquote>' +
+          '<blockquote><blockquote data-x-post="333">内だけ</blockquote></blockquote>',
+      ),
+    ).toEqual([
+      {
+        tag: "blockquote",
+        xPost: "111",
+        children: [
+          { tag: "p", children: ["外"] },
+          { tag: "blockquote", xPost: "222", children: [{ tag: "p", children: ["内"] }] },
+        ],
+      },
+      { tag: "blockquote", children: [{ tag: "blockquote", xPost: "333", children: ["内だけ"] }] },
+    ]);
+  });
+
+  test("引用の中の文もリンクの文字も空でも、出すものがあると数える（開くリンクを出すため）", () => {
+    // fixture の B（文が空）と D（リンクだけ）の形
+    expect(
+      hasVisibleContent(
+        parseContent(
+          `<blockquote data-x-post="${ID}"><p></p> <a href="https://x.com/user/status/${ID}"></a></blockquote>`,
+        ),
+      ),
+    ).toBe(true);
+    expect(
+      hasVisibleContent(parseContent(`<div><blockquote data-x-post="${ID}"></blockquote></div>`)),
+    ).toBe(true);
+    // 印のない空の引用は、今までどおり
+    expect(hasVisibleContent(parseContent("<blockquote><p> </p></blockquote>"))).toBe(false);
   });
 });
 
@@ -245,6 +364,25 @@ describe("悪意のある本文（sendo のサニタイズをすり抜けたと�
     const many = parseContent("<b>x</b>".repeat(MAX_CONTENT_ELEMENTS + 10));
     expect(elements(many)).toHaveLength(MAX_CONTENT_ELEMENTS);
     expect(textOf(many)).toHaveLength(MAX_CONTENT_ELEMENTS + 10);
+  });
+
+  test("X の投稿の印の値で、属性やタグから抜け出せない", () => {
+    expect(
+      parseContent(
+        '<blockquote data-x-post="1"><script>alert(1)</script>"><p>a</p></blockquote>' +
+          `<blockquote data-x-post='1" onclick="alert(1)'>b</blockquote>` +
+          "<blockquote data-x-post=1&gt;<img src=x onerror=alert(1)>c</blockquote>",
+      ),
+    ).toEqual([
+      { tag: "blockquote", xPost: "1", children: ['">', { tag: "p", children: ["a"] }] },
+      { tag: "blockquote", children: ["b"] },
+      { tag: "blockquote", children: ["c"] },
+    ]);
+    // とても長い値は、印にせず、時間もかからない
+    const started = performance.now();
+    const nodes = parseContent(`<blockquote data-x-post="${"1".repeat(1_000_000)}">d</blockquote>`);
+    expect(nodes).toEqual([{ tag: "blockquote", children: ["d"] }]);
+    expect(performance.now() - started).toBeLessThan(2000);
   });
 
   test("数の属性は、数字だけを通し、表のまたぐ数は上限で切る", () => {

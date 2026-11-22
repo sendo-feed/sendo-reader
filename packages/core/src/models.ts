@@ -93,6 +93,11 @@ export interface ContentElement {
   rowspan?: number;
   /** ol だけ */
   start?: number;
+  /**
+   * blockquote だけ。sendo が印（`data-x-post`）を付けた X の投稿の ID（1〜20 桁の数字の文字列）。
+   * 数としては扱わない（docs/decisions/embeds.md）
+   */
+  xPost?: string;
 }
 
 /** 文字（プレーンテキスト）か、要素 */
