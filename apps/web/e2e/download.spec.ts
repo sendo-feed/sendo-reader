@@ -4,7 +4,8 @@ import { FakeSendo, routeFakeSendo, signIn } from "./fake-sendo";
 
 /**
  * 取得した全文を、HTML か Markdown の 1 つのファイルでダウンロードする。画像は data: URI で
- * 埋め込み、取れなかった画像は代替テキストで残す。フィードの本文を出していても、書き出すのは全文
+ * 埋め込み、取れなかった画像は代替テキストで残す。フィードの本文を出していても、書き出すのは全文。
+ * 訳文を出していれば、訳したタイトルと訳した本文（本文を訳さなかった記事は全文）を書き出す
  */
 
 // Chromium は、ファイルシステムの文字コードで表せない名前（LANG が空のときの日本語など）を
@@ -189,10 +190,12 @@ test("訳文を出していれば、訳したタイトルと訳した本文を�
   expect(original.text).toContain("Full text");
   expect(original.text).not.toContain("訳した見出し");
 
-  // 本文を訳さなかった記事は、訳文を出していても全文を書き出せる
+  // 本文を訳さなかった記事は、訳文を出していれば、訳したタイトルと全文を書き出す（画面と同じ）
   await page.locator(".article-list .item", { hasText: "本文を訳さなかった記事" }).click();
   await expect(view.locator(".body")).toHaveText("Full text of no body");
   const fallback = await download(page, "Markdown");
+  expect(fallback.name).toBe("本文を訳さなかった記事.md");
+  expect(fallback.text).toContain('title: "本文を訳さなかった記事"');
   expect(fallback.text).toContain("Full text of no body");
 });
 
@@ -223,20 +226,29 @@ test("訳文を出していて、訳した本文が手元にないときは、Do
   await page.locator(".article-list").getByRole("button", { name: "Unread only" }).click();
   await expect(page.locator(".article-list .item")).toHaveCount(1);
 
-  // オフラインで開く。原文に切り替えても全文は取れないので、原文でも Download は出ない
+  // オフラインで開く。訳した本文が手元にないので、Download は出ない
   server.onRequest = () => Promise.reject(new TypeError("offline"));
   await context.setOffline(true);
   await page.locator(".article-list .item").first().click();
   const view = page.locator(".article-view");
   await expect(view.locator(".summary")).toHaveText("訳した要約");
   await openActions(page);
-  await expect(actions(page).getByRole("button", { name: "Show original text" })).toBeVisible();
+  await expect(actions(page).getByRole("button", { name: /^Download/ })).toHaveCount(0);
+  // 原文に切り替えても、全文が手元にないので出ない
+  await actions(page).getByRole("button", { name: "Show original text" }).click();
+  await expect(view.getByRole("heading", { level: 1 })).toHaveText("Original title");
+  await openActions(page);
   await expect(actions(page).getByRole("button", { name: /^Download/ })).toHaveCount(0);
   await page.keyboard.press("Escape");
 
-  // つながって訳した本文が届くと、出る
+  // つながると、原文では全文が届いて出る。訳文に戻すと、訳した本文が届いて出る
   server.onRequest = null;
   await context.setOffline(false);
+  await expect(view.locator(".body")).toHaveText("Full text");
+  await openActions(page);
+  await expect(actions(page).getByRole("button", { name: "Download", exact: true })).toBeVisible();
+  await page.keyboard.press("Escape");
+  await page.keyboard.press("t");
   await expect(view.locator(".body")).toHaveText("訳した本文");
   await openActions(page);
   await expect(actions(page).getByRole("button", { name: "Download", exact: true })).toBeVisible();
