@@ -16,7 +16,9 @@ export default defineConfig({
   reporter: process.env.CI ? [["list"], ["github"]] : "list",
   use: {
     baseURL: "http://localhost:4173",
-    trace: "retain-on-failure",
+    // CI では、やり直す回（retries）だけトレースを録る。全部のテストで録ると、そのぶん CPU を使い、
+    // 遅くなる。手元はやり直さないので、失敗したテストのトレースを残す
+    trace: process.env.CI ? "on-first-retry" : "retain-on-failure",
   },
   projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
   webServer: {
