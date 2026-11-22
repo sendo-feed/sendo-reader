@@ -330,3 +330,114 @@ describe("手元の訳した本文を消す", () => {
     expect(await core.fetchTranslatedContent(readFirst, T1)).toMatchObject({ status: "ready" });
   });
 });
+
+describe("訳した本文を先に取る", () => {
+  test("訳文のある未読の記事は、全文ではなく訳した本文を取る。訳文のない記事は全文。選ぶ順と件数は同じ", async () => {
+    const { server, core, feed, article: first } = await seeded();
+    const t = server.now;
+    // seeded の記事（訳文あり）より新しい記事を 2 つ。片方は訳文なし
+    const plain = server.deliver(feed.id, { publishedAt: t + 2 });
+    const second = server.deliver(feed.id, { publishedAt: t + 1, translation: translated(T1) });
+    for (const article of [first, plain, second]) {
+      server.pageContents.set(article.id, "<p>全文</p>");
+      server.translatedContents.set(article.id, `<p>訳 ${article.id}</p>`);
+    }
+    await core.sync();
+
+    // 1 回に取るのは 2 件まで。新しい順に選ぶ
+    expect(await core.prefetchArticleContents(2)).toBe(2);
+    expect(server.pageContentRequests).toEqual([plain.id]);
+    expect(server.translationContentRequests).toEqual([second.id]);
+    expect(await core.prefetchArticleContents(2)).toBe(1);
+    expect(server.translationContentRequests).toEqual([second.id, first.id]);
+    expect(server.pageContentRequests).toEqual([plain.id]);
+
+    // 開くと、通信を待たずに訳した本文が出る
+    const requested = server.requests.length;
+    expect(await core.getTranslatedContent(first.id, T1)).toMatchObject({
+      status: "ready",
+      content: { nodes: [{ tag: "p", children: [`訳 ${first.id}`] }] },
+    });
+    expect(server.requests).toHaveLength(requested);
+    // 取るものがなければ、sendo に何も聞かない
+    expect(await core.prefetchArticleContents(2)).toBe(0);
+    expect(server.requests).toHaveLength(requested);
+  });
+
+  test("全文を先に取ったあとで訳文が届いたら、次の先読みで訳した本文を取る。全文は消さない", async () => {
+    const { server, core, feed } = await seeded();
+    const article = server.deliver(feed.id, {
+      translation: { ...translated(T1), status: "queued", title: null, translatedAt: null },
+    });
+    server.pageContents.set(article.id, "<p>全文</p>");
+    server.translatedContents.set(article.id, "<p>訳</p>");
+    await core.sync();
+    await core.prefetchArticleContents(10);
+    expect(server.pageContentRequests).toContain(article.id);
+    expect(server.translationContentRequests).not.toContain(article.id);
+
+    server.setTranslation(article.id, translated(T2));
+    await core.sync();
+    await core.prefetchArticleContents(10);
+    expect(server.translationContentRequests).toContain(article.id);
+    expect(await core.getTranslatedContent(article.id, T2)).toMatchObject({ status: "ready" });
+    expect(await core.getArticleContent(article.id, "page")).toMatchObject({ status: "ready" });
+  });
+
+  test("本文を訳さなかった記事は、続けて全文を取る。次の先読みでは、どちらも取り直さない", async () => {
+    const { server, core, article } = await seeded();
+    server.pageContents.set(article.id, "<p>全文</p>");
+    server.translatedContents.set(article.id, null);
+    expect(await core.prefetchArticleContents(10)).toBe(1);
+    expect(server.translationContentRequests).toEqual([article.id]);
+    expect(server.pageContentRequests).toEqual([article.id]);
+    expect(await core.getArticleContent(article.id, "page")).toMatchObject({ status: "ready" });
+
+    const before = server.requests.length;
+    expect(await core.prefetchArticleContents(10)).toBe(0);
+    expect(server.requests).toHaveLength(before);
+  });
+
+  test("本文を訳さなかった印のある記事は、これまでどおり全文を取る", async () => {
+    const { server, core, article } = await seeded();
+    server.pageContents.set(article.id, "<p>全文</p>");
+    server.translatedContents.set(article.id, null);
+    // 開いて、本文を訳さなかったと知った（全文はまだない）
+    expect(await core.fetchTranslatedContent(article.id, T1)).toEqual({ status: "none" });
+    expect(await core.prefetchArticleContents(10)).toBe(1);
+    expect(server.translationContentRequests).toEqual([article.id]);
+    expect(server.pageContentRequests).toEqual([article.id]);
+  });
+
+  test("取る間に訳し直された記事は、その回では取り直さず、全文も取らない。同期で時刻が届いたら手元から使う", async () => {
+    const { server, core, article } = await seeded();
+    server.pageContents.set(article.id, "<p>全文</p>");
+    // 手元は T1 のまま、sendo で訳し直した
+    server.setTranslation(article.id, translated(T2));
+    server.translatedContents.set(article.id, "<p>新しい訳</p>");
+    expect(await core.prefetchArticleContents(10)).toBe(0);
+    expect(server.translationContentRequests).toEqual([article.id]);
+    expect(server.pageContentRequests).toEqual([]);
+
+    await core.sync();
+    expect(await core.getTranslatedContent(article.id, T2)).toMatchObject({ status: "ready" });
+    expect(await core.prefetchArticleContents(10)).toBe(0);
+    expect(server.translationContentRequests).toEqual([article.id]);
+  });
+
+  test("開いている一覧の、読んでいる位置のすぐ下から、訳した本文を取る", async () => {
+    const { server, core, feed, article: first } = await seeded();
+    const other = server.subscribe({ url: "https://example.com/other.xml" });
+    const newest = server.deliver(other.id, {
+      publishedAt: server.now + 10_000,
+      translation: translated(T1),
+    });
+    for (const article of [first, newest]) {
+      server.translatedContents.set(article.id, "<p>訳</p>");
+    }
+    await core.sync();
+    core.setOpenList({ feedId: feed.id }, { tab: "tab", seq: 1 });
+    expect(await core.prefetchArticleContents(10)).toBe(2);
+    expect(server.translationContentRequests).toEqual([first.id, newest.id]);
+  });
+});

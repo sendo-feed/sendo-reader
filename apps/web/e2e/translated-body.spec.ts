@@ -314,3 +314,33 @@ test("Translate で頼んだ記事は、訳文が届くと訳した本文に替�
   await expect(view.getByRole("heading", { level: 1 })).toHaveText("フィーチャートグル");
   await expect(view.locator(".body")).toHaveText("訳した本文");
 });
+
+test("訳文のある未読の記事は、同期のあとに訳した本文を先に取っておき、オフラインで開いても出る", async ({
+  page,
+  context,
+}) => {
+  const server = new FakeSendo();
+  const feed = server.subscribe({ url: "https://blog.example/feed.xml", title: "Blog" });
+  const article = server.deliver(feed.id, {
+    title: "Refactoring with Codemods",
+    summary: "Codemods are scripts.",
+    url: "https://blog.example/codemods",
+    translation: translated("コードモッドでリファクタリングする", new Date().toISOString()),
+  });
+  server.pageContents.set(article.id, "<p>Full text</p>");
+  server.translatedContents.set(article.id, "<p>訳した本文</p>");
+  await routeFakeSendo(context, server);
+  await page.goto("/");
+  await signIn(page);
+  // 全文ではなく、訳した本文を先に取る
+  await expect.poll(() => server.translationContentRequests).toEqual([article.id]);
+  expect(server.pageContentRequests).toEqual([]);
+
+  await setOffline(context, server, true);
+  await page.locator(".article-list .item").first().click();
+  const view = page.locator(".article-view");
+  await expect(view.getByRole("heading", { level: 1 })).toHaveText(
+    "コードモッドでリファクタリングする",
+  );
+  await expect(view.locator(".body")).toHaveText("訳した本文");
+});
