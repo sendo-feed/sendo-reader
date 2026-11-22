@@ -21,6 +21,7 @@ function setup(
   let clock = 0;
   let holder = options.holder === undefined ? "self" : options.holder;
   let releasedAt: number | null = null;
+  const timers: { fn: () => void; ms: number }[] = [];
   const page = watchBackForwardCache({
     window: {
       addEventListener: (type, listener) => {
@@ -46,11 +47,18 @@ function setup(
     sleep: async (ms) => {
       clock += ms;
     },
+    setTimeout: (fn, ms) => {
+      timers.push({ fn, ms });
+    },
     now: () => clock,
   });
   const fire = (type: "pagehide" | "pageshow", persisted: boolean) =>
     listeners.get(type)?.({ persisted });
-  return { page, log, fire };
+  /** あとで動かすものを、すべて動かす */
+  const runTimers = () => {
+    for (const timer of timers.splice(0)) timer.fn();
+  };
+  return { page, log, fire, timers, runTimers };
 }
 
 describe("leave（reader の外へ移る）", () => {
@@ -84,10 +92,28 @@ describe("leave（reader の外へ移る）", () => {
     expect(log).toEqual(["release", "assign /login at 1000"]);
   });
 
-  test("ロックを調べるのに失敗しても、ワーカーを止めて移る", async () => {
+  test("ロックを調べるのに失敗しても、投げずに、ワーカーを止めて移る", async () => {
     const { page, log } = setup({ queryFails: true });
-    await expect(page.leave("/login")).rejects.toThrow();
+    await page.leave("/login");
     expect(log).toEqual(["release", "assign /login at 0"]);
+  });
+
+  test("移ったあと 30 秒たってもページが残っていたら（移動が起きなかった）、読み込み直す", async () => {
+    const { page, log, timers, runTimers } = setup();
+    await page.leave("/login");
+    expect(timers.map((t) => t.ms)).toEqual([30_000]);
+    runTimers();
+    expect(log).toEqual(["release", "assign /login at 0", "reload"]);
+  });
+
+  test("移ってページが隠れたら（ふつうに移った・bfcache に入った）、時間がたっても読み込み直さない", async () => {
+    for (const persisted of [false, true]) {
+      const { page, log, fire, runTimers } = setup();
+      await page.leave("/login");
+      fire("pagehide", persisted);
+      runTimers();
+      expect(log).toEqual(["release", "assign /login at 0"]);
+    }
   });
 
   test("移ったあと bfcache から戻ったら、読み込み直す", async () => {
