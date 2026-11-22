@@ -14,6 +14,10 @@ const READER = `http://localhost:${PORT}/`;
 const EMBED = `http://127.0.0.1:${PORT}`;
 const ID = "1234567890123456789";
 
+// 親にする reader の画面の Service Worker は要らない（あると、同じオリジンのほかのページの読み込みを
+// 横取りする）
+test.use({ serviceWorkers: "block" });
+
 let preview: RunningPreview | null = null;
 test.beforeAll(async () => {
   preview = await startPreview(PORT, { X_EMBED_ORIGIN: EMBED });
@@ -37,12 +41,17 @@ window.twttr = {
       frame.src = "https://platform.twitter.com/embed/Tweet.html?id=" + id;
       frame.style.display = "block";
       frame.style.border = "0";
-      frame.style.height = "200px";
+      // 本物と同じく、入れ物の幅が狭いと、ウィジェットは高く組まれる
+      frame.style.height = container.getBoundingClientRect().width < 546 ? "300px" : "200px";
       tweet.append(frame);
       container.append(tweet);
       return new Promise((resolve, reject) => {
         window.__settle = (how) =>
-          how === "element" ? resolve(tweet) : how === "reject" ? reject(new Error("x")) : resolve(undefined);
+          how === "element"
+            ? resolve(tweet)
+            : how === "reject"
+              ? reject(new Error("x"))
+              : resolve(how === "object" ? {} : undefined);
       });
     },
   },
@@ -119,7 +128,7 @@ function messages(page: Page): Promise<unknown[]> {
   return page.evaluate(() => (window as unknown as { xPostMessages: unknown[] }).xPostMessages);
 }
 
-function settle(frame: Frame, how: "element" | "undefined" | "reject"): Promise<void> {
+function settle(frame: Frame, how: "element" | "undefined" | "object" | "reject"): Promise<void> {
   return frame.evaluate((value) => {
     (window as unknown as { __settle: (how: string) => void }).__settle(value);
   }, how);
@@ -298,7 +307,13 @@ test("挨拶が 2 回来たら、最後の結果を送り直す", async ({ page,
     ]);
 });
 
-test("枠が中身より低くても、スクロールバーで入れ物の幅が縮まない", async ({ page, context }) => {
+test("枠が中身より低くても、文書をスクロールさせない（スクロールバーで入れ物の幅を縮めない）", async ({
+  page,
+  context,
+}) => {
+  // 幅を取るスクロールバーの環境（Windows や Linux）で、幅が縮むと、ウィジェットが狭い幅で組まれ、
+  // 高さが枠の高さで変わる。Playwright の headless の Chromium はスクロールバーに幅を取らせないので、
+  // 高さの違いでは確かめられない。スクロールさせないことを、文書の様子で確かめる
   await routeX(context, "fake");
   const frame = await openFrame(page, `#id=${ID}&theme=light`);
   await page.evaluate(() => {
@@ -308,20 +323,16 @@ test("枠が中身より低くても、スクロールバーで入れ物の幅�
   await createTweetCalled(frame);
   await settle(frame, "element");
   await expect.poll(() => messages(page)).toEqual([{ type: "sendo:x-post:rendered", height: 220 }]);
-  expect(
-    await frame.evaluate(() => ({
-      overflow: document.documentElement.style.overflow,
-      width: document.getElementById("post")?.getBoundingClientRect().width,
-      // 枠の幅 550px から、iframe の既定の枠線（左右 2px ずつ）を除いた幅。スクロールバーの分は縮まない
-      viewport: document.documentElement.clientWidth,
-    })),
-  ).toEqual({ overflow: "hidden", width: 546, viewport: 546 });
+  expect(await frame.evaluate(() => getComputedStyle(document.documentElement).overflowY)).toBe(
+    "hidden",
+  );
 });
 
 for (const [name, widgets, how] of [
   ["widgets.js が読めない", "unreachable", null],
   ["twttr がない", "missing-twttr", null],
   ["Promise が undefined で解決した", "fake", "undefined"],
+  ["Promise が要素でない値で解決した", "fake", "object"],
   ["Promise が reject した", "fake", "reject"],
 ] as const) {
   test(`${name}ときは、failed を送る`, async ({ page, context }) => {
