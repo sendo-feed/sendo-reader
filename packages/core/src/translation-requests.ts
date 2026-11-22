@@ -127,11 +127,18 @@ export class TranslationRequests {
     }
     const translation = article.translation;
     if (translation == null) return article;
-    if (request.failed && returned(request, translation)) {
-      return { ...article, translationRequest: "failed" };
+    if (request.failed) {
+      // 失敗の文を出したあとに状態が変わったのは、ほかの人の頼み。この端末で頼んだものとして
+      // 見せない（次の同期の終わりに忘れる）
+      return returned(request, translation)
+        ? { ...article, translationRequest: "failed" }
+        : article;
     }
+    // 頼んだものが届いた（同期の終わりに忘れる）。この端末で頼んだものとして見せ続けると、画面が
+    // あとで届くほかの人の訳文まで、頼んだものとして扱ってしまう
+    if (arrived(request, translation)) return article;
     const marked = request.marked && this.#now() - request.acceptedAt < TRANSLATION_MARK_MS;
-    if (marked && !arrived(request, translation)) {
+    if (marked) {
       return {
         ...article,
         translation: { ...translation, status: "translating" },

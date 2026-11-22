@@ -90,7 +90,10 @@ export function describeTranslationError(error: unknown): string {
       case "translation_not_supported":
         return "この記事は訳せません。";
       case "retranslation_not_allowed":
-        return "この記事はもう訳し直したか、訳し直せる訳文がありません。";
+        return "この記事は、もう訳し直したか、訳し直しの最中か、訳し直せる訳文がありません。";
+      case "translation_exists":
+        // 訳し直しの指定に対応する前の sendo は、本文を読まずにその場の翻訳として断る
+        return "この Sendo では訳し直しを使えません。Sendo を新しくすると使えます。";
       case "not_found":
         return "この記事は Sendo にもうありません。";
     }

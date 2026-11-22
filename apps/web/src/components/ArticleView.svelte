@@ -310,7 +310,8 @@
       translatedState = "none";
       originalStarted = false;
       showOriginal = false;
-      requestSeen = false;
+      requested = null;
+      retranslateConfirmOpen = false;
       translateError = null;
       if (id === null) {
         article = null;
@@ -473,36 +474,41 @@
   });
 
   /**
-   * この記事をこの端末で訳してもらうよう頼んだ（頼んだ記事として core が覚えている）のを見た。
-   * 頼んだ記事の訳文が届いたら、開いていても訳文に替える（docs/decisions/translation.md の 3）
+   * この記事をこの端末で訳してもらうよう頼んだ（頼んだ記事として core が覚えている）のを見た。何を
+   * 頼んだか（その場の翻訳か訳し直しか）。頼んだものが届いたら、開いていても訳文に替える
+   * （docs/decisions/translation.md の 3）。替えたら、訳せなかったら、core が忘れたら下ろし、あとで
+   * 届くほかの人の訳文では替えない
    */
-  let requestSeen = $state(false);
+  let requested = $state<"translate" | "retranslate" | null>(null);
 
   $effect(() => {
     const current = article;
     if (current === null || current.id !== articleId) return;
     untrack(() => {
       const translation = current.translation;
-      // core が覚えている間だけ、この端末で頼んだ記事として扱う。訳せなかったとき（失敗の文を出したら
-      // 忘れる）と、core が忘れたあと（1 時間、ほかの人が頼んだ）に届いた訳文では替えない
-      if (current.translationRequest === "requested") requestSeen = true;
-      else if (current.translationRequest === "failed" || translation?.translatedAt == null) {
-        requestSeen = false;
-      }
-      // その場の翻訳なら訳文が、訳し直しなら訳し直した訳文が届いたら替える
-      if (
-        requestSeen &&
-        translation != null &&
-        translation.translatedAt !== null &&
-        (openedTranslation === null ||
-          (translation.retranslated && openedTranslation.translatedAt !== translation.translatedAt))
+      if (current.translationRequest === "requested") {
+        // ほかのタブで頼んだときも、この端末で頼んだものとして扱う。訳文の時刻があるのは訳し直し
+        requested ??= translation?.translatedAt == null ? "translate" : "retranslate";
+      } else if (current.translationRequest === "failed" || translation == null) {
+        requested = null;
+      } else if (requested === "translate" && translation.translatedAt === null) {
+        // core が忘れた（1 時間）
+        requested = null;
+      } else if (
+        requested === "retranslate" &&
+        translation.status === "translated" &&
+        !translation.retranslated
       ) {
-        // 替えたら、この端末で頼んだものは届いた。あとでほかの端末が替えた訳文では替えない
-        requestSeen = false;
-        showOriginal = false;
-        openTranslation(current.id, translation);
-        onviewchange();
+        requested = null;
       }
+      if (requested === null || translation == null || translation.translatedAt === null) return;
+      if (requested === "retranslate" && !translation.retranslated) return;
+      // 頼んだものが届いた。まだ出していなければ替える
+      requested = null;
+      if (openedTranslation?.translatedAt === translation.translatedAt) return;
+      showOriginal = false;
+      openTranslation(current.id, translation);
+      onviewchange();
     });
   });
 
@@ -525,7 +531,7 @@
       article.translation.status === "translated" &&
       !article.translation.retranslated,
   );
-  /** 訳し直しの確かめの窓 */
+  /** 訳し直しの確かめの窓（記事を替えたら閉じる。確かめたのと別の記事を訳し直さない） */
   let retranslateConfirmOpen = $state(false);
   /** 頼んで、sendo の返事を待っている記事（記事ごと。ほかの記事の Translate は止めない） */
   let translatingIds = $state<string[]>([]);
@@ -557,7 +563,7 @@
       await reader.client.requestTranslation(id);
       // 受け付けられた。訳文がすぐ届いて、core が頼んだ記事を忘れたあとに読み直しても、このタブで
       // 頼んだ記事として訳文に替える（頼んだ印を読めるかどうかに頼らない）
-      if (articleId === id) requestSeen = true;
+      if (articleId === id) requested = "translate";
     } catch (error) {
       if (articleId === id) translateError = describeTranslationError(error);
     } finally {
@@ -578,7 +584,7 @@
     try {
       await reader.client.requestTranslation(id, { retranslation: true });
       // 受け付けられた。訳し直した訳文が届いたら、開いていても替える（決定の 3）
-      if (articleId === id) requestSeen = true;
+      if (articleId === id) requested = "retranslate";
     } catch (error) {
       if (articleId === id) translateError = describeTranslationError(error);
     } finally {
@@ -1380,7 +1386,12 @@
     訳し直した訳文は、この記事を読むすべての人の訳文を置き換えます。訳し直せるのは 1 回だけです。
   </p>
   <div class="choices">
-    <button type="button" class="primary" disabled={translating || !online} onclick={retranslate}>
+    <button
+      type="button"
+      class="primary"
+      disabled={!canRetranslate || translating || !online}
+      onclick={retranslate}
+    >
       Retranslate
     </button>
     <button type="button" class="link" onclick={() => (retranslateConfirmOpen = false)}>
