@@ -1230,6 +1230,8 @@ test.describe("覚えた高さの枠を取ったあと", () => {
       await expect(post(page, n).locator("blockquote")).not.toHaveAttribute("hidden", "");
       await expect(post(page, n).locator(".reserved, iframe")).toHaveCount(0);
     }
+    // ほかの投稿の、まだ読み込んでいない枠は、そのまま
+    await expect(post(page, 6).locator(".reserved")).toHaveCount(1);
     await scrollToEnd(page);
     await page.waitForTimeout(300);
     await scrollTo(page, 5);
@@ -1362,5 +1364,41 @@ test.describe("覚えた高さの枠を取ったあと", () => {
     await expect(first.locator("blockquote")).not.toHaveAttribute("hidden", "");
     await expect(second.locator(".reserved")).toHaveCount(0);
     await expect(second.locator("blockquote")).not.toHaveAttribute("hidden", "");
+  });
+  test("同じ投稿の片方が失敗したあと、読み込み中だったもう片方が表示範囲から出たら、元の引用に戻す", async ({
+    page,
+    context,
+  }) => {
+    const behavior: Record<string, How> = { "*": "render:200" };
+    await openArticle(page, context, `${quote(1)}${quote(1)}${filler(80)}`, behavior);
+    const [first, second] = [post(page, 1).first(), post(page, 1).last()];
+    for (const item of [first, second]) {
+      await expect(item.locator("blockquote")).toHaveAttribute("hidden", "");
+    }
+    await scrollTo(page, 10);
+    await letRemember(page);
+    behavior["*"] = "manual";
+    await page.reload();
+    await expect(page.locator(".article-view h1")).toHaveText("X の投稿を引いた記事");
+    await expect(iframes(page)).toHaveCount(2);
+    // 1 つ目だけを失敗させる（2 つ目は読み込み中のまま）
+    const frames = () =>
+      page.frames().filter((frame) => frame.url().startsWith(`${EMBED}/#id=${postId(1)}&`));
+    await expect.poll(() => frames().length).toBe(2);
+    const failing = frames()[0];
+    if (failing === undefined) throw new Error("隔離フレームがない");
+    await failing.waitForLoadState("load");
+    await expect.poll(() => failing.evaluate(() => "__settle" in window)).toBe(true);
+    await failing.evaluate(() =>
+      (window as unknown as { __settle: (height?: number) => void }).__settle(undefined),
+    );
+    await expect(iframes(page)).toHaveCount(1);
+    // 読み込み中の 2 つ目を表示範囲から出すと、空の枠ではなく元の引用に戻る
+    await scrollToEnd(page);
+    await expect(iframes(page)).toHaveCount(0);
+    for (const item of [first, second]) {
+      await expect(item.locator(".reserved")).toHaveCount(0);
+      await expect(item.locator("blockquote")).not.toHaveAttribute("hidden", "");
+    }
   });
 });

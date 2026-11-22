@@ -300,7 +300,8 @@ export class XPostLoader {
    * にする。ほかは、元の引用に戻す（embeds.md の 4、5）
    */
   #release(post: XPostFrame): void {
-    if (post.reserved === null) {
+    // 同じ投稿がほかで失敗していたら、もう読み込まないので、元の引用に戻す
+    if (post.reserved === null || this.#failed.has(post.id)) {
       this.#cancel(post);
       return;
     }
