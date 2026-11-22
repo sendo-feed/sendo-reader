@@ -244,6 +244,15 @@ const migrations: readonly (readonly string[])[] = [
     "create index articles_feed_unread_published_idx on articles (feed_id, published_at, id) where read_at is null",
     "create index articles_feed_read_idx on articles (feed_id, read_at) where read_at is not null",
   ],
+  [
+    // sendo の翻訳（docs/decisions/translation.md）。状態が null なら翻訳なし。すでに手元にある行は
+    // null のまま（もう一度届くまでラベルを出さない。最初から同期し直させない）
+    "alter table articles add column translation_status text",
+    "alter table articles add column translation_language text",
+    "alter table articles add column translation_title text",
+    "alter table articles add column translation_summary text",
+    "alter table articles add column translated_at integer",
+  ],
 ];
 
 export const SCHEMA_VERSION = migrations.length;

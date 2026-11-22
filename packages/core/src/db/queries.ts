@@ -1,4 +1,11 @@
-import type { Article, Feed, Folder, UnreadCounts } from "../models";
+import {
+  type Article,
+  type ArticleTranslation,
+  type Feed,
+  type Folder,
+  TRANSLATION_STATUSES,
+  type UnreadCounts,
+} from "../models";
 import type { Executor, SqlValue } from "./database";
 
 /** 画面のための読み出し。手元の DB だけを読み、ネットワークは待たない */
@@ -58,10 +65,15 @@ type ArticleRow = {
   received_at: number;
   read_at: number | null;
   starred_at: number | null;
+  translation_status: string | null;
+  translation_language: string | null;
+  translation_title: string | null;
+  translation_summary: string | null;
+  translated_at: number | null;
 };
 
 const ARTICLE_COLUMNS =
-  "a.id, a.feed_id, a.url, a.title, a.summary, a.author, a.thumbnail_url, a.has_content, a.published_at, a.received_at, a.read_at, a.starred_at";
+  "a.id, a.feed_id, a.url, a.title, a.summary, a.author, a.thumbnail_url, a.has_content, a.published_at, a.received_at, a.read_at, a.starred_at, a.translation_status, a.translation_language, a.translation_title, a.translation_summary, a.translated_at";
 
 /**
  * 一覧の範囲（どの記事を出すか。未読だけの絞り込みと並び順は含まない）。何も指定しなければ、
@@ -259,5 +271,18 @@ function toArticle(row: ArticleRow): Article {
     receivedAt: row.received_at,
     readAt: row.read_at,
     starredAt: row.starred_at,
+    translation: toTranslation(row),
+  };
+}
+
+function toTranslation(row: ArticleRow): ArticleTranslation | null {
+  const status = TRANSLATION_STATUSES.find((s) => s === row.translation_status);
+  if (status === undefined || row.translation_language === null) return null;
+  return {
+    language: row.translation_language,
+    status,
+    title: row.translation_title,
+    summary: row.translation_summary,
+    translatedAt: row.translated_at,
   };
 }

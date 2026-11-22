@@ -13,7 +13,7 @@
  * 組み立てる。sendo が使う項目の形を変えたら、ここが型チェックで止まる。
  */
 
-import { DEVICE_TYPES, type JsonValue, type SavedPage } from "../models";
+import { DEVICE_TYPES, type JsonValue, type SavedPage, TRANSLATION_STATUSES } from "../models";
 import { normalizeSavedUrl, SAVED_ID_PATTERN } from "../saved";
 import type { SyncArticle, SyncPage, SyncSetting } from "../sync/page";
 import { toSameOriginUrl } from "../url";
@@ -87,6 +87,16 @@ export function toSyncPage(body: unknown): SyncPage {
               receivedAt: Date.parse(article.receivedAt),
               readAt: article.readAt === null ? null : Date.parse(article.readAt),
               starredAt: article.starredAt === null ? null : Date.parse(article.starredAt),
+              translation:
+                article.translation === null
+                  ? null
+                  : {
+                      ...article.translation,
+                      translatedAt:
+                        article.translation.translatedAt === null
+                          ? null
+                          : Date.parse(article.translation.translatedAt),
+                    },
               deleted: false,
             },
     ),
@@ -177,10 +187,43 @@ function parseSyncChanges(body: unknown): Omit<SyncChanges, "feeds" | "settings"
         receivedAt: time(row.receivedAt, at("receivedAt")),
         readAt: nullableTime(row.readAt, at("readAt")),
         starredAt: nullableTime(row.starredAt, at("starredAt")),
+        translation: parseTranslation(row.translation),
         deleted: false,
       };
     }),
   };
+}
+
+/** 元の言語の形（ISO 639-1 の小文字 2 文字か、判定できなかった und） */
+const LANGUAGE_PATTERN = /^(?:[a-z]{2}|und)$/;
+
+/**
+ * 記事の翻訳（あとから足された項目。sendo の docs/decisions/sync.md の 10）。翻訳に対応する前の
+ * sendo（項目がない）と、翻訳の付かない記事（null）は、翻訳なし。
+ *
+ * 翻訳はラベルと訳したタイトルにしか使わないので、形が崩れていても（知らない状態、読めない時刻など）
+ * 同期は止めず、その記事を翻訳なしとして扱う。sendo が状態を足しても、古い reader が止まらない
+ */
+function parseTranslation(value: unknown): Schemas["SyncArticleTranslation"] {
+  if (value === undefined || value === null) return null;
+  if (typeof value !== "object" || Array.isArray(value)) return null;
+  const row = value as Record<string, unknown>;
+  const status = TRANSLATION_STATUSES.find((s) => s === row.status);
+  const { language, title, summary, translatedAt } = row;
+  if (status === undefined) return null;
+  if (typeof language !== "string" || !LANGUAGE_PATTERN.test(language)) return null;
+  if (!isNullableString(title) || !isNullableString(summary)) return null;
+  if (
+    translatedAt !== null &&
+    (typeof translatedAt !== "string" || Number.isNaN(Date.parse(translatedAt)))
+  ) {
+    return null;
+  }
+  return { language, status, title, summary, translatedAt };
+}
+
+function isNullableString(value: unknown): value is string | null {
+  return value === null || typeof value === "string";
 }
 
 /** 保存 API の応答にも、差分同期と同じ境界の検証を使う。 */

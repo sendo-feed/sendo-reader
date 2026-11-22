@@ -32,6 +32,7 @@ export { wrapSqliteWasm } from "./db/sqlite-wasm";
 export type {
   Article,
   ArticleContent,
+  ArticleTranslation,
   ContentElement,
   ContentNode,
   DeviceType,
@@ -44,6 +45,7 @@ export type {
   SettingItem,
   SettingsChange,
   Table,
+  TranslationStatus,
   UnreadCounts,
   User,
 } from "./models";

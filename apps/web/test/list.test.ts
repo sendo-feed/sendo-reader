@@ -21,6 +21,7 @@ function article(id: string, publishedAt: number): Article {
     receivedAt: publishedAt,
     readAt: null,
     starredAt: null,
+    translation: null,
   };
 }
 

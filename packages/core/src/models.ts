@@ -62,6 +62,32 @@ export interface Article {
   receivedAt: number;
   readAt: number | null;
   starredAt: number | null;
+  /**
+   * sendo の翻訳（sendo の docs/decisions/translation.md の 14、docs/decisions/translation.md）。
+   * 訳さない記事、訳すかどうかがまだ決まっていない記事、翻訳に対応する前の sendo からの記事は null
+   */
+  translation: ArticleTranslation | null;
+}
+
+/** 翻訳の状態。queued は自動の翻訳を待っている、translating は訳している、translated は訳文がある */
+export type TranslationStatus = "queued" | "translating" | "translated" | "untranslated";
+
+export const TRANSLATION_STATUSES: readonly TranslationStatus[] = [
+  "queued",
+  "translating",
+  "translated",
+  "untranslated",
+];
+
+export interface ArticleTranslation {
+  /** 訳すかどうかを決めたときの、記事の主言語（ISO 639-1 の小文字。判定できなければ und） */
+  language: string;
+  status: TranslationStatus;
+  /** 訳したタイトルと要約（プレーンテキスト。信頼できないデータ）。訳文がなければ null */
+  title: string | null;
+  summary: string | null;
+  /** 訳した時刻（ミリ秒）。訳文がなければ null */
+  translatedAt: number | null;
 }
 
 export type SavedPage = {

@@ -12,6 +12,7 @@
   import type { ArticleListState, ListProgress } from "../lib/list.svelte";
   import { prefs, type ViewOptions } from "../lib/prefs.svelte";
   import { handleLink, isPlainClick, type ListAnchor, router } from "../lib/router.svelte";
+  import { listTitle, translationLabel } from "../lib/translation";
   import ArticleListItem from "./ArticleListItem.svelte";
   import Icon from "./Icon.svelte";
   import ReadCelebration from "./ReadCelebration.svelte";
@@ -913,7 +914,8 @@
             use:swipe={article}
           >
             <ArticleListItem
-              title={article.title ?? "(Untitled)"}
+              title={listTitle(article) ?? "(Untitled)"}
+              translationLabel={translationLabel(article.translation)}
               feedTitle={reader.feedTitle(article.feedId)}
               time={shortTime(
                 kind === "recentlyRead"
