@@ -128,6 +128,45 @@ export function createSendoApi(options: SendoApiOptions) {
       return { html: body.html, source: body.source.slice(0, 100) };
     },
 
+    /**
+     * 記事の訳文の本文（GET /articles/{id}/translation。docs/decisions/translation.md の 8）。訳文が
+     * ない（404。記事がない not_found も、訳文がない no_translation も）なら null。html が null なら、
+     * sendo が本文を訳さなかった（タイトルと要約だけを訳した）。html は信頼できない HTML として扱う
+     */
+    async articleTranslation(
+      id: string,
+      signal?: AbortSignal,
+    ): Promise<{ html: string | null; source: string | null; translatedAt: number } | null> {
+      const { data, error, response } = await client(signal).GET("/articles/{id}/translation", {
+        params: { path: { id } },
+      });
+      if (response.status === 404) return null;
+      if (data === undefined) throw errorFromBody(response.status, error);
+      const body = data as {
+        content?: unknown;
+        contentSource?: unknown;
+        translatedAt?: unknown;
+      } | null;
+      const translatedAt =
+        typeof body?.translatedAt === "string" ? Date.parse(body.translatedAt) : Number.NaN;
+      if (
+        body === null ||
+        Number.isNaN(translatedAt) ||
+        !(body.content === null || typeof body.content === "string") ||
+        !(body.contentSource == null || typeof body.contentSource === "string")
+      ) {
+        throw new ApiError("server", "sendo の訳文の応答の形が違う");
+      }
+      // 決まりより大きい本文は、本文を訳さなかったものとして扱う（原文の本文を出す）
+      const html =
+        body.content === null || body.content.length > MAX_CONTENT_LENGTH ? null : body.content;
+      const source =
+        html === null || typeof body.contentSource !== "string"
+          ? null
+          : body.contentSource.slice(0, 100);
+      return { html, source, translatedAt };
+    },
+
     /** セッションのユーザー（GET /me）。ログインしていなければ ApiError("unauthorized") */
     async me(signal?: AbortSignal): Promise<User> {
       const { data, error, response } = await client(signal).GET("/me");

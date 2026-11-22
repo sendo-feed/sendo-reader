@@ -45,6 +45,11 @@ import {
   setSettingsSeed,
 } from "./db/synced-settings";
 import {
+  getStoredTranslatedContent,
+  putStoredTranslatedContent,
+  type StoredTranslatedContent,
+} from "./db/translated-content";
+import {
   type Article,
   type ArticleContent,
   DEVICE_TYPES,
@@ -57,6 +62,7 @@ import {
   type SettingItem,
   type SettingsChange,
   type Table,
+  type TranslatedContent,
   type UnreadCounts,
   type User,
 } from "./models";
@@ -241,6 +247,8 @@ export class ReaderCore {
   readonly #folderIds = new Map<string, string>();
   /** 取りにいっている本文（出どころと記事の ID ごと）。同じ本文を同時に 2 回取らない */
   readonly #contentFetches = new Map<string, Promise<StoredContent | null>>();
+  /** 取っている訳した本文（記事ごと。同じ記事を続けて頼まれても、1 回だけ取る） */
+  readonly #translationFetches = new Map<string, Promise<StoredTranslatedContent | null>>();
   readonly #feedTimesRefreshes = new Map<string, Promise<FeedFetchTimes | null>>();
   readonly #prefetchContents: number;
   #prefetching: Promise<number> | null = null;
@@ -1196,6 +1204,44 @@ export class ReaderCore {
   }
 
   /**
+   * 手元の訳した本文を読む（ネットワークを待たない。docs/decisions/translation.md の 8）。
+   * translatedAt は、画面が出している訳文の訳した時刻で、その時刻の本文だけを使う（ready か none。
+   * なければ missing）。本文は、通すタグと属性だけの木にして返す
+   */
+  async getTranslatedContent(articleId: string, translatedAt: number): Promise<TranslatedContent> {
+    const found = await getStoredTranslatedContent(this.#db, articleId);
+    const stored = found?.stored;
+    if (stored == null || stored.translatedAt !== translatedAt) return { status: "missing" };
+    return toTranslatedContent(stored);
+  }
+
+  /**
+   * 訳した本文を返す（docs/decisions/translation.md の 8、9）。手元に translatedAt の本文か、本文を
+   * 訳さなかった印があれば、ネットワークを待たない。なければ sendo から取り、手元に置いてある
+   * ものより新しければ置く。sendo の訳文が translatedAt のものでなければ（訳し直した、なくなった）、
+   * stale（新しい本文は置いておき、同期で時刻が届いたら使う）。届かなければ ApiError を投げる
+   */
+  async fetchTranslatedContent(
+    articleId: string,
+    translatedAt: number,
+  ): Promise<TranslatedContent> {
+    this.#requireSignedIn();
+    // 待つ前に、今のログインの合図を取る（待っている間のログアウトで中断されるように）
+    const session = this.#session.signal;
+    const found = await getStoredTranslatedContent(this.#db, articleId);
+    if (found === null) return { status: "stale" };
+    if (found.stored?.translatedAt === translatedAt) return toTranslatedContent(found.stored);
+    let fetched = await this.#fetchTranslatedContent(articleId, session);
+    // 前の時刻を頼んだ取得に合流して、頼んだ時刻より古い訳文が返った（取っている間に、同期で
+    // 新しい時刻が届いた）。その取得は終わったので、一度だけ取り直す
+    if (fetched !== null && fetched.translatedAt < translatedAt) {
+      fetched = await this.#fetchTranslatedContent(articleId, session);
+    }
+    if (fetched === null || fetched.translatedAt !== translatedAt) return { status: "stale" };
+    return toTranslatedContent(fetched);
+  }
+
+  /**
    * 画面がいま開いている一覧を知らせる（docs/decisions/local-first.md の「記事の本文」）。先読みは、
    * この一覧の、読んでいる位置のすぐ下から先に取る。一覧を出さない画面、言葉が空の Search、
    * Recently Read では null を渡す（すべての未読から新しい順に取る）。最後に知らせたものに従い、
@@ -1470,6 +1516,41 @@ export class ReaderCore {
     return running;
   }
 
+  /**
+   * sendo から訳した本文を取り、手元に置いてあるものより新しければ置く。sendo に訳文がなければ
+   * null。取る前に、セッションのユーザーを確かめる（#fetchContent と同じ）
+   */
+  #fetchTranslatedContent(
+    articleId: string,
+    session: AbortSignal,
+  ): Promise<StoredTranslatedContent | null> {
+    if (session.aborted) {
+      return Promise.reject(new ApiError("unauthorized", "ログインし直したので取らなかった"));
+    }
+    const existing = this.#translationFetches.get(articleId);
+    if (existing !== undefined) return existing;
+    const running = (async () => {
+      await this.#confirmSameUser(session);
+      const fetched = await this.#api.articleTranslation(articleId, session);
+      if (fetched === null) return null;
+      await this.#db.transaction(async (tx) => {
+        // 取っている間にログアウトしたり、ユーザーが替わったりしたら、置かない
+        throwIfSessionEnded(session);
+        if (!(await putStoredTranslatedContent(tx, articleId, fetched, this.#now()))) return;
+        // 上限を超えたら、既読の分を消す。いま置いた本文と、最後に開いた記事の本文は消さない
+        const limit = await this.#contentStorageLimit(tx);
+        if (limit > 0) await evictContents(tx, limit, await protectedArticles(tx, articleId));
+      });
+      return fetched;
+    })().finally(() => {
+      if (this.#translationFetches.get(articleId) === running) {
+        this.#translationFetches.delete(articleId);
+      }
+    });
+    this.#translationFetches.set(articleId, running);
+    return running;
+  }
+
   // --- 変更の通知 ---
 
   /** 手元の表が変わったら呼ぶ。やめるときは返した関数を呼ぶ */
@@ -1549,6 +1630,18 @@ async function clearAll(tx: Executor): Promise<void> {
 function toArticleContent(stored: StoredContent): ArticleContent | null {
   const nodes = parseContent(stored.html);
   return hasVisibleContent(nodes) ? { nodes, source: stored.source } : null;
+}
+
+/**
+ * 手元に置いた訳した本文を、画面に渡す形にする。本文を訳さなかった印か、出すもの（文字か画像）が
+ * 残らなければ none（原文の本文を出す）
+ */
+function toTranslatedContent(stored: StoredTranslatedContent): TranslatedContent {
+  if (stored.html === null) return { status: "none" };
+  const nodes = parseContent(stored.html);
+  return hasVisibleContent(nodes)
+    ? { status: "ready", content: { nodes, source: stored.source ?? "feed" } }
+    : { status: "none" };
 }
 
 /** 端末の種類を確かめる（画面のワーカーの外から来た値なので） */

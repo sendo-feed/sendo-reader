@@ -171,7 +171,7 @@ export async function markPageMissing(tx: Executor, articleId: string, now: numb
   );
 }
 
-/** 手元に置いた本文（全文とフィード本文）の合計の大きさ（UTF-8 のバイト数） */
+/** 手元に置いた本文（全文、フィード本文、訳した本文）の合計の大きさ（UTF-8 のバイト数） */
 export async function storedContentBytes(db: Executor): Promise<number> {
   const [row] = await db.all<{ bytes: number }>(
     "select coalesce(sum(bytes), 0) as bytes from article_content_sizes",
@@ -224,7 +224,11 @@ export async function evictContents(
       total -= row.bytes;
     }
     const ids = JSON.stringify(doomed);
-    for (const table of ["article_contents", "article_page_contents"]) {
+    for (const table of [
+      "article_contents",
+      "article_page_contents",
+      "article_translation_contents",
+    ]) {
       await tx.run(`delete from ${table} where article_id in (select value from json_each(?))`, [
         ids,
       ]);

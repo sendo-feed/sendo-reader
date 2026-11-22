@@ -253,6 +253,42 @@ const migrations: readonly (readonly string[])[] = [
     "alter table articles add column translation_summary text",
     "alter table articles add column translated_at integer",
   ],
+  [
+    // 訳した本文（docs/decisions/translation.md の 8）。原文の本文とは別に、訳した時刻と一緒に置く。
+    // html が null の行は、その時刻の訳文に本文がなかった（sendo が本文を訳さなかった）印
+    `create table article_translation_contents (
+      article_id text primary key,
+      html text,
+      source text,
+      translated_at integer not null,
+      fetched_at integer not null
+    ) strict`,
+    `create trigger articles_delete_translation_content after delete on articles
+     begin
+       delete from article_translation_contents where article_id = old.id;
+     end`,
+    // 大きさは、原文の本文と同じ表に写し、同じ上限に含める。本文のない印は数えない。本文の
+    // UPSERT の中で動くので、原文の本文と同じく、消してから入れる
+    ...(() => {
+      const put = `delete from article_content_sizes
+           where article_id = new.article_id and source = 'translation';
+         insert into article_content_sizes (article_id, source, bytes)
+           select new.article_id, 'translation', length(cast(new.html as blob))
+           where new.html is not null`;
+      return [
+        `create trigger article_translation_contents_size_insert
+         after insert on article_translation_contents begin ${put}; end`,
+        `create trigger article_translation_contents_size_update
+         after update on article_translation_contents begin ${put}; end`,
+        `create trigger article_translation_contents_size_delete
+         after delete on article_translation_contents
+         begin
+           delete from article_content_sizes
+             where article_id = old.article_id and source = 'translation';
+         end`,
+      ];
+    })(),
+  ],
 ];
 
 export const SCHEMA_VERSION = migrations.length;

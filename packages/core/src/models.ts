@@ -154,6 +154,20 @@ export type LocalArticleContent =
   | { status: "missing" }
   | { status: "none" };
 
+/**
+ * 訳した本文の様子（docs/decisions/translation.md の 8）。どれも、頼んだ訳した時刻の訳文のもの。
+ * - ready：手元にある（取った）
+ * - missing：まだ手元にない（getTranslatedContent だけ）
+ * - none：sendo が本文を訳さなかった。原文の本文を出す
+ * - stale：sendo の訳文が、頼んだ時刻のものでない（訳し直した、なくなった）。同期で新しい時刻が
+ *   届くまで、訳した要約を出しておく（fetchTranslatedContent だけ）
+ */
+export type TranslatedContent =
+  | { status: "ready"; content: ArticleContent }
+  | { status: "missing" }
+  | { status: "none" }
+  | { status: "stale" };
+
 export interface UnreadCounts {
   total: number;
   /** 未読のあるフィードだけ */
