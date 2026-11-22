@@ -7,6 +7,8 @@
   import type { ArticleListState } from "../lib/list.svelte";
   import { type ArticleSwipe, prefs } from "../lib/prefs.svelte";
   import { handleLink, router, viewHref } from "../lib/router.svelte";
+  import { xEmbedOrigin } from "../lib/x-embed";
+  import { setXPostLoader, XPostLoader } from "../lib/x-post.svelte";
   import ArticleBody from "./ArticleBody.svelte";
   import Dialog from "./Dialog.svelte";
   import Icon from "./Icon.svelte";
@@ -29,6 +31,37 @@
   let article = $state<Article | null>(null);
   let missing = $state(false);
   let scroller = $state<HTMLElement>();
+  let toolbarHeight = $state(0);
+
+  /**
+   * 本文の中の X の投稿を読み込む順番と時間（docs/decisions/embeds.md の 4）。隔離フレームの
+   * オリジンが未設定なら、作らない（投稿は、元の引用と X で開くリンクだけ）
+   */
+  const embedOrigin = xEmbedOrigin();
+  const xPosts = embedOrigin === null ? null : new XPostLoader(embedOrigin);
+  setXPostLoader(xPosts);
+  /**
+   * 読書位置が決まった（下の、本文が出たら位置を戻す effect が済んだ）。決まるまでは、X の投稿を
+   * 読み込まない。その effect は、開いたときの全文の自動の取得も待つので、全文を取りにいく記事では、
+   * 全文に替わってから（取れなければ、取れないと決まってから）読み込む（替わる前の本文で読み込んだ
+   * 枠は、作り直しになるため）
+   */
+  let positioned = $state(false);
+
+  $effect(() => xPosts?.connect());
+
+  /** 表示範囲は、スクロールする欄（狭い画面ではページ全体）から、ツールバーに隠れる分を除いたところ */
+  $effect(() => {
+    if (xPosts === null) return;
+    const height = Math.ceil(toolbarHeight);
+    // 狭い画面では、ツールバーは下にある
+    if (layout.pageScroll) xPosts.setArea(null, `0px 0px -${height}px 0px`);
+    else if (scroller !== undefined) xPosts.setArea(scroller, `-${height}px 0px 0px 0px`);
+  });
+
+  $effect(() => {
+    xPosts?.setReady(positioned);
+  });
 
   async function load(id: string) {
     const found = await reader.client.getArticle(id);
@@ -212,6 +245,8 @@
       preferFullText = true;
       pageAttempted = false;
       autoPageFailed = false;
+      positioned = false;
+      xPosts?.reset();
       if (id === null) {
         article = null;
         missing = false;
@@ -259,12 +294,17 @@
     untrack(() => {
       const top = restoreTop;
       restoreTop = null;
-      if (top === null) return;
+      if (top === null) {
+        positioned = true;
+        return;
+      }
       const id = articleId;
       void tick().then(() => {
-        // 待っている間に別の記事に替えた、読み始めた
-        if (articleId !== id || scrollTopOf(scroller) > 0) return;
-        scrollToTop(scroller, top);
+        // 待っている間に別の記事に替えた
+        if (articleId !== id) return;
+        // 読み始めていたら、戻さない
+        if (scrollTopOf(scroller) === 0) scrollToTop(scroller, top);
+        positioned = true;
       });
     });
   });
@@ -711,7 +751,7 @@
         </span>
       </div>
     {/if}
-    <div class="toolbar">
+    <div class="toolbar" bind:offsetHeight={toolbarHeight}>
       <button
         type="button"
         class="icon-button back"
