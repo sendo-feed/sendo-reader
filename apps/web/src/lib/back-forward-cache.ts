@@ -24,8 +24,14 @@ export interface BackForwardCacheEnvironment {
   assign: (url: string) => void;
   /** 代表のロックが空くのを待つ上限（ミリ秒）。既定は 1 秒 */
   releaseTimeout?: number;
-  /** 移ったあと、ページが残ったままなら読み込み直すまでの時間（ミリ秒）。既定は 30 秒。移動の途中（移った先の応答を待っている間）に読み込み直すと、移動が取り消されるので、遅い回線でも移り終わる長さにする */
-  stuckTimeout?: number;
+  /**
+   * leave で移ったのにページが残っている（移動が起きなかったか、移った先の応答が遅い）。ワーカーが
+   * いないので、読み込み直せることを利用者に知らせる。自分では読み込み直さない（移動の途中なら、
+   * 取り消してしまうため）
+   */
+  onStalled: () => void;
+  /** 移ったあと、ページが残っていたら onStalled を呼ぶまでの時間（ミリ秒）。既定は 10 秒 */
+  stallTimeout?: number;
   /** 何ミリ秒か待つ（テストで差し替える） */
   sleep?: (ms: number) => Promise<void>;
   /** あとで動かす（テストで差し替える） */
@@ -39,8 +45,8 @@ export interface PageLeaver {
    * reader の外へページごと移る（Google のログイン、Discord の連携）。先にワーカーを止め、代表の
    * ロックが空いたのを確かめてから移る。ほかのタブが代表のときは空かないので、上限まで待って移る
    * （生きている代表がいるので、次に開いたページは止まらない）。失敗しても投げずに移る。
-   * 移動が起きずにページが残ったら（読み込みを止めた、アプリに渡ったなど）、ワーカーがいないので、
-   * しばらくして読み込み直す
+   * しばらくしてもページが残っていたら（読み込みを止めた、アプリに渡った、応答が遅いなど）、
+   * ワーカーがいないので、読み込み直せることを知らせる（onStalled）
    */
   leave(url: string): Promise<void>;
 }
@@ -56,7 +62,7 @@ export interface PageLeaver {
  *   （docs/decisions/local-first.md の 5）
  * - それ以外の移動（リンクを開くなど）に備えて、bfcache に入るとき（persisted の pagehide）にも止める
  * - 止めたあとに bfcache から戻ったら、ワーカーがいないので、読み込み直す。leave で移ったのに
- *   ページが残ったときも、しばらくして読み込み直す
+ *   ページが残ったときは、読み込み直せることを知らせる
  *
  * ロックを持つページを bfcache に入れないブラウザ（Chromium）では、pagehide ／ pageshow の
  * persisted が true にならないので、leave で止める以外は何もしない。
@@ -113,8 +119,8 @@ export function watchBackForwardCache(env: BackForwardCacheEnvironment): PageLea
       release();
       // 移れなかったとき（assign が投げたときも）に備えて、先に仕掛ける
       schedule(() => {
-        if (!pageHidden) env.reload();
-      }, env.stuckTimeout ?? 30_000);
+        if (!pageHidden) env.onStalled();
+      }, env.stallTimeout ?? 10_000);
       env.assign(url);
     },
   };

@@ -36,6 +36,9 @@ if (location.pathname === AUTHORIZE_PATH) {
     release: reader.stop,
     reload: () => location.reload(),
     assign: (url) => location.assign(url),
+    onStalled: () => {
+      state.leaveStalled = true;
+    },
   });
   const state = new ReaderState(reader.client, page.leave);
   // 設定の正は手元の DB（docs/decisions/settings.md）。つないで、読み直す

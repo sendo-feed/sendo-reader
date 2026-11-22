@@ -120,3 +120,37 @@ test("bfcache に入らないとき（persisted が false）は、ワーカー�
   await page.keyboard.press("s");
   await expect(page.locator(".article-view").getByRole("button", { name: "Unsave" })).toBeVisible();
 });
+
+test("ログインへ移れずにページが残っていたら、読み込み直さずに知らせ、Reload で読み込み直す", async ({
+  page,
+  context,
+}) => {
+  // 知らせを出すまで 10 秒待つ
+  test.setTimeout(60_000);
+  await routeFakeSendo(context, seed());
+  await page.goto("/");
+  // ログインの入口が 204 を返し、移動が起きない（ページが残る）。応答が遅いまま移動の途中にある
+  // ページは、Playwright が移り終わるまで調べられないので、移動の起きない形で真似る
+  await page.route("**/api/v1/auth/google/login**", (route) => route.fulfill({ status: 204 }));
+  await page.evaluate(() => Object.assign(window, { notReloaded: true }));
+  await signIn(page);
+
+  // 移動が取り消されたページでは、Playwright の locator が答えなくなるので、evaluate で調べて押す
+  const stalled = () =>
+    page.evaluate(() => document.querySelector('[role="alert"]')?.textContent ?? null);
+  await expect.poll(stalled, { timeout: 15_000 }).toContain("移り先のページが開きません");
+  expect(await page.evaluate(() => "notReloaded" in window)).toBe(true);
+
+  await page.unroute("**/api/v1/auth/google/login**");
+  const reloaded = page.waitForEvent("load");
+  await page.evaluate(() => {
+    const button = [...document.querySelectorAll('[role="alert"] button')].find(
+      (b) => b.textContent === "Reload",
+    );
+    (button as HTMLButtonElement).click();
+  });
+  await reloaded;
+  await expect(page.getByRole("button", { name: "Google でログイン" })).toBeEnabled();
+  expect(await page.evaluate(() => "notReloaded" in window)).toBe(false);
+  await expect.poll(() => heldLeaderLocks(page)).toBe(1);
+});

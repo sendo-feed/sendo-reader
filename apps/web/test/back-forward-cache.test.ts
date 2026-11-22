@@ -43,6 +43,7 @@ function setup(
       releasedAt = clock;
     },
     reload: () => log.push("reload"),
+    onStalled: () => log.push("stalled"),
     assign: (url) => log.push(`assign ${url} at ${clock}`),
     sleep: async (ms) => {
       clock += ms;
@@ -98,15 +99,15 @@ describe("leave（reader の外へ移る）", () => {
     expect(log).toEqual(["release", "assign /login at 0"]);
   });
 
-  test("移ったあと 30 秒たってもページが残っていたら（移動が起きなかった）、読み込み直す", async () => {
+  test("移ったあと 10 秒たってもページが残っていたら、読み込み直さずに知らせる", async () => {
     const { page, log, timers, runTimers } = setup();
     await page.leave("/login");
-    expect(timers.map((t) => t.ms)).toEqual([30_000]);
+    expect(timers.map((t) => t.ms)).toEqual([10_000]);
     runTimers();
-    expect(log).toEqual(["release", "assign /login at 0", "reload"]);
+    expect(log).toEqual(["release", "assign /login at 0", "stalled"]);
   });
 
-  test("移ってページが隠れたら（ふつうに移った・bfcache に入った）、時間がたっても読み込み直さない", async () => {
+  test("移ってページが隠れたら（ふつうに移った・bfcache に入った）、時間がたっても知らせない", async () => {
     for (const persisted of [false, true]) {
       const { page, log, fire, runTimers } = setup();
       await page.leave("/login");

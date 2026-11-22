@@ -1,4 +1,5 @@
 <script lang="ts">
+  import LeaveStalled from "./components/LeaveStalled.svelte";
   import VersionMismatch from "./components/VersionMismatch.svelte";
   import { useReader } from "./lib/context";
   import Login from "./routes/Login.svelte";
@@ -7,7 +8,9 @@
   const state = useReader();
 </script>
 
-{#if state.versionMismatch !== null}
+{#if state.leaveStalled}
+  <LeaveStalled />
+{:else if state.versionMismatch !== null}
   <VersionMismatch error={state.versionMismatch} />
 {/if}
 {#if state.signedIn === null}

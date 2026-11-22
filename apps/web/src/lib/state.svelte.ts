@@ -43,6 +43,11 @@ export class ReaderState {
    * （lib/back-forward-cache.ts）。移ったあとは client が答えない
    */
   readonly leave: (url: string) => Promise<void>;
+  /**
+   * leave で移ったのに、しばらくしてもページが残っている。DB のワーカーを止めているので、
+   * 読み込み直せることを知らせる（components/LeaveStalled.svelte）
+   */
+  leaveStalled = $state(false);
   /** 起動の途中で、版の違うタブのために止まった。番号の合う代表に替わったら、起動し直す */
   #startBlocked = false;
 
