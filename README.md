@@ -98,7 +98,7 @@ reader のコンテナの設定（環境変数）は、次のとおりです。`
   - `Referrer-Policy: no-referrer`、`X-Content-Type-Options: nosniff`
 - 隔離フレームのホスト名では、`/api/v1/me` などの Sendo のパスが 404 になること
 - reader の画面の CSP に `frame-src https://x-embed.example.net` が入ること
-- 本物の X で、投稿が 1 つ出ること：ブラウザーで `https://x-embed.example.net/#id=20&theme=light` を、reader の画面の中の iframe（開発者ツールで足す）から開くと、投稿が出ます（フレームの外で直接開くと、何もしません）
+- 本物の X で、記事の中の投稿が出ること：X の投稿を引いた記事を reader で開き、投稿までスクロールすると、引用が X の公式ウィジェットに置き換わります（ライトとダークのテーマで、それぞれ 1 回）。開発者ツールのコンソールに、CSP の違反が出ないこと。ウィジェットの下の「Open on X」から、投稿を開けること
 
 手元でイメージを作るときは `docker build -t sendo-reader .` です。手元で作ったイメージを Sendo の `compose.yaml` で試すときは、`reader` の `image` を `sendo-reader` に替えます。
 

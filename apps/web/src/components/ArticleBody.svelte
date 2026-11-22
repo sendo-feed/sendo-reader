@@ -41,7 +41,10 @@
         >{@render render(node.children)}</a
       >
     {:else if node.tag === "blockquote" && node.xPost !== undefined}
-      <XPost id={node.xPost}>{@render render(node.children)}</XPost>
+      <!-- 本文が替わったら（フィードの本文から全文へ、など）、同じ位置の投稿でも作り直す -->
+      {#key node}
+        <XPost id={node.xPost}>{@render render(node.children)}</XPost>
+      {/key}
     {:else if node.tag === "table"}
       <div class="table-scroll">
         <table>
