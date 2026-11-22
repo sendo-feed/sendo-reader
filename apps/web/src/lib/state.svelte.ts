@@ -38,10 +38,16 @@ export class ReaderState {
   versionMismatch = $state<ProtocolMismatchError | null>(null);
 
   readonly client: ReaderClient;
+  /**
+   * reader の外へページごと移る（Google のログイン、Discord の連携）。DB のワーカーを止めてから移る
+   * （lib/back-forward-cache.ts）。移ったあとは client が答えない
+   */
+  readonly leave: (url: string) => Promise<void>;
   /** 起動の途中で、版の違うタブのために止まった。番号の合う代表に替わったら、起動し直す */
   #startBlocked = false;
 
-  constructor(client: ReaderClient) {
+  constructor(client: ReaderClient, leave: (url: string) => Promise<void>) {
+    this.leave = leave;
     this.client = watchVersionMismatch(client, (error) => {
       this.versionMismatch = error;
     });

@@ -2,10 +2,11 @@ import { expect, type Page, test } from "@playwright/test";
 import { FakeSendo, routeFakeSendo, signIn } from "./fake-sendo";
 
 /**
- * ページが bfcache に入るときに DB のワーカーを止め、戻ったら読み込み直す（Issue #250）。
- * Safari は、ワーカーごとページを止めて残し、代表のロックを持ったままにする。Chromium は、ロックを
- * 持つページを bfcache に入れず、Playwright は bfcache を切っているので、bfcache に入る・戻る
- * ときのイベント（persisted が true の pagehide ／ pageshow）を、ページに起こして真似る。
+ * reader の外へ移る前と、ページが bfcache に入るときに DB のワーカーを止め、bfcache から戻ったら
+ * 読み込み直す（Issue #250）。Safari は、ワーカーごとページを止めて残し、代表のロックを持ったままに
+ * する。Chromium は、ロックを持つページを bfcache に入れず、Playwright は bfcache を切っているので、
+ * bfcache に入る・戻るときのイベント（persisted が true の pagehide ／ pageshow）は、ページに起こして
+ * 真似る。
  */
 
 const LEADER_LOCK = "sendo-reader:leader";
@@ -31,6 +32,43 @@ function firePageTransition(page: Page, type: "pagehide" | "pageshow"): Promise<
     type,
   );
 }
+
+test("Google でログインするときは、移る前に代表のロックを離し、戻ったページが代表になる", async ({
+  page,
+  context,
+}) => {
+  await routeFakeSendo(context, seed());
+  await page.goto("/");
+  await expect(page.getByRole("button", { name: "Google でログイン" })).toBeVisible();
+  await expect.poll(() => heldLeaderLocks(page)).toBe(1);
+
+  // ログインの入口への移動を止めておき、移る前のページでロックを確かめる
+  let reachLogin: () => void = () => {};
+  const reached = new Promise<void>((resolve) => {
+    reachLogin = resolve;
+  });
+  let proceed: () => void = () => {};
+  const proceeding = new Promise<void>((resolve) => {
+    proceed = resolve;
+  });
+  await page.route("**/api/v1/auth/google/login**", async (route) => {
+    reachLogin();
+    await proceeding;
+    await route.fallback();
+  });
+  await signIn(page);
+  await reached;
+  // 移っている途中のページでは evaluate が移り終わるのを待つので、同じオリジンの別のページで調べる
+  const observer = await context.newPage();
+  await observer.goto("/manifest.webmanifest");
+  expect(await heldLeaderLocks(observer)).toBe(0);
+  await observer.close();
+
+  proceed();
+  const item = page.locator(".article-list .item", { hasText: "最初の記事" });
+  await expect(item).toBeVisible();
+  expect(await heldLeaderLocks(page)).toBe(1);
+});
 
 test("bfcache に入るときに代表のロックを離して、次に開いたページが動き、戻ったら読み込み直す", async ({
   page,

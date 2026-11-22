@@ -13,7 +13,7 @@
 
   async function signInAgain() {
     try {
-      await startSignIn(reader.client);
+      await startSignIn(reader);
     } catch (e) {
       signInError = describeError(e);
     }
