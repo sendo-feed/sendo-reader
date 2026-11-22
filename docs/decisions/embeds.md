@@ -20,7 +20,7 @@
      ```html
      <iframe src="<隔離フレームのオリジン>/#id=<ID>&theme=<light か dark>"
        sandbox="allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox"
-       allow="fullscreen" referrerpolicy="no-referrer" title="X の投稿"></iframe>
+       allow="fullscreen" referrerpolicy="no-referrer" title="X の投稿" tabindex="-1"></iframe>
      ```
 
    - 隔離フレームのページは、外部の `embed.js` と空の入れ物だけ。`embed.js` は `https://platform.twitter.com/widgets.js` を読み込み、`twttr.widgets.createTweet(id, 入れ物, { dnt: true, lang: "ja", conversation: "none", theme })` を呼ぶ。`color-scheme` は、ハッシュの `theme` から `document.documentElement.style.colorScheme` で付け、reader のテーマとそろえる
@@ -51,6 +51,8 @@
 6. **スワイプとキーボード**
    - ウィジェットの上に、透明な覆いを置く。覆いの上からの横のスワイプと縦のスクロールは、reader が受ける。覆いを 1 回押すと外れ、ウィジェットの中を操作できる。ウィジェットが表示範囲から出たら、覆いを戻す
    - reader の `window` の `blur` で、`document.activeElement` がウィジェットの iframe なら、本文に `focus({ preventScroll: true })` する。押したあとも `j` ／ `k` ／ `Esc` が効く。キーボードだけでウィジェットの中を操作することは、できない
+   - iframe は、Tab キーの順に入れない（`tabindex="-1"`）。Tab で本文を進むと、覆いと「Open on X」に移り、ウィジェットの中には入らない
+   - 覆いは、Tab で止まるボタンにし、読み上げの名前を付ける（そこに X の投稿があると分かる）。Enter と Space でも外れ、フォーカスは「Open on X」に移る。外したあとの中の操作は、ポインター（指、マウス）でだけできる
 7. **X に伝わること**
    - 表示範囲に入った投稿ごとに、読者の IP、開いた時刻、投稿の ID、隔離フレームのホスト名が X に伝わる。`dnt: true` を付けるが、計測の通信（`syndication.x.com/i/jot/embeds`）は減らない（`dnt=1` が付くだけ）
    - 通信の量は、投稿 1 つで約 450KB。動画付きは、再生を押す前から約 1.8MB。読み込みの途中で表示範囲から出て、入り直した投稿は、読み込み直すので、もう一度伝わる
@@ -68,12 +70,14 @@
 - **開発のときだけ http の localhost と 127.0.0.1 を受け付ける**：dev サーバーと e2e の preview は `http://localhost` で reader を配るので、同じサーバーから別のホスト名で隔離フレームを配れれば、本番と同じ「ホスト名で振り分ける」作りのまま確かめられる。コンテナでは受け付けない。本番の reader は `https` で、`http` の値に使い道がない。コンテナは自分のオリジンを知らないので、手元で `localhost` の reader を使う人が `http://localhost:<別のポート>` を設定すると、reader への要求がすべて隔離フレームのほうに振り分けられる。誤りやすい値は、受け付けない。
 - **`frame-ancestors` を付けない**：付けるには、reader のオリジンをコンテナに教える設定がもう 1 つ要る。ページが出すのは ID で指した公開の投稿だけで、クッキーも reader のデータも持たず、X との通信は訪問者のブラウザーから直接出る。
 - **覆いとフォーカスを戻すこと**：iframe の中のタッチとキーの入力は、親に届かない。覆いがないと、ウィジェットの上から記事のスワイプが始まらず、一度押すと `j` ／ `k` ／ `Esc` が効かなくなる。
+- **iframe を Tab キーの順に入れない**：入れたままだと、Tab で本文を進んで iframe に入ったところで、フォーカスを戻す処理が本文に戻し、また iframe に入る、を繰り返して、投稿より先へ Tab で進めない。キーボードだけでは中を操作できないので、Tab で入れなくしても、できることは減らない。
 
 ## 検討した代替案
 
 - **reader のオリジンで `widgets.js` を動かす**：作りは小さいが、上の理由で reader の CSP と Trusted Types を大きく緩めることになる。
 - **読者が押してから読み込む**：X に伝わるのは押した投稿だけになるが、読むたびに 1 手間かかる。伝えたくない読者は、設定で切れる。
 - **sendo が X から投稿の中身を取り、本文に入れる**：読者から X へ通信しなくなるが、中身を取るには、有料の API か、公式でない取得口に頼ることになる。動画も出せない。
+- **Tab キーで iframe に入ったときだけ、フォーカスを戻す先を変える**（投稿の次の要素や前の要素へ）：iframe の属性を変えずに済むが、押したキーの向きを覚え、前後の要素を探す処理が要る。
 - **位置を本文の要素で覚える**：高さを覚えなくてよいが、要素の道の付け方と、引用・画像・改行ごとの戻し方が要り、作りが大きい。
 - **ビルド時の設定にする**：コンテナの書き換えが要らないが、使う人がイメージを作り直すことになる（[コンテナ版](container.md)の 1）。
 - **設定のファイル（`/config.json`）を返す**：`index.html` を書き換えずに済むが、CSP は古いのに設定は新しい、という食い違いが起き、reader のためのパスも増える。
@@ -88,6 +92,6 @@
 - X がウィジェットの作り、置き場、通信先を変えたとき（隔離フレームの CSP と、成功・失敗の決め方を確かめ直す）。
 - Workbox の出力の形が変わり、`sw.js` を書き換えられなくなったとき。
 - Service Worker が返した `index.html` の CSP が、取り直した応答のヘッダーのものにならないと分かったとき。
-- iOS の Safari や Firefox で、位置がずれる、出ない、と分かったとき（確かめたのは Chromium と、デスクトップの WebKit）。
+- iOS の Safari や Firefox で、位置がずれる、出ない、Tab キーでウィジェットの中に入る、と分かったとき（確かめたのは Chromium と、デスクトップの WebKit。Tab キーの順は Chromium だけ）。
 - 通信の量や、X に伝わることが困ると分かったとき。
 - 隔離フレームのページが、ほかのサイトに使われて困ると分かったとき（`frame-ancestors` を足す）。
