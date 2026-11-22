@@ -293,18 +293,37 @@ export class ArticleListState {
 
   /**
    * 既読・スターを切り替える。押したらすぐ画面に出し、手元の DB への書き込みはそのあとに待つ
-   * （docs/decisions/performance.md の操作の反応 100ms）。書けなかったら、手元の DB の状態に戻す
+   * （docs/decisions/performance.md の操作の反応 100ms）。書けなかったら、押す前の表示に戻し、
+   * 手元の DB の状態を読み直す
    */
   async toggle(article: Article, field: "readAt" | "starredAt"): Promise<void> {
     const on = article[field] === null;
-    this.patch(article.id, { [field]: on ? Date.now() : null });
+    const value = on ? Date.now() : null;
+    this.patch(article.id, { [field]: value });
     try {
       if (field === "readAt") await this.#client.setRead(article.id, on);
       else await this.#client.setStarred(article.id, on);
     } catch (error) {
-      await this.refresh();
+      this.revert(article.id, field, value, article[field]);
+      await this.refreshAfterFailure();
       throw error;
     }
+  }
+
+  /**
+   * 書けなかった楽観的な更新を、押す前の値に戻す。そのあとに別の操作（続けて押した、読み直した）
+   * で値が替わっていたら、そちらを残す
+   */
+  revert(id: string, field: "readAt" | "starredAt", value: number | null, previous: number | null) {
+    if (this.find(id)?.[field] === value) this.patch(id, { [field]: previous });
+  }
+
+  /**
+   * 書けなかったあとに、手元の DB の状態を読み直す。読み直しも失敗したら（版の違うタブのために
+   * 代表とやり取りできない、など）、戻した表示のままにする
+   */
+  async refreshAfterFailure(): Promise<void> {
+    await this.refresh().catch(() => {});
   }
 
   /**
@@ -323,7 +342,12 @@ export class ArticleListState {
     try {
       await this.#client.setReadMany([...targets], true);
     } catch (error) {
-      await this.refresh();
+      this.#articles = this.articles.map((article) =>
+        targets.has(article.id) && article.readAt === readAt
+          ? { ...article, readAt: null }
+          : article,
+      );
+      await this.refreshAfterFailure();
       throw error;
     }
   }

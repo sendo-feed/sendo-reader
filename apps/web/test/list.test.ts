@@ -77,4 +77,58 @@ describe("ArticleListState", () => {
     expect(list.articles.map((a) => a.id)).toEqual(["a"]);
     expect(list.loading).toBe(false);
   });
+
+  describe("書けず、読み直しもできなかったとき（版の違うタブのために代表とやり取りできない、など）", () => {
+    /** 一覧を出したあと、書き込みも読み出しも失敗する窓口。a は保存済みで未読、b は既読、c は未読 */
+    async function failingList() {
+      let failing = false;
+      const write = () => Promise.reject(new Error("書けない"));
+      const read = () => Promise.reject(new Error("読み直せない"));
+      const client = {
+        listArticles: async () =>
+          failing
+            ? read()
+            : [
+                { ...article("a", 3), starredAt: 30 },
+                { ...article("b", 2), readAt: 20 },
+                article("c", 1),
+              ],
+        getArticles: async () => (failing ? read() : []),
+        setRead: write,
+        setStarred: write,
+        setReadMany: write,
+      } as unknown as ReaderClient;
+      const list = new ArticleListState(client);
+      await list.show({});
+      failing = true;
+      return list;
+    }
+
+    test("既読・スターの切り替えは、押す前の表示に戻る（読み直しの失敗は返さない）", async () => {
+      const list = await failingList();
+      const a = list.find("a");
+      if (a === null) throw new Error("記事がない");
+      await expect(list.toggle(a, "starredAt")).rejects.toThrow("書けない");
+      expect(list.find("a")?.starredAt).toBe(30);
+      await expect(list.toggle(a, "readAt")).rejects.toThrow("書けない");
+      expect(list.find("a")?.readAt).toBeNull();
+    });
+
+    test("押したあとに別の操作で値が替わっていたら、そちらを残す", async () => {
+      const list = await failingList();
+      const a = list.find("a");
+      if (a === null) throw new Error("記事がない");
+      const toggling = list.toggle(a, "starredAt");
+      // 書き込みの答えを待つ間に、読み直しなどで値が替わった
+      list.patch("a", { starredAt: 40 });
+      await expect(toggling).rejects.toThrow("書けない");
+      expect(list.find("a")?.starredAt).toBe(40);
+    });
+
+    test("まとめて既読にしたものは、既読にした記事だけを押す前の表示に戻す", async () => {
+      const list = await failingList();
+      await expect(list.markRead(["a", "b", "c"])).rejects.toThrow("書けない");
+      expect(list.articles.map((a) => a.readAt)).toEqual([null, 20, null]);
+    });
+  });
 });

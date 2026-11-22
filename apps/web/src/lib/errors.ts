@@ -1,4 +1,5 @@
 import { ApiError, type SyncStatus } from "@sendo-reader/core";
+import { ProtocolMismatchError } from "@sendo-reader/core/web";
 import { AccountChangedError } from "./account";
 
 export const DISCORD_UNAVAILABLE =
@@ -22,8 +23,24 @@ export function describeDiscordError(error: unknown): string {
   return describeError(error);
 }
 
+/**
+ * 版の違うタブと、やり取りの版の番号が合わない（docs/decisions/local-first.md の 5）。自分のほうが
+ * 古ければ、自分を読み込み直せば直る。相手が番号を名乗らなければ（この決まりより前の版）、相手が古い
+ */
+export function isOlderThanPeer(error: ProtocolMismatchError): boolean {
+  return error.peerVersion !== null && error.peerVersion > error.version;
+}
+
+/** 版の違うタブが開いているときの文。どちらのタブを読み込み直せばよいかを分けて書く */
+export function describeVersionMismatch(error: ProtocolMismatchError): string {
+  return isOlderThanPeer(error)
+    ? "新しい版の画面が、ほかのタブで開いています。このタブを読み込み直してください。"
+    : "古い版の画面が、ほかのタブで開いています。そのタブを読み込み直すか閉じると、このタブを使えます。";
+}
+
 /** 失敗を、画面に出す文にする */
 export function describeError(error: unknown): string {
+  if (error instanceof ProtocolMismatchError) return describeVersionMismatch(error);
   if (error instanceof AccountChangedError) {
     return "別のアカウントでログインしていたので、送りませんでした。そのアカウントに切り替えます。";
   }

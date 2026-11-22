@@ -560,7 +560,7 @@
         chordTimer = setTimeout(() => (chord = false), 1500);
       },
       "/": () => go({ kind: "search" }),
-      r: () => void reader.client.syncNow(),
+      r: () => void reader.client.syncNow().catch(() => {}),
       Escape: () => {
         if (menuOpen) menuOpen = false;
         else router.openArticle(null);

@@ -7,7 +7,7 @@ import {
   type UnreadCounts,
   type User,
 } from "@sendo-reader/core";
-import type { ReaderClient } from "@sendo-reader/core/web";
+import { ProtocolMismatchError, type ReaderClient } from "@sendo-reader/core/web";
 import { takeLoginError } from "./login";
 
 /**
@@ -31,11 +31,20 @@ export class ReaderState {
   readToday = $state(0);
   /** 記事が変わるたびに増える。一覧や記事の画面は、これを見て読み直す */
   articlesVersion = $state(0);
+  /**
+   * 版の違うタブが開いていて、代表のワーカーとやり取りできない（docs/decisions/local-first.md
+   * の 5）。どの呼び出しの失敗でも覚え、番号の合う代表に替わって同期の様子が届いたら消す
+   */
+  versionMismatch = $state<ProtocolMismatchError | null>(null);
 
   readonly client: ReaderClient;
+  /** 起動の途中で、版の違うタブのために止まった。番号の合う代表に替わったら、起動し直す */
+  #startBlocked = false;
 
   constructor(client: ReaderClient) {
-    this.client = client;
+    this.client = watchVersionMismatch(client, (error) => {
+      this.versionMismatch = error;
+    });
     client.onChange((tables) => {
       if (tables.has("folders")) void this.#loadFolders();
       if (tables.has("feeds") || tables.has("folders")) void this.#loadFeeds();
@@ -45,8 +54,17 @@ export class ReaderState {
       }
     });
     client.onStatus((status) => {
+      // 同期の様子は、番号の合う代表（か自分）からしか届かない
+      this.versionMismatch = null;
       this.status = status;
       this.user = status.user;
+      if (this.#startBlocked) {
+        // ログインしているかは、起動の続きで確かめる（Google のログインから戻ってきたときは、
+        // sendo のセッションを見る）
+        this.#startBlocked = false;
+        void this.#start();
+        return;
+      }
       if (this.signedIn !== status.signedIn) {
         this.signedIn = status.signedIn;
         if (status.signedIn) void this.#loadAll();
@@ -60,10 +78,29 @@ export class ReaderState {
    */
   async init(): Promise<void> {
     this.loginError = takeLoginError();
+    await this.#start();
+  }
+
+  async #start(): Promise<void> {
+    try {
+      await this.#signIn();
+    } catch (error) {
+      // 版の違うタブのために止まったら、知らせを出し（versionMismatch）、番号の合う代表に
+      // 替わるのを待つ
+      if (error instanceof ProtocolMismatchError) {
+        this.#startBlocked = true;
+        return;
+      }
+      throw error;
+    }
+  }
+
+  async #signIn(): Promise<void> {
     let signedIn: boolean;
     try {
       signedIn = await this.client.restoreSession();
     } catch (error) {
+      if (error instanceof ProtocolMismatchError) throw error;
       // 手元にユーザーがいれば restoreSession は待たずに答えるので、ここに来るのは、手元に
       // いなくて sendo に聞けなかったとき
       this.offline = error instanceof ApiError && error.kind === "network";
@@ -113,4 +150,32 @@ export class ReaderState {
     this.unread = unread;
     this.readToday = readToday;
   }
+}
+
+/**
+ * 窓口の呼び出しの失敗のうち、版の違うタブのためのもの（ProtocolMismatchError）を知らせる。
+ * 呼び出しの結果は変えない（呼んだ側は、今までどおり失敗を受ける。呼んだ側が失敗を受けなければ、
+ * 今までどおり処理されなかった失敗として報告される）
+ */
+function watchVersionMismatch(
+  client: ReaderClient,
+  onMismatch: (error: ProtocolMismatchError) => void,
+): ReaderClient {
+  const watched: Record<string, unknown> = {};
+  for (const [name, value] of Object.entries(client)) {
+    if (typeof value !== "function") {
+      watched[name] = value;
+      continue;
+    }
+    const call = value as (...args: unknown[]) => unknown;
+    watched[name] = (...args: unknown[]) => {
+      const result = call(...args);
+      if (!(result instanceof Promise)) return result;
+      return result.catch((error: unknown) => {
+        if (error instanceof ProtocolMismatchError) onMismatch(error);
+        throw error;
+      });
+    };
+  }
+  return watched as ReaderClient;
 }
