@@ -48,10 +48,12 @@ test("一覧に訳したタイトルとラベルを出し、次の同期で替�
   await expect(rows.nth(1).locator(".translation")).toHaveText("FR · Queued");
   await expect(rows.nth(2).locator(".translation")).toHaveCount(0);
 
-  // 記事の画面にも同じラベルを出す。見出しは原文のまま（訳文の表示は別の Issue）
+  // 記事の画面にも同じラベルを出す
   await rows.nth(0).locator(".item").click();
   const view = page.locator(".article-view");
-  await expect(view.getByRole("heading", { level: 1 })).toHaveText("Refactoring with Codemods");
+  await expect(view.getByRole("heading", { level: 1 })).toHaveText(
+    "コードモッドでリファクタリングする",
+  );
   await expect(view.locator("header .translation")).toHaveText("・ EN · Translated");
 
   server.setTranslation(waiting.id, {
@@ -64,4 +66,199 @@ test("一覧に訳したタイトルとラベルを出し、次の同期で替�
   await page.getByRole("button", { name: "Sync now" }).click();
   await expect(rows.nth(1)).toContainText("フィーチャートグル");
   await expect(rows.nth(1).locator(".translation")).toHaveText("FR · Translated");
+});
+
+/**
+ * 記事の画面で訳したタイトルを先に出し、原文に切り替える（docs/decisions/translation.md の 3、7）。
+ * どちらを出しているかは履歴の項目に持ち、読み込み直しても、戻る・進むでも同じ方に戻る
+ */
+test("記事の画面で訳したタイトルを出し、原文に切り替え、戻る・読み込み直しで同じ方に戻る", async ({
+  page,
+  context,
+}) => {
+  const server = new FakeSendo();
+  const feed = server.subscribe({ url: "https://blog.example/feed.xml", title: "Blog" });
+  const now = Date.now();
+  const translatedAt = new Date(now).toISOString();
+  server.deliver(feed.id, {
+    title: "Refactoring with Codemods",
+    summary: "Codemods are scripts.",
+    url: "https://blog.example/codemods",
+    publishedAt: now - 1000,
+    translation: {
+      language: "en",
+      status: "translated",
+      title: "<b>コードモッド</b>でリファクタリングする",
+      summary: "コードモッドはスクリプト。",
+      translatedAt,
+    },
+  });
+  const waiting = server.deliver(feed.id, {
+    title: "Feature Toggles",
+    summary: "Toggles.",
+    publishedAt: now - 2000,
+    translation: {
+      language: "fr",
+      status: "queued",
+      title: null,
+      summary: null,
+      translatedAt: null,
+    },
+  });
+  await routeFakeSendo(context, server);
+  await page.goto("/");
+  await signIn(page);
+
+  const list = page.locator(".article-list");
+  const view = page.locator(".article-view");
+  const heading = view.getByRole("heading", { level: 1 });
+  const actions = page.getByRole("dialog", { name: "Article actions" });
+  // 開いた記事は既読になるので、既読も出す
+  await list.getByRole("button", { name: "Unread only" }).click();
+  await expect(list.locator(".item")).toHaveCount(2);
+  const codemods = list.locator(".item").filter({ hasText: "コードモッド" });
+  const toggles = list.locator(".item").filter({ hasText: /Feature Toggles|フィーチャートグル/ });
+
+  await codemods.click();
+  // 訳したタイトルを文字のまま出し、元のページへのリンクは同じ。本文は原文
+  await expect(heading).toHaveText("<b>コードモッド</b>でリファクタリングする");
+  await expect(heading.getByRole("link")).toHaveAttribute("href", "https://blog.example/codemods");
+  await expect(view).toContainText("Codemods are scripts.");
+
+  await view.getByRole("button", { name: "More actions" }).click();
+  await actions.getByRole("button", { name: "Show original text" }).click();
+  await expect(heading).toHaveText("Refactoring with Codemods");
+  await view.getByRole("button", { name: "More actions" }).click();
+  await expect(actions.getByRole("button", { name: "Show translation" })).toBeVisible();
+  await page.keyboard.press("Escape");
+
+  // 原文のまま読み込み直すと原文。閉じて（一覧に戻って）進むと原文
+  await page.reload();
+  await expect(heading).toHaveText("Refactoring with Codemods");
+  await page.keyboard.press("Escape");
+  await expect(heading).toHaveCount(0);
+  await page.goForward();
+  await expect(heading).toHaveText("Refactoring with Codemods");
+
+  // t で訳文に戻る。閉じて進んでも訳文
+  await page.keyboard.press("t");
+  await expect(heading).toHaveText("<b>コードモッド</b>でリファクタリングする");
+  await page.keyboard.press("Escape");
+  await expect(heading).toHaveCount(0);
+  await page.goForward();
+  await expect(heading).toHaveText("<b>コードモッド</b>でリファクタリングする");
+
+  // 訳文のない記事では、切り替えが出ず、t は何もしない
+  await toggles.click();
+  await expect(heading).toHaveText("Feature Toggles");
+  await page.keyboard.press("t");
+  await expect(heading).toHaveText("Feature Toggles");
+  await view.getByRole("button", { name: "More actions" }).click();
+  await expect(actions.getByRole("button", { name: "Show original text" })).toHaveCount(0);
+  await page.keyboard.press("Escape");
+
+  // 開いている間に訳文が届いても、見出しは替えない。ラベルは替わる。開き直すと訳文
+  server.setTranslation(waiting.id, {
+    language: "fr",
+    status: "translated",
+    title: "フィーチャートグル",
+    summary: null,
+    translatedAt,
+  });
+  await page.getByRole("button", { name: "Sync now" }).click();
+  await expect(view.locator("header .translation")).toHaveText("・ FR · Translated");
+  await expect(heading).toHaveText("Feature Toggles");
+  await codemods.click();
+  await expect(heading).toHaveText("<b>コードモッド</b>でリファクタリングする");
+  await toggles.click();
+  await expect(heading).toHaveText("フィーチャートグル");
+
+  // 同じ記事を一覧から新しく開くと、訳文から出る
+  await codemods.click();
+  await page.keyboard.press("t");
+  await expect(heading).toHaveText("Refactoring with Codemods");
+  await toggles.click();
+  await codemods.click();
+  await expect(heading).toHaveText("<b>コードモッド</b>でリファクタリングする");
+
+  // 原文にしてほかの画面（Saved）に移り、戻ると原文
+  await page.keyboard.press("t");
+  await expect(heading).toHaveText("Refactoring with Codemods");
+  await page.locator("nav.sidebar").getByRole("link", { name: "Saved" }).click();
+  await expect(heading).toHaveCount(0);
+  await page.goBack();
+  await expect(heading).toHaveText("Refactoring with Codemods");
+});
+
+test("訳文のない記事（untranslated、翻訳なし）では切り替えが出ず、URL のない訳し済みの記事でも More actions で切り替えられる", async ({
+  page,
+  context,
+}) => {
+  const server = new FakeSendo();
+  const feed = server.subscribe({ url: "https://blog.example/feed.xml", title: "Blog" });
+  const now = Date.now();
+  server.deliver(feed.id, {
+    title: "Untranslated",
+    publishedAt: now - 1000,
+    translation: {
+      language: "en",
+      status: "untranslated",
+      title: null,
+      summary: null,
+      translatedAt: null,
+    },
+  });
+  server.deliver(feed.id, { title: "No translation", publishedAt: now - 2000 });
+  server.deliver(feed.id, {
+    title: "No link",
+    url: null,
+    publishedAt: now - 3000,
+    translation: {
+      language: "en",
+      status: "translated",
+      title: "リンクのない記事",
+      summary: null,
+      translatedAt: new Date(now).toISOString(),
+    },
+  });
+  await routeFakeSendo(context, server);
+  await page.goto("/");
+  await signIn(page);
+
+  const list = page.locator(".article-list");
+  const view = page.locator(".article-view");
+  const heading = view.getByRole("heading", { level: 1 });
+  const more = view.getByRole("button", { name: "More actions" });
+  const actions = page.getByRole("dialog", { name: "Article actions" });
+  await expect(list.locator(".item")).toHaveCount(3);
+
+  for (const title of ["Untranslated", "No translation"]) {
+    await list.locator(".item").filter({ hasText: title }).click();
+    await expect(heading).toHaveText(title);
+    await page.keyboard.press("t");
+    await expect(heading).toHaveText(title);
+    await more.click();
+    await expect(actions.getByRole("button", { name: "Show original text" })).toHaveCount(0);
+    await page.keyboard.press("Escape");
+  }
+
+  await list.locator(".item").filter({ hasText: "リンクのない記事" }).click();
+  await expect(heading).toHaveText("リンクのない記事");
+  await more.click();
+  // 元のページがないので、全文は出さない
+  await expect(actions.getByRole("button", { name: "Show full text" })).toHaveCount(0);
+  await actions.getByRole("button", { name: "Show original text" }).click();
+  await expect(heading).toHaveText("No link");
+});
+
+test("操作の一覧に t がある", async ({ page, context }) => {
+  const server = new FakeSendo();
+  const feed = server.subscribe({ url: "https://blog.example/feed.xml", title: "Blog" });
+  server.deliver(feed.id, { title: "記事" });
+  await routeFakeSendo(context, server);
+  await page.goto("/");
+  await signIn(page);
+  await expect(page.locator(".article-list .item")).toHaveCount(1);
+  await page.keyboard.press("?");
+  await expect(page.getByRole("dialog")).toContainText("Show translation / original text");
 });

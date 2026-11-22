@@ -13,7 +13,20 @@ test.describe("速さの予算", () => {
     const server = new FakeSendo();
     const feed = server.subscribe({ url: "https://blog.example/feed.xml", title: "Blog" });
     for (let i = 0; i < ARTICLES; i++) {
-      server.deliver(feed.id, { title: `記事 ${i}`, publishedAt: server.now - i * 60_000 });
+      server.deliver(feed.id, {
+        title: `記事 ${i}`,
+        publishedAt: server.now - i * 60_000,
+        // 先頭の記事は訳し済み（訳文と原文の切り替えを測る）
+        ...(i === 0 && {
+          translation: {
+            language: "en",
+            status: "translated",
+            title: `訳した記事 ${i}`,
+            summary: null,
+            translatedAt: new Date(server.now).toISOString(),
+          },
+        }),
+      });
     }
     await routeFakeSendo(context, server);
     await page.goto("/");
@@ -88,6 +101,33 @@ test.describe("速さの予算", () => {
         { press, expected },
       );
       console.log(`「${press}」の反応：${Math.round(elapsed)}ms`);
+      expect(elapsed).toBeLessThan(100);
+    }
+  });
+
+  test("訳文と原文の切り替え（t）は 100ms 以内", async ({ page, context }) => {
+    await page.locator(".article-list .item").first().click();
+    const heading = page.locator(".article-view").getByRole("heading", { level: 1 });
+    await expect(heading).toHaveText("訳した記事 0");
+    const cdp = await context.newCDPSession(page);
+    await cdp.send("Emulation.setCPUThrottlingRate", { rate: CPU_SLOWDOWN });
+
+    for (const expected of ["記事 0", "訳した記事 0"]) {
+      const elapsed = await page.evaluate(
+        (expected) =>
+          new Promise<number>((resolve) => {
+            const start = performance.now();
+            window.dispatchEvent(new KeyboardEvent("keydown", { key: "t" }));
+            const check = () => {
+              if (document.querySelector(".article-view h1")?.textContent?.trim() === expected) {
+                resolve(performance.now() - start);
+              } else requestAnimationFrame(check);
+            };
+            check();
+          }),
+        expected,
+      );
+      console.log(`「t」の反応（${expected}）：${Math.round(elapsed)}ms`);
       expect(elapsed).toBeLessThan(100);
     }
   });
