@@ -31,9 +31,10 @@ function world() {
   cleanups.push(serveFakeSendo(server, `${namespace}:fake-sendo`));
   /**
    * タブを開く。"failing" なら、DB を開けないワーカーにする。"other-version" なら、やり取りの
-   * 版の番号が違うワーカー（版の違うタブ）にする
+   * 版の番号が違うワーカー（版の違うタブ）にする。"slow" なら、DB を開くのに時間がかかり、開き
+   * 始めたらワーカーが { type: "opening" } を送る
    */
-  const open = (kind: "ok" | "failing" | "other-version" = "ok"): Tab => {
+  const open = (kind: "ok" | "failing" | "other-version" | "slow" = "ok"): Tab => {
     // Vite はワーカーのオプションを、その場に書いた値からしか読めない
     const worker =
       kind === "ok"
@@ -46,10 +47,15 @@ function world() {
               type: "module",
               name: namespace,
             })
-          : new Worker(new URL("./other-version-reader-worker.ts", import.meta.url), {
-              type: "module",
-              name: namespace,
-            });
+          : kind === "slow"
+            ? new Worker(new URL("./slow-reader-worker.ts", import.meta.url), {
+                type: "module",
+                name: namespace,
+              })
+            : new Worker(new URL("./other-version-reader-worker.ts", import.meta.url), {
+                type: "module",
+                name: namespace,
+              });
     cleanups.push(() => worker.terminate());
     const client = connectReader(worker);
     const tab: Tab = { worker, client, changes: [], statuses: [] };
@@ -344,23 +350,23 @@ describe("版の違うタブが混ざったとき", () => {
   });
 
   test("代表が番号を名乗らない（この決まりより前の版）と、頼みを送らずにすぐ失敗し、その知らせも画面に渡さない", async () => {
-    const { open, openLegacyLeader, joinPeers } = world();
+    const { open, openLegacyLeader } = world();
     const legacy = await openLegacyLeader();
     const tab = open();
     await expectMismatch(tab.client.createFolder("Tech"), null);
     await expectMismatch(tab.client.isSignedIn(), null);
     expect(legacy.received).toEqual([]);
 
-    const { messages } = joinPeers();
     legacy.post({ type: "changed", tables: ["folders"] });
     legacy.post({ type: "status", status: { signedIn: true } });
-    await vi.waitFor(() => {
-      expect(messages.map((m) => m.type)).toEqual(["changed", "status"]);
-    });
-    // 知らせが届いていれば、そのあとの呼び出しの答えより先に、画面に渡っている
-    await expectMismatch(tab.client.countPending(), null);
+    // 同じ送り手の知らせは、送った順に届く。番号の合う知らせが画面に届いたら、その前の知らせも
+    // タブのワーカーに届いている
+    const marker = { signedIn: false, marker: true };
+    legacy.post({ type: "status", version: PROTOCOL_VERSION, status: marker });
+    await vi.waitFor(() => expect(tab.statuses).toEqual([marker]));
     expect(tab.changes).toEqual([]);
-    expect(tab.statuses).toEqual([]);
+    // 頼みを送っていれば、ここまでに届いている
+    expect(legacy.received).toEqual([]);
   });
 
   test("番号のない頼み（この決まりより前の版のタブ）と番号の違う頼みは、代表が処理せずに失敗を返す", async () => {
@@ -441,15 +447,14 @@ describe("版の違うタブが混ざったとき", () => {
     tabs[0].statuses.length = 0;
     tabs[1].statuses.length = 0;
 
-    // 番号の合わない代表の知らせは、画面に渡さない
+    // 番号の合わない代表の知らせは、画面に渡さない（届く順の保証のある確かめは、番号を名乗らない
+    // 代表のテストでする。ここでは、ページに届いたあとに確かめるだけ）
     const { messages } = joinPeers();
     await other.client.createFolder("Tech");
     await vi.waitFor(() => {
       expect(messages).toContainEqual(expect.objectContaining({ type: "changed" }));
     });
     for (const tab of tabs) {
-      // 知らせが届いていれば、そのあとの呼び出しの答えより先に、画面に渡っている
-      await expectMismatch(tab.client.countPending(), PROTOCOL_VERSION + 1);
       expect(tab.changes).toEqual([]);
       expect(tab.statuses).toEqual([]);
     }
@@ -462,5 +467,24 @@ describe("版の違うタブが混ざったとき", () => {
       });
       expect((await tab.client.listFolders()).map((f) => f.name)).toEqual(["Tech"]);
     }
+  });
+
+  test("番号の合わない代表が閉じて代表のロックを取ったら、DB を開いている間の呼び出しも失敗させず、代表になってから受ける", async () => {
+    const { open, signIn } = world();
+    const other = open("other-version");
+    await signIn(other);
+    await other.client.syncNow();
+    const tab = open("slow");
+    await expectMismatch(tab.client.isSignedIn(), PROTOCOL_VERSION + 1);
+    const opening = new Promise<void>((resolve) => {
+      tab.worker.addEventListener("message", (event: MessageEvent) => {
+        if (event.data.type === "opening") resolve();
+      });
+    });
+
+    other.worker.terminate();
+    await opening;
+    const folderId = await tab.client.createFolder("Tech");
+    expect((await tab.client.listFolders()).map((f) => f.id)).toEqual([folderId]);
   });
 });

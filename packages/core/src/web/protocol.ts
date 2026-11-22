@@ -171,7 +171,11 @@ export type WorkerMessage =
  *
  * 頼み、知らせ、名乗りには version（PROTOCOL_VERSION）を付ける。この決まりより前の版のワーカー
  * は付けないので、受けるときは付いていない形も考える。hello、visible、result は、番号を確かめず
- * に受ける（result は、番号を確かめてから送った頼みにだけ届く）
+ * に受ける（result は、番号を確かめてから送った頼みにだけ届く）。
+ *
+ * 版の違うワーカーどうしが番号の食い違いに気づけるよう、hello、leader（leaderId と version）、
+ * result（失敗の name と peerVersion を含む）、call の from と id と version の形は、番号を上げても
+ * 変えない
  */
 export type PeerMessage =
   | { type: "call"; version?: number; from: string; id: number; method: Method; args: unknown[] }

@@ -79,6 +79,13 @@ export function runReaderWorker(options: ReaderWorkerOptions = {}): void {
    * 自分のタブからの呼び出しを送らずに待たせる
    */
   let currentLeader: { id: string; version: number | null } | null = null;
+  /** ほかの代表を知ったことがある（番号の合う代表に替わったら、すべての表を読み直させる） */
+  let knewLeader = false;
+  /**
+   * 代表のロックを取った（DB を開いている途中か、代表である）。ほかの代表はいないので、
+   * 名乗りは受けず、自分のタブからの呼び出しは、代表になるまで溜める
+   */
+  let locked = false;
   /** 代表に渡して（番号を知るまでは、渡すのを待って）、まだ答えの来ていない呼び出し */
   const forwarded = new Map<number, Extract<TabMessage, { type: "call" }>>();
   /**
@@ -106,13 +113,14 @@ export function runReaderWorker(options: ReaderWorkerOptions = {}): void {
           toTab({ type: "result", id: message.id, result }),
         );
       } else {
-        if (currentLeader !== null && currentLeader.version !== version) {
+        if (!locked && currentLeader !== null && currentLeader.version !== version) {
           // 番号の合わない代表には頼まない（処理されると、形の違う頼みで誤って動きうる）
           toTab({ type: "result", id: message.id, result: mismatch(currentLeader.version) });
         } else {
           forwarded.set(message.id, message);
-          // 代表の番号を知るまでは送らない（名乗ったときに送る）
-          if (currentLeader !== null) forward(message);
+          // 代表の番号を知るまでは送らない（名乗ったときに送る）。ロックを取ったあとは、
+          // 代表になったときに受ける
+          if (!locked && currentLeader !== null) forward(message);
         }
         // 前に代表になれなかったら、もう一度なろうとする（ほかのタブが代表なら、その代表が
         // 答え、こちらはロックを待つだけ）
@@ -175,7 +183,7 @@ export function runReaderWorker(options: ReaderWorkerOptions = {}): void {
       case "leader":
         // 代表が替わったときだけ動く（同じ代表が名乗り直しただけなら、すでに受けているので
         // 送り直さない）
-        if (leader === null && message.leaderId !== currentLeader?.id) {
+        if (!locked && message.leaderId !== currentLeader?.id) {
           onLeader({ id: message.leaderId, version: message.version ?? null });
         }
         return;
@@ -213,8 +221,9 @@ export function runReaderWorker(options: ReaderWorkerOptions = {}): void {
 
   /** ほかのタブが代表になった（または、代表を知った） */
   function onLeader(next: { id: string; version: number | null }): void {
-    const replaced = currentLeader !== null;
+    const replaced = knewLeader;
     currentLeader = next;
+    knewLeader = true;
     if (next.version !== version) {
       // 番号が合わない。答えの来ていない呼び出しも、待たせずに失敗で返す
       const result = mismatch(next.version);
@@ -239,11 +248,15 @@ export function runReaderWorker(options: ReaderWorkerOptions = {}): void {
     if (seeking) return;
     seeking = true;
     void navigator.locks.request(`${namespace}:leader`, async () => {
+      // 前の代表はもういない（番号の合わない代表でも、もう頼みを断らない）
+      locked = true;
+      currentLeader = null;
       try {
         leader = await becomeLeader();
       } catch (error) {
         console.error("代表になれなかった（DB を開けない）", error);
         seeking = false;
+        locked = false;
         const result: Result = { ok: false, error: serializeError(error) };
         for (const call of forwarded.values()) toTab({ type: "result", id: call.id, result });
         forwarded.clear();
@@ -307,7 +320,7 @@ export function runReaderWorker(options: ReaderWorkerOptions = {}): void {
     forwarded.clear();
     announce(current);
     // ほかの代表から引き継いだときは、すべての表を読み直させる（ほかの代表から替わったときと同じ）
-    if (currentLeader !== null) toTab({ type: "changed", tables: [...TABLES] });
+    if (knewLeader) toTab({ type: "changed", tables: [...TABLES] });
     toTab({ type: "status", status: scheduler.status });
     scheduler.requestNow();
     updates?.update(scheduler.status);
