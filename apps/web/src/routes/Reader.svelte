@@ -316,6 +316,7 @@
         top: articleView.scrollTop(),
         // X の投稿を出していない記事では、今までと同じ形で書く
         ...(xPosts.length > 0 ? { xPosts } : {}),
+        ...(articleView.showingOriginal() ? { original: true as const } : {}),
       };
     }
     return Object.keys(position).length > 0 ? position : null;
@@ -576,6 +577,9 @@
         m: () => toggleCurrent("readAt"),
         s: () => toggleCurrent("starredAt"),
         v: openOriginal,
+        t: () => {
+          if (router.articleId !== null) articleView?.toggleTranslation();
+        },
         A: askMarkAll,
         J: () => stepFeed(1),
         K: () => stepFeed(-1),
@@ -640,6 +644,7 @@
       {list}
       onstep={step}
       onpeek={peek}
+      onviewchange={rememberPosition}
     />
   {/if}
 

@@ -20,6 +20,7 @@
     list,
     onstep,
     onpeek = () => {},
+    onviewchange = () => {},
   }: {
     articleId: string | null;
     list: ArticleListState;
@@ -27,6 +28,8 @@
     onstep: (delta: 1 | -1) => Promise<void> | void;
     /** スワイプで戻る間、記事の後ろに一覧を見せる（true）・見せるのをやめる（false） */
     onpeek?: (on: boolean) => void;
+    /** 訳文と原文を切り替えた（履歴の項目に書いてもらう） */
+    onviewchange?: () => void;
   } = $props();
 
   const reader = useReader();
@@ -253,6 +256,9 @@
       autoPageFailed = false;
       positioned = false;
       xPosts?.reset();
+      openedTranslation = null;
+      translationFor = null;
+      showOriginal = false;
       if (id === null) {
         article = null;
         missing = false;
@@ -270,6 +276,8 @@
         scrollToTop(scroller);
         const entered = router.takeArticle(id);
         restoreTop = entered?.top ?? null;
+        // 読み込み直したときや、戻る・進むで来たときは、前に出していた方（訳文か原文）に戻す
+        showOriginal = entered?.original === true;
         // 前に出した X の投稿の大きさ。位置を戻す前に、その高さの枠を取る（embeds.md の 5）
         xPosts?.restore(entered?.xPosts ?? []);
         // 書けなかったら、次に手元が変わったときの読み直しで、手元の DB の状態に戻る
@@ -290,6 +298,52 @@
 
   /** 本文が出たら戻す、前に見ていた位置（px） */
   let restoreTop: number | null = null;
+
+  /**
+   * 開いたときの訳文（docs/decisions/translation.md の 3）。訳した時刻が届いている記事だけ。開いて
+   * いる間に訳文が届いたり替わったりしても、出している見出しを替えないよう、開いたときに決める
+   */
+  let openedTranslation = $state<{ title: string | null } | null>(null);
+  /** openedTranslation を決めた記事 */
+  let translationFor: string | null = null;
+  /** 訳文ではなく原文を出している */
+  let showOriginal = $state(false);
+
+  $effect(() => {
+    const current = article;
+    const id = articleId;
+    if (current === null || current.id !== id || translationFor === id) return;
+    untrack(() => {
+      translationFor = id;
+      const translation = current.translation;
+      openedTranslation =
+        translation != null && translation.translatedAt !== null
+          ? { title: translation.title }
+          : null;
+    });
+  });
+
+  /** 見出しに出すタイトル。訳文を出していて訳したタイトルがあれば、それ */
+  const heading = $derived(
+    article === null
+      ? null
+      : !showOriginal && openedTranslation?.title
+        ? openedTranslation.title
+        : article.title,
+  );
+
+  /** 訳文と原文を切り替える（More actions と t）。訳文のない記事では何もしない */
+  export function toggleTranslation(): void {
+    if (openedTranslation === null) return;
+    showOriginal = !showOriginal;
+    actionsOpen = false;
+    onviewchange();
+  }
+
+  /** 原文を出しているか。位置と一緒に、履歴の項目に覚える */
+  export function showingOriginal(): boolean {
+    return openedTranslation !== null && showOriginal;
+  }
 
   $effect(() => {
     // 本文を確かめている間・取っている間は、高さが決まらないので待つ（取れなかったら、要約で戻す）
@@ -858,11 +912,11 @@
                 rel="noopener noreferrer"
                 title="Open original (v)"
               >
-                {article.title ?? "(Untitled)"}
+                {heading ?? "(Untitled)"}
                 <Icon name="external" />
               </a>
             {:else}
-              {article.title ?? "(Untitled)"}
+              {heading ?? "(Untitled)"}
             {/if}
           </h1>
           <p class="meta">
@@ -909,6 +963,12 @@
 
 <Dialog bind:open={actionsOpen} title="Article actions">
   <div class="content-actions">
+    {#if openedTranslation !== null && !choosingFormat}
+      <!-- 何語で読むかの切り替え。原文の中のどの本文を出すか（全文、フィード本文）とは別 -->
+      <button type="button" onclick={toggleTranslation}>
+        {showOriginal ? "Show translation" : "Show original text"}
+      </button>
+    {/if}
     {#if choosingFormat}
       <!-- Download を押したあと、書き出す形式を選ぶ（やり方の違いは、押したあとに選ぶ。ui.md の 8） -->
       <button

@@ -56,6 +56,8 @@ export interface ArticlePosition {
   id: string;
   top: number;
   xPosts?: XPostSize[];
+  /** 訳文ではなく原文を出していた（docs/decisions/translation.md の 3。訳文のときは書かない） */
+  original?: true;
 }
 
 class Router {
@@ -246,6 +248,7 @@ export function positionOf(state: unknown): Position {
       id: article.id,
       top: article.top,
       ...(xPosts.length > 0 ? { xPosts } : {}),
+      ...(article.original === true ? { original: true as const } : {}),
     };
   }
   return position;
