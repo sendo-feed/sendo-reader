@@ -154,7 +154,8 @@ export class ReaderState {
 
 /**
  * 窓口の呼び出しの失敗のうち、版の違うタブのためのもの（ProtocolMismatchError）を知らせる。
- * 呼び出しの結果は変えない（呼んだ側は、今までどおり失敗を受ける）
+ * 呼び出しの結果は変えない（呼んだ側は、今までどおり失敗を受ける。呼んだ側が失敗を受けなければ、
+ * 今までどおり処理されなかった失敗として報告される）
  */
 function watchVersionMismatch(
   client: ReaderClient,
@@ -169,12 +170,11 @@ function watchVersionMismatch(
     const call = value as (...args: unknown[]) => unknown;
     watched[name] = (...args: unknown[]) => {
       const result = call(...args);
-      if (result instanceof Promise) {
-        result.catch((error: unknown) => {
-          if (error instanceof ProtocolMismatchError) onMismatch(error);
-        });
-      }
-      return result;
+      if (!(result instanceof Promise)) return result;
+      return result.catch((error: unknown) => {
+        if (error instanceof ProtocolMismatchError) onMismatch(error);
+        throw error;
+      });
     };
   }
   return watched as ReaderClient;

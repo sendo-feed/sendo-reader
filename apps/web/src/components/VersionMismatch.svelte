@@ -22,7 +22,8 @@
     top: calc(1rem + env(safe-area-inset-top, 0px));
     right: 1rem;
     left: 1rem;
-    z-index: 5;
+    /* 読み終えたときのお祝い（z-index 5）より上に出す */
+    z-index: 6;
     display: flex;
     align-items: center;
     gap: 0.75rem;

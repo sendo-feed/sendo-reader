@@ -77,4 +77,39 @@ describe("ArticleListState", () => {
     expect(list.articles.map((a) => a.id)).toEqual(["a"]);
     expect(list.loading).toBe(false);
   });
+
+  describe("書けず、読み直しもできなかったとき（版の違うタブのために代表とやり取りできない、など）", () => {
+    /** 一覧を出したあと、書き込みも読み出しも失敗する窓口 */
+    async function failingList() {
+      let failing = false;
+      const fail = () => Promise.reject(new Error("代表とやり取りできない"));
+      const client = {
+        listArticles: async () => (failing ? fail() : [article("a", 2), article("b", 1)]),
+        getArticles: async () => (failing ? fail() : []),
+        setRead: fail,
+        setStarred: fail,
+        setReadMany: fail,
+      } as unknown as ReaderClient;
+      const list = new ArticleListState(client);
+      await list.show({});
+      failing = true;
+      return list;
+    }
+
+    test("既読・スターの切り替えは、押す前の表示に戻る", async () => {
+      const list = await failingList();
+      const a = list.find("a");
+      if (a === null) throw new Error("記事がない");
+      await expect(list.toggle(a, "starredAt")).rejects.toThrow("代表とやり取りできない");
+      expect(list.find("a")?.starredAt).toBeNull();
+      await expect(list.toggle(a, "readAt")).rejects.toThrow("代表とやり取りできない");
+      expect(list.find("a")?.readAt).toBeNull();
+    });
+
+    test("まとめて既読にしたものも、押す前の表示に戻る", async () => {
+      const list = await failingList();
+      await expect(list.markRead(["a", "b"])).rejects.toThrow("代表とやり取りできない");
+      expect(list.articles.map((a) => a.readAt)).toEqual([null, null]);
+    });
+  });
 });

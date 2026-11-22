@@ -258,7 +258,14 @@
     const readAt = Date.now();
     list.patch(id, { readAt });
     if (article?.id === id) article = { ...article, readAt };
-    await reader.client.setRead(id, true);
+    try {
+      await reader.client.setRead(id, true);
+    } catch (error) {
+      // 押す前（開く前）の表示に戻す
+      list.patch(id, { readAt: null });
+      if (article?.id === id) article = { ...article, readAt: null };
+      throw error;
+    }
   }
 
   /**
@@ -322,8 +329,8 @@
         showOriginal = entered?.original === true;
         // 前に出した X の投稿の大きさ。位置を戻す前に、その高さの枠を取る（embeds.md の 5）
         xPosts?.restore(entered?.xPosts ?? []);
-        // 書けなかったら、次に手元が変わったときの読み直しで、手元の DB の状態に戻る
-        markOnOpen(id).catch(() => void list.refresh());
+        // 書けなかったら、開く前の表示に戻し、手元の DB の状態を読み直す
+        markOnOpen(id).catch(() => void list.refreshAfterFailure());
         void load(id);
         // 本文は、訳文があるかが決まってから取る（訳文があれば、原文より先に訳した本文を取る）
       }
@@ -628,10 +635,14 @@
       if (field === "readAt") await reader.client.setRead(current.id, on);
       else await reader.client.setStarred(current.id, on);
     } catch {
-      // 手元に書けなかった（容量不足など）。表示を手元の DB の状態に戻す
+      // 手元に書けなかった（容量不足など）。押す前の表示に戻してから、手元の DB の状態を読み直す
+      // （版の違うタブのために代表とやり取りできないときは、読み直しも失敗するので、戻した表示の
+      // ままにする）
       saveError = "保存できませんでした。";
-      void list.refresh();
-      if (articleId === current.id) await load(current.id);
+      list.patch(current.id, { [field]: current[field] });
+      if (articleId === current.id) article = current;
+      void list.refreshAfterFailure();
+      if (articleId === current.id) await load(current.id).catch(() => {});
     }
   }
 
