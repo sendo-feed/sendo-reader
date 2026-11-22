@@ -399,14 +399,21 @@ describe("訳した本文を先に取る", () => {
   });
 
   test("木にして出すものが残らない訳した本文は、本文を訳さなかったものとして、続けて全文を取る", async () => {
-    const { server, core, article } = await seeded();
+    const { server, core, db, article } = await seeded();
     server.pageContents.set(article.id, "<p>全文</p>");
     server.translatedContents.set(article.id, "<script>alert(1)</script><p></p>");
     expect(await core.prefetchArticleContents(10)).toBe(1);
     expect(server.translationContentRequests).toEqual([article.id]);
     expect(server.pageContentRequests).toEqual([article.id]);
     expect(await core.getTranslatedContent(article.id, T1)).toEqual({ status: "none" });
-    // 次の先読みでは、どちらも取り直さない。印は大きさに数えない
+    // 本文を訳さなかった印として置き、大きさには数えない（全文の分だけ）
+    expect(await translationRows(db)).toEqual([
+      { article_id: article.id, html: null, translated_at: T1 },
+    ]);
+    expect((await core.getContentStorage()).used).toBe(
+      new TextEncoder().encode("<p>全文</p>").byteLength,
+    );
+    // 次の先読みでは、どちらも取り直さない
     const before = server.requests.length;
     expect(await core.prefetchArticleContents(10)).toBe(0);
     expect(server.requests).toHaveLength(before);
