@@ -23,8 +23,6 @@ describe("値の形", () => {
     "http://localhost:5173",
     "http://127.0.0.1",
     "http://127.0.0.1:4173/",
-    "https://localhost",
-    "https://127.0.0.1:8443",
   ])("開発用の %s は、dev サーバーと preview だけが受け付ける", (value) => {
     expect(toXEmbedOrigin(value, { allowDevelopment: true })).toBe(value.replace(/\/$/, ""));
     expect(toXEmbedOrigin(value, { allowDevelopment: false })).toBeNull();

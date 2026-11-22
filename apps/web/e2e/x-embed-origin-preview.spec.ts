@@ -15,6 +15,7 @@ import { expect, test } from "@playwright/test";
 const PORT = 4186;
 const EMBED = `http://127.0.0.1:${PORT}`;
 const APP = fileURLToPath(new URL("..", import.meta.url));
+const VITE = fileURLToPath(new URL("../node_modules/vite/bin/vite.js", import.meta.url));
 const BUILT_SW = readFileSync(fileURLToPath(new URL("../dist/sw.js", import.meta.url)), "utf8");
 
 type Answer = { status: number; headers: IncomingHttpHeaders; body: string };
@@ -86,7 +87,7 @@ test("preview も、X_EMBED_ORIGIN を、コンテナと同じ処理に通す", 
 
   let preview: ChildProcess | null = null;
   try {
-    preview = spawn("pnpm", ["exec", "vite", "preview", "--port", String(PORT), "--strictPort"], {
+    preview = spawn(process.execPath, [VITE, "preview", "--port", String(PORT), "--strictPort"], {
       cwd: APP,
       env: {
         ...process.env,
@@ -102,13 +103,18 @@ test("preview も、X_EMBED_ORIGIN を、コンテナと同じ処理に通す", 
     preview.stderr?.on("data", (chunk: Buffer) => {
       output += chunk.toString();
     });
-    await expect.poll(() => output, { timeout: 30_000 }).toContain(`${PORT}`);
+    const started = preview;
     await expect
-      .poll(() =>
-        send(`localhost:${PORT}`, "/").then(
-          (answer) => answer.status,
-          () => 0,
-        ),
+      .poll(
+        () => {
+          // 起動に失敗したら（ポートが埋まっている、など）、待たずに落とす
+          if (started.exitCode !== null) throw new Error(`preview exited:\n${output}`);
+          return send(`localhost:${PORT}`, "/").then(
+            (answer) => answer.status,
+            () => 0,
+          );
+        },
+        { timeout: 30_000 },
       )
       .toBe(200);
 
@@ -137,7 +143,12 @@ test("preview も、X_EMBED_ORIGIN を、コンテナと同じ処理に通す", 
     expect(await upgrade(`127.0.0.1:${PORT}`, "/api/v1/sync/updates")).toBe(404);
     expect(received).toEqual([]);
   } finally {
-    preview?.kill("SIGTERM");
+    const running = preview;
+    if (running !== null && running.exitCode === null && running.signalCode === null) {
+      const exited = new Promise((resolve) => running.once("exit", resolve));
+      running.kill("SIGTERM");
+      await exited;
+    }
     await new Promise<void>((resolve) => sendo.close(() => resolve()));
   }
 });

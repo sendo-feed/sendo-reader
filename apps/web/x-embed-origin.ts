@@ -33,9 +33,7 @@ export type XEmbedOriginOptions = {
  * - https で、パス・クエリ・ハッシュ・認証情報がない
  * - ホスト名は、英小文字・数字・ハイフンのラベルを点でつないだもの（* などの記号、空のラベル、
  *   末尾の点、IPv6 は受けない）
- * - 開発用には、http の localhost と 127.0.0.1（ホスト名は完全一致。ポートは問わない）。開発用でない
- *   ときは、https でも localhost と 127.0.0.1 は受けない（コンテナのヘルスチェックや、手元で reader を
- *   開くホスト名と重なる）
+ * - 開発用には、http の localhost と 127.0.0.1（ホスト名は完全一致。ポートは問わない）
  */
 export function toXEmbedOrigin(value: string, options: XEmbedOriginOptions): string | null {
   // URL として読むと消えてしまう、空のクエリ・ハッシュ・認証情報の印や、整えると消えるパス
@@ -49,11 +47,9 @@ export function toXEmbedOrigin(value: string, options: XEmbedOriginOptions): str
   }
   if (url.username !== "" || url.password !== "" || url.pathname !== "/") return null;
   if (!url.hostname.split(".").every((label) => LABEL.test(label))) return null;
-  const development = DEVELOPMENT_HOSTNAMES.has(url.hostname);
-  if (url.protocol === "https:")
-    return development && !options.allowDevelopment ? null : url.origin;
+  if (url.protocol === "https:") return url.origin;
   if (url.protocol === "http:" && options.allowDevelopment) {
-    return development ? url.origin : null;
+    return DEVELOPMENT_HOSTNAMES.has(url.hostname) ? url.origin : null;
   }
   return null;
 }

@@ -111,9 +111,6 @@ describe("X_EMBED_ORIGIN", () => {
     // コンテナは https だけ。開発用の http も受けない
     "http://localhost:5174",
     "http://127.0.0.1",
-    // https でも、コンテナのヘルスチェック（127.0.0.1）や手元のホスト名と重なるものは受けない
-    "https://localhost",
-    "https://127.0.0.1",
     "https://embed.example/.",
     "https://a..b",
     "http://embed.example",
