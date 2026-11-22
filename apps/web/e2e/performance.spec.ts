@@ -13,7 +13,7 @@ test.describe("速さの予算", () => {
     const server = new FakeSendo();
     const feed = server.subscribe({ url: "https://blog.example/feed.xml", title: "Blog" });
     for (let i = 0; i < ARTICLES; i++) {
-      server.deliver(feed.id, {
+      const article = server.deliver(feed.id, {
         title: `記事 ${i}`,
         publishedAt: server.now - i * 60_000,
         // 2 番目の記事は自動の翻訳を待っている（Translate を測る）
@@ -37,6 +37,8 @@ test.describe("速さの予算", () => {
           },
         }),
       });
+      // 訳し済みの記事は、訳した本文もある（訳した本文と原文の本文の切り替えを測る）
+      if (i === 0) server.translatedContents.set(article.id, "<p>訳した本文</p>");
     }
     await routeFakeSendo(context, server);
     await page.goto("/");
@@ -119,6 +121,7 @@ test.describe("速さの予算", () => {
     await page.locator(".article-list .item").first().click();
     const heading = page.locator(".article-view").getByRole("heading", { level: 1 });
     await expect(heading).toHaveText("訳した記事 0");
+    await expect(page.locator(".article-view .body")).toHaveText("訳した本文");
     const cdp = await context.newCDPSession(page);
     await cdp.send("Emulation.setCPUThrottlingRate", { rate: CPU_SLOWDOWN });
 

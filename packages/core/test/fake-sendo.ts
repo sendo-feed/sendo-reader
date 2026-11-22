@@ -438,6 +438,13 @@ export class FakeSendo {
   omitHasContent = false;
   /** 翻訳に対応する前の版の sendo のふりをする（記事に translation を付けない） */
   omitTranslation = false;
+  /**
+   * 訳した本文（GET /articles/{id}/translation の content）。記事の翻訳に訳した時刻があれば返す。
+   * 決めていない記事と null は、本文を訳さなかったことにする
+   */
+  readonly translatedContents = new Map<string, string | null>();
+  /** 訳文を取りに来たリクエスト（記事の ID） */
+  readonly translationContentRequests: string[] = [];
   /** その場の翻訳を頼まれた記事（POST /articles/{id}/translation） */
   readonly translationRequests: string[] = [];
   /** その場の翻訳の求めに、決めた失敗を返す（null なら sendo と同じに答える） */
@@ -768,6 +775,9 @@ export class FakeSendo {
     if (request.method === "POST" && match !== null) {
       return this.#requestTranslation(decodeURIComponent(match[1] ?? ""));
     }
+    if (request.method === "GET" && match !== null) {
+      return this.#getTranslation(decodeURIComponent(match[1] ?? ""));
+    }
     if (request.method === "POST" && path === "/folders") {
       // sendo の #48 と同じく、クライアントが決めた ID（小文字の UUID）を受ける
       this.folderRequests.push(body);
@@ -847,6 +857,33 @@ export class FakeSendo {
     }
     return error(404, "not_found", "Not Found");
   };
+
+  /**
+   * 訳文を返す（sendo の GET /articles/{id}/translation）。訳した時刻のない記事は 404
+   * （no_translation）
+   */
+  #getTranslation(id: string): Response {
+    this.translationContentRequests.push(id);
+    const row = this.inbox.get(id);
+    if (row === undefined) return error(404, "not_found", "article does not exist");
+    const translation = row.translation as {
+      title?: unknown;
+      summary?: unknown;
+      translatedAt?: unknown;
+    } | null;
+    if (translation === null || typeof translation !== "object" || !translation.translatedAt) {
+      return error(404, "no_translation", "the article is not translated");
+    }
+    const content = this.translatedContents.get(id) ?? null;
+    return json(200, {
+      title: translation.title ?? null,
+      summary: translation.summary ?? null,
+      content,
+      contentSource: content === null ? null : "page",
+      model: "claude-test",
+      translatedAt: translation.translatedAt,
+    });
+  }
 
   /**
    * その場の翻訳を受け付ける（sendo の POST /articles/{id}/translation）。queued ／ untranslated

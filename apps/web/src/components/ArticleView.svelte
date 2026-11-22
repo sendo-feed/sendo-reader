@@ -1,5 +1,10 @@
 <script lang="ts">
-  import { type Article, type ArticleContent, toSafeHttpUrl } from "@sendo-reader/core";
+  import {
+    type Article,
+    type ArticleContent,
+    type TranslatedContent,
+    toSafeHttpUrl,
+  } from "@sendo-reader/core";
   import { tick, untrack } from "svelte";
   import { useReader } from "../lib/context";
   import { describeTranslationError, TRANSLATION_FAILED } from "../lib/errors";
@@ -205,6 +210,8 @@
     if (
       articleId === null ||
       link === null ||
+      // 訳した本文を出している間は、全文を取らない（原文に切り替えたら取る。決定の 9）
+      translatedBody ||
       !preferFullText ||
       hasPageContent ||
       pageAttempted ||
@@ -221,7 +228,12 @@
   /** つながったら、取れなかった本文・自動で取れなかった全文を取り直す */
   $effect(() => {
     const retry = () => {
-      if (articleId === null || pageLoading) return;
+      if (articleId === null) return;
+      if (translatedBody && translatedState === "unavailable" && openedTranslation !== null) {
+        void loadTranslatedContent(articleId, openedTranslation.translatedAt);
+        return;
+      }
+      if (pageLoading) return;
       if (contentState === "unavailable") {
         // 本文が届いたら、上の自動の取得が全文も取る
         void loadContent(articleId);
@@ -282,6 +294,10 @@
       xPosts?.reset();
       openedTranslation = null;
       translationFor = null;
+      translatedRequest += 1;
+      translatedContent = null;
+      translatedState = "none";
+      originalStarted = false;
       showOriginal = false;
       requestSeen = false;
       translateError = null;
@@ -309,7 +325,7 @@
         // 書けなかったら、次に手元が変わったときの読み直しで、手元の DB の状態に戻る
         markOnOpen(id).catch(() => void list.refresh());
         void load(id);
-        void loadContent(id);
+        // 本文は、訳文があるかが決まってから取る（訳文があれば、原文より先に訳した本文を取る）
       }
     });
   });
@@ -329,9 +345,14 @@
    * 開いたときの訳文（docs/decisions/translation.md の 3）。訳した時刻が届いている記事だけ。開いて
    * いる間に訳文が届いたり替わったりしても、出している見出しを替えないよう、開いたときに決める
    */
-  let openedTranslation = $state<{ title: string | null } | null>(null);
+  let openedTranslation = $state<OpenedTranslation | null>(null);
+  interface OpenedTranslation {
+    title: string | null;
+    summary: string | null;
+    translatedAt: number;
+  }
   /** openedTranslation を決めた記事 */
-  let translationFor: string | null = null;
+  let translationFor = $state<string | null>(null);
   /** 訳文ではなく原文を出している */
   let showOriginal = $state(false);
 
@@ -341,12 +362,103 @@
     if (current === null || current.id !== id || translationFor === id) return;
     untrack(() => {
       translationFor = id;
-      const translation = current.translation;
-      openedTranslation =
-        translation != null && translation.translatedAt !== null
-          ? { title: translation.title }
-          : null;
+      openTranslation(id, current.translation);
     });
+  });
+
+  /**
+   * 出す訳文を決め、その訳した本文を読む。訳した時刻のない記事は、訳文なし（原文の本文を出す）
+   */
+  function openTranslation(id: string, translation: Article["translation"]) {
+    if (translation == null || translation.translatedAt === null) {
+      openedTranslation = null;
+      return;
+    }
+    openedTranslation = {
+      title: translation.title,
+      summary: translation.summary,
+      translatedAt: translation.translatedAt,
+    };
+    void loadTranslatedContent(id, translation.translatedAt);
+  }
+
+  /**
+   * 訳した本文（docs/decisions/translation.md の 3、8、9）。openedTranslation の訳した時刻のもの。
+   * - checking：手元を確かめている（すぐ終わる）
+   * - loading：手元になく、sendo から取っている（訳した要約を出す）
+   * - ready：訳した本文を出す
+   * - none：sendo が本文を訳さなかった（原文の本文を出す）
+   * - waiting：sendo の訳文が替わっていた（同期で新しい訳した時刻が届くまで、訳した要約を出す）
+   * - unavailable：取れなかった（オフラインなど。訳した要約を出し、つながったら取り直す）
+   */
+  let translatedContent = $state<ArticleContent | null>(null);
+  let translatedState = $state<
+    "checking" | "loading" | "ready" | "none" | "waiting" | "unavailable"
+  >("none");
+  let translatedRequest = 0;
+
+  async function loadTranslatedContent(id: string, translatedAt: number) {
+    const request = ++translatedRequest;
+    const current = () => id === articleId && request === translatedRequest;
+    translatedContent = null;
+    translatedState = "checking";
+    try {
+      // まず手元だけを読む（ネットワークを待たない）
+      const local = await reader.client.getTranslatedContent(id, translatedAt);
+      if (!current()) return;
+      if (local.status === "missing") {
+        translatedState = "loading";
+        const fetched = await reader.client.fetchTranslatedContent(id, translatedAt);
+        if (!current()) return;
+        showTranslatedContent(fetched);
+      } else {
+        showTranslatedContent(local);
+      }
+    } catch {
+      if (current()) translatedState = "unavailable";
+    }
+  }
+
+  function showTranslatedContent(result: TranslatedContent) {
+    translatedContent = result.status === "ready" ? result.content : null;
+    translatedState =
+      result.status === "ready" ? "ready" : result.status === "none" ? "none" : "waiting";
+  }
+
+  /** 訳文を出していて、訳した本文の側で本文を出す（本文を訳さなかった記事では、原文の本文を出す） */
+  const translatedBody = $derived(
+    openedTranslation !== null && !showOriginal && translatedState !== "none",
+  );
+
+  /** この記事で、原文の本文を取り始めた */
+  let originalStarted = false;
+
+  /**
+   * 原文の本文が要るようになったら（訳文のない記事、原文に切り替えた、本文を訳さなかった）、
+   * 取り始める。訳文のある記事を開いただけでは、原文の本文を取らない（決定の 9）
+   */
+  $effect(() => {
+    const id = articleId;
+    if (id === null || translationFor !== id || translatedBody) return;
+    untrack(() => {
+      if (originalStarted) return;
+      originalStarted = true;
+      void loadContent(id);
+    });
+  });
+
+  /**
+   * 訳した要約を出して訳した本文を待っている間に、訳文が届いたり替わったりしたら、その訳文に
+   * 替える（決定の 3。本文を出している間は替えない）
+   */
+  $effect(() => {
+    const current = article;
+    const opened = openedTranslation;
+    if (current === null || current.id !== articleId || opened === null || !translatedBody) return;
+    if (translatedState === "ready") return;
+    const translatedAt = current.translation?.translatedAt ?? null;
+    if (translatedAt === null || translatedAt === opened.translatedAt) return;
+    untrack(() => openTranslation(current.id, current.translation));
   });
 
   /**
@@ -372,8 +484,8 @@
         translation != null &&
         translation.translatedAt !== null
       ) {
-        openedTranslation = { title: translation.title };
         showOriginal = false;
+        openTranslation(current.id, translation);
         onviewchange();
       }
     });
@@ -456,13 +568,10 @@
 
   $effect(() => {
     // 本文を確かめている間・取っている間は、高さが決まらないので待つ（取れなかったら、要約で戻す）
-    if (
-      article === null ||
-      contentState === "checking" ||
-      contentState === "loading" ||
-      pageLoading
-    )
-      return;
+    const pending = translatedBody
+      ? translatedState === "checking" || translatedState === "loading"
+      : contentState === "checking" || contentState === "loading" || pageLoading;
+    if (article === null || translationFor !== articleId || pending) return;
     untrack(() => {
       const top = restoreTop;
       restoreTop = null;
@@ -892,11 +1001,15 @@
   );
 
   /** 要約は、空行で段落に分けて出す（HTML としては出さない） */
-  const paragraphs = $derived(
-    (article?.summary ?? "")
+  const toParagraphs = (summary: string | null | undefined) =>
+    (summary ?? "")
       .split(/\n\s*\n/)
       .map((text) => text.trim())
-      .filter((text) => text !== ""),
+      .filter((text) => text !== "");
+  const paragraphs = $derived(toParagraphs(article?.summary));
+  /** 訳した本文を待つ間に出す、訳した要約（なければ原文の要約） */
+  const translatedParagraphs = $derived(
+    toParagraphs(openedTranslation?.summary ?? article?.summary),
   );
 </script>
 
@@ -1058,21 +1171,35 @@
             <p class="content-note" role="alert">{TRANSLATION_FAILED}</p>
           {/if}
         </header>
-        {#if pageLoading}
-          <p class="content-note" role="status">全文を取得しています…</p>
-        {:else if pageNote !== null}
-          <p class="content-note" role="status">{pageNote}</p>
-        {/if}
-        {#if content !== null}
-          <ArticleBody nodes={content.nodes} />
-        {:else if showSummary}
-          {#each paragraphs as text, index (index)}
-            <p class="summary">{text}</p>
-          {/each}
-          {#if contentState === "unavailable"}
-            <p class="content-note" role="status">
-              この記事には本文があります。sendo につながったら読めます。
-            </p>
+        {#if translatedBody}
+          <!-- 訳した本文。取っている間と手元にないときは、訳した要約を出す（決定の 3） -->
+          {#if translatedContent !== null}
+            <ArticleBody nodes={translatedContent.nodes} />
+          {:else if translatedState !== "checking"}
+            {#each translatedParagraphs as text, index (index)}
+              <p class="summary">{text}</p>
+            {/each}
+            {#if translatedState === "unavailable"}
+              <p class="content-note" role="status">訳した本文は、sendo につながったら読めます。</p>
+            {/if}
+          {/if}
+        {:else}
+          {#if pageLoading}
+            <p class="content-note" role="status">全文を取得しています…</p>
+          {:else if pageNote !== null}
+            <p class="content-note" role="status">{pageNote}</p>
+          {/if}
+          {#if content !== null}
+            <ArticleBody nodes={content.nodes} />
+          {:else if showSummary}
+            {#each paragraphs as text, index (index)}
+              <p class="summary">{text}</p>
+            {/each}
+            {#if contentState === "unavailable"}
+              <p class="content-note" role="status">
+                この記事には本文があります。sendo につながったら読めます。
+              </p>
+            {/if}
           {/if}
         {/if}
       </div>
@@ -1120,6 +1247,8 @@
       >
         Back
       </button>
+    {:else if translatedBody}
+      <!-- 訳文を出している間は、原文の中のどの本文を出すかを選ばせない（決定の 3） -->
     {:else if content?.source === "page" || pageLoading}
       <button type="button" onclick={() => showContent("feed")}>Show feed content</button>
     {:else if link !== null}

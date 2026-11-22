@@ -885,7 +885,7 @@ export interface paths {
          * 記事の本文
          * @description 記事の本文（HTML）を返す。出どころは 2 つあり、source で選ぶ。
          *     - feed（既定）：フィードに入っていた本文。記事の hasContent が true のときだけ、取りにいく。
-         *     - page：記事のページから抜いた本文。まだ抜いていなければ、このリクエストの中でページを取りにいって抜く（数秒かかることがある）。抜けなかったら 404（page_content_unavailable）で、1 日たつまで取りにいき直さない。
+         *     - page：全文。記事のページから抜いた本文で、まだ抜いていなければ、このリクエストの中でページを取りにいって抜く（数秒かかることがある）。抜けなかったら 404（page_content_unavailable）で、1 日たつまで取りにいき直さない。Discord の投稿では、ページを取りにいかず、フィードの本文（投稿のテキストと埋め込み）を全文として返す。本文がなければ 404（page_content_unavailable）。
          *     HTML は Sendo がサニタイズしてある（決めたタグと属性だけ。スクリプトやスタイルはない）。それでも外部から来たデータなので、クライアントの側でも、信頼できない HTML として扱う。
          *     本文の中の画像は、中継を通る URL（/api/v1/images?…。オリジンは付けない）に書き換えてある。リンクは絶対の URL。
          *     引用（blockquote）の data-x-post 属性は、X の投稿の引用の印で、値は投稿の ID（数字だけの文字列）。Sendo が、引用の中の投稿のリンクから付けたもので、そのリンクと同じ投稿を指す。
@@ -894,7 +894,7 @@ export interface paths {
         get: {
             parameters: {
                 query?: {
-                    /** @description 本文の出どころ。feed はフィードに入っていた本文、page は記事のページから抜いた本文 */
+                    /** @description 本文の出どころ。feed はフィードに入っていた本文、page は全文（記事のページから抜いた本文。Discord の投稿では、フィードの本文） */
                     source?: "feed" | "page";
                 };
                 header?: never;
@@ -914,7 +914,7 @@ export interface paths {
                         "application/json": components["schemas"]["ArticleContent"];
                     };
                 };
-                /** @description 記事がない（not_found）か、その記事にフィードの本文がない（no_content）か、ページから本文を抜けなかった（page_content_unavailable） */
+                /** @description 記事がない（not_found）か、その記事にフィードの本文がない（no_content）か、全文が取れなかった（page_content_unavailable。ページから本文を抜けなかったか、Discord の投稿に本文がない） */
                 404: {
                     headers: {
                         [name: string]: unknown;
@@ -1168,8 +1168,9 @@ export interface paths {
         };
         /**
          * 記事の訳文
-         * @description Sendo が日本語に訳した、記事のタイトルと要約を返す（docs/decisions/translation.md の 13）。
-         *     訳文は外部から来たデータを LLM が訳したもので、プレーンテキスト。表示する側でエスケープする。
+         * @description Sendo が日本語に訳した、記事のタイトル・要約・本文を返す（docs/decisions/translation.md の 13）。
+         *     訳文は外部から来たデータを LLM が訳したもの。タイトルと要約はプレーンテキストで、表示する側でエスケープする。
+         *     本文は、GET /articles/{id}/content の html と同じく、サニタイズして画像を中継の URL に書き換えた HTML。それでも信頼せず、表示する側で通すタグと属性を決める。
          *     訳し直すと替わる。translatedAt が変わったら取り直す。
          */
         get: {
@@ -2494,7 +2495,7 @@ export interface components {
             /** @description サニタイズした HTML */
             html: string;
             /**
-             * @description 本文の出どころ。feed はフィードに入っていた本文、page は記事のページから抜いた本文
+             * @description 求めた本文の種類（クエリの source と同じ）。feed はフィードに入っていた本文、page は全文（記事のページから抜いた本文。Discord の投稿では、フィードの本文）
              * @enum {string}
              */
             source: "feed" | "page";
@@ -2568,6 +2569,13 @@ export interface components {
             title: string | null;
             /** @description 訳した要約 */
             summary: string | null;
+            /** @description 訳した本文（サニタイズした HTML）。本文のない記事、長すぎて訳さなかった本文は null（タイトルと要約だけを訳した） */
+            content: string | null;
+            /**
+             * @description 訳した本文の出どころ。page は記事のページから抜いた本文、feed はフィードの本文。訳した本文がなければ null
+             * @enum {string|null}
+             */
+            contentSource: "feed" | "page" | null;
             /** @description 訳したモデル */
             model: string;
             /**
