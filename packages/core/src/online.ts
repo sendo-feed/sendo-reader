@@ -41,17 +41,21 @@ function parseFetchTime(value: unknown): number | null {
 }
 
 /**
- * 記事をその場で訳してもらう（sendo の POST /articles/{id}/translation。docs/decisions/translation.md
- * の 4、6）。受け付けられたら（202）返る。断られたか届かなければ ApiError（code に理由）
+ * 記事をその場で訳してもらう。retranslation なら、Opus で訳し直してもらう（sendo の
+ * POST /articles/{id}/translation。docs/decisions/translation.md の 4〜6）。受け付けられたら（202）
+ * 返る。断られたか届かなければ ApiError（code に理由）
  */
 export async function requestTranslation(
   api: SendoApi,
   articleId: string,
   signal: AbortSignal,
+  retranslation = false,
 ): Promise<void> {
-  const { data, error, response } = await api
-    .client(signal)
-    .POST("/articles/{id}/translation", { params: { path: { id: articleId } } });
+  // その場の翻訳は本文を付けない（訳し直しの指定に対応する前の sendo にも頼める）
+  const { data, error, response } = await api.client(signal).POST("/articles/{id}/translation", {
+    params: { path: { id: articleId } },
+    ...(retranslation && { body: { retranslate: true } }),
+  });
   if (data === undefined) throw errorFromBody(response.status, error);
 }
 

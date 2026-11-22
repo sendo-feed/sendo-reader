@@ -70,10 +70,11 @@ type ArticleRow = {
   translation_title: string | null;
   translation_summary: string | null;
   translated_at: number | null;
+  translation_retranslated: number;
 };
 
 const ARTICLE_COLUMNS =
-  "a.id, a.feed_id, a.url, a.title, a.summary, a.author, a.thumbnail_url, a.has_content, a.published_at, a.received_at, a.read_at, a.starred_at, a.translation_status, a.translation_language, a.translation_title, a.translation_summary, a.translated_at";
+  "a.id, a.feed_id, a.url, a.title, a.summary, a.author, a.thumbnail_url, a.has_content, a.published_at, a.received_at, a.read_at, a.starred_at, a.translation_status, a.translation_language, a.translation_title, a.translation_summary, a.translated_at, a.translation_retranslated";
 
 /**
  * 一覧の範囲（どの記事を出すか。未読だけの絞り込みと並び順は含まない）。何も指定しなければ、
@@ -284,5 +285,6 @@ function toTranslation(row: ArticleRow): ArticleTranslation | null {
     title: row.translation_title,
     summary: row.translation_summary,
     translatedAt: row.translated_at,
+    retranslated: row.translation_retranslated === 1,
   };
 }
