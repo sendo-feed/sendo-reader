@@ -7,7 +7,9 @@ import { SyncUpdates, syncUpdatesUrl, type WebSocketLike } from "../sync/updates
 import { openWebDatabase } from "./database";
 import { clearImageCache } from "./image-cache";
 import {
+  DEFAULT_NAMESPACE,
   isMethod,
+  leaderLockName,
   type Method,
   type PeerMessage,
   PROTOCOL_VERSION,
@@ -58,7 +60,7 @@ const VISIBLE_SYNC_AFTER_MS = 30_000;
  * ProtocolMismatchError で返す。代表も、番号の合わない頼みは処理せずに同じ失敗を返す。
  */
 export function runReaderWorker(options: ReaderWorkerOptions = {}): void {
-  const namespace = options.namespace ?? "sendo-reader";
+  const namespace = options.namespace ?? DEFAULT_NAMESPACE;
   // DedicatedWorkerGlobalScope の型は、画面（DOM）の型で調べると見えないので、使う形だけを書く
   const scope = globalThis as unknown as {
     postMessage(message: WorkerMessage): void;
@@ -257,7 +259,7 @@ export function runReaderWorker(options: ReaderWorkerOptions = {}): void {
   function seekLeadership(): void {
     if (seeking) return;
     seeking = true;
-    void navigator.locks.request(`${namespace}:leader`, async () => {
+    void navigator.locks.request(leaderLockName(namespace), async () => {
       // 前の代表はもういない（番号の合わない代表でも、もう頼みを断らない）
       locked = true;
       currentLeader = null;

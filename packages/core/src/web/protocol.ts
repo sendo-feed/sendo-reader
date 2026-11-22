@@ -23,6 +23,17 @@ import type { SyncStatus } from "../sync/scheduler";
  */
 export const PROTOCOL_VERSION = 2;
 
+/** DB の名前、代表を決めるロックの名前、タブの間のチャンネルの名前の元の既定 */
+export const DEFAULT_NAMESPACE = "sendo-reader";
+
+/**
+ * 代表を決めるロック（Web Locks）の名前。ページは、移る前にワーカーを止めたあと、このロックが
+ * 空いたのを確かめる（ロックを持ったまま止まったページが、次に開いたページを待たせないように）
+ */
+export function leaderLockName(namespace: string = DEFAULT_NAMESPACE): string {
+  return `${namespace}:leader`;
+}
+
 /**
  * 代表のワーカーと、やり取りの版の番号が合わない（docs/decisions/local-first.md の 5）。
  * 頼みは処理していない。版の違うタブを読み込み直すか閉じれば、使えるようになる

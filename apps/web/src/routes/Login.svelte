@@ -12,7 +12,7 @@
     message = null;
     try {
       // ページごと Google のログインへ移るので、うまくいったら busy のままにする
-      await startSignIn(reader.client);
+      await startSignIn(reader);
     } catch (error) {
       message = describeError(error);
       busy = false;

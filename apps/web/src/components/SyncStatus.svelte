@@ -40,7 +40,7 @@
     signingIn = true;
     signInError = null;
     try {
-      await startSignIn(reader.client);
+      await startSignIn(reader);
     } catch (error) {
       signInError = describeError(error);
       signingIn = false;
