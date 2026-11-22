@@ -782,6 +782,9 @@ test("隔離フレームのオリジンが未設定なら、設定の項目を�
     .toEqual({ "reader.xPosts": false, "reader.markReadOnScroll": false });
 });
 
+const scrollTopOf = (page: Page) =>
+  page.locator(".article-view").evaluate((node) => node.scrollTop);
+
 /** 履歴の項目に書いた、記事の位置 */
 function articleState(page: Page): Promise<unknown> {
   return page.evaluate(() => (history.state as { article?: unknown } | null)?.article);
@@ -871,13 +874,27 @@ test.describe("読書位置（覚えた高さ）", () => {
     await scrollTo(page, 5);
     await letRemember(page);
     expect(await articleState(page)).toMatchObject({ xPosts: [{ id: postId(1), height: 320 }] });
-    // 表示範囲の外で、高さが変わった
+    // 表示範囲の外で、高さが変わった（画面の外の枠は描画が間引かれるので、知らせは直接送る）
     await scrollToEnd(page);
-    await resize(400);
+    await expect.poll(() => scrollTopOf(page)).toBeGreaterThan(3000);
     await page.waitForTimeout(300);
+    await inner.evaluate(() =>
+      parent.postMessage({ type: "sendo:x-post:rendered", height: 400 }, "*"),
+    );
+    // 受けて、枠の高さは付け直すが、覚え直さない
+    await expect
+      .poll(() =>
+        post(page, 1)
+          .locator("iframe")
+          .evaluate((node) => node.getBoundingClientRect().height),
+      )
+      .toBe(400);
     await scrollTo(page, 3000);
     await letRemember(page);
-    expect(await articleState(page)).toMatchObject({ xPosts: [{ id: postId(1), height: 320 }] });
+    expect(await articleState(page)).toMatchObject({
+      top: 3000,
+      xPosts: [{ id: postId(1), height: 320 }],
+    });
   });
 
   test("X の投稿のない記事では、今までと同じ形で書く", async ({ page, context }) => {
