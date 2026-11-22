@@ -72,3 +72,22 @@ export function securityHeaders(
     "Permissions-Policy": "camera=(), microphone=(), geolocation=(), payment=(), usb=()",
   };
 }
+
+/**
+ * X の投稿の隔離フレームのページ（x-embed/）の応答のヘッダー（docs/decisions/embeds.md の 2）。
+ * reader の CSP とは別のもの。X の widgets.js と、それが作る X の iframe だけを許す。
+ *
+ * - img-src、connect-src、style-src は要らない（画像と通信は、どれも X の iframe の中から出る）
+ * - Trusted Types は入れない（widgets.js が止まる）
+ * - frame-ancestors は付けない（ほかのサイトが iframe に入れることは受け入れる）
+ * - 許すのは platform.twitter.com のホストだけで、パスまでは絞らない（X が置き場を変えると、黙って出なくなる）
+ */
+export function xEmbedPageHeaders(): Record<string, string> {
+  return {
+    "Content-Security-Policy":
+      "default-src 'none'; script-src 'self' https://platform.twitter.com; frame-src https://platform.twitter.com; base-uri 'none'; form-action 'none'",
+    "X-Content-Type-Options": "nosniff",
+    "Referrer-Policy": "no-referrer",
+    "Permissions-Policy": securityHeaders("production")["Permissions-Policy"] ?? "",
+  };
+}

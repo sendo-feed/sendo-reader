@@ -32,6 +32,8 @@ ENV NODE_ENV=production \
 WORKDIR /app
 COPY --from=build /app/apps/web/dist ./dist
 COPY --from=build /app/apps/web/dist-server ./dist-server
+# X の投稿の隔離フレームのページ（docs/decisions/embeds.md の 2・3）。X_EMBED_ORIGIN を設定したときだけ配る
+COPY --from=build /app/apps/web/x-embed ./x-embed
 USER node
 EXPOSE 8080
 # reader 自身が返す / を見る。/healthz は sendo に中継するので、見ると sendo の生死になる

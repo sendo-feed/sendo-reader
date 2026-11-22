@@ -15,6 +15,7 @@
     "vitest.config.ts",
     "security-headers.ts",
     "sendo-paths.ts",
-    "x-embed-origin.ts"
+    "x-embed-origin.ts",
+    "x-embed/embed.js"
   ]
 }

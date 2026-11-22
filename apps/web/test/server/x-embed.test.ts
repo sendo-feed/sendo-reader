@@ -1,7 +1,9 @@
+import { readFile } from "node:fs/promises";
 import { request as httpRequest, type IncomingHttpHeaders } from "node:http";
+import { fileURLToPath } from "node:url";
 import { afterEach, beforeAll, describe, expect, test } from "vitest";
-import { contentSecurityPolicy, securityHeaders } from "../../security-headers";
-import { withXEmbedOrigin } from "../../server/assets";
+import { contentSecurityPolicy, securityHeaders, xEmbedPageHeaders } from "../../security-headers";
+import { loadXEmbedPage, withXEmbedOrigin } from "../../server/assets";
 import { parseXEmbedOrigin } from "../../server/config";
 import type { Assets } from "../../server/static";
 import { X_EMBED_ORIGIN_META } from "../../x-embed-origin";
@@ -19,6 +21,9 @@ import {
  */
 
 const ORIGIN = "https://embed.example";
+const X_EMBED_DIR = fileURLToPath(new URL("../../x-embed", import.meta.url));
+const X_EMBED_HTML = await readFile(`${X_EMBED_DIR}/index.html`, "utf8");
+const X_EMBED_JS = await readFile(`${X_EMBED_DIR}/embed.js`, "utf8");
 const INDEX = "<!doctype html><html><head><title>Sendo</title></head><body></body></html>";
 /** Workbox の generateSW が出力する precache の一覧の形 */
 const SW =
@@ -56,7 +61,9 @@ async function start(value: string | undefined) {
           xEmbedOrigin,
           contentSecurityPolicy("production", { xEmbedOrigin }),
         );
-  const reader = await startReader(assets, sendo.origin, { xEmbedOrigin });
+  // 本番の main.ts と同じく、設定があるときだけ、隔離フレームのページを読む
+  const xEmbedPage = xEmbedOrigin === null ? undefined : await loadXEmbedPage(X_EMBED_DIR);
+  const reader = await startReader(assets, sendo.origin, { xEmbedOrigin, xEmbedPage });
   running.push(sendo, reader);
   return { sendo, reader };
 }
@@ -135,9 +142,9 @@ describe("X_EMBED_ORIGIN", () => {
 
 describe("隔離フレームのホスト名への要求", () => {
   test.each([
-    "/",
     "/index.html",
-    "/embed.js",
+    "/embed.js/",
+    "/x-embed/embed.js",
     "/api/v1/me",
     "/api/v1/sync/updates",
     "/oauth/token",
@@ -159,11 +166,15 @@ describe("隔離フレームのホスト名への要求", () => {
 
   test("HEAD も 404。GET ／ HEAD のほかは 405", async () => {
     const { sendo, reader } = await start(ORIGIN);
-    expect((await send(reader.origin, "/", "embed.example", { method: "HEAD" })).status).toBe(404);
+    expect(
+      (await send(reader.origin, "/api/v1/me", "embed.example", { method: "HEAD" })).status,
+    ).toBe(404);
     for (const method of ["POST", "PUT", "DELETE", "PATCH", "OPTIONS"]) {
-      const answer = await send(reader.origin, "/api/v1/auth/logout", "embed.example", { method });
-      expect(answer.status, method).toBe(405);
-      expect(answer.headers.allow).toBe("GET, HEAD");
+      for (const path of ["/api/v1/auth/logout", "/", "/embed.js"]) {
+        const answer = await send(reader.origin, path, "embed.example", { method });
+        expect(answer.status, `${method} ${path}`).toBe(405);
+        expect(answer.headers.allow).toBe("GET, HEAD");
+      }
     }
     expect(sendo.received).toEqual([]);
   });
@@ -178,7 +189,7 @@ describe("隔離フレームのホスト名への要求", () => {
   ])("Host が %s でも、隔離フレームのホスト名として扱う", async (host) => {
     const { sendo, reader } = await start(ORIGIN);
     expect((await send(reader.origin, "/api/v1/me", host)).status).toBe(404);
-    expect((await send(reader.origin, "/", host)).body).not.toContain("Sendo");
+    expect((await send(reader.origin, "/", host)).body).toBe(X_EMBED_HTML);
     expect(sendo.received).toEqual([]);
   });
 
@@ -221,6 +232,70 @@ describe("隔離フレームのホスト名への要求", () => {
     });
     expect(status).toBe(404);
     expect(sendo.received).toEqual([]);
+  });
+});
+
+describe("隔離フレームのページ", () => {
+  test("隔離フレームのホスト名の / と /embed.js は、隔離フレームのページを、ページのヘッダーで返す", async () => {
+    const { sendo, reader } = await start(ORIGIN);
+    const page = await send(reader.origin, "/", "embed.example");
+    expect(page.status).toBe(200);
+    expect(page.headers["content-type"]).toBe("text/html; charset=utf-8");
+    expect(page.body).toBe(X_EMBED_HTML);
+    const script = await send(reader.origin, "/embed.js", "embed.example");
+    expect(script.status).toBe(200);
+    expect(script.headers["content-type"]).toBe("text/javascript; charset=utf-8");
+    expect(script.body).toBe(X_EMBED_JS);
+    for (const answer of [page, script]) {
+      for (const [name, value] of Object.entries(xEmbedPageHeaders())) {
+        expect(answer.headers[name.toLowerCase()]).toBe(value);
+      }
+      expect(answer.headers["content-security-policy"]).toBe(
+        "default-src 'none'; script-src 'self' https://platform.twitter.com; frame-src https://platform.twitter.com; base-uri 'none'; form-action 'none'",
+      );
+      // reader の CSP（frame-ancestors 'none'、Trusted Types）は付かない
+      expect(answer.headers["content-security-policy"]).not.toContain("frame-ancestors");
+      expect(answer.headers["content-security-policy"]).not.toContain("trusted-types");
+      expect(answer.headers["permissions-policy"]).toBe(
+        securityHeaders("production")["Permissions-Policy"],
+      );
+    }
+    expect(sendo.received).toEqual([]);
+  });
+
+  test("HEAD は本文なしで返す。キャッシュは毎回確かめさせ、変わっていなければ 304", async () => {
+    const { reader } = await start(ORIGIN);
+    for (const path of ["/", "/embed.js"]) {
+      const head = await send(reader.origin, path, "embed.example", { method: "HEAD" });
+      expect(head.status, path).toBe(200);
+      expect(head.body).toBe("");
+      const first = await send(reader.origin, path, "embed.example");
+      expect(first.headers["cache-control"]).toBe("public, max-age=0, must-revalidate");
+      const etag = String(first.headers.etag);
+      expect(etag).toMatch(/^"[\w-]+"$/);
+      const second = await send(reader.origin, path, "embed.example", {
+        headers: { "if-none-match": etag },
+      });
+      expect(second.status, path).toBe(304);
+      expect(second.headers["content-security-policy"]).toBe(
+        xEmbedPageHeaders()["Content-Security-Policy"],
+      );
+    }
+  });
+
+  test("reader のホスト名で /embed.js を要求しても、隔離フレームのスクリプトは返らない", async () => {
+    const { reader } = await start(ORIGIN);
+    const answer = await send(reader.origin, "/embed.js", "reader.example");
+    expect(answer.body).not.toBe(X_EMBED_JS);
+    expect(answer.body).toContain("<title>Sendo</title>");
+  });
+
+  test("設定がないときは、どのホスト名でも、隔離フレームのページは返らない", async () => {
+    const { reader } = await start(undefined);
+    for (const host of ["embed.example", "reader.example"]) {
+      expect((await send(reader.origin, "/", host)).body).not.toBe(X_EMBED_HTML);
+      expect((await send(reader.origin, "/embed.js", host)).body).not.toBe(X_EMBED_JS);
+    }
   });
 });
 

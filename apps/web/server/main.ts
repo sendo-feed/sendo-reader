@@ -9,12 +9,14 @@
  * - DIST_DIR：画面のビルドの置き場。既定は、このバンドル（dist-server/server.mjs）から見た ../dist
  * - X_EMBED_ORIGIN：X の投稿の隔離フレームのオリジン（https）。なければ、この機能は出ない
  *   （docs/decisions/embeds.md の 3）
+ * - X_EMBED_DIR：隔離フレームのページ（index.html と embed.js）の置き場。既定は、このバンドルから見た
+ *   ../x-embed
  */
 import { fileURLToPath } from "node:url";
 import { serve } from "@hono/node-server";
 import { contentSecurityPolicy } from "../security-headers";
 import { createReaderServer } from "./app";
-import { loadAssets, withXEmbedOrigin } from "./assets";
+import { loadAssets, loadXEmbedPage, withXEmbedOrigin } from "./assets";
 import { type Env, parsePort, parseSendoUrl, parseXEmbedOrigin } from "./config";
 import { createUpgradeRelay } from "./websocket";
 
@@ -23,6 +25,10 @@ const SHUTDOWN_TIMEOUT_MS = 10 * 1000;
 
 function distDirectory(env: Env): string {
   return env.DIST_DIR?.trim() || fileURLToPath(new URL("../dist", import.meta.url));
+}
+
+function xEmbedDirectory(env: Env): string {
+  return env.X_EMBED_DIR?.trim() || fileURLToPath(new URL("../x-embed", import.meta.url));
 }
 
 async function main(env: Env): Promise<void> {
@@ -39,7 +45,9 @@ async function main(env: Env): Promise<void> {
           xEmbedOrigin,
           contentSecurityPolicy("production", { xEmbedOrigin }),
         );
-  const app = createReaderServer({ assets, sendoOrigin, xEmbedOrigin });
+  // 隔離フレームのページは、設定があるときだけ読む（なければ、このホスト名の振り分けもない）
+  const xEmbedPage = xEmbedOrigin === null ? undefined : await loadXEmbedPage(xEmbedDirectory(env));
+  const app = createReaderServer({ assets, sendoOrigin, xEmbedOrigin, xEmbedPage });
 
   const server = serve(
     { fetch: app.fetch, port, hostname: env.HOST?.trim() || "0.0.0.0" },

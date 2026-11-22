@@ -71,12 +71,34 @@ Sendo と並べて、コンテナで動かします（[決定](docs/decisions/co
 - 手前のプロキシは、WebSocket の Upgrade を通すようにします（Caddy と Cloudflare Tunnel は何も足さずに通します。nginx などの設定は [Sendo の README](https://github.com/sendo-feed/sendo#動かす) にあります）。通さなくても、画面は定期同期だけで動きます
 - reader は、Sendo のヘルスチェックが通ってから始まります。更新は `docker compose pull && docker compose up -d` で、Sendo と一緒に新しくなります
 
-reader のコンテナの設定（環境変数）は、次の 2 つだけです。どちらも、ふつうは変えません。
+reader のコンテナの設定（環境変数）は、次のとおりです。`SENDO_URL` と `PORT` は、ふつうは変えません。
 
 | 名前 | 既定 | 意味 |
 |---|---|---|
 | `SENDO_URL` | `http://sendo:8787` | 中継の先の Sendo（compose の中の名前） |
 | `PORT` | `8080` | 受けるポート |
+| `X_EMBED_ORIGIN` | なし | 記事の中の X の投稿を、公式ウィジェットで出すための隔離フレームのオリジン（下を参照）。なければ、X の投稿は引用と「Open on X」のリンクで出ます |
+
+### 記事の中の X の投稿（任意）
+
+記事の中の X の投稿を、X の公式ウィジェットで出せます（[決定](docs/decisions/embeds.md)）。X のスクリプトは、reader のオリジンでは動かさず、別のホスト名で配る隔離フレームの中で動かします。
+
+1. 隔離フレームのためのホスト名を 1 つ用意します（例：`x-embed.example.net`）。reader と違うホスト名にし、できれば reader と別のドメイン（登録できるドメインが違うもの）にします。同じドメインの下に置くと、ブラウザーが reader と同じプロセスで動かすことがあり、そのドメインも X に伝わります
+2. そのホスト名も、手前のリバースプロキシで reader のコンテナに向けます（reader のホスト名と、隔離フレームのホスト名の 2 つが、同じコンテナに届くようにします。`Host` のヘッダーは書き換えずに渡します）
+3. reader のコンテナに `X_EMBED_ORIGIN=https://x-embed.example.net` を設定して、起動し直します。形が合わない値（`https` でない、パスがある、など）では、理由を出して起動しません
+
+読者には、新しい版への切り替えと同じ時点で届きます（画面が前に出たとき、または開いたままなら 1 時間以内に確かめ、画面が裏にある間か、次に前に出たときに切り替わります）。
+
+読み込むと、表示範囲に入った投稿ごとに、読者の IP、開いた時刻、投稿の ID、隔離フレームのホスト名が X に伝わり、投稿 1 つで約 450KB（動画付きは約 1.8MB）を通信します。
+
+配備したあとに確かめること：
+
+- 隔離フレームのホスト名の `/` が、次のヘッダーで返ること（`curl -sI https://x-embed.example.net/`）
+  - `Content-Security-Policy: default-src 'none'; script-src 'self' https://platform.twitter.com; frame-src https://platform.twitter.com; base-uri 'none'; form-action 'none'`
+  - `Referrer-Policy: no-referrer`、`X-Content-Type-Options: nosniff`
+- 隔離フレームのホスト名では、`/api/v1/me` などの Sendo のパスが 404 になること
+- reader の画面の CSP に `frame-src https://x-embed.example.net` が入ること
+- 本物の X で、投稿が 1 つ出ること：ブラウザーで `https://x-embed.example.net/#id=20&theme=light` を、reader の画面の中の iframe（開発者ツールで足す）から開くと、投稿が出ます（フレームの外で直接開くと、何もしません）
 
 手元でイメージを作るときは `docker build -t sendo-reader .` です。手元で作ったイメージを Sendo の `compose.yaml` で試すときは、`reader` の `image` を `sendo-reader` に替えます。
 
@@ -101,6 +123,7 @@ sendo-reader/
 │   └── web/                  # PWA（Svelte 5 ＋ Vite）
 │       ├── src/              # 画面
 │       ├── server/           # コンテナのサーバー（静的なファイル ＋ Sendo のパスの中継）
+│       ├── x-embed/          # X の投稿の隔離フレームのページ（X_EMBED_ORIGIN のホスト名で配る）
 │       ├── sendo-paths.ts    # Sendo に中継するパス
 │       └── security-headers.ts  # CSP などのヘッダー
 ├── scripts/                  # 手元と CI で動かす道具

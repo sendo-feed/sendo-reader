@@ -110,12 +110,13 @@ export type RunningReader = { origin: string; close: () => Promise<void> };
 export async function startReader(
   assets: Assets,
   sendoOrigin: string,
-  relayOptions: UpgradeRelayOptions = {},
+  relayOptions: UpgradeRelayOptions & { xEmbedPage?: Assets | undefined } = {},
 ): Promise<RunningReader> {
   const app = createReaderServer({
     assets,
     sendoOrigin,
     xEmbedOrigin: relayOptions.xEmbedOrigin ?? null,
+    xEmbedPage: relayOptions.xEmbedPage,
   });
   const { server, port } = await new Promise<{ server: ReturnType<typeof serve>; port: number }>(
     (resolve) => {

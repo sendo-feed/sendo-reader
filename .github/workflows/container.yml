@@ -96,6 +96,29 @@ jobs:
           code=$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8080/api/v1/me)
           [ "$code" = 502 ] || { echo "::error::/api の中継が 502 にならない（$code）"; exit 1; }
 
+      # X の投稿の隔離フレームのオリジンを設定しても起動し、隔離フレームのホスト名で隔離フレームのページを、
+      # reader のホスト名で frame-src の入った画面を返すかを見る（docs/decisions/embeds.md の 3）
+      - name: Smoke test (X_EMBED_ORIGIN)
+        if: github.event_name == 'pull_request'
+        run: |
+          docker run -d --name reader-x -p 127.0.0.1:8081:8080 -e SENDO_URL=http://127.0.0.1:9 -e X_EMBED_ORIGIN=https://x-embed.example sendo-reader:ci
+          for i in $(seq 1 30); do
+            status=$(docker inspect -f '{{.State.Health.Status}}' reader-x)
+            [ "$status" = healthy ] && break
+            sleep 2
+          done
+          docker logs reader-x
+          [ "$status" = healthy ] || { echo "::error::X_EMBED_ORIGIN を設定した reader のコンテナが healthy にならない（$status）"; exit 1; }
+          curl -fsS -D reader-headers.txt -o reader.html http://127.0.0.1:8081/
+          grep -qi '^content-security-policy: .*frame-src https://x-embed.example' reader-headers.txt
+          grep -q '<meta name="sendo-x-embed-origin" content="https://x-embed.example">' reader.html
+          curl -fsS -H 'Host: x-embed.example' -D embed-headers.txt -o embed.html http://127.0.0.1:8081/
+          grep -qi "^content-security-policy: default-src 'none'; script-src 'self' https://platform.twitter.com;" embed-headers.txt
+          grep -q 'src="/embed.js"' embed.html
+          curl -fsS -H 'Host: x-embed.example' -o /dev/null http://127.0.0.1:8081/embed.js
+          code=$(curl -s -o /dev/null -w '%{http_code}' -H 'Host: x-embed.example' http://127.0.0.1:8081/api/v1/me)
+          [ "$code" = 404 ] || { echo "::error::隔離フレームのホスト名の /api が 404 にならない（$code）"; exit 1; }
+
       - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
