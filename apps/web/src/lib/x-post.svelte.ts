@@ -64,11 +64,6 @@ export class XPostFrame {
    * 同じ幅なら、出るまで（height が付くまで）元の引用の代わりに、この高さの枠を取る
    */
   reserved = $state<number | null>(null);
-  /**
-   * ウィジェットの上に、透明な覆いを掛けている（embeds.md の 6）。覆いの上の横のスワイプと縦の
-   * スクロールは、reader が受ける。1 回押すと外れ、表示範囲から出たら、また掛ける
-   */
-  covered = $state(true);
 
   phase: "idle" | "loading" | "shown" | "failed" = "idle";
   /** 表示範囲に入っている */
@@ -82,11 +77,6 @@ export class XPostFrame {
     readonly element: Element,
     readonly origin: string,
   ) {}
-
-  /** 覆いを外す（覆いを押した）。次の操作から、ウィジェットの中に届く */
-  uncover(): void {
-    this.covered = false;
-  }
 
   /** 枠の load で、隔離フレームに挨拶する（送り先は、隔離フレームのオリジンだけ） */
   hello(frame: HTMLIFrameElement): void {
@@ -225,12 +215,6 @@ export class XPostLoader {
     return [...this.#sizes.values()].slice(-MAX_X_POST_SIZES);
   }
 
-  /** 要素が、本文の中の投稿（の iframe など）か */
-  contains(element: Element): boolean {
-    for (const post of this.#posts) if (post.element.contains(element)) return true;
-    return false;
-  }
-
   /** 本文の中の投稿を登録する */
   add(id: string, element: Element): XPostFrame {
     const post = new XPostFrame(id, element, this.#origin);
@@ -279,8 +263,6 @@ export class XPostLoader {
       post.visible = entry.isIntersecting;
       // 読み込み中に出たら、iframe を外して数から外す（Chromium は、画面の外の枠を解決させない）
       if (!post.visible && post.phase === "loading") this.#release(post);
-      // 出ているウィジェットが表示範囲から出たら、覆いを掛け直す
-      if (!post.visible && post.phase === "shown") post.covered = true;
     }
     this.#pump();
   }
@@ -300,7 +282,6 @@ export class XPostLoader {
 
   #start(post: XPostFrame): void {
     post.phase = "loading";
-    post.covered = true;
     post.attempt += 1;
     post.frame = null;
     post.height = null;
