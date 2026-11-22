@@ -42,8 +42,9 @@ sendo-reader は、[sendo のコンテナ版](https://github.com/sendo-feed/send
    - JS、CSS、wasm などは、ブラウザが受けられれば圧縮して返す（brotli か gzip）
 6. **reader のコンテナのヘルスチェック（イメージの `HEALTHCHECK`）は、reader 自身が返す `/`（`index.html`）を見る。** `/healthz` は sendo に中継するので、reader のコンテナで見ると sendo の生死を見ることになる。reader のためだけのパスは足さない（sendo のパスと重なるおそれを増やさない）。
 7. **サーバーは Node で書く。** HTTP は Hono と `@hono/node-server`（sendo と同じ）で受ける。コードは `apps/web/server/` に置き、ここだけ `node:*` を使ってよい。イメージには、画面のビルド（`vite build` の `dist`）と、依存ごと 1 つのファイルにまとめたサーバーを入れる。
-8. **sendo の機能は、すべて使える前提で作る。`GET /api/v1/features` は見ない。**
+8. **sendo の機能は、すべて使える前提で作る（翻訳を除く）。`GET /api/v1/features` は見ない。**
    - sendo は、ページ本文の抽出と言語判定を常に動かし、欠いたままでは起動しない（sendo の[コンテナ版](https://github.com/sendo-feed/sendo/blob/main/docs/decisions/container.md)の 1〜3）。reader は、全文の取得を、いつでも使える機能として出す
+   - 例外は、sendo に API キーがあるときだけ動く翻訳。reader は、記事に翻訳の項目が届いたときだけ、翻訳の表示と操作を出す（[記事の翻訳](translation.md)の 1、4）
    - `/features` は、この決定を実装する PR で使わなくする。その PR を含む reader のイメージが GHCR の `main` に出たら、sendo は `/features` を消してよい（sendo の[コンテナ版](https://github.com/sendo-feed/sendo/blob/main/docs/decisions/container.md)の 3）
    - 消したあとに、古い版の画面（Service Worker に残った版）が `/features` を呼んでも、404 を「全文を使えない」と受けて、全文の取得の操作を出さないだけで動き続ける。新しい版に切り替われば（[UI とツール](ui.md)の 5）、出る
 9. **テストは Node で動かす。** 中継するパスの振り分け、中継（ヘッダー、`Set-Cookie`、リダイレクト、ストリーム、WebSocket の Upgrade）、静的なファイルのヘッダー、`X_EMBED_ORIGIN` を設定したときの値の確かめ・振り分け・書き換えを、偽の sendo を相手に Vitest で確かめる。CI では、PR でイメージが作れて動くことを確かめ、`main` に入ったらイメージを出す（sendo と同じ形）。
