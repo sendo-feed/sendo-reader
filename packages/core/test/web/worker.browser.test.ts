@@ -217,6 +217,8 @@ describe("複数のタブ", () => {
     await second.client.setRead(article.id, true);
     await second.client.syncNow();
     expect(server.inbox.get(article.id)?.readAt).not.toBeNull();
+    // 番号の合う代表どうしの交代では、すべての表を読み直させない（読み込み直すたびに重くしない）
+    expect(second.changes).not.toContainEqual([...TABLES].sort());
   });
 
   test("3 つのタブで代表が 2 回入れ替わっても、どのタブからも使える", async () => {

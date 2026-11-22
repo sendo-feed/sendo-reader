@@ -79,8 +79,13 @@ export function runReaderWorker(options: ReaderWorkerOptions = {}): void {
    * 自分のタブからの呼び出しを送らずに待たせる
    */
   let currentLeader: { id: string; version: number | null } | null = null;
-  /** ほかの代表を知ったことがある（番号の合う代表に替わったら、すべての表を読み直させる） */
-  let knewLeader = false;
+  /**
+   * 番号の合わない代表を知ってから、まだ番号の合う代表に替わっていない。その間の知らせは画面に
+   * 渡さず、失敗を返した頼みも前の代表が書き込んでいたかもしれないので、番号の合う代表に替わったら
+   * （自分が代表になったときも）、すべての表を読み直させる。番号の合う代表どうしの交代では、頼みを
+   * 送り直すだけにする（読み込み直すたびに、すべての表を読み直させない）
+   */
+  let afterMismatch = false;
   /**
    * 代表のロックを取った（DB を開いている途中か、代表である）。ほかの代表はいないので、
    * 名乗りは受けず、自分のタブからの呼び出しは、代表になるまで溜める
@@ -221,20 +226,24 @@ export function runReaderWorker(options: ReaderWorkerOptions = {}): void {
 
   /** ほかのタブが代表になった（または、代表を知った） */
   function onLeader(next: { id: string; version: number | null }): void {
-    const replaced = knewLeader;
     currentLeader = next;
-    knewLeader = true;
     if (next.version !== version) {
+      afterMismatch = true;
       // 番号が合わない。答えの来ていない呼び出しも、待たせずに失敗で返す
       const result = mismatch(next.version);
       for (const call of forwarded.values()) toTab({ type: "result", id: call.id, result });
       forwarded.clear();
       return;
     }
-    // 前の代表が書き込んでから答える前に閉じたかもしれず、番号の合わない代表の間の知らせも
-    // 渡していないので、すべての表を読み直させる（同期の様子は、新しい代表が名乗るときに送る）
-    if (replaced) toTab({ type: "changed", tables: [...TABLES] });
+    // 同期の様子は、新しい代表が名乗るときに送る
+    readAgainAfterMismatch();
     for (const call of forwarded.values()) forward(call);
+  }
+
+  function readAgainAfterMismatch(): void {
+    if (!afterMismatch) return;
+    afterMismatch = false;
+    toTab({ type: "changed", tables: [...TABLES] });
   }
 
   /**
@@ -319,8 +328,7 @@ export function runReaderWorker(options: ReaderWorkerOptions = {}): void {
     }
     forwarded.clear();
     announce(current);
-    // ほかの代表から引き継いだときは、すべての表を読み直させる（ほかの代表から替わったときと同じ）
-    if (knewLeader) toTab({ type: "changed", tables: [...TABLES] });
+    readAgainAfterMismatch();
     toTab({ type: "status", status: scheduler.status });
     scheduler.requestNow();
     updates?.update(scheduler.status);
