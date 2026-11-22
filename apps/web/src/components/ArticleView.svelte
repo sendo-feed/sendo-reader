@@ -2,6 +2,7 @@
   import { type Article, type ArticleContent, toSafeHttpUrl } from "@sendo-reader/core";
   import { tick, untrack } from "svelte";
   import { useReader } from "../lib/context";
+  import { describeTranslationError, TRANSLATION_FAILED } from "../lib/errors";
   import { formatDateTime } from "../lib/format";
   import { layout, reducedMotion, scrollTopOf, scrollToTop } from "../lib/layout.svelte";
   import type { ArticleListState } from "../lib/list.svelte";
@@ -259,6 +260,8 @@
       openedTranslation = null;
       translationFor = null;
       showOriginal = false;
+      requestSeen = false;
+      translateError = null;
       if (id === null) {
         article = null;
         missing = false;
@@ -323,6 +326,72 @@
     });
   });
 
+  /**
+   * この記事をこの端末で訳してもらうよう頼んだ（頼んだ記事として core が覚えている）のを見た。
+   * 頼んだ記事の訳文が届いたら、開いていても訳文に替える（docs/decisions/translation.md の 3）
+   */
+  let requestSeen = $state(false);
+
+  $effect(() => {
+    const current = article;
+    if (current === null || current.id !== articleId) return;
+    untrack(() => {
+      if (current.translationRequest === "requested") requestSeen = true;
+      const translation = current.translation;
+      if (
+        requestSeen &&
+        openedTranslation === null &&
+        translation != null &&
+        translation.translatedAt !== null
+      ) {
+        openedTranslation = { title: translation.title };
+        showOriginal = false;
+        onviewchange();
+      }
+    });
+  });
+
+  /** その場の翻訳を頼める（訳文がない、頼んだ印がない。docs/decisions/translation.md の 4） */
+  const canTranslate = $derived(
+    article !== null &&
+      article.translation != null &&
+      (article.translation.status === "queued" || article.translation.status === "untranslated") &&
+      article.translationRequest !== "requested",
+  );
+  /** 頼んで、sendo の返事を待っている */
+  let translating = $state(false);
+  /** 頼めなかった理由（日本語の文） */
+  let translateError = $state<string | null>(null);
+  /** オフラインのときは頼めない（sendo に届かないとできない操作。決定の 6） */
+  let online = $state(navigator.onLine);
+
+  $effect(() => {
+    const update = () => {
+      online = navigator.onLine;
+    };
+    window.addEventListener("online", update);
+    window.addEventListener("offline", update);
+    return () => {
+      window.removeEventListener("online", update);
+      window.removeEventListener("offline", update);
+    };
+  });
+
+  /** その場で訳してもらう（Translate と t） */
+  async function translate(): Promise<void> {
+    const id = articleId;
+    if (id === null || !canTranslate || translating || !online) return;
+    translating = true;
+    translateError = null;
+    try {
+      await reader.client.requestTranslation(id);
+    } catch (error) {
+      if (articleId === id) translateError = describeTranslationError(error);
+    } finally {
+      translating = false;
+    }
+  }
+
   /** 見出しに出すタイトル。訳文を出していて訳したタイトルがあれば、それ */
   const heading = $derived(
     article === null
@@ -332,9 +401,15 @@
         : article.title,
   );
 
-  /** 訳文と原文を切り替える（More actions と t）。訳文のない記事では何もしない */
+  /**
+   * 訳文と原文を切り替える（More actions と t）。訳文がなく Translate を出している記事では、
+   * Translate と同じ（docs/decisions/translation.md の 7）
+   */
   export function toggleTranslation(): void {
-    if (openedTranslation === null) return;
+    if (openedTranslation === null) {
+      void translate();
+      return;
+    }
     showOriginal = !showOriginal;
     actionsOpen = false;
     onviewchange();
@@ -930,7 +1005,24 @@
             {#if translation !== null}
               <span class="translation">・ {translation}</span>
             {/if}
+            {#if canTranslate}
+              <!-- 訳文のない記事を、押したときだけ訳してもらう（ラベルのすぐ横。決定の 4） -->
+              <button
+                type="button"
+                class="translate"
+                disabled={translating || !online}
+                title={online ? "Translate (t)" : "オフラインのときは訳してもらえません"}
+                onclick={translate}
+              >
+                Translate
+              </button>
+            {/if}
           </p>
+          {#if translateError !== null}
+            <p class="content-note" role="alert">{translateError}</p>
+          {:else if article.translationRequest === "failed"}
+            <p class="content-note" role="alert">{TRANSLATION_FAILED}</p>
+          {/if}
         </header>
         {#if pageLoading}
           <p class="content-note" role="status">全文を取得しています…</p>
@@ -1186,6 +1278,22 @@
     margin: 0 0 1.25em;
     color: var(--muted);
     font-size: 0.875rem;
+  }
+
+  /* Translate はラベルの横に、メタと同じ大きさの文字で出す（決定の 4） */
+  .translate {
+    margin-left: 0.375rem;
+    padding: 0;
+    border: 0;
+    background: none;
+    color: var(--accent);
+    font: inherit;
+    cursor: pointer;
+  }
+
+  .translate:disabled {
+    color: var(--faint);
+    cursor: default;
   }
 
   .original-title {

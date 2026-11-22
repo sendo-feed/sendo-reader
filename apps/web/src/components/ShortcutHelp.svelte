@@ -22,7 +22,7 @@
         [["m"], "Toggle read"],
         [["s"], "Save / Unsave"],
         [["v"], "Open original in new tab"],
-        [["t"], "Show translation / original text"],
+        [["t"], "Translate / switch translation and original"],
         [["Shift", "A"], "Mark all as read"],
       ],
     },

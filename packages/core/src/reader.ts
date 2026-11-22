@@ -66,6 +66,7 @@ import {
   fetchFeedTimes,
   importOpml,
   type OpmlImportResult,
+  requestTranslation,
   subscribe,
 } from "./online";
 import {
@@ -92,6 +93,7 @@ import {
   push,
   type RejectedOperation,
 } from "./sync/queue";
+import { TranslationRequests } from "./translation-requests";
 
 /** ログインしたユーザー（JSON）を置く設定の鍵 */
 const USER_KEY = "auth.user";
@@ -261,12 +263,19 @@ export class ReaderCore {
    * 捨てる
    */
   readonly #openedAt = new Map<string, { seq: number; key: string; since: number }>();
+  /** この端末で頼んだ、その場の翻訳（docs/decisions/translation.md の 6）。メモリーにだけ持つ */
+  readonly #translationRequests: TranslationRequests;
+  /** 頼んだ印が 1 分で外れたときに、画面に読み直してもらうための時計 */
+  #translationTimer: ReturnType<typeof setTimeout> | undefined;
+  /** これまでに始めた同期の数（頼んだあとに始めた同期かを見分ける） */
+  #startedSyncs = 0;
 
   private constructor(options: ReaderCoreOptions) {
     this.#db = options.db;
     this.#now = options.now ?? Date.now;
     this.#onDataCleared = options.onDataCleared;
     this.#prefetchContents = options.prefetchContents ?? 0;
+    this.#translationRequests = new TranslationRequests(this.#now);
     this.#api = createSendoApi({
       baseUrl: options.baseUrl,
       ...(options.fetch === undefined ? {} : { fetch: options.fetch }),
@@ -433,6 +442,9 @@ export class ReaderCore {
     this.#prefetchFailures.clear();
     this.#openList = null;
     this.#openedAt.clear();
+    this.#translationRequests.clear();
+    clearTimeout(this.#translationTimer);
+    this.#translationTimer = undefined;
     return this.#session.signal;
   }
 
@@ -478,6 +490,7 @@ export class ReaderCore {
 
   async #runSync(started: AbortSignal): Promise<SyncResult> {
     this.#requireSignedIn();
+    const syncNumber = ++this.#startedSyncs;
     // 別のユーザーでログインしていたら、手元を消して、そのユーザーで最初から同期する
     const signal = await this.#confirmUser(started);
     const allow = (id: number) => {
@@ -501,6 +514,13 @@ export class ReaderCore {
       pushed.sent += again.sent;
       pushed.rejected.push(...again.rejected);
       pushed.remapped.push(...again.remapped);
+    }
+    // 頼んだあとに始めた同期が終わったら、頼んだ印を外し、訳せなかったかを決める
+    if (
+      signal === this.#session.signal &&
+      (await this.#translationRequests.afterSync(syncNumber, (ids) => getArticles(this.#db, ids)))
+    ) {
+      this.#emit(new Set<Table>(["articles"]));
     }
     return { push: pushed, pull: pulled };
   }
@@ -1071,17 +1091,59 @@ export class ReaderCore {
     return getSavedPage(this.#db, id);
   }
 
-  listArticles(query?: ArticleQuery): Promise<Article[]> {
-    return listArticles(this.#db, query);
+  // 記事には、この端末で頼んだその場の翻訳を重ねて返す（docs/decisions/translation.md の 6）
+
+  async listArticles(query?: ArticleQuery): Promise<Article[]> {
+    return (await listArticles(this.#db, query)).map((a) => this.#translationRequests.overlay(a));
   }
 
-  getArticle(id: string): Promise<Article | null> {
-    return getArticle(this.#db, id);
+  async getArticle(id: string): Promise<Article | null> {
+    const article = await getArticle(this.#db, id);
+    return article === null ? null : this.#translationRequests.overlay(article);
   }
 
   /** 記事をまとめて読む（見つからない ID は飛ばす） */
-  getArticles(ids: readonly string[]): Promise<Article[]> {
-    return getArticles(this.#db, ids);
+  async getArticles(ids: readonly string[]): Promise<Article[]> {
+    return (await getArticles(this.#db, ids)).map((a) => this.#translationRequests.overlay(a));
+  }
+
+  // --- 記事の翻訳を頼む（sendo に届かないとできない） ---
+
+  /**
+   * 記事をその場で訳してもらう（docs/decisions/translation.md の 4、6）。操作キューには積まず、
+   * sendo に届かなければ ApiError（network）。受け付けられたら（もう訳しているか、訳し終えていた
+   * ときも）、頼んだ印を付けて、記事が変わったと知らせる。断られたら ApiError（code に理由）。
+   * 同期は呼んだ側が頼む（Web ではワーカーが、終わったらすぐ同期する）
+   */
+  async requestTranslation(articleId: string): Promise<void> {
+    this.#requireSignedIn();
+    const session = this.#session.signal;
+    try {
+      await requestTranslation(this.#api, articleId, session);
+    } catch (error) {
+      if (!(error instanceof ApiError && error.code === "translation_exists")) throw error;
+    }
+    // 待っている間にログアウトした ／ 別のユーザーでログインし直した
+    throwIfSessionEnded(session);
+    this.#translationRequests.accept(articleId, this.#startedSyncs);
+    this.#scheduleTranslationExpiry();
+    this.#emit(new Set<Table>(["articles"]));
+  }
+
+  /** 頼んだ印が 1 分で外れたら、画面に読み直してもらう */
+  #scheduleTranslationExpiry(): void {
+    clearTimeout(this.#translationTimer);
+    this.#translationTimer = undefined;
+    const at = this.#translationRequests.nextExpiry();
+    if (at === null) return;
+    this.#translationTimer = setTimeout(
+      () => {
+        this.#translationTimer = undefined;
+        if (this.#translationRequests.expireMarks()) this.#emit(new Set<Table>(["articles"]));
+        this.#scheduleTranslationExpiry();
+      },
+      Math.max(0, at - this.#now()),
+    );
   }
 
   /** since（ミリ秒）からあとに既読にした記事の数 */
