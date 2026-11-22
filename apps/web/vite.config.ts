@@ -1,4 +1,7 @@
 import { execSync } from "node:child_process";
+import { existsSync, readFileSync, statSync } from "node:fs";
+import type { IncomingMessage, ServerResponse } from "node:http";
+import path from "node:path";
 import { svelte } from "@sveltejs/vite-plugin-svelte";
 import { defineConfig, type Plugin } from "vite";
 import { VitePWA } from "vite-plugin-pwa";
@@ -7,31 +10,139 @@ import {
   IMAGE_CACHE_NAME,
   IMAGE_CACHE_URL_PATTERN,
 } from "../../packages/core/src/web/image-cache.ts";
-import { securityHeaders } from "./security-headers.ts";
-import { SENDO_NAVIGATION_DENYLIST } from "./sendo-paths.ts";
+import { contentSecurityPolicy, securityHeaders } from "./security-headers.ts";
+import { isSendoPath, SENDO_NAVIGATION_DENYLIST } from "./sendo-paths.ts";
+import {
+  applyXEmbedOrigin,
+  isXEmbedHost,
+  toXEmbedOrigin,
+  withXEmbedMeta,
+} from "./x-embed-origin.ts";
+
+/**
+ * X の投稿の隔離フレームのオリジン（docs/decisions/embeds.md の 3）。本番のコンテナと同じ環境変数
+ * X_EMBED_ORIGIN で受け、同じ関数（x-embed-origin.ts）で確かめる。手元では、開発用の
+ * http://localhost と http://127.0.0.1 も受け付ける（reader と違うほうのホスト名にする）
+ */
+function devXEmbedOrigin(value: string | undefined): string | null {
+  const text = value?.trim() ?? "";
+  if (text === "") return null;
+  const origin = toXEmbedOrigin(text, { allowDevelopment: true });
+  if (origin === null) throw new Error(`X_EMBED_ORIGIN の形が合わない: ${text}`);
+  return origin;
+}
+
+const X_EMBED_ORIGIN = devXEmbedOrigin(process.env.X_EMBED_ORIGIN);
+
+type Middleware = (req: IncomingMessage, res: ServerResponse, next: () => void) => void;
+
+/** 隔離フレームのホスト名への要求は、sendo にも画面にも回さない（本番の server/app.ts と同じ） */
+function xEmbedHostMiddleware(headers: Record<string, string>): Middleware {
+  return (req, res, next) => {
+    if (X_EMBED_ORIGIN === null || !isXEmbedHost(req.headers.host, X_EMBED_ORIGIN)) return next();
+    for (const [name, value] of Object.entries(headers)) res.setHeader(name, value);
+    if (req.method !== "GET" && req.method !== "HEAD") {
+      res.statusCode = 405;
+      res.setHeader("allow", "GET, HEAD");
+      res.end();
+      return;
+    }
+    res.statusCode = 404;
+    res.end(req.method === "HEAD" ? undefined : "Not Found");
+  };
+}
+
+/**
+ * 隔離フレームのホスト名への要求は、sendo に中継しない（WebSocket の Upgrade も）。Vite の中継の
+ * bypass で false を返すと、Vite が 404 を返して、中継しない
+ */
+function bypassXEmbedHost(req: IncomingMessage): false | undefined {
+  return X_EMBED_ORIGIN !== null && isXEmbedHost(req.headers.host, X_EMBED_ORIGIN)
+    ? false
+    : undefined;
+}
+
+/** preview が返すビルドのファイルのうち、ほかのパスの代わりに index.html を返すものか（SPA） */
+function isIndexPath(pathname: string, outDir: string): boolean {
+  if (pathname === "/" || pathname === "/index.html") return true;
+  if (isSendoPath(pathname)) return false;
+  let file: string;
+  try {
+    file = path.resolve(outDir, `.${decodeURIComponent(pathname)}`);
+  } catch {
+    return true;
+  }
+  if (!file.startsWith(outDir + path.sep)) return true;
+  return !(existsSync(file) && statSync(file).isFile());
+}
 
 /**
  * 手元の dev サーバーと preview にヘッダーを付ける。本番は、reader のコンテナのサーバーが同じものを付ける
- * （server/static.ts）
+ * （server/static.ts）。X の投稿の隔離フレームのオリジンが設定してあれば、本番のコンテナと同じく、
+ * CSP の frame-src に入れ、index.html に <meta> を足し（preview は sw.js の版の印も書き換え）、
+ * 隔離フレームのホスト名への要求を断る
  */
-function securityHeadersPlugin(): Plugin {
-  return {
-    name: "sendo-reader:security-headers",
-    configureServer(server) {
-      const headers = securityHeaders("development");
-      server.middlewares.use((_req, res, next) => {
-        for (const [name, value] of Object.entries(headers)) res.setHeader(name, value);
-        next();
-      });
+function securityHeadersPlugin(): Plugin[] {
+  const developmentHeaders = securityHeaders("development", { xEmbedOrigin: X_EMBED_ORIGIN });
+  const productionHeaders = securityHeaders("production", { xEmbedOrigin: X_EMBED_ORIGIN });
+  return [
+    {
+      name: "sendo-reader:security-headers",
+      configureServer(server) {
+        server.middlewares.use(xEmbedHostMiddleware(developmentHeaders));
+        server.middlewares.use((_req, res, next) => {
+          for (const [name, value] of Object.entries(developmentHeaders)) {
+            res.setHeader(name, value);
+          }
+          next();
+        });
+      },
+      async configurePreviewServer(server) {
+        server.middlewares.use(xEmbedHostMiddleware(productionHeaders));
+        server.middlewares.use((_req, res, next) => {
+          for (const [name, value] of Object.entries(productionHeaders)) res.setHeader(name, value);
+          next();
+        });
+        if (X_EMBED_ORIGIN === null) return;
+        // 本番のコンテナと同じく、起動するときに index.html と sw.js を書き換える
+        const outDir = path.resolve(server.config.root, server.config.build.outDir);
+        const files = await applyXEmbedOrigin(
+          {
+            indexHtml: readFileSync(path.join(outDir, "index.html"), "utf8"),
+            sw: readFileSync(path.join(outDir, "sw.js"), "utf8"),
+          },
+          X_EMBED_ORIGIN,
+          contentSecurityPolicy("production", { xEmbedOrigin: X_EMBED_ORIGIN }),
+        );
+        server.middlewares.use((req, res, next) => {
+          if (req.method !== "GET" && req.method !== "HEAD") return next();
+          const pathname = new URL(req.url ?? "/", "http://preview.invalid").pathname;
+          const body =
+            pathname === "/sw.js"
+              ? files.sw
+              : isIndexPath(pathname, outDir)
+                ? files.indexHtml
+                : null;
+          if (body === null) return next();
+          res.setHeader(
+            "content-type",
+            pathname === "/sw.js" ? "text/javascript; charset=utf-8" : "text/html; charset=utf-8",
+          );
+          res.setHeader("cache-control", "no-cache");
+          res.end(req.method === "HEAD" ? undefined : body);
+        });
+      },
     },
-    configurePreviewServer(server) {
-      const headers = securityHeaders("production");
-      server.middlewares.use((_req, res, next) => {
-        for (const [name, value] of Object.entries(headers)) res.setHeader(name, value);
-        next();
-      });
+    {
+      // 手元の dev サーバーだけ。ビルドした index.html には埋めない（イメージは 1 つのまま。
+      // 本番はコンテナが起動するときに埋める）
+      name: "sendo-reader:x-embed-origin-meta",
+      apply: "serve",
+      transformIndexHtml(html) {
+        return X_EMBED_ORIGIN === null ? html : withXEmbedMeta(html, X_EMBED_ORIGIN);
+      },
     },
-  };
+  ];
 }
 
 /**
@@ -106,7 +217,7 @@ export default defineConfig({
   define: { __APP_VERSION__: JSON.stringify(appVersion()) },
   plugins: [
     svelte(),
-    securityHeadersPlugin(),
+    ...securityHeadersPlugin(),
     // アプリの外枠と SQLite の wasm をキャッシュして、ネットワークがなくても起動する
     // （docs/decisions/ui.md）。登録は src/main.ts で、Trusted Types のポリシーを通して行う
     VitePWA({
@@ -182,7 +293,8 @@ export default defineConfig({
       // ws: true で、sendo の通知（WebSocket の Upgrade）も中継する
       SENDO_NAVIGATION_DENYLIST.map((pattern) => [
         pattern.source,
-        { target: SENDO_DEV_URL, ws: true },
+        // preview も、この中継を引き継ぐ。隔離フレームのホスト名への要求は中継しない
+        { target: SENDO_DEV_URL, ws: true, bypass: bypassXEmbedHost },
       ]),
     ),
   },

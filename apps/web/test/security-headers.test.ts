@@ -18,4 +18,15 @@ describe("CSP", () => {
     expect(csp).toContain("script-src 'self' 'wasm-unsafe-eval'");
     expect(csp).not.toContain("trusted-types");
   });
+
+  test("X の投稿の隔離フレームのオリジンがあるときだけ、frame-src を 1 つ足し、ほかは変えない", () => {
+    for (const mode of ["production", "development"] as const) {
+      const base = contentSecurityPolicy(mode);
+      expect(base).not.toContain("frame-src");
+      expect(contentSecurityPolicy(mode, { xEmbedOrigin: null })).toBe(base);
+      expect(contentSecurityPolicy(mode, { xEmbedOrigin: "https://embed.example" })).toBe(
+        `${base}; frame-src https://embed.example`,
+      );
+    }
+  });
 });
