@@ -329,6 +329,35 @@ test.describe("Translate", () => {
     expect(server.translationRequests).toEqual([article.id, article.id]);
   });
 
+  test("訳せなかったあとでほかの端末が訳しても、開いている見出しは替えない", async ({
+    page,
+    context,
+  }) => {
+    const { server, article, view } = await open(page, context);
+    const heading = view.getByRole("heading", { level: 1 });
+    await view.getByRole("button", { name: "Translate", exact: true }).click();
+    await expect(view.locator("header .translation")).toHaveText("・ EN · Translating");
+    server.setTranslation(article.id, { ...queued, status: "untranslated" });
+    await page.getByRole("button", { name: "Sync now" }).click();
+    await expect(view.getByRole("alert")).toBeVisible();
+
+    // ほかの端末が頼み、訳し終えた
+    server.setTranslation(article.id, { ...queued, status: "translating" });
+    await page.getByRole("button", { name: "Sync now" }).click();
+    await expect(view.locator("header .translation")).toHaveText("・ EN · Translating");
+    server.setTranslation(article.id, {
+      language: "en",
+      status: "translated",
+      title: "フィーチャートグル",
+      summary: null,
+      translatedAt: new Date().toISOString(),
+    });
+    await page.getByRole("button", { name: "Sync now" }).click();
+    await expect(view.locator("header .translation")).toHaveText("・ EN · Translated");
+    await expect(heading).toHaveText("Feature Toggles");
+    await expect(view.getByRole("alert")).toHaveCount(0);
+  });
+
   test("断られたら理由を出し、また押せる", async ({ page, context }) => {
     const { server, view } = await open(page, context);
     server.translationRequestError = { status: 503, code: "translation_unavailable" };

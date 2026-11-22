@@ -336,8 +336,13 @@
     const current = article;
     if (current === null || current.id !== articleId) return;
     untrack(() => {
-      if (current.translationRequest === "requested") requestSeen = true;
       const translation = current.translation;
+      // core が覚えている間だけ、この端末で頼んだ記事として扱う。訳せなかったとき（失敗の文を出したら
+      // 忘れる）と、core が忘れたあと（1 時間、ほかの人が頼んだ）に届いた訳文では替えない
+      if (current.translationRequest === "requested") requestSeen = true;
+      else if (current.translationRequest === "failed" || translation?.translatedAt == null) {
+        requestSeen = false;
+      }
       if (
         requestSeen &&
         openedTranslation === null &&
