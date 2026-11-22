@@ -60,6 +60,11 @@ export interface PrefsValue {
   hideReadFeeds: boolean;
   /** 広い画面のサイドバーを、アイコンだけで出す */
   sidebarCollapsed: boolean;
+  /**
+   * 記事の中の X の投稿を、公式ウィジェットで読み込む（docs/decisions/embeds.md の 1）。切ったら、
+   * X へ通信せず、元の引用と X で開くリンクだけを出す
+   */
+  xPosts: boolean;
   /** 左のメニューで、畳んでいるフォルダの ID */
   collapsed: string[];
   /** 指でのスワイプの割り当て */
@@ -84,6 +89,7 @@ const DEFAULTS: PrefsValue = {
   markReadOnScroll: true,
   hideReadFeeds: false,
   sidebarCollapsed: false,
+  xPosts: true,
   collapsed: [],
   views: {},
   // 記事を右へスワイプすると、一覧に戻る。一覧の行は、右でスター、左で既読・未読（Feedly と同じ）
@@ -112,6 +118,7 @@ export function parsePrefs(text: string | null): PrefsValue {
     markReadOnScroll: flag("markReadOnScroll"),
     hideReadFeeds: flag("hideReadFeeds"),
     sidebarCollapsed: flag("sidebarCollapsed"),
+    xPosts: flag("xPosts"),
     collapsed: Array.isArray(raw.collapsed)
       ? raw.collapsed.filter((id): id is string => typeof id === "string").slice(-MAX_COLLAPSED)
       : [],
@@ -159,6 +166,7 @@ const SIMPLE_NAMES = {
   markReadOnScroll: "reader.markReadOnScroll",
   hideReadFeeds: "reader.hideReadFeeds",
   sidebarCollapsed: "reader.sidebarCollapsed",
+  xPosts: "reader.xPosts",
 } as const;
 
 /**
