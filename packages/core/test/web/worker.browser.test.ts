@@ -359,13 +359,15 @@ describe("版の違うタブが混ざったとき", () => {
 
     legacy.post({ type: "changed", tables: ["folders"] });
     legacy.post({ type: "status", status: { signedIn: true } });
+    legacy.post({ type: "changed", version: PROTOCOL_VERSION + 1, tables: ["feeds"] });
+    legacy.post({ type: "status", version: PROTOCOL_VERSION + 1, status: { signedIn: true } });
     // 同じ送り手の知らせは、送った順に届く。番号の合う知らせが画面に届いたら、その前の知らせも
     // タブのワーカーに届いている
     const marker = { signedIn: false, marker: true };
     legacy.post({ type: "status", version: PROTOCOL_VERSION, status: marker });
     await vi.waitFor(() => expect(tab.statuses).toEqual([marker]));
     expect(tab.changes).toEqual([]);
-    // 頼みを送っていれば、ここまでに届いている
+    // 頼みを送っていれば、たいていはここまでに届いている（届く順の保証はない）
     expect(legacy.received).toEqual([]);
   });
 
@@ -484,7 +486,33 @@ describe("版の違うタブが混ざったとき", () => {
 
     other.worker.terminate();
     await opening;
-    const folderId = await tab.client.createFolder("Tech");
+    const creating = tab.client.createFolder("Tech");
+    // 同じワーカーへの送りは、送った順に届く（呼び出しは、DB を開いている間に届く）
+    tab.worker.postMessage({ type: "open" });
+    const folderId = await creating;
     expect((await tab.client.listFolders()).map((f) => f.id)).toEqual([folderId]);
+  });
+
+  test("番号の合わない代表が閉じたあと DB を開けなくても、閉じた代表のせいにせず、番号の合う代表が来たら読み直させて使える", async () => {
+    const { open, signIn } = world();
+    const other = open("other-version");
+    await signIn(other);
+    const failing = open("failing");
+    await expectMismatch(failing.client.isSignedIn(), PROTOCOL_VERSION + 1);
+
+    other.worker.terminate();
+    // ロックを取り、DB を開けずに放したあとは、DB の失敗で返る（閉じた代表の番号では返さない）
+    await vi.waitFor(async () => {
+      const error = await failing.client.isSignedIn().catch((e: unknown) => e);
+      expect((error as Error).message).toContain("OPFS を開けない");
+    });
+
+    const ok = open();
+    expect(await ok.client.isSignedIn()).toBe(true);
+    await vi.waitFor(() => {
+      expect(failing.changes).toContainEqual([...TABLES].sort());
+      expect(failing.statuses.at(-1)).toMatchObject({ signedIn: true });
+    });
+    expect(await failing.client.isSignedIn()).toBe(true);
   });
 });
