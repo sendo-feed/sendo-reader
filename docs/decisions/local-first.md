@@ -73,7 +73,7 @@
 - **CSP を厳しくする。** 本番（reader のコンテナのサーバー）と、手元の Vite の dev サーバー・preview で、画面のすべての応答に付ける。
   - `default-src 'none'`、`script-src 'self' 'wasm-unsafe-eval'`（wasm のため）、`worker-src 'self'`、`connect-src 'self'`、`img-src 'self' data:`、`style-src 'self'`、`manifest-src 'self'`、`base-uri 'none'`、`form-action 'none'`、`frame-ancestors 'none'`、`object-src 'none'`。X の投稿の隔離フレームのオリジンが設定してあるときだけ、`frame-src <隔離フレームのオリジン>` を足す
   - インラインのスクリプトと `eval` を許さない。ほかのオリジンへの通信を許さないので、手元のデータを `fetch` で外に送れない
-  - 例外は、X の投稿の隔離フレームを 1 つだけ iframe に入れること（[記事の中の X の投稿](embeds.md)）。X のスクリプトは隔離フレームの中で動き、reader のオリジンでは動かない。隔離フレームに渡すのは、投稿の ID とテーマだけにする
+  - 例外は、X の投稿の隔離フレームのオリジン 1 つだけを、`frame-src` で iframe に許すこと（[記事の中の X の投稿](embeds.md)）。X のスクリプトは隔離フレームの中で動き、reader のオリジンでは動かない。隔離フレームに渡すのは、投稿の ID とテーマだけにする
   - 通知の WebSocket は、同じオリジンの `wss:`（手元は `ws:`）につなぐ。CSP Level 3 では、`connect-src 'self'` が同じホストとポートの `ws:` ／ `wss:` も許すので、CSP は緩めない。本番の CSP のまま、Playwright（Chromium）でつながることを確かめる。`'self'` を `wss:` に当てないブラウザでは接続が止められ、定期同期だけで動く
   - 記事のサムネイルやフィードのアイコンのために、`img-src` は緩めない。画像は sendo が中継し、同じオリジン（`/api/v1/images`）から読む（[画像](images.md)）
   - ほかに緩める必要が出たら、そのときに範囲を決めてこのファイルを直す
