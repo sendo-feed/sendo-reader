@@ -1,6 +1,11 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
 import { ApiError } from "../src";
-import { TRANSLATION_MARK_MS, TRANSLATION_WATCH_MS } from "../src/translation-requests";
+import type { Article } from "../src/models";
+import {
+  TRANSLATION_MARK_MS,
+  TRANSLATION_WATCH_MS,
+  TranslationRequests,
+} from "../src/translation-requests";
 import { setup } from "./helpers";
 
 /*
@@ -299,5 +304,72 @@ describe("Opus で訳し直してもらう（docs/decisions/translation.md の 5
       core.requestTranslation(article.id, { retranslation: true }),
     ).rejects.toMatchObject({ code: "translation_exists" });
     expect((await core.getArticle(article.id))?.translationRequest).toBeUndefined();
+  });
+});
+
+/*
+ * 同期の途中（届いたページを知らせたあと、同期の終わりに頼みを片付ける前）に画面が読む記事。同期の
+ * 途中のこの瞬間は、同期を通して確かめにくいので、頼みの表を直接使う
+ */
+describe("同期の途中で読んだ記事に、届いた頼みと、ほかの人の頼みを、この端末の頼みとして重ねない", () => {
+  const base: Article = {
+    id: "a1",
+    feedId: "f1",
+    url: null,
+    title: "Feature Toggles",
+    summary: null,
+    author: null,
+    thumbnailUrl: null,
+    hasContent: false,
+    publishedAt: 0,
+    receivedAt: 0,
+    readAt: null,
+    starredAt: null,
+    translation: null,
+  };
+  const withTranslation = (translation: Article["translation"]): Article => ({
+    ...base,
+    translation,
+  });
+  const sonnetAt = (at: number) => ({
+    language: "en",
+    status: "translated" as const,
+    title: "訳したタイトル",
+    summary: null,
+    translatedAt: at,
+    retranslated: false,
+  });
+
+  test("その場の翻訳の訳文が届いた記事", () => {
+    const requests = new TranslationRequests(() => 0);
+    requests.accept("a1", 0);
+    const overlaid = requests.overlay(withTranslation(sonnetAt(1)));
+    expect(overlaid.translationRequest).toBeUndefined();
+    expect(overlaid.translation?.status).toBe("translated");
+  });
+
+  test("訳し直した訳文が届いた記事。届く前は translating にする", () => {
+    const requests = new TranslationRequests(() => 0);
+    requests.accept("a1", 0, true);
+    expect(requests.overlay(withTranslation(sonnetAt(1)))).toMatchObject({
+      translation: { status: "translating" },
+      translationRequest: "requested",
+    });
+    const overlaid = requests.overlay(
+      withTranslation({ ...sonnetAt(2), title: "Opus", retranslated: true }),
+    );
+    expect(overlaid.translationRequest).toBeUndefined();
+    expect(overlaid.translation?.status).toBe("translated");
+  });
+
+  test("訳せなかったあとで、ほかの人の頼みで translating になった記事", async () => {
+    const requests = new TranslationRequests(() => 0);
+    requests.accept("a1", 0, true);
+    await requests.afterSync(1, async () => [withTranslation(sonnetAt(1))]);
+    expect(requests.overlay(withTranslation(sonnetAt(1))).translationRequest).toBe("failed");
+    const translating = requests.overlay(
+      withTranslation({ ...sonnetAt(1), status: "translating" }),
+    );
+    expect(translating.translationRequest).toBeUndefined();
   });
 });

@@ -494,11 +494,8 @@
       } else if (requested === "translate" && translation.translatedAt === null) {
         // core が忘れた（1 時間）
         requested = null;
-      } else if (
-        requested === "retranslate" &&
-        translation.status === "translated" &&
-        !translation.retranslated
-      ) {
+      } else if (requested === "retranslate" && !translation.retranslated) {
+        // core が忘れた（訳せなかった、1 時間、代表のタブが替わった）。そこからは届いた状態で出す
         requested = null;
       }
       if (requested === null || translation == null || translation.translatedAt === null) return;

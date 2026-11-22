@@ -758,6 +758,28 @@ test.describe("Retranslate with Opus", () => {
     await expect(heading).toHaveText("機能フラグ");
   });
 
+  test("その場の翻訳で訳文に替わったあとは、ほかの端末が訳し直しても、開いている見出しは替えない", async ({
+    page,
+    context,
+  }) => {
+    const queued = { ...sonnet(0), status: "queued", title: null, translatedAt: null };
+    const { server, article, view } = await open(page, context, queued);
+    const heading = view.getByRole("heading", { level: 1 });
+    await view.getByRole("button", { name: "Translate", exact: true }).click();
+    await expect(view.locator("header .translation")).toHaveText("・ EN · Translating");
+    server.setTranslation(article.id, sonnet(Date.now() - 60_000));
+    await page.getByRole("button", { name: "Sync now" }).click();
+    await expect(heading).toHaveText("フィーチャートグル");
+
+    // ほかの端末が訳し直した。この端末が頼んだものではない
+    server.setTranslation(article.id, opus(Date.now()));
+    await page.getByRole("button", { name: "Sync now" }).click();
+    await openActions(page);
+    await expect(retranslateButton(page)).toHaveCount(0);
+    await page.keyboard.press("Escape");
+    await expect(heading).toHaveText("フィーチャートグル");
+  });
+
   test("確かめの窓は、記事を替えると閉じる", async ({ page, context }) => {
     const { server, view } = await open(page, context, sonnet(Date.now() - 60_000));
     await openActions(page);
