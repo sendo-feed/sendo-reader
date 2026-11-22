@@ -26,7 +26,7 @@
    - 隔離フレームのページは、外部の `embed.js` と空の入れ物だけ。`embed.js` は `https://platform.twitter.com/widgets.js` を読み込み、`twttr.widgets.createTweet(id, 入れ物, { dnt: true, lang: "ja", conversation: "none", theme })` を呼ぶ。`color-scheme` は、ハッシュの `theme` から `document.documentElement.style.colorScheme` で付け、reader のテーマとそろえる
    - 隔離フレームのページの応答のヘッダー：`Content-Security-Policy: default-src 'none'; script-src 'self' https://platform.twitter.com; frame-src https://platform.twitter.com; base-uri 'none'; form-action 'none'`、`Referrer-Policy: no-referrer`、`X-Content-Type-Options: nosniff`、`Permissions-Policy`（reader と同じ）。ページに `<meta name="twitter:widgets:csp" content="on">` を置く。Trusted Types は入れない（`widgets.js` が止まる）。許すのは `platform.twitter.com` のホストだけで、パスまでは絞らない
    - やり取り：枠の `load` で、reader が `iframe.contentWindow.postMessage({ type: "sendo:x-post:hello" }, <隔離フレームのオリジン>)` を送る。隔離フレームは `event.source === window.parent` を確かめ、`event.origin` を送り先として覚える。隔離フレームが送るのは、覚えたオリジンに、次の 2 種類だけ
-     - `{ type: "sendo:x-post:rendered", height }`：`createTweet` の Promise が要素で解決したあと。`height` は、余白を含めた入れ物の高さ（整数。枠の高さによらない値）。解決の前には、高さを送らない。解決のあとは、文書の高さが変わるたびに、同じ形でもう一度送る（枠の幅が変わると、ウィジェットの高さも変わる）
+     - `{ type: "sendo:x-post:rendered", height }`：`createTweet` の Promise が要素で解決したあと。`height` は、余白を含めた入れ物の高さ（整数。枠の高さによらない値）。解決の前には、高さを送らない。解決のあとは、高さが変わるたびに、同じ形でもう一度送る（枠の幅が変わると、ウィジェットの高さも変わる）
      - `{ type: "sendo:x-post:failed" }`：`widgets.js` の `onerror`、`twttr` がない、Promise が `undefined` で解決した、Promise が reject した
    - reader は、`event.origin` が隔離フレームのオリジンで、`event.source` がその iframe の `contentWindow` のメッセージだけを受ける。`height` は 1〜4000 の整数だけを受け、`style:` で付ける。2 回目からの `rendered` は、枠の高さを付け直すだけにする
 3. **隔離フレームの配り方と設定**：reader のコンテナが配る（[コンテナ版](container.md)の 2・4・5）。
