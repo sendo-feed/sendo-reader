@@ -12,8 +12,11 @@ const STATUS_LABELS: Record<TranslationStatus, string> = {
  * 翻訳のない記事は null。言語が判定できなかった記事（und）は、訳文がないあいだは出さず、
  * 訳しているときと訳したあとは、言語を省いて出す
  */
-export function translationLabel(translation: ArticleTranslation | null): string | null {
-  if (translation === null) return null;
+export function translationLabel(
+  translation: ArticleTranslation | null | undefined,
+): string | null {
+  // 版の違うタブが代表のときは、翻訳の項目のない記事が届くことがある（undefined）
+  if (translation == null) return null;
   const status = STATUS_LABELS[translation.status];
   if (translation.language === "und") {
     return translation.status === "translating" || translation.status === "translated"
@@ -23,7 +26,15 @@ export function translationLabel(translation: ArticleTranslation | null): string
   return `${translation.language.toUpperCase()} · ${status}`;
 }
 
-/** 一覧の行に出すタイトル。訳したタイトルがあれば、それを出す（docs/decisions/translation.md の 2） */
-export function listTitle(article: Pick<Article, "title" | "translation">): string | null {
-  return article.translation?.title ?? article.title;
+/**
+ * 一覧の行に出すタイトル。訳したタイトルがあれば、それを出す（docs/decisions/translation.md の 2）。
+ * 訳したタイトルが空なら、原文のタイトル
+ */
+export function listTitle(
+  article: Pick<Article, "title"> & { translation?: Article["translation"] | undefined },
+): string | null {
+  const translated = article.translation?.title;
+  return translated !== undefined && translated !== null && translated !== ""
+    ? translated
+    : article.title;
 }

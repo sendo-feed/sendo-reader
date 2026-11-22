@@ -32,6 +32,8 @@ describe("translationLabel", () => {
 
   test("翻訳のない記事にはラベルを出さない", () => {
     expect(translationLabel(null)).toBeNull();
+    // 翻訳に対応する前の版のタブが代表のときは、項目そのものがない
+    expect(translationLabel(undefined)).toBeNull();
   });
 
   test("und は、訳文がないあいだは出さず、訳しているときと訳したあとは言語を省く", () => {
@@ -51,5 +53,12 @@ describe("listTitle", () => {
     expect(listTitle({ title: "Original", translation: t("en", "queued") })).toBe("Original");
     expect(listTitle({ title: "Original", translation: null })).toBe("Original");
     expect(listTitle({ title: null, translation: null })).toBeNull();
+    expect(listTitle({ title: "Original" })).toBe("Original");
+  });
+
+  test("訳したタイトルが空なら、原文のタイトル", () => {
+    expect(listTitle({ title: "Original", translation: t("en", "translated", "") })).toBe(
+      "Original",
+    );
   });
 });

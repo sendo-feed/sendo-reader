@@ -1,4 +1,6 @@
 import { describe, expect, test } from "vitest";
+import { createSendoApi } from "../src/api/client";
+import { pull } from "../src/sync/pull";
 import { setup } from "./helpers";
 
 /*
@@ -16,6 +18,12 @@ const translated = {
   summary: "API の変更を自動で当てる",
   translatedAt: TRANSLATED_AT,
 };
+
+/** 操作を送らずに、取るだけの同期（ops.test.ts と同じ） */
+async function pullOnly(context: Awaited<ReturnType<typeof setup>>) {
+  const api = createSendoApi({ baseUrl: "https://sendo.test/api/v1", fetch: context.server.fetch });
+  return pull(context.db, api, {});
+}
 
 async function seeded() {
   const context = await setup();
@@ -97,16 +105,35 @@ describe("記事の翻訳を受ける", () => {
     });
   });
 
-  test("既読にしたあとで翻訳が届いても、既読のまま", async () => {
-    const { server, core, feed } = await seeded();
+  test("まだ送っていない既読とスターがある間に翻訳が届いても、既読とスターを保ち、翻訳も置く", async () => {
+    const context = await seeded();
+    const { server, core, feed } = context;
     const article = server.deliver(feed.id, { translation: queued });
     await core.sync();
     await core.setRead(article.id, true);
-    await core.sync();
+    await core.setStarred(article.id, true);
     server.setTranslation(article.id, translated);
-    await core.sync();
+    // 操作を送らずに取るだけの同期。届いた行（未読・スターなし）の上に、手元の操作を重ね直す
+    await pullOnly(context);
     const stored = await core.getArticle(article.id);
     expect(stored?.readAt).not.toBeNull();
+    expect(stored?.starredAt).not.toBeNull();
     expect(stored?.translation?.status).toBe("translated");
+
+    await core.sync();
+    expect(server.inbox.get(article.id)?.readAt).not.toBeNull();
+    expect(server.inbox.get(article.id)?.starredAt).not.toBeNull();
+  });
+
+  test("言語が und の記事も、翻訳を置く", async () => {
+    const { server, core, feed } = await seeded();
+    const article = server.deliver(feed.id, {
+      translation: { ...translated, language: "und" },
+    });
+    await core.sync();
+    expect((await core.getArticle(article.id))?.translation).toMatchObject({
+      language: "und",
+      status: "translated",
+    });
   });
 });
