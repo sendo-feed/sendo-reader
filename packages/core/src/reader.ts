@@ -1277,7 +1277,9 @@ export class ReaderCore {
 
   /**
    * 未読で手元に全文がない記事の全文を、1 件ずつ選び直しながら limit 件まで取っておく
-   * （docs/decisions/local-first.md の「記事の本文」）。開いている一覧（setOpenList）があれば、その
+   * （docs/decisions/local-first.md の「記事の本文」）。訳文のある記事は、全文ではなく訳した本文を
+   * 取る（手元に今の訳した時刻の訳した本文がなければ、全文があっても選ぶ。sendo が本文を訳さなかった
+   * 記事は全文を取る。docs/decisions/translation.md の 10）。開いている一覧（setOpenList）があれば、その
    * 一覧の、読んでいる位置のすぐ下から先に取る。全文が取れなかった記事は印を置いて先読みでは
    * 取り直さず、フィード本文があれば代わりに取っておく。リンクのない記事は全文を頼まない。手元の
    * 本文が上限に届いたら、既読の分を消して空け、空かなければやめる。上限が Off なら取らない。
@@ -1388,12 +1390,21 @@ export class ReaderCore {
   }
 
   /**
-   * 1 件の本文を取っておく。全文を頼める記事は全文を取り、取れなければ、フィード本文があれば
-   * 代わりに取る。新しく本文を置けたら true（選んでから順番が来るまでに、開いて取っていた記事は
-   * 取り直さず false）
+   * 1 件の本文を取っておく。訳文のある記事は訳した本文を取る（docs/decisions/translation.md の
+   * 10）。sendo が本文を訳さなかったら、原文の本文を取る。sendo の訳文の時刻が選んだときと違えば
+   * （取る間に訳し直した）、この回では取らない。原文の本文は、全文を頼める記事は全文を取り、取れ
+   * なければ、フィード本文があれば代わりに取る。新しく本文を置けたら true（選んでから順番が来るまで
+   * に、開いて取っていた記事は取り直さず false）
    */
   async #prefetchContent(target: PrefetchTarget, session: AbortSignal): Promise<boolean> {
     const articleId = target.id;
+    if (target.translatedAt !== null) {
+      const found = await getStoredTranslatedContent(this.#db, articleId);
+      if (found?.stored?.translatedAt === target.translatedAt) return false;
+      const fetched = await this.#fetchTranslatedContent(articleId, session, true);
+      if (fetched === null || fetched.translatedAt !== target.translatedAt) return false;
+      if (fetched.html !== null) return true;
+    }
     if (!target.feedOnly) {
       // 選んでから順番が来るまでに、開いて取っていたら、取り直さない
       const page = await getStoredContent(this.#db, articleId, "page");
@@ -1513,11 +1524,13 @@ export class ReaderCore {
 
   /**
    * sendo から訳した本文を取り、手元に置いてあるものより新しければ置く。sendo に訳文がなければ
-   * null。取る前に、セッションのユーザーを確かめる（#fetchContent と同じ）
+   * null。取る前に、セッションのユーザーを確かめる（confirmed なら、呼ぶ側が確かめてある。
+   * #fetchContent と同じ）
    */
   #fetchTranslatedContent(
     articleId: string,
     session: AbortSignal,
+    confirmed = false,
   ): Promise<StoredTranslatedContent | null> {
     if (session.aborted) {
       return Promise.reject(new ApiError("unauthorized", "ログインし直したので取らなかった"));
@@ -1525,9 +1538,15 @@ export class ReaderCore {
     const existing = this.#translationFetches.get(articleId);
     if (existing !== undefined) return existing;
     const running = (async () => {
-      await this.#confirmSameUser(session);
-      const fetched = await this.#api.articleTranslation(articleId, session);
-      if (fetched === null) return null;
+      if (!confirmed) await this.#confirmSameUser(session);
+      const received = await this.#api.articleTranslation(articleId, session);
+      if (received === null) return null;
+      // 木にして出すもの（文字か画像）が残らない本文は、本文を訳さなかった印として置く（原文の
+      // 本文を出し、先読みでは全文を取る。docs/decisions/translation.md の 8、10）
+      const fetched: StoredTranslatedContent =
+        received.html !== null && !hasVisibleContent(parseContent(received.html))
+          ? { html: null, source: null, translatedAt: received.translatedAt }
+          : received;
       await this.#db.transaction(async (tx) => {
         // 取っている間にログアウトしたり、ユーザーが替わったりしたら、置かない
         throwIfSessionEnded(session);

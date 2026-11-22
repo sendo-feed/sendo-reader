@@ -5,11 +5,11 @@ import type { Executor } from "./database";
  * 別の表に、訳した時刻と一緒に置く。記事を手元から消すと、一緒に消える（スキーマのトリガー）。
  *
  * 置くのは、sendo から受け取った HTML（信頼できない）。html が null の行は、その時刻の訳文に本文が
- * なかった（sendo が本文を訳さなかった）印で、取り直さない。
+ * なかった（sendo が本文を訳さなかったか、木にして出すものが残らなかった）印で、取り直さない。
  */
 
 export interface StoredTranslatedContent {
-  /** 訳した本文。null は、本文を訳さなかった印 */
+  /** 訳した本文。null は、本文を訳さなかった（出すものが残らなかった）印 */
   html: string | null;
   source: string | null;
   translatedAt: number;

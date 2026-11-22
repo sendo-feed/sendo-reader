@@ -78,6 +78,11 @@ export async function markContentMissing(tx: Executor, articleId: string): Promi
 export interface PrefetchTarget {
   id: string;
   /**
+   * 訳した本文を取る記事なら、記事の訳した時刻（docs/decisions/translation.md の 10）。null なら、
+   * 原文の本文（全文かフィード本文）を取る
+   */
+  translatedAt: number | null;
+  /**
    * 全文は頼まず、フィード本文だけを取る（前に全文が取れなかった記事と、リンクがなく全文を
    * 抜けない記事）
    */
@@ -93,17 +98,36 @@ export interface PrefetchList {
 }
 
 /**
- * 先に取る記事の条件（記事の表の別名は a）。未読で、手元に全文がない記事のうち、全文を頼める
- * 記事（リンクがあり、全文が取れなかった印がない）と、全文は頼めないがフィード本文があって手元に
- * まだない記事。除く記事（json の配列）は選ばない
+ * 訳した本文を取る記事の条件（記事の表の別名は a）。訳文があり、手元に今の訳した時刻の訳した本文も、
+ * 本文を訳さなかった印もない記事（全文があっても選ぶ。docs/decisions/translation.md の 10）
+ */
+const NEEDS_TRANSLATED_CONTENT = `(a.translated_at is not null and not exists (
+    select 1 from article_translation_contents t
+    where t.article_id = a.id and t.translated_at = a.translated_at
+  ))`;
+
+/**
+ * 先に取る記事の条件（記事の表の別名は a）。未読で、除く記事（json の配列）でない記事のうち、
+ * 訳した本文を取る記事と、原文の本文を取る記事。原文の本文を取るのは、訳文がないか、今の訳した
+ * 時刻で本文を訳さなかった印のある記事で、手元に全文がなく、全文を頼める記事（リンクがあり、全文が
+ * 取れなかった印がない）か、全文は頼めないがフィード本文があって手元にまだない記事
  */
 const PREFETCH_CONDITIONS = `a.read_at is null
-  and a.id not in (select article_id from article_page_contents)
+  and a.id not in (select value from json_each(?))
   and (
-    (m.article_id is null and a.url is not null)
-    or (a.has_content <> 0 and a.id not in (select article_id from article_contents))
-  )
-  and a.id not in (select value from json_each(?))`;
+    ${NEEDS_TRANSLATED_CONTENT}
+    or (
+      (a.translated_at is null or exists (
+        select 1 from article_translation_contents t
+        where t.article_id = a.id and t.translated_at = a.translated_at and t.html is null
+      ))
+      and a.id not in (select article_id from article_page_contents)
+      and (
+        (m.article_id is null and a.url is not null)
+        or (a.has_content <> 0 and a.id not in (select article_id from article_contents))
+      )
+    )
+  )`;
 
 /**
  * 本文を次に先に取っておく記事を 1 件選ぶ（docs/decisions/local-first.md の「記事の本文」。先読みは
@@ -122,15 +146,18 @@ export async function nextContentToPrefetch(
 ): Promise<PrefetchTarget | null> {
   const excluded = JSON.stringify(exclude);
   const pick = async (where: string[], params: SqlValue[]) => {
-    const [row] = await db.all<{ id: string; feed_only: number }>(
-      `select a.id, (m.article_id is not null or a.url is null) as feed_only
+    const [row] = await db.all<{ id: string; feed_only: number; translated_at: number | null }>(
+      `select a.id, (m.article_id is not null or a.url is null) as feed_only,
+         case when ${NEEDS_TRANSLATED_CONTENT} then a.translated_at end as translated_at
        from articles a left join article_page_misses m on m.article_id = a.id
        where ${[PREFETCH_CONDITIONS, ...where].join(" and ")}
        order by a.published_at desc, a.id desc
        limit 1`,
       [excluded, ...params],
     );
-    return row === undefined ? null : { id: row.id, feedOnly: row.feed_only !== 0 };
+    return row === undefined
+      ? null
+      : { id: row.id, feedOnly: row.feed_only !== 0, translatedAt: row.translated_at };
   };
 
   if (list !== null) {
