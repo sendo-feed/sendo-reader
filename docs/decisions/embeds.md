@@ -20,7 +20,7 @@
      ```html
      <iframe src="<隔離フレームのオリジン>/#id=<ID>&theme=<light か dark>"
        sandbox="allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox"
-       allow="fullscreen" referrerpolicy="no-referrer" title="X の投稿"></iframe>
+       allow="fullscreen" referrerpolicy="no-referrer" title="X の投稿" tabindex="-1"></iframe>
      ```
 
    - 隔離フレームのページは、外部の `embed.js` と空の入れ物だけ。`embed.js` は `https://platform.twitter.com/widgets.js` を読み込み、`twttr.widgets.createTweet(id, 入れ物, { dnt: true, lang: "ja", conversation: "none", theme })` を呼ぶ。`color-scheme` は、ハッシュの `theme` から `document.documentElement.style.colorScheme` で付け、reader のテーマとそろえる
@@ -51,6 +51,7 @@
 6. **スワイプとキーボード**
    - ウィジェットの上に、透明な覆いを置く。覆いの上からの横のスワイプと縦のスクロールは、reader が受ける。覆いを 1 回押すと外れ、ウィジェットの中を操作できる。ウィジェットが表示範囲から出たら、覆いを戻す
    - reader の `window` の `blur` で、`document.activeElement` がウィジェットの iframe なら、本文に `focus({ preventScroll: true })` する。押したあとも `j` ／ `k` ／ `Esc` が効く。キーボードだけでウィジェットの中を操作することは、できない
+   - iframe は、Tab キーの順に入れない（`tabindex="-1"`）。Tab で本文を進むと、覆いと「Open on X」に移り、ウィジェットの中には入らない
 7. **X に伝わること**
    - 表示範囲に入った投稿ごとに、読者の IP、開いた時刻、投稿の ID、隔離フレームのホスト名が X に伝わる。`dnt: true` を付けるが、計測の通信（`syndication.x.com/i/jot/embeds`）は減らない（`dnt=1` が付くだけ）
    - 通信の量は、投稿 1 つで約 450KB。動画付きは、再生を押す前から約 1.8MB。読み込みの途中で表示範囲から出て、入り直した投稿は、読み込み直すので、もう一度伝わる
@@ -68,6 +69,7 @@
 - **開発のときだけ http の localhost と 127.0.0.1 を受け付ける**：dev サーバーと e2e の preview は `http://localhost` で reader を配るので、同じサーバーから別のホスト名で隔離フレームを配れれば、本番と同じ「ホスト名で振り分ける」作りのまま確かめられる。コンテナでは受け付けない。本番の reader は `https` で、`http` の値に使い道がない。コンテナは自分のオリジンを知らないので、手元で `localhost` の reader を使う人が `http://localhost:<別のポート>` を設定すると、reader への要求がすべて隔離フレームのほうに振り分けられる。誤りやすい値は、受け付けない。
 - **`frame-ancestors` を付けない**：付けるには、reader のオリジンをコンテナに教える設定がもう 1 つ要る。ページが出すのは ID で指した公開の投稿だけで、クッキーも reader のデータも持たず、X との通信は訪問者のブラウザーから直接出る。
 - **覆いとフォーカスを戻すこと**：iframe の中のタッチとキーの入力は、親に届かない。覆いがないと、ウィジェットの上から記事のスワイプが始まらず、一度押すと `j` ／ `k` ／ `Esc` が効かなくなる。
+- **iframe を Tab キーの順に入れない**：入れたままだと、Tab で本文を進んで iframe に入ったところで、フォーカスを戻す処理が本文に戻し、また iframe に入る、を繰り返して、投稿より先へ Tab で進めない。キーボードだけでは中を操作できないので、Tab で入れなくしても、できることは減らない。
 
 ## 検討した代替案
 
