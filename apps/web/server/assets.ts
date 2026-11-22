@@ -9,7 +9,6 @@ import { createHash } from "node:crypto";
 import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import { brotliCompressSync, constants, gzipSync } from "node:zlib";
-import { applyXEmbedOrigin } from "../x-embed-origin";
 import type { Asset, Assets, AssetVariant } from "./static";
 
 const CONTENT_TYPES: Record<string, string> = {
@@ -97,33 +96,4 @@ export async function loadAssets(directory: string): Promise<Assets> {
     throw new Error(`index.html is not found in ${directory}; run vite build first`);
   }
   return assets;
-}
-
-/**
- * X の投稿の隔離フレームのオリジンが設定してあるときの、画面のファイル（docs/decisions/embeds.md の 3）。
- * index.html に <meta> を足し、sw.js の中の index.html の revision を、書き換えたあとの index.html と
- * 付ける CSP から作った値に替える。Service Worker が新しい版として取り込み、index.html を取り直す。
- * 書き換えられなければ投げる（起動しない）
- */
-export async function withXEmbedOrigin(
-  assets: Assets,
-  origin: string,
-  csp: string,
-): Promise<Assets> {
-  const decoder = new TextDecoder("utf-8", { fatal: true });
-  const index = assets.get("/index.html");
-  const sw = assets.get("/sw.js");
-  if (index === undefined || sw === undefined) {
-    throw new Error("index.html and sw.js are needed to set X_EMBED_ORIGIN; run vite build first");
-  }
-  const files = await applyXEmbedOrigin(
-    { indexHtml: decoder.decode(index.identity.body), sw: decoder.decode(sw.identity.body) },
-    origin,
-    csp,
-  );
-  const encoder = new TextEncoder();
-  const next = new Map(assets);
-  next.set("/index.html", toAsset("index.html", encoder.encode(files.indexHtml)));
-  next.set("/sw.js", toAsset("sw.js", encoder.encode(files.sw)));
-  return next;
 }

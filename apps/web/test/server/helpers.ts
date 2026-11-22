@@ -112,11 +112,7 @@ export async function startReader(
   sendoOrigin: string,
   relayOptions: UpgradeRelayOptions = {},
 ): Promise<RunningReader> {
-  const app = createReaderServer({
-    assets,
-    sendoOrigin,
-    xEmbedOrigin: relayOptions.xEmbedOrigin ?? null,
-  });
+  const app = createReaderServer({ assets, sendoOrigin });
   const { server, port } = await new Promise<{ server: ReturnType<typeof serve>; port: number }>(
     (resolve) => {
       const started = serve({ fetch: app.fetch, port: 0, hostname: "127.0.0.1" }, (info) =>

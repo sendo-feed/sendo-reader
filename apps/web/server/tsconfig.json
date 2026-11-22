@@ -5,5 +5,5 @@
     // コンテナ版のサーバーは Node で動く（docs/decisions/container.md の 7）
     "types": ["node"]
   },
-  "include": [".", "../security-headers.ts", "../sendo-paths.ts", "../x-embed-origin.ts"]
+  "include": [".", "../security-headers.ts", "../sendo-paths.ts"]
 }

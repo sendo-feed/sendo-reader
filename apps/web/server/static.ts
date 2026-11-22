@@ -70,12 +70,8 @@ function findAsset(pathname: string, assets: Assets): Asset | undefined {
   return assets.get("/index.html");
 }
 
-export function serveAsset(
-  request: Request,
-  assets: Assets,
-  security: Readonly<Record<string, string>> = securityHeaders("production"),
-): Response {
-  const headers = new Headers(security);
+export function serveAsset(request: Request, assets: Assets): Response {
+  const headers = new Headers(securityHeaders("production"));
   if (request.method !== "GET" && request.method !== "HEAD") {
     headers.set("allow", "GET, HEAD");
     return new Response(null, { status: 405, headers });

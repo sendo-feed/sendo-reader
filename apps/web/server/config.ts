@@ -1,7 +1,6 @@
 /**
  * コンテナ版の reader のサーバーの設定を読む（docs/decisions/container.md の 4）。
  */
-import { toXEmbedOrigin } from "../x-embed-origin";
 
 export type Env = Readonly<Record<string, string | undefined>>;
 
@@ -20,22 +19,6 @@ export function parseSendoUrl(value: string | undefined): string {
     throw new Error(`SENDO_URL must be an http(s) origin: ${text}`);
   }
   return url.origin;
-}
-
-/**
- * X の投稿の隔離フレームのオリジン（docs/decisions/embeds.md の 3）。なければ null。
- * コンテナは https だけを受け付ける（開発用の http は、手元の Vite の dev サーバーと preview だけ）
- */
-export function parseXEmbedOrigin(value: string | undefined): string | null {
-  const text = value?.trim() ?? "";
-  if (text === "") return null;
-  const origin = toXEmbedOrigin(text, { allowDevelopment: false });
-  if (origin === null) {
-    throw new Error(
-      `X_EMBED_ORIGIN must be an https origin without a path, query, hash or credentials: ${text}`,
-    );
-  }
-  return origin;
 }
 
 export function parsePort(value: string | undefined): number {
