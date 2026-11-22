@@ -51,6 +51,16 @@ window.twttr = {
       window.__options = options;
       const how = behavior[id] ?? behavior["*"] ?? "manual";
       const tweet = document.createElement("div");
+      // ウィジェットの中のボタン（押された回数を数える）
+      window.__innerClicks = 0;
+      const inner = document.createElement("button");
+      inner.id = "inner";
+      inner.textContent = "中のボタン";
+      inner.style.display = "block";
+      inner.style.width = "100%";
+      inner.style.height = "60px";
+      inner.addEventListener("click", () => { window.__innerClicks += 1; });
+      tweet.append(inner);
       return new Promise((resolve) => {
         window.__settle = (height) => {
           if (height === undefined) return resolve(undefined);
@@ -1400,5 +1410,292 @@ test.describe("覚えた高さの枠を取ったあと", () => {
       await expect(item.locator(".reserved")).toHaveCount(0);
       await expect(item.locator("blockquote")).not.toHaveAttribute("hidden", "");
     }
+  });
+});
+
+/** ウィジェットの中のボタンが押された回数 */
+function innerClicks(frame: Frame): Promise<number> {
+  return frame.evaluate(() => (window as unknown as { __innerClicks: number }).__innerClicks);
+}
+
+const cover = (page: Page, n: number) =>
+  post(page, n).getByRole("button", { name: "X の投稿を操作する" });
+
+test.describe("ウィジェットの上の覆いとフォーカス", () => {
+  test("出たウィジェットには、同じ大きさの透明な覆いがある。読み込み中と失敗のときはない", async ({
+    page,
+    context,
+  }) => {
+    const { violations } = await openArticle(page, context, `${quote(1)}${quote(2)}${quote(3)}`, {
+      [postId(1)]: "render:240",
+      [postId(2)]: "manual",
+      [postId(3)]: "undefined",
+    });
+    await expectShown(page, 1);
+    await expect(cover(page, 1)).toHaveCount(1);
+    const frameBox = await post(page, 1).locator("iframe").boundingBox();
+    expect(await cover(page, 1).boundingBox()).toEqual(frameBox);
+    // ポインターを重ねても、押している間も、透明のまま（ウィジェットを塗らない）
+    const transparent = "rgba(0, 0, 0, 0)";
+    const background = () =>
+      cover(page, 1).evaluate((node) => getComputedStyle(node).backgroundColor);
+    expect(await background()).toBe(transparent);
+    await cover(page, 1).hover();
+    expect(await background()).toBe(transparent);
+    if (frameBox === null) throw new Error("枠がない");
+    await page.mouse.down();
+    expect(await background()).toBe(transparent);
+    await page.mouse.move(0, 0);
+    await page.mouse.up();
+    await expect(cover(page, 1)).toHaveCount(1);
+    // 読み込み中、失敗して元の引用を出しているときは、覆いはない
+    await expect(post(page, 2).locator("iframe")).toHaveCount(1);
+    await expect(cover(page, 2)).toHaveCount(0);
+    await expect(post(page, 3).locator("blockquote")).not.toHaveAttribute("hidden", "");
+    await expect(cover(page, 3)).toHaveCount(0);
+    // Open on X のリンクは、覆いの下に隠れない
+    const link = post(page, 1).getByRole("link", { name: "Open on X" });
+    const hit = await link.evaluate((node) => {
+      const box = node.getBoundingClientRect();
+      const top = document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2);
+      return top !== null && node.contains(top);
+    });
+    expect(hit).toBe(true);
+    // ウィジェットの高さが変わったら、覆いもついていく
+    const inner = await frameOf(page, 1);
+    await inner.evaluate(() =>
+      (window as unknown as { __resize: (h: number) => void }).__resize(320),
+    );
+    await expect.poll(async () => (await cover(page, 1).boundingBox())?.height).toBe(320);
+    expect(await violations()).toEqual([]);
+  });
+
+  test("覆いを 1 回押すと外れ、その操作は中に届かない。次の操作から中に届く", async ({
+    page,
+    context,
+  }) => {
+    await openArticle(page, context, quote(1));
+    await expectShown(page, 1);
+    const inner = await frameOf(page, 1);
+    await cover(page, 1).click();
+    await expect(cover(page, 1)).toHaveCount(0);
+    expect(await innerClicks(inner)).toBe(0);
+    await page.frameLocator(`.article-view .x-post iframe`).locator("#inner").click();
+    await expect.poll(() => innerClicks(inner)).toBe(1);
+  });
+
+  test("覆いはキーボードでフォーカスでき、Enter と Space で外れる。フォーカスの枠が見える", async ({
+    page,
+    context,
+  }) => {
+    await openArticle(page, context, `${quote(1)}${quote(2)}`);
+    await expectShown(page, 1);
+    await expectShown(page, 2);
+    // キーボードで、覆いに移る（1 つ目の投稿の Open on X から、1 つ前へ）
+    await post(page, 1).getByRole("link", { name: "Open on X" }).focus();
+    await page.keyboard.press("Shift+Tab");
+    await expect(cover(page, 1)).toBeFocused();
+    expect(await cover(page, 1).evaluate((node) => getComputedStyle(node).outlineStyle)).toBe(
+      "solid",
+    );
+    await page.keyboard.press("Enter");
+    await expect(cover(page, 1)).toHaveCount(0);
+    // 外したあとは、Open on X に移る（フォーカスを見失わない）
+    await expect(post(page, 1).getByRole("link", { name: "Open on X" })).toBeFocused();
+    await cover(page, 2).focus();
+    await page.keyboard.press("Space");
+    await expect(cover(page, 2)).toHaveCount(0);
+    await expect(post(page, 2).getByRole("link", { name: "Open on X" })).toBeFocused();
+  });
+
+  test("ウィジェットが表示範囲から出たら、覆いを掛け直す", async ({ page, context }) => {
+    await openArticle(page, context, `${quote(1)}${filler(60)}`);
+    await expectShown(page, 1);
+    await cover(page, 1).click();
+    await expect(cover(page, 1)).toHaveCount(0);
+    await scrollToEnd(page);
+    await expect(post(page, 1)).not.toBeInViewport();
+    await page.waitForTimeout(300);
+    await scrollTo(page, 0);
+    await expect(cover(page, 1)).toHaveCount(1);
+  });
+
+  test("覆いの上でホイールを回すと、記事がスクロールする。覆いは外れない", async ({
+    page,
+    context,
+  }) => {
+    await openArticle(page, context, `${quote(1)}${filler(60)}`);
+    await expectShown(page, 1);
+    const box = await cover(page, 1).boundingBox();
+    if (box === null) throw new Error("覆いがない");
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    await page.mouse.wheel(0, 300);
+    await expect.poll(() => scrollTopOf(page)).toBeGreaterThan(100);
+    await expect(cover(page, 1)).toHaveCount(1);
+  });
+
+  test.describe("スマホ", () => {
+    test.use({ viewport: { width: 390, height: 844 }, hasTouch: true });
+
+    test("覆いの上から始めた横のスワイプで記事を移る。縦に指で動かすとスクロールする。どちらでも覆いは外れない", async ({
+      page,
+      context,
+    }) => {
+      await openArticle(page, context, `${quote(1)}${filler(60)}`);
+      await expectShown(page, 1);
+      // 縦に指で動かす（本物のタッチの操作）
+      const box = await cover(page, 1).boundingBox();
+      if (box === null) throw new Error("覆いがない");
+      const cdp = await context.newCDPSession(page);
+      const x = Math.round(box.x + box.width / 2);
+      const y = Math.round(box.y + box.height / 2);
+      await cdp.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x, y }] });
+      for (let step = 1; step <= 10; step++) {
+        await cdp.send("Input.dispatchTouchEvent", {
+          type: "touchMove",
+          touchPoints: [{ x, y: y - step * 20 }],
+        });
+      }
+      await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+      await expect.poll(() => page.evaluate(() => window.scrollY)).toBeGreaterThan(100);
+      await expect(cover(page, 1)).toHaveCount(1);
+      await page.evaluate(() => window.scrollTo({ top: 0 }));
+
+      /** 覆いの上で、指を横に払う（既定では、右へ払うと一覧に戻る。左は何もしない） */
+      const flick = (from: number, to: number) =>
+        cover(page, 1).evaluate(
+          (element, { start, end }) => {
+            const at = (x: number) =>
+              new Touch({ identifier: 1, target: element, clientX: x, clientY: 300 });
+            const fire = (type: string, touches: Touch[], changed: Touch[]) =>
+              element.dispatchEvent(
+                new TouchEvent(type, { bubbles: true, touches, changedTouches: changed }),
+              );
+            fire("touchstart", [at(start)], [at(start)]);
+            fire("touchend", [], [at(end)]);
+          },
+          { start: from, end: to },
+        );
+      await flick(260, 100);
+      await page.waitForTimeout(300);
+      await expect(cover(page, 1)).toHaveCount(1);
+      await flick(100, 260);
+      await expect(page.locator(".article-list")).toBeVisible();
+    });
+
+    test("覆いをタップすると外れ、そのタップは中に届かない", async ({ page, context }) => {
+      await openArticle(page, context, quote(1));
+      await expectShown(page, 1);
+      const inner = await frameOf(page, 1);
+      const box = await cover(page, 1).boundingBox();
+      if (box === null) throw new Error("覆いがない");
+      await page.touchscreen.tap(box.x + box.width / 2, box.y + 20);
+      await expect(cover(page, 1)).toHaveCount(0);
+      expect(await innerClicks(inner)).toBe(0);
+      await page.touchscreen.tap(box.x + box.width / 2, box.y + 20);
+      await expect.poll(() => innerClicks(inner)).toBe(1);
+    });
+  });
+
+  test("ウィジェットの中を押したあとも、キーボードの操作が効く。押した操作は取り消さず、スクロールしない", async ({
+    page,
+    context,
+  }) => {
+    await openArticle(
+      page,
+      context,
+      `${filler(3)}${quote(1)}${filler(60, 3)}`,
+      { "*": "render:240" },
+      (server, feedId) =>
+        server.deliver(feedId, {
+          title: "次の記事",
+          summary: "要約",
+          content: filler(5),
+          publishedAt: 0,
+        }),
+    );
+    await post(page, 1).scrollIntoViewIfNeeded();
+    await expectShown(page, 1);
+    const inner = await frameOf(page, 1);
+    await cover(page, 1).click();
+    const top = await scrollTopOf(page);
+    await page.frameLocator(`.article-view .x-post iframe`).locator("#inner").click();
+    await expect.poll(() => innerClicks(inner)).toBe(1);
+    // フォーカスは本文に戻り、スクロールしない
+    await expect
+      .poll(() => page.evaluate(() => document.activeElement?.className ?? ""))
+      .toContain("content");
+    expect(await scrollTopOf(page)).toBe(top);
+    await page.keyboard.press("j");
+    await expect(page.locator(".article-view h1")).toHaveText("次の記事");
+    await page.keyboard.press("k");
+    await expect(page.locator(".article-view h1")).toHaveText("X の投稿を引いた記事");
+    await page.keyboard.press("Escape");
+    await expect(page.locator(".article-view h1")).toHaveCount(0);
+  });
+
+  test("ウィジェットでないところへ移ったときは、フォーカスを動かさない", async ({
+    page,
+    context,
+  }) => {
+    await openArticle(page, context, quote(1));
+    await expectShown(page, 1);
+    const save = page.locator(".article-view").getByRole("button", { name: "Save" });
+    await save.focus();
+    // ほかの窓やタブへ移った
+    await page.evaluate(() => window.dispatchEvent(new Event("blur")));
+    await expect(save).toBeFocused();
+  });
+
+  test("iframe は Tab キーの順に入らない。Tab で進むと、覆い、Open on X、後ろのリンクの順に移る", async ({
+    page,
+    context,
+  }) => {
+    await openArticle(
+      page,
+      context,
+      `<p><a href="https://example.com/before">前のリンク</a></p>${quote(1)}${quote(2)}` +
+        `<p><a href="https://example.com/after">後ろのリンク</a></p>`,
+      { [postId(1)]: "render:240", [postId(2)]: "manual" },
+    );
+    await expectShown(page, 1);
+    await expect(post(page, 2).locator("iframe")).toHaveCount(1);
+    for (const n of [1, 2]) {
+      await expect(post(page, n).locator("iframe")).toHaveAttribute("tabindex", "-1");
+    }
+    const body = page.locator(".article-view .body");
+    await body.getByRole("link", { name: "前のリンク" }).focus();
+    // 出たウィジェットは覆い → Open on X、読み込み中（覆いがない）は Open on X、の順に進み、本文に戻されない
+    const order = [
+      cover(page, 1),
+      post(page, 1).getByRole("link", { name: "Open on X" }),
+      // 読み込み中は元の引用を出しているので、引用の中のリンクにも止まる
+      post(page, 2).getByRole("link", { name: "日付" }),
+      post(page, 2).getByRole("link", { name: "Open on X" }),
+      body.getByRole("link", { name: "後ろのリンク" }),
+    ];
+    for (const next of order) {
+      await page.keyboard.press("Tab");
+      await expect(next).toBeFocused();
+    }
+  });
+
+  test("覆いを指やマウスで押したときは、Open on X にフォーカスを移さず、スクロールしない", async ({
+    page,
+    context,
+  }) => {
+    // 背の高いウィジェット。Open on X は画面の外にある
+    await openArticle(page, context, `${quote(1)}${filler(40)}`, { "*": "render:1400" });
+    await expectShown(page, 1);
+    const link = post(page, 1).getByRole("link", { name: "Open on X" });
+    await expect(link).not.toBeInViewport();
+    const top = await scrollTopOf(page);
+    const box = await cover(page, 1).boundingBox();
+    if (box === null) throw new Error("覆いがない");
+    await page.mouse.click(box.x + box.width / 2, box.y + 100);
+    await expect(cover(page, 1)).toHaveCount(0);
+    await page.waitForTimeout(300);
+    await expect(link).not.toBeFocused();
+    expect(await scrollTopOf(page)).toBe(top);
   });
 });
