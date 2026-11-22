@@ -145,6 +145,11 @@ export default defineConfig({
         // 文字列を渡せない。Workbox の実行部分を sw.js に入れる
         inlineWorkboxRuntime: true,
         cleanupOutdatedCaches: true,
+        // 新しい版は、取り込んだらすぐ使い始める（docs/decisions/ui.md の 5）。待機させると、開いている
+        // タブをすべて閉じるまで使われず、src/lib/app-update.ts の読み込み直しも起きない。
+        // 読み込み直す時期は、app-update.ts が決める（画面が裏にある間か、次に前に出たとき）
+        skipWaiting: true,
+        clientsClaim: true,
         // sendo が中継した画像（サムネイル、フィードのアイコン）を、キャッシュを先に見て出す
         // （docs/decisions/images.md の 3）。オフラインでも、一度出した画像を出す。入れるのは
         // 成功（200）だけで、401 ／ 403 ／ 502 は入れない。画面のファイルとは別の名前にして、
