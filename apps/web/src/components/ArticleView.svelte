@@ -952,9 +952,9 @@
   const canDownload = $derived(translatedBody ? translatedContent !== null : hasPageContent);
 
   // 形式を選んでいる途中で書き出せなくなったら（頼んだ訳文が届いて、訳した本文を待っている、など）、
-  // 最初の操作に戻す
+  // 最初の操作に戻す。書き出している最中は、押したときの本文で書き出し終えるまで待つ
   $effect(() => {
-    if (!canDownload) untrack(() => (choosingFormat = false));
+    if (!canDownload && exporting === null) untrack(() => (choosingFormat = false));
   });
 
   /**

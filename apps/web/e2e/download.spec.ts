@@ -253,3 +253,59 @@ test("訳文を出していて、訳した本文が手元にないときは、Do
   await openActions(page);
   await expect(actions(page).getByRole("button", { name: "Download", exact: true })).toBeVisible();
 });
+
+test("形式を選んでいる途中に、頼んだ訳文が届いて書き出せなくなったら、最初の操作に戻す", async ({
+  page,
+  context,
+}) => {
+  const server = new FakeSendo();
+  const feed = server.subscribe({ url: "https://example.com/feed", title: "Blog" });
+  const queued = {
+    language: "en",
+    status: "queued",
+    title: null,
+    summary: null,
+    translatedAt: null,
+  };
+  const article = server.deliver(feed.id, {
+    title: "Original title",
+    summary: "Summary",
+    url: "https://blog.example/posts/1",
+    translation: queued,
+  });
+  server.setArticleState(article.id, { read: true });
+  server.pageContents.set(article.id, "<p>Full text</p>");
+  server.translatedContents.set(article.id, "<p>訳した本文</p>");
+  await routeFakeSendo(context, server);
+  await page.goto("/");
+  await signIn(page);
+  await page.locator(".article-list").getByRole("button", { name: "Unread only" }).click();
+  await page.locator(".article-list .item").first().click();
+  const view = page.locator(".article-view");
+  await expect(view.locator(".body")).toHaveText("Full text");
+
+  // Translate の返事を止めておき、その間に形式を選ぶ段にする
+  let release = () => {};
+  server.translationRequestGate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  await view.getByRole("button", { name: "Translate", exact: true }).click();
+  await openActions(page);
+  await actions(page).getByRole("button", { name: "Download", exact: true }).click();
+  await expect(actions(page).getByRole("button", { name: "HTML", exact: true })).toBeVisible();
+
+  // 訳し終えていた（translation_exists は受け付けと同じ）。同期で訳文が届き、訳文に替わる
+  server.setTranslation(article.id, {
+    ...queued,
+    status: "translated",
+    title: "訳したタイトル",
+    summary: "訳した要約",
+    translatedAt: new Date().toISOString(),
+  });
+  release();
+  await expect(view.getByRole("heading", { level: 1 })).toHaveText("訳したタイトル");
+  await expect(actions(page).getByRole("button", { name: "HTML", exact: true })).toHaveCount(0);
+  // 訳した本文が届けば、訳文を書き出せる
+  await expect(view.locator(".body")).toHaveText("訳した本文");
+  await expect(actions(page).getByRole("button", { name: "Download", exact: true })).toBeVisible();
+});
