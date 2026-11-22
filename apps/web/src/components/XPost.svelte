@@ -37,18 +37,20 @@
 
 <div class="x-post" bind:this={element}>
   {#if post !== null && post.src !== null}
-    <iframe
-      src={post.src}
-      sandbox="allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox"
-      allow="fullscreen"
-      referrerpolicy="no-referrer"
-      title="X の投稿"
-      class:shown
-      style:height={post.height === null ? undefined : `${post.height}px`}
-      onload={(event) => {
-        if (event.currentTarget instanceof HTMLIFrameElement) post?.hello(event.currentTarget);
-      }}
-    ></iframe>
+    {#key post.attempt}
+      <iframe
+        src={post.src}
+        sandbox="allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox"
+        allow="fullscreen"
+        referrerpolicy="no-referrer"
+        title="X の投稿"
+        class:shown
+        style:height={post.height === null ? undefined : `${post.height}px`}
+        onload={(event) => {
+          if (event.currentTarget instanceof HTMLIFrameElement) post?.hello(event.currentTarget);
+        }}
+      ></iframe>
+    {/key}
   {/if}
   <blockquote hidden={shown}>{@render children()}</blockquote>
   {#if href !== null}

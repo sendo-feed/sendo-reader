@@ -45,6 +45,11 @@ export function isXPostHeight(value: unknown): value is number {
 export class XPostFrame {
   /** iframe の src。null の間は、iframe を置かない */
   src = $state<string | null>(null);
+  /**
+   * 読み込みを始めた回数。部品は、これが替わるたびに iframe を作り直す（取り消してすぐ始め直したとき、
+   * src が同じでも、前の iframe を使い続けない）
+   */
+  attempt = $state(0);
   /** ウィジェットの高さ（px）。null の間は、元の引用を出し、iframe は場所を取らない */
   height = $state<number | null>(null);
 
@@ -77,6 +82,8 @@ export class XPostLoader {
   readonly #failed = new Set<string>();
   #ready = false;
   #online = navigator.onLine;
+  /** 文書が見えている。裏に回ったタブやアプリでは、表示範囲に入っているとは数えない */
+  #shown = document.visibilityState === "visible";
   #observer: IntersectionObserver | null = null;
   #root: Element | null = null;
   #margin = "0px";
@@ -95,15 +102,24 @@ export class XPostLoader {
     const onOffline = () => {
       this.#online = false;
       // 読み込み中のものは、失敗にせず取り消す。つながったら、表示範囲に入っているものから始め直す
-      for (const post of this.#posts) if (post.phase === "loading") this.#cancel(post);
+      this.#cancelLoading();
+    };
+    const onVisibility = () => {
+      this.#shown = document.visibilityState === "visible";
+      // 裏に回った間は、ブラウザーが枠の描画を止め、rendered が来ない。読み込み中のものは、失敗に
+      // せず取り消し、前に出たら、表示範囲に入っているものから始め直す
+      if (this.#shown) this.#pump();
+      else this.#cancelLoading();
     };
     window.addEventListener("message", onMessage);
+    document.addEventListener("visibilitychange", onVisibility);
     window.addEventListener("online", onOnline);
     window.addEventListener("offline", onOffline);
     return () => {
       window.removeEventListener("message", onMessage);
       window.removeEventListener("online", onOnline);
       window.removeEventListener("offline", onOffline);
+      document.removeEventListener("visibilitychange", onVisibility);
       this.#observer?.disconnect();
       this.#observer = null;
       for (const post of this.#posts) this.#cancel(post);
@@ -129,7 +145,7 @@ export class XPostLoader {
     if (ready === this.#ready) return;
     this.#ready = ready;
     if (!ready) {
-      for (const post of this.#posts) if (post.phase === "loading") this.#cancel(post);
+      this.#cancelLoading();
       return;
     }
     this.#observe();
@@ -185,7 +201,7 @@ export class XPostLoader {
 
   /** 空いている分だけ、表示範囲に入っている投稿の読み込みを始める */
   #pump(): void {
-    if (!this.#ready || !this.#online) return;
+    if (!this.#ready || !this.#online || !this.#shown) return;
     let loading = 0;
     for (const post of this.#posts) if (post.phase === "loading") loading += 1;
     for (const post of this.#posts) {
@@ -198,11 +214,16 @@ export class XPostLoader {
 
   #start(post: XPostFrame): void {
     post.phase = "loading";
+    post.attempt += 1;
     post.frame = null;
     post.height = null;
     // 渡すのは、投稿の ID とテーマだけ
     post.src = `${this.#origin}/#id=${post.id}&theme=${currentTheme()}`;
     post.timer = setTimeout(() => this.#fail(post), X_POST_TIMEOUT_MS);
+  }
+
+  #cancelLoading(): void {
+    for (const post of this.#posts) if (post.phase === "loading") this.#cancel(post);
   }
 
   /** 読み込みを取り消して、元の引用に戻す（失敗にはしない） */

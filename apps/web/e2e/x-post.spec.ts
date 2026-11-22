@@ -330,8 +330,23 @@ test("読書位置を戻すまでは、先頭に見えた投稿を読み込ま�
   await expect(iframes(page)).toHaveCount(0);
   await page.waitForTimeout(500);
   requested.embed.length = 0;
+  // 読み込み直したあと、位置を戻すのは、開いたときの全文の自動の取得が終わってから。それを止めて、
+  // 先頭が見えたまま（位置が決まる前）の間を作る
+  let release: () => void = () => {};
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  await context.route("**/api/v1/articles/*/content?source=page", async (route) => {
+    await held;
+    await route.fallback();
+  });
   await page.reload();
   await expect(page.locator(".article-view h1")).toHaveText("X の投稿を引いた記事");
+  await expect(post(page, 1).locator("blockquote")).toBeInViewport();
+  await page.waitForTimeout(500);
+  expect(requested.embed).toEqual([]);
+  await expect(iframes(page)).toHaveCount(0);
+  release();
   await expect
     .poll(() => page.locator(".article-view").evaluate((node) => node.scrollTop))
     .toBeGreaterThan(1000);
@@ -436,7 +451,10 @@ test("表示範囲に入ったまま 10 秒たっても出なければ、失敗�
   await expect(frame).toHaveCount(1);
   await page.clock.fastForward(6_000);
   await expect(frame).toHaveCount(1);
-  await page.clock.fastForward(4_100);
+  // 時計は、早送りの間も実際の時間で進むので、境の前後に少し幅を持たせる
+  await page.clock.fastForward(3_500);
+  await expect(frame).toHaveCount(1);
+  await page.clock.fastForward(500);
   await expect(frame).toHaveCount(0);
   await expect(post(page, 1).locator("blockquote")).toBeVisible();
   // 失敗したあとは、やり直さない
@@ -472,6 +490,7 @@ test("受けるのは、その投稿の iframe からの、決まった形のメ
     page.evaluate((url) => void window.open(url), `${EMBED}/`),
   ]);
   await popup.waitForLoadState("load");
+  expect(await popup.evaluate(() => window.opener !== null)).toBe(true);
   await popup.evaluate(() => {
     window.opener?.postMessage({ type: "sendo:x-post:rendered", height: 240 }, "*");
     window.opener?.postMessage({ type: "sendo:x-post:failed" }, "*");
@@ -550,11 +569,12 @@ test("全文に差し替わったら、前の iframe を残さず、新しい本
   const { server, articleId } = await openArticle(
     page,
     context,
+    // 全文でも、同じ位置に同じ投稿がある
     `${quote(1)}<p>フィードの本文</p>`,
     { "*": "manual" },
   );
   await expect(post(page, 1).locator("iframe")).toHaveCount(1);
-  server.pageContents.set(articleId, `<p>全文の本文</p>${quote(1)}${quote(2)}`);
+  server.pageContents.set(articleId, `${quote(1)}<p>全文の本文</p>${quote(2)}`);
   // 全文の取得を止めておく
   await context.route("**/api/v1/articles/*/content?source=page", async (route) => {
     await held;
@@ -597,4 +617,53 @@ test("記事を切り替えたら、前の記事の iframe と待ちを残さな
   // 前の記事の 4 つが数を占めたままにならず、次の記事の投稿をすぐ始める
   await expect(iframes(page)).toHaveCount(1);
   await expect(post(page, 7).locator("iframe")).toHaveCount(1);
+});
+
+/** 文書が裏に回った ／ 前に出たことにする（Playwright では、タブを裏に回せない） */
+async function setHidden(page: Page, hidden: boolean): Promise<void> {
+  await page.evaluate((value) => {
+    Object.defineProperty(document, "visibilityState", {
+      configurable: true,
+      get: () => (value ? "hidden" : "visible"),
+    });
+    document.dispatchEvent(new Event("visibilitychange"));
+  }, hidden);
+}
+
+test("裏に回っている間は数えず、読み込み中のものは取り消し、前に出たら始め直す", async ({
+  page,
+  context,
+}) => {
+  await page.clock.install();
+  await openArticle(page, context, quote(1), { "*": "manual" });
+  const frame = post(page, 1).locator("iframe");
+  await expect(frame).toHaveCount(1);
+  await setHidden(page, true);
+  await expect(frame).toHaveCount(0);
+  await expect(post(page, 1).locator("blockquote")).toBeVisible();
+  // 裏にある間は、10 秒を超えても失敗にしない
+  await page.clock.fastForward(30_000);
+  await setHidden(page, false);
+  await expect(frame).toHaveCount(1);
+  await settle(page, 1, 200);
+  await expect(post(page, 1).locator("blockquote")).toBeHidden();
+});
+
+test("取り消してすぐ始め直したら、iframe を作り直し、新しい枠の結果を受ける", async ({
+  page,
+  context,
+}) => {
+  await openArticle(page, context, quote(1), { "*": "manual" });
+  const frame = post(page, 1).locator("iframe");
+  await expect(frame).toHaveCount(1);
+  const old = await frame.elementHandle();
+  // 同じ処理の中で、取り消し（offline）と始め直し（online）が続く
+  await page.evaluate(() => {
+    window.dispatchEvent(new Event("offline"));
+    window.dispatchEvent(new Event("online"));
+  });
+  await expect.poll(() => old?.evaluate((node) => node.isConnected)).toBe(false);
+  await expect(frame).toHaveCount(1);
+  await settle(page, 1, 200);
+  await expect(post(page, 1).locator("blockquote")).toBeHidden();
 });

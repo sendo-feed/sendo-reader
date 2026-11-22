@@ -40,7 +40,12 @@
   const embedOrigin = xEmbedOrigin();
   const xPosts = embedOrigin === null ? null : new XPostLoader(embedOrigin);
   setXPostLoader(xPosts);
-  /** 読書位置が決まった（戻す位置があれば戻した）。決まるまでは、X の投稿を読み込まない */
+  /**
+   * 読書位置が決まった（下の、本文が出たら位置を戻す effect が済んだ）。決まるまでは、X の投稿を
+   * 読み込まない。その effect は、開いたときの全文の自動の取得も待つので、全文を取りにいく記事では、
+   * 全文に替わってから（取れなければ、取れないと決まってから）読み込む（替わる前の本文で読み込んだ
+   * 枠は、作り直しになるため）
+   */
   let positioned = $state(false);
 
   $effect(() => xPosts?.connect());
