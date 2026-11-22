@@ -1,6 +1,12 @@
 import { type ChildProcess, spawn } from "node:child_process";
+import { readFileSync } from "node:fs";
+import { copyFile, mkdtemp, rm } from "node:fs/promises";
+import { request as httpRequest } from "node:http";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { expect, type Page, test } from "@playwright/test";
+import { xEmbedPageHeaders } from "../security-headers";
 import { FakeSendo, routeFakeSendo } from "./fake-sendo";
 
 /**
@@ -20,8 +26,8 @@ const DIST = fileURLToPath(new URL("../dist", import.meta.url));
 
 type Running = { process: ChildProcess; output: () => string };
 
-function spawnServer(env: Record<string, string>): Running {
-  const child = spawn(process.execPath, [SERVER], {
+function spawnServer(env: Record<string, string>, server = SERVER): Running {
+  const child = spawn(process.execPath, [server], {
     env: {
       PATH: process.env.PATH ?? "",
       PORT: String(PORT),
@@ -43,8 +49,8 @@ function spawnServer(env: Record<string, string>): Running {
 }
 
 /** コンテナのサーバーを、本番と同じく環境変数で設定して動かす。受け始めるまで待つ */
-async function startServer(env: Record<string, string>): Promise<Running> {
-  const running = spawnServer(env);
+async function startServer(env: Record<string, string>, server = SERVER): Promise<Running> {
+  const running = spawnServer(env, server);
   try {
     await expect
       .poll(
@@ -208,6 +214,58 @@ test("設定ありから設定なしに替えると、同じ時点で frame-src 
   await page.reload();
   expect(await metaOrigin(page)).toBeNull();
   expect(await framed(page)).toBe(false);
+});
+
+/** コンテナのサーバーに、Host を決めて送る */
+function send(host: string, path: string): Promise<{ status: number; csp: string; body: string }> {
+  return new Promise((resolve, reject) => {
+    const request = httpRequest(`http://127.0.0.1:${PORT}${path}`, {
+      setHost: false,
+      headers: { host },
+    });
+    request.on("response", (response) => {
+      const chunks: Buffer[] = [];
+      response.on("data", (chunk: Buffer) => chunks.push(chunk));
+      response.on("end", () =>
+        resolve({
+          status: response.statusCode ?? 0,
+          csp: String(response.headers["content-security-policy"] ?? ""),
+          body: Buffer.concat(chunks).toString(),
+        }),
+      );
+    });
+    request.on("error", reject);
+    request.end();
+  });
+}
+
+test("コンテナは、バンドルに取り込んだ隔離フレームのページを、隔離フレームのホスト名でだけ返す", async () => {
+  // バンドルだけを別の場所に写して動かす（隣に x-embed/ がなくても返すこと＝バンドルから返していること）
+  const directory = await mkdtemp(path.join(tmpdir(), "sendo-reader-server-"));
+  await copyFile(SERVER, path.join(directory, "server.mjs"));
+  running = await startServer({ X_EMBED_ORIGIN: EMBED }, path.join(directory, "server.mjs"));
+  const html = readFileSync(
+    fileURLToPath(new URL("../x-embed/index.html", import.meta.url)),
+    "utf8",
+  );
+  const script = readFileSync(
+    fileURLToPath(new URL("../x-embed/embed.js", import.meta.url)),
+    "utf8",
+  );
+  for (const path of ["/", "/?from=reader"]) {
+    const page = await send("embed.test", path);
+    expect(page.status, path).toBe(200);
+    expect(page.body, path).toBe(html);
+    expect(page.csp).toBe(xEmbedPageHeaders()["Content-Security-Policy"]);
+  }
+  const embed = await send("embed.test", "/embed.js?v=1");
+  expect(embed.status).toBe(200);
+  expect(embed.body).toBe(script);
+  // reader のホスト名では返さない
+  expect((await send(`localhost:${PORT}`, "/embed.js")).body).not.toBe(script);
+  await stopServer(running);
+  running = null;
+  await rm(directory, { recursive: true, force: true });
 });
 
 test("コンテナは、形の合わない X_EMBED_ORIGIN では、理由を出して起動しない", async () => {

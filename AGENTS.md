@@ -65,6 +65,7 @@ Sendo の公式リーダー。`packages/core`（同期エンジン）と `apps/w
     - `lib/errors.ts`：失敗（`ApiError` の `code` ／ `kind`）を、画面に出す文にする
     - 画面は `@sendo-reader/core/web` の窓口だけを使い、DB や sendo の API に直接触れない
   - `server/`：reader のコンテナのサーバー（`docs/decisions/container.md`）。画面を配る唯一の形（Cloudflare では動かさない）。Node で動き、ここだけ `node:*` を使ってよい。`assets.ts` が画面のビルドを起動するときにメモリーに読み、`static.ts` が決まった応答（ヘッダー、ETag、圧縮、SPA）で返し、`proxy.ts` が sendo のパスを書き換えずに中継する（WebSocket の Upgrade は `websocket.ts`）。依存ごと esbuild で 1 つのファイルにまとめる（イメージに `node_modules` を入れない）
+  - `x-embed/`：X の投稿の隔離フレームのページ（`index.html` と `embed.js`。`docs/decisions/embeds.md`）。画面のビルド（`dist`）には入れず、サーバーのバンドルに文字として取り込み（`server/x-embed-page.ts`）、コンテナのサーバー（と dev ／ preview）が、`X_EMBED_ORIGIN` のホスト名の `/` と `/embed.js` でだけ返す。CSP は `security-headers.ts` の `xEmbedPageHeaders`（Trusted Types と style 属性は使えないので、見た目は CSSOM で付ける）
   - `sendo-paths.ts`：sendo に中継するパスの一覧。Service Worker の `navigateFallbackDenylist` と、手元の Vite の dev サーバーの中継も同じものを使う。sendo が外に出すパスを足したらここに足し、画面のルートはここと重ねない（`/oauth/authorize` は画面、`/oauth/token` は sendo）
   - `security-headers.ts`：CSP などのヘッダー。dev サーバー・preview と、本番のコンテナのサーバーの両方に使う
   - `test/`：ヘッダーと、新しい版への切り替えのテスト。`test/server/` はコンテナのサーバーのテストで、偽の sendo と reader のサーバーを本物の HTTP で動かして確かめる

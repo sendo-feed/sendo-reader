@@ -1,9 +1,10 @@
-import { type ChildProcess, spawn } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { createServer, request as httpRequest, type IncomingHttpHeaders } from "node:http";
 import type { AddressInfo } from "node:net";
 import { fileURLToPath } from "node:url";
 import { expect, test } from "@playwright/test";
+import { xEmbedPageHeaders } from "../security-headers";
+import { type RunningPreview, startPreview } from "./x-embed-preview";
 
 /**
  * 手元の Vite の preview も、コンテナと同じ設定（X_EMBED_ORIGIN）を、同じ処理（値の確かめ、Host での
@@ -14,16 +15,15 @@ import { expect, test } from "@playwright/test";
 
 const PORT = 4186;
 const EMBED = `http://127.0.0.1:${PORT}`;
-const APP = fileURLToPath(new URL("..", import.meta.url));
-const VITE = fileURLToPath(new URL("../node_modules/vite/bin/vite.js", import.meta.url));
 const BUILT_SW = readFileSync(fileURLToPath(new URL("../dist/sw.js", import.meta.url)), "utf8");
 
 type Answer = { status: number; headers: IncomingHttpHeaders; body: string };
 
-/** localhost の preview に、Host を決めて送る */
+/** preview に、Host を決めて送る */
 function send(host: string, path: string, method = "GET"): Promise<Answer> {
   return new Promise((resolve, reject) => {
-    const request = httpRequest(`http://localhost:${PORT}${path}`, {
+    // preview は 127.0.0.1 で待ち受ける（vite.config.ts）。Host は、引数で決める
+    const request = httpRequest(`http://127.0.0.1:${PORT}${path}`, {
       method,
       setHost: false,
       headers: { host },
@@ -47,7 +47,8 @@ function send(host: string, path: string, method = "GET"): Promise<Answer> {
 /** WebSocket の Upgrade を送り、返った状態を読む */
 function upgrade(host: string, path: string): Promise<number> {
   return new Promise((resolve, reject) => {
-    const request = httpRequest(`http://localhost:${PORT}${path}`, {
+    // preview は 127.0.0.1 で待ち受ける（vite.config.ts）。Host は、引数で決める
+    const request = httpRequest(`http://127.0.0.1:${PORT}${path}`, {
       setHost: false,
       headers: {
         host,
@@ -85,38 +86,12 @@ test("preview も、X_EMBED_ORIGIN を、コンテナと同じ処理に通す", 
   await new Promise<void>((resolve) => sendo.listen(0, "127.0.0.1", resolve));
   const sendoPort = (sendo.address() as AddressInfo).port;
 
-  let preview: ChildProcess | null = null;
+  let preview: RunningPreview | null = null;
   try {
-    preview = spawn(process.execPath, [VITE, "preview", "--port", String(PORT), "--strictPort"], {
-      cwd: APP,
-      env: {
-        ...process.env,
-        X_EMBED_ORIGIN: EMBED,
-        SENDO_DEV_URL: `http://127.0.0.1:${sendoPort}`,
-      },
-      stdio: ["ignore", "pipe", "pipe"],
+    preview = await startPreview(PORT, {
+      X_EMBED_ORIGIN: EMBED,
+      SENDO_DEV_URL: `http://127.0.0.1:${sendoPort}`,
     });
-    let output = "";
-    preview.stdout?.on("data", (chunk: Buffer) => {
-      output += chunk.toString();
-    });
-    preview.stderr?.on("data", (chunk: Buffer) => {
-      output += chunk.toString();
-    });
-    const started = preview;
-    await expect
-      .poll(
-        () => {
-          // 起動に失敗したら（ポートが埋まっている、など）、待たずに落とす
-          if (started.exitCode !== null) throw new Error(`preview exited:\n${output}`);
-          return send(`localhost:${PORT}`, "/").then(
-            (answer) => answer.status,
-            () => 0,
-          );
-        },
-        { timeout: 30_000 },
-      )
-      .toBe(200);
 
     // reader のホスト名：CSP に frame-src、index.html に <meta>、sw.js の revision が替わる
     const page = await send(`localhost:${PORT}`, "/");
@@ -134,7 +109,15 @@ test("preview も、X_EMBED_ORIGIN を、コンテナと同じ処理に通す", 
 
     // 隔離フレームのホスト名：sendo に中継せず、reader の画面も返さない
     received.length = 0;
-    for (const path of ["/", "/api/v1/me", "/settings", "/sw.js"]) {
+    // 返すのは、隔離フレームのページ（/ と /embed.js）だけ
+    const framePage = await send(`127.0.0.1:${PORT}`, "/");
+    expect(framePage.status).toBe(200);
+    expect(framePage.body).toContain('<script src="/embed.js" defer></script>');
+    expect(framePage.headers["content-security-policy"]).toBe(
+      xEmbedPageHeaders()["Content-Security-Policy"],
+    );
+    expect((await send(`127.0.0.1:${PORT}`, "/embed.js")).status).toBe(200);
+    for (const path of ["/index.html", "/api/v1/me", "/settings", "/sw.js"]) {
       const answer = await send(`127.0.0.1:${PORT}`, path);
       expect(answer.status, path).toBe(404);
       expect(answer.body, path).not.toContain("<title>Sendo</title>");
@@ -143,12 +126,7 @@ test("preview も、X_EMBED_ORIGIN を、コンテナと同じ処理に通す", 
     expect(await upgrade(`127.0.0.1:${PORT}`, "/api/v1/sync/updates")).toBe(404);
     expect(received).toEqual([]);
   } finally {
-    const running = preview;
-    if (running !== null && running.exitCode === null && running.signalCode === null) {
-      const exited = new Promise((resolve) => running.once("exit", resolve));
-      running.kill("SIGTERM");
-      await exited;
-    }
+    await preview?.stop();
     await new Promise<void>((resolve) => sendo.close(() => resolve()));
   }
 });

@@ -63,9 +63,9 @@ function decodePath(pathname: string): string {
   }
 }
 
-function findAsset(pathname: string, assets: Assets): Asset | undefined {
+function findAsset(pathname: string, assets: Assets, fallback: boolean): Asset | undefined {
   const exact = assets.get(decodePath(pathname));
-  if (exact) return exact;
+  if (exact || !fallback) return exact;
   // 画面のルート（/settings、/feeds/<ID> など）や、ないパスには index.html を返す
   return assets.get("/index.html");
 }
@@ -74,13 +74,15 @@ export function serveAsset(
   request: Request,
   assets: Assets,
   security: Readonly<Record<string, string>> = securityHeaders("production"),
+  /** ないパスに index.html を返すか（SPA）。隔離フレームのページでは返さない */
+  fallback = true,
 ): Response {
   const headers = new Headers(security);
   if (request.method !== "GET" && request.method !== "HEAD") {
     headers.set("allow", "GET, HEAD");
     return new Response(null, { status: 405, headers });
   }
-  const asset = findAsset(new URL(request.url).pathname, assets);
+  const asset = findAsset(new URL(request.url).pathname, assets, fallback);
   if (!asset) return new Response("Not Found", { status: 404, headers });
 
   const encoding = chooseEncoding(request.headers.get("accept-encoding"), asset);

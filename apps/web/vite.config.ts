@@ -2,6 +2,7 @@ import { execSync } from "node:child_process";
 import { existsSync, readFileSync, statSync } from "node:fs";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { svelte } from "@sveltejs/vite-plugin-svelte";
 import { defineConfig, type Plugin } from "vite";
 import { VitePWA } from "vite-plugin-pwa";
@@ -10,7 +11,7 @@ import {
   IMAGE_CACHE_NAME,
   IMAGE_CACHE_URL_PATTERN,
 } from "../../packages/core/src/web/image-cache.ts";
-import { contentSecurityPolicy, securityHeaders } from "./security-headers.ts";
+import { contentSecurityPolicy, securityHeaders, xEmbedPageHeaders } from "./security-headers.ts";
 import { isSendoPath, SENDO_NAVIGATION_DENYLIST } from "./sendo-paths.ts";
 import {
   applyXEmbedOrigin,
@@ -36,12 +37,31 @@ const X_EMBED_ORIGIN = devXEmbedOrigin(process.env.X_EMBED_ORIGIN);
 
 type Middleware = (req: IncomingMessage, res: ServerResponse, next: () => void) => void;
 
-/** 隔離フレームのホスト名への要求は、sendo にも画面にも回さない（本番の server/app.ts と同じ） */
+/** 隔離フレームのページ（x-embed/）。dev と preview は、開くたびにファイルから読む */
+const X_EMBED_PAGE = new Map([
+  ["/", { file: "index.html", type: "text/html; charset=utf-8" }],
+  ["/embed.js", { file: "embed.js", type: "text/javascript; charset=utf-8" }],
+]);
+const X_EMBED_DIR = fileURLToPath(new URL("./x-embed/", import.meta.url));
+
+/**
+ * 隔離フレームのホスト名への要求は、隔離フレームのページ（/ と /embed.js）だけを返し、sendo にも画面にも
+ * 回さない（本番の server/app.ts と同じ）
+ */
 function xEmbedHostMiddleware(headers: Record<string, string>): Middleware {
   return (req, res, next) => {
     if (X_EMBED_ORIGIN === null || !isXEmbedHost(req.headers.host, X_EMBED_ORIGIN)) return next();
+    const isGet = req.method === "GET" || req.method === "HEAD";
+    const page = X_EMBED_PAGE.get(new URL(req.url ?? "/", "http://x-embed.invalid").pathname);
+    if (isGet && page !== undefined) {
+      for (const [name, value] of Object.entries(xEmbedPageHeaders())) res.setHeader(name, value);
+      res.setHeader("content-type", page.type);
+      res.setHeader("cache-control", "no-cache");
+      res.end(req.method === "HEAD" ? undefined : readFileSync(path.join(X_EMBED_DIR, page.file)));
+      return;
+    }
     for (const [name, value] of Object.entries(headers)) res.setHeader(name, value);
-    if (req.method !== "GET" && req.method !== "HEAD") {
+    if (!isGet) {
       res.statusCode = 405;
       res.setHeader("allow", "GET, HEAD");
       res.end();
@@ -285,7 +305,12 @@ export default defineConfig({
   // 読むので、Vite の事前バンドルに入れない
   worker: { format: "es" },
   optimizeDeps: { exclude: ["@sqlite.org/sqlite-wasm"] },
+  // 開発用の隔離フレームのオリジン（http://localhost と http://127.0.0.1 の、reader と違うほう）を
+  // 設定したときは、127.0.0.1 で待ち受ける。localhost の名前は、環境によって IPv6（::1）だけを指し、
+  // 127.0.0.1 に届かないため。ブラウザーは、localhost を 127.0.0.1 にも引くので、reader にも届く
+  ...(X_EMBED_ORIGIN?.startsWith("http:") ? { preview: { host: "127.0.0.1" } } : {}),
   server: {
+    ...(X_EMBED_ORIGIN?.startsWith("http:") ? { host: "127.0.0.1" } : {}),
     // 手元では、本番の reader のコンテナのサーバーと同じパス（sendo-paths.ts）を、sendo の pnpm dev
     // （ポート 8787）に中継する（docs/decisions/ui.md の 4）。^ で始まるキーは、Vite が正規表現として
     // パスとクエリに当てる

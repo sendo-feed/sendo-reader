@@ -17,6 +17,7 @@ import { createReaderServer } from "./app";
 import { loadAssets, withXEmbedOrigin } from "./assets";
 import { type Env, parsePort, parseSendoUrl, parseXEmbedOrigin } from "./config";
 import { createUpgradeRelay } from "./websocket";
+import { bundledXEmbedPage } from "./x-embed-page";
 
 /** 止めるときに、処理中のリクエストを待つ上限 */
 const SHUTDOWN_TIMEOUT_MS = 10 * 1000;
@@ -39,7 +40,9 @@ async function main(env: Env): Promise<void> {
           xEmbedOrigin,
           contentSecurityPolicy("production", { xEmbedOrigin }),
         );
-  const app = createReaderServer({ assets, sendoOrigin, xEmbedOrigin });
+  // 隔離フレームのページは、設定があるときだけ使う（なければ、このホスト名の振り分けもない）
+  const xEmbedPage = xEmbedOrigin === null ? undefined : bundledXEmbedPage();
+  const app = createReaderServer({ assets, sendoOrigin, xEmbedOrigin, xEmbedPage });
 
   const server = serve(
     { fetch: app.fetch, port, hostname: env.HOST?.trim() || "0.0.0.0" },

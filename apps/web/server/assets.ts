@@ -100,6 +100,28 @@ export async function loadAssets(directory: string): Promise<Assets> {
 }
 
 /**
+ * X の投稿の隔離フレームのページ（apps/web/x-embed の index.html と embed.js。docs/decisions/embeds.md
+ * の 2・3）。隔離フレームのホスト名の / と /embed.js で返す。画面のビルド（dist）とは別に、サーバーの
+ * バンドルに取り込む（x-embed-page.ts）ので、reader のホスト名では返さず、Service Worker の precache
+ * にも入らない
+ */
+export function xEmbedPageAssets(html: string, script: string): Assets {
+  const encoder = new TextEncoder();
+  return new Map([
+    ["/", toAsset("index.html", encoder.encode(html))],
+    ["/embed.js", toAsset("embed.js", encoder.encode(script))],
+  ]);
+}
+
+/** 隔離フレームのページを、置き場所から読む（テストと、バンドルしない手元の確かめ用） */
+export async function loadXEmbedPage(directory: string): Promise<Assets> {
+  return xEmbedPageAssets(
+    await readFile(path.join(directory, "index.html"), "utf8"),
+    await readFile(path.join(directory, "embed.js"), "utf8"),
+  );
+}
+
+/**
  * X の投稿の隔離フレームのオリジンが設定してあるときの、画面のファイル（docs/decisions/embeds.md の 3）。
  * index.html に <meta> を足し、sw.js の中の index.html の revision を、書き換えたあとの index.html と
  * 付ける CSP から作った値に替える。Service Worker が新しい版として取り込み、index.html を取り直す。
