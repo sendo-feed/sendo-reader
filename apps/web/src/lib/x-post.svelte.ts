@@ -5,7 +5,8 @@
  * 記事の画面（ArticleView）が 1 つ作り、本文の中の投稿の部品（XPost）が、自分を登録する。
  *
  * - 投稿が表示範囲（ツールバーの下は数えない）に入ったら、iframe の src を付けて読み込みを始める。
- *   読書位置が決まる前（setReady の前）と、オフラインの間は、始めない
+ *   読者の設定（reader.xPosts）で切ってあるとき、読書位置が決まる前（setReady の前）、オフラインの
+ *   間、文書が裏に回っている間は、始めない
  * - 同時に読み込む（rendered か失敗を待つ）のは 4 つまで。空いたら、表示範囲に入っているものから
  *   始める。読み込み中に表示範囲から出たものは、iframe を外して元の引用に戻し、数から外す
  *   （入り直したら、最初から読み込む）
@@ -81,6 +82,8 @@ export class XPostLoader {
   /** この記事で失敗した投稿の ID（本文を全文に替えても、やり直さない） */
   readonly #failed = new Set<string>();
   #ready = false;
+  /** 読者の設定（reader.xPosts）。切ってあれば、読み込まない */
+  #enabled = true;
   #online = navigator.onLine;
   /** 文書が見えている。裏に回ったタブやアプリでは、表示範囲に入っているとは数えない */
   #shown = document.visibilityState === "visible";
@@ -151,6 +154,22 @@ export class XPostLoader {
     this.#observe();
   }
 
+  /**
+   * 読者の設定で、読み込むか。切ったら、出ているウィジェットも読み込み中のものも外して、元の引用に
+   * 戻す（そのあとは X へ通信しない）。入れたら、表示範囲に入っているものから始める
+   */
+  setEnabled(enabled: boolean): void {
+    if (enabled === this.#enabled) return;
+    this.#enabled = enabled;
+    if (enabled) {
+      this.#pump();
+      return;
+    }
+    for (const post of this.#posts) {
+      if (post.phase === "loading" || post.phase === "shown") this.#cancel(post);
+    }
+  }
+
   /** 記事が替わった。失敗の覚えを捨てる */
   reset(): void {
     this.#failed.clear();
@@ -201,7 +220,7 @@ export class XPostLoader {
 
   /** 空いている分だけ、表示範囲に入っている投稿の読み込みを始める */
   #pump(): void {
-    if (!this.#ready || !this.#online || !this.#shown) return;
+    if (!this.#enabled || !this.#ready || !this.#online || !this.#shown) return;
     let loading = 0;
     for (const post of this.#posts) if (post.phase === "loading") loading += 1;
     for (const post of this.#posts) {

@@ -60,6 +60,10 @@
   });
 
   $effect(() => {
+    xPosts?.setEnabled(prefs.value.xPosts);
+  });
+
+  $effect(() => {
     xPosts?.setReady(positioned);
   });
 

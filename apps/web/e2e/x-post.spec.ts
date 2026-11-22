@@ -667,3 +667,113 @@ test("取り消してすぐ始め直したら、iframe を作り直し、新し�
   await settle(page, 1, 200);
   await expect(post(page, 1).locator("blockquote")).toBeHidden();
 });
+
+/** Settings の Reading を開く */
+async function openReadingSettings(page: Page): Promise<void> {
+  await page.locator("nav.sidebar").getByRole("link", { name: "Settings" }).click();
+  await page.getByRole("tab", { name: "Reading", exact: true }).click();
+}
+
+test.describe("読み込むかの設定（reader.xPosts）", () => {
+  test("Settings で切り替え、既定と違うときだけ預ける。読み込み直しても残る", async ({
+    page,
+    context,
+  }) => {
+    const { server } = await openArticle(page, context, quote(1));
+    await openReadingSettings(page);
+    const toggle = page.getByLabel("Load X posts");
+    await expect(toggle).toBeChecked();
+    await expect(page.locator("#x-posts-note")).toContainText("IP");
+    await toggle.uncheck();
+    await expect.poll(() => server.settingsOf("desktop")).toEqual({ "reader.xPosts": false });
+    await page.reload();
+    await page.getByRole("tab", { name: "Reading", exact: true }).click();
+    await expect(page.getByLabel("Load X posts")).not.toBeChecked();
+    // 既定に戻したら、項目を消す
+    await page.getByLabel("Load X posts").check();
+    await expect.poll(() => server.settingsOf("desktop")).toEqual({});
+  });
+
+  test("切ってあれば、表示範囲に入っても読み込まない", async ({ page, context }) => {
+    const { requested } = await openArticle(page, context, quote(1), { "*": "manual" }, (server) =>
+      server.putSetting("desktop", "reader.xPosts", false),
+    );
+    await expect(post(page, 1).locator("blockquote")).toBeVisible();
+    await page.waitForTimeout(500);
+    await expect(iframes(page)).toHaveCount(0);
+    expect(requested).toEqual({ x: [], embed: [], frames: [] });
+  });
+
+  test("知らない値は、既定（読み込む）として扱う", async ({ page, context }) => {
+    await openArticle(page, context, quote(1), { "*": "manual" }, (server) =>
+      server.putSetting("desktop", "reader.xPosts", "no"),
+    );
+    await expect(post(page, 1).locator("iframe")).toHaveCount(1);
+  });
+
+  test("同期で切ったと届いたら、開いている記事の枠を外し、そのあと通信しない。入れたら読み込む", async ({
+    page,
+    context,
+  }) => {
+    await page.setViewportSize({ width: 1280, height: 1400 });
+    const { server, requested } = await openArticle(
+      page,
+      context,
+      [1, 2, 3, 4, 5, 6].map(quote).join(""),
+      { "*": "manual" },
+    );
+    await expect(iframes(page)).toHaveCount(4);
+    // 1 は出て、2〜5 は読み込み中、6 は待っている
+    await settle(page, 1, 200);
+    await expect(post(page, 5).locator("iframe")).toHaveCount(1);
+    await expect(post(page, 1).locator("blockquote")).toBeHidden();
+
+    server.putSetting("desktop", "reader.xPosts", false);
+    await page.getByRole("button", { name: "Sync now" }).click();
+    // 出ていたウィジェットも、読み込み中のものも外し、引用に戻す
+    await expect(iframes(page)).toHaveCount(0);
+    for (const n of [1, 2, 3, 4, 5, 6])
+      await expect(post(page, n).locator("blockquote")).toBeVisible();
+    const before = { x: requested.x.length, embed: requested.embed.length };
+    await page.waitForTimeout(500);
+    expect({ x: requested.x.length, embed: requested.embed.length }).toEqual(before);
+
+    server.removeSetting("desktop", "reader.xPosts");
+    await page.getByRole("button", { name: "Sync now" }).click();
+    await expect(iframes(page)).toHaveCount(4);
+    await expect(post(page, 1).locator("iframe")).toHaveCount(1);
+  });
+
+  test("ほかのタブで切ったら、開いている記事の枠を外す", async ({ page, context }) => {
+    await openArticle(page, context, quote(1));
+    await expect(post(page, 1).locator("blockquote")).toBeHidden();
+    const other = await context.newPage();
+    await other.goto(`${READER}/`);
+    await openReadingSettings(other);
+    await other.getByLabel("Load X posts").uncheck();
+    await expect(iframes(page)).toHaveCount(0);
+    await expect(post(page, 1).locator("blockquote")).toBeVisible();
+    await other.close();
+  });
+});
+
+test("隔離フレームのオリジンが未設定なら、設定の項目を出さず、預けた値も消さない", async ({
+  page,
+  context,
+}) => {
+  const server = new FakeSendo();
+  server.subscribe({ url: "https://blog.example/feed.xml", title: "Blog" });
+  server.putSetting("desktop", "reader.xPosts", false);
+  await routeFakeSendo(context, server);
+  // X_EMBED_ORIGIN のない preview（playwright.config.ts の webServer）
+  await page.goto("http://localhost:4173/");
+  await signIn(page);
+  await openReadingSettings(page);
+  await expect(page.getByLabel("Mark as read on scroll")).toBeVisible();
+  await expect(page.getByLabel("Load X posts")).toHaveCount(0);
+  // ほかの設定を変えても、預けた値は残る
+  await page.getByLabel("Mark as read on scroll").uncheck();
+  await expect
+    .poll(() => server.settingsOf("desktop"))
+    .toEqual({ "reader.xPosts": false, "reader.markReadOnScroll": false });
+});
