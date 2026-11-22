@@ -452,6 +452,8 @@ export class FakeSendo {
   translationResponseGate: Promise<void> | null = null;
   /** その場の翻訳を頼まれた記事（POST /articles/{id}/translation） */
   readonly translationRequests: string[] = [];
+  /** 訳し直しを頼まれた記事（POST /articles/{id}/translation の本文 { retranslate: true }） */
+  readonly retranslationRequests: string[] = [];
   /** その場の翻訳の求めに、決めた失敗を返す（null なら sendo と同じに答える） */
   translationRequestError: { status: number; code: string } | null = null;
   /** その場の翻訳の求めに答える前に待つ（返る前にほかの操作をする場面を作る） */
@@ -778,7 +780,7 @@ export class FakeSendo {
     }
     match = /^\/articles\/([^/]+)\/translation$/.exec(path);
     if (request.method === "POST" && match !== null) {
-      return this.#requestTranslation(decodeURIComponent(match[1] ?? ""));
+      return this.#requestTranslation(decodeURIComponent(match[1] ?? ""), body);
     }
     if (request.method === "GET" && match !== null) {
       return this.#getTranslation(decodeURIComponent(match[1] ?? ""));
@@ -895,11 +897,13 @@ export class FakeSendo {
   }
 
   /**
-   * その場の翻訳を受け付ける（sendo の POST /articles/{id}/translation）。queued ／ untranslated
-   * なら translating にして 202。訳し終えるのは、テストが setTranslation で決める
+   * その場の翻訳と訳し直しを受け付ける（sendo の POST /articles/{id}/translation）。その場の翻訳は
+   * queued ／ untranslated、訳し直し（本文の retranslate）は translated で訳し直しの印のないときに、
+   * translating にして 202。訳し終えるのは、テストが setTranslation で決める
    */
-  async #requestTranslation(id: string): Promise<Response> {
-    this.translationRequests.push(id);
+  async #requestTranslation(id: string, body: Record<string, unknown>): Promise<Response> {
+    const retranslation = body.retranslate === true;
+    (retranslation ? this.retranslationRequests : this.translationRequests).push(id);
     await this.translationRequestGate;
     if (this.translationRequestError !== null) {
       const { status, code } = this.translationRequestError;
@@ -907,11 +911,15 @@ export class FakeSendo {
     }
     const row = this.inbox.get(id);
     if (row === undefined) return error(404, "not_found", "article does not exist");
-    const translation = row.translation as { status?: unknown } | null;
+    const translation = row.translation as { status?: unknown; retranslated?: unknown } | null;
     if (translation === null || typeof translation !== "object") {
       return error(409, "translation_not_supported", "this article is not translated");
     }
-    if (translation.status !== "queued" && translation.status !== "untranslated") {
+    if (retranslation) {
+      if (translation.status !== "translated" || translation.retranslated === true) {
+        return error(409, "retranslation_not_allowed", "the article cannot be retranslated");
+      }
+    } else if (translation.status !== "queued" && translation.status !== "untranslated") {
       return error(409, "translation_exists", "the article is already translated");
     }
     this.setTranslation(id, { ...translation, status: "translating" });

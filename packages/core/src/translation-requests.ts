@@ -1,4 +1,4 @@
-import type { Article } from "./models";
+import type { Article, ArticleTranslation } from "./models";
 
 /** 頼んだ印を外すまでの長さ（docs/decisions/translation.md の 6） */
 export const TRANSLATION_MARK_MS = 60 * 1000;
@@ -13,18 +13,37 @@ interface Request {
   afterSync: number;
   /** 頼んだ印（Translating にして、押せなくする）が付いている */
   marked: boolean;
-  /** 訳せなかった（sendo で untranslated に戻った）。失敗の文を出す */
+  /** 訳せなかった（sendo で、頼む前の状態に戻った）。失敗の文を出す */
   failed: boolean;
+  /** 訳し直し（Opus）を頼んだ。でなければ、その場の翻訳 */
+  retranslation: boolean;
+}
+
+/** 頼んだものが届いた（その場の翻訳なら訳文、訳し直しなら訳し直しの印。記事か翻訳がなくなったときも） */
+function arrived(request: Request, translation: ArticleTranslation | null | undefined): boolean {
+  if (translation == null) return true;
+  return request.retranslation ? translation.retranslated : translation.translatedAt !== null;
 }
 
 /**
- * この端末で頼んだ、その場の翻訳（docs/decisions/translation.md の 6）。core のメモリーにだけ置き、
- * ログアウトとユーザーの切り替えで消す（代表のタブが替わったときも消える）。
+ * sendo で訳せずに、頼む前の状態に戻った（docs/decisions/translation.md の 6。sendo は 202 を返す前に
+ * translating にするので、受け付けたあとの同期で見えるこの状態は、訳せずに戻ったもの）
+ */
+function returned(request: Request, translation: ArticleTranslation): boolean {
+  return request.retranslation
+    ? translation.status === "translated" && !translation.retranslated
+    : translation.status === "untranslated";
+}
+
+/**
+ * この端末で頼んだ、その場の翻訳と訳し直し（docs/decisions/translation.md の 6）。core のメモリーに
+ * だけ置き、ログアウトとユーザーの切り替えで消す（代表のタブが替わったときも消える）。
  *
  * - 頼んだ印：sendo が受け付けたら付け、受け付けたあとに始めた同期が成功して終わったときか、
  *   1 分たったときに外す。印のある記事は Translating にする
- * - 頼んだ記事：そのあとの同期で untranslated だったら、訳せなかったとして失敗にする。訳文が
- *   届くか、1 時間たったら忘れる
+ * - 頼んだ記事：そのあとの同期で、その場の翻訳なら untranslated、訳し直しなら訳し直しの印のない
+ *   translated だったら、訳せなかったとして失敗にする。訳文（訳し直しなら印）が届くか、1 時間
+ *   たったら忘れる
  */
 export class TranslationRequests {
   readonly #requests = new Map<string, Request>();
@@ -35,12 +54,13 @@ export class TranslationRequests {
   }
 
   /** sendo が受け付けた。startedSyncs は、今までに始めた同期の数 */
-  accept(articleId: string, startedSyncs: number): void {
+  accept(articleId: string, startedSyncs: number, retranslation = false): void {
     this.#requests.set(articleId, {
       acceptedAt: this.#now(),
       afterSync: startedSyncs,
       marked: true,
       failed: false,
+      retranslation,
     });
   }
 
@@ -64,11 +84,11 @@ export class TranslationRequests {
         changed = true;
       }
       const translation = articles.get(id)?.translation;
-      if (translation == null || translation.translatedAt !== null) {
+      if (translation == null || arrived(request, translation)) {
         // 訳文が届いた（または、記事か翻訳がなくなった）
         this.#requests.delete(id);
         changed = true;
-      } else if (translation.status === "untranslated") {
+      } else if (returned(request, translation)) {
         if (!request.failed) changed = true;
         request.failed = true;
       } else if (request.failed) {
@@ -107,11 +127,11 @@ export class TranslationRequests {
     }
     const translation = article.translation;
     if (translation == null) return article;
-    if (request.failed && translation.status === "untranslated") {
+    if (request.failed && returned(request, translation)) {
       return { ...article, translationRequest: "failed" };
     }
     const marked = request.marked && this.#now() - request.acceptedAt < TRANSLATION_MARK_MS;
-    if (marked && translation.translatedAt === null) {
+    if (marked && !arrived(request, translation)) {
       return {
         ...article,
         translation: { ...translation, status: "translating" },

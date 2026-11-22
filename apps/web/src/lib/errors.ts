@@ -77,7 +77,11 @@ export function describeError(error: unknown): string {
 /** その場の翻訳が sendo で訳せずに戻ったときの文（docs/decisions/translation.md の 6） */
 export const TRANSLATION_FAILED = "訳せませんでした。Translate でもう一度頼めます。";
 
-/** その場の翻訳を頼めなかったときの文（docs/decisions/translation.md の 6） */
+/** 訳し直しが sendo で訳せずに戻ったときの文（docs/decisions/translation.md の 6） */
+export const RETRANSLATION_FAILED =
+  "訳し直せませんでした。もとの訳文のままです。More actions の Retranslate with Opus でもう一度頼めます。";
+
+/** その場の翻訳と訳し直しを頼めなかったときの文（docs/decisions/translation.md の 6） */
 export function describeTranslationError(error: unknown): string {
   if (error instanceof ApiError) {
     switch (error.code) {
@@ -85,6 +89,8 @@ export function describeTranslationError(error: unknown): string {
         return "この Sendo では翻訳を使えません（API キーが設定されていません）。";
       case "translation_not_supported":
         return "この記事は訳せません。";
+      case "retranslation_not_allowed":
+        return "この記事はもう訳し直したか、訳し直せる訳文がありません。";
       case "not_found":
         return "この記事は Sendo にもうありません。";
     }

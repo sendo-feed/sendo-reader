@@ -7,7 +7,11 @@
   } from "@sendo-reader/core";
   import { tick, untrack } from "svelte";
   import { useReader } from "../lib/context";
-  import { describeTranslationError, TRANSLATION_FAILED } from "../lib/errors";
+  import {
+    describeTranslationError,
+    RETRANSLATION_FAILED,
+    TRANSLATION_FAILED,
+  } from "../lib/errors";
   import { formatDateTime } from "../lib/format";
   import { layout, reducedMotion, scrollTopOf, scrollToTop } from "../lib/layout.svelte";
   import type { ArticleListState } from "../lib/list.svelte";
@@ -485,12 +489,16 @@
       else if (current.translationRequest === "failed" || translation?.translatedAt == null) {
         requestSeen = false;
       }
+      // その場の翻訳なら訳文が、訳し直しなら訳し直した訳文が届いたら替える
       if (
         requestSeen &&
-        openedTranslation === null &&
         translation != null &&
-        translation.translatedAt !== null
+        translation.translatedAt !== null &&
+        (openedTranslation === null ||
+          (translation.retranslated && openedTranslation.translatedAt !== translation.translatedAt))
       ) {
+        // 替えたら、この端末で頼んだものは届いた。あとでほかの端末が替えた訳文では替えない
+        requestSeen = false;
         showOriginal = false;
         openTranslation(current.id, translation);
         onviewchange();
@@ -507,6 +515,18 @@
       article.translation != null &&
       (article.translation.status === "queued" || article.translation.status === "untranslated"),
   );
+  /**
+   * Opus で訳し直してもらえる（訳文があり、まだ訳し直していない。docs/decisions/translation.md の 5）。
+   * 頼んだ印のある間は、core が状態を translating にして返すので出ない
+   */
+  const canRetranslate = $derived(
+    article !== null &&
+      article.translation != null &&
+      article.translation.status === "translated" &&
+      !article.translation.retranslated,
+  );
+  /** 訳し直しの確かめの窓 */
+  let retranslateConfirmOpen = $state(false);
   /** 頼んで、sendo の返事を待っている記事（記事ごと。ほかの記事の Translate は止めない） */
   let translatingIds = $state<string[]>([]);
   const translating = $derived(articleId !== null && translatingIds.includes(articleId));
@@ -537,6 +557,27 @@
       await reader.client.requestTranslation(id);
       // 受け付けられた。訳文がすぐ届いて、core が頼んだ記事を忘れたあとに読み直しても、このタブで
       // 頼んだ記事として訳文に替える（頼んだ印を読めるかどうかに頼らない）
+      if (articleId === id) requestSeen = true;
+    } catch (error) {
+      if (articleId === id) translateError = describeTranslationError(error);
+    } finally {
+      translatingIds = translatingIds.filter((other) => other !== id);
+    }
+  }
+
+  /**
+   * Opus で訳し直してもらう（More actions の Retranslate with Opus を押し、確かめの窓で選んだとき）。
+   * 訳し直した訳文は全員分を置き換える（docs/decisions/translation.md の 5、6）
+   */
+  async function retranslate(): Promise<void> {
+    retranslateConfirmOpen = false;
+    const id = articleId;
+    if (id === null || !canRetranslate || translating || !online) return;
+    translatingIds = [...translatingIds, id];
+    translateError = null;
+    try {
+      await reader.client.requestTranslation(id, { retranslation: true });
+      // 受け付けられた。訳し直した訳文が届いたら、開いていても替える（決定の 3）
       if (articleId === id) requestSeen = true;
     } catch (error) {
       if (articleId === id) translateError = describeTranslationError(error);
@@ -1213,7 +1254,12 @@
           {#if translateError !== null}
             <p class="content-note" role="alert">{translateError}</p>
           {:else if article.translationRequest === "failed" && !translating}
-            <p class="content-note" role="alert">{TRANSLATION_FAILED}</p>
+            <!-- 訳し直しの失敗では、もとの訳文（translated）に戻っている -->
+            <p class="content-note" role="alert">
+              {article.translation?.status === "translated"
+                ? RETRANSLATION_FAILED
+                : TRANSLATION_FAILED}
+            </p>
           {/if}
         </header>
         {#if translatedBody}
@@ -1268,6 +1314,20 @@
         {showOriginal ? "Show translation" : "Show original text"}
       </button>
     {/if}
+    {#if canRetranslate && !choosingFormat}
+      <!-- まれで費用のかかる操作なので、More actions に置き、確かめてから頼む（決定の 5） -->
+      <button
+        type="button"
+        disabled={translating || !online}
+        title={online ? undefined : "オフラインのときは訳し直してもらえません"}
+        onclick={() => {
+          actionsOpen = false;
+          retranslateConfirmOpen = true;
+        }}
+      >
+        Retranslate with Opus
+      </button>
+    {/if}
     {#if choosingFormat}
       <!-- Download を押したあと、書き出す形式を選ぶ（やり方の違いは、押したあとに選ぶ。ui.md の 8） -->
       <button
@@ -1315,7 +1375,39 @@
   </div>
 </Dialog>
 
+<Dialog bind:open={retranslateConfirmOpen} title="Retranslate with Opus">
+  <p class="confirm">
+    訳し直した訳文は、この記事を読むすべての人の訳文を置き換えます。訳し直せるのは 1 回だけです。
+  </p>
+  <div class="choices">
+    <button type="button" class="primary" disabled={translating || !online} onclick={retranslate}>
+      Retranslate
+    </button>
+    <button type="button" class="link" onclick={() => (retranslateConfirmOpen = false)}>
+      Cancel
+    </button>
+  </div>
+</Dialog>
+
 <style>
+  .confirm {
+    margin: 0 0 1.25rem;
+  }
+
+  .choices {
+    display: grid;
+    gap: 0.5rem;
+  }
+
+  .choices button {
+    padding-block: 0.6rem;
+  }
+
+  .choices .link {
+    justify-self: center;
+    padding-block: 0.25rem;
+  }
+
   .content-actions {
     display: grid;
   }

@@ -289,6 +289,11 @@ const migrations: readonly (readonly string[])[] = [
       ];
     })(),
   ],
+  [
+    // 訳し直しの印（docs/decisions/translation.md の 5）。すでに手元にある行は 0 のまま（次に届くまで、
+    // 訳し直した記事にも Retranslate with Opus が出うる。頼んでも sendo が断り、同期で直る）
+    "alter table articles add column translation_retranslated integer not null default 0",
+  ],
 ];
 
 export const SCHEMA_VERSION = migrations.length;

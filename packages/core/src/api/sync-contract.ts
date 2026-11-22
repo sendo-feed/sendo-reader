@@ -209,7 +209,7 @@ function parseTranslation(value: unknown): Schemas["SyncArticleTranslation"] {
   if (typeof value !== "object" || Array.isArray(value)) return null;
   const row = value as Record<string, unknown>;
   const status = TRANSLATION_STATUSES.find((s) => s === row.status);
-  const { language, title, summary, translatedAt } = row;
+  const { language, title, summary, translatedAt, retranslated } = row;
   if (status === undefined) return null;
   if (typeof language !== "string" || !LANGUAGE_PATTERN.test(language)) return null;
   if (!isNullableString(title) || !isNullableString(summary)) return null;
@@ -219,7 +219,9 @@ function parseTranslation(value: unknown): Schemas["SyncArticleTranslation"] {
   ) {
     return null;
   }
-  return { language, status, title, summary, translatedAt };
+  // 訳し直しの印は、あとから足された項目。印に対応する前の sendo（項目がない）は、訳し直していない
+  if (retranslated !== undefined && typeof retranslated !== "boolean") return null;
+  return { language, status, title, summary, translatedAt, retranslated: retranslated === true };
 }
 
 function isNullableString(value: unknown): value is string | null {

@@ -1113,22 +1113,30 @@ export class ReaderCore {
   // --- 記事の翻訳を頼む（sendo に届かないとできない） ---
 
   /**
-   * 記事をその場で訳してもらう（docs/decisions/translation.md の 4、6）。操作キューには積まず、
-   * sendo に届かなければ ApiError（network）。受け付けられたら（もう訳しているか、訳し終えていた
-   * ときも）、頼んだ印を付けて、記事が変わったと知らせる。断られたら ApiError（code に理由）。
-   * 同期は呼んだ側が頼む（Web ではワーカーが、終わったらすぐ同期する）
+   * 記事をその場で訳してもらう。options.retranslation なら、Opus で訳し直してもらう
+   * （docs/decisions/translation.md の 4〜6）。操作キューには積まず、sendo に届かなければ
+   * ApiError（network）。受け付けられたら（その場の翻訳で、もう訳しているか、訳し終えていたときも）、
+   * 頼んだ印を付けて、記事が変わったと知らせる。断られたら ApiError（code に理由）。同期は呼んだ側が
+   * 頼む（Web ではワーカーが、終わったらすぐ同期する。訳し直しを断られた retranslation_not_allowed
+   * のときも、手元の状態が古いので同期する）
    */
-  async requestTranslation(articleId: string): Promise<void> {
+  async requestTranslation(
+    articleId: string,
+    options: { retranslation?: boolean } = {},
+  ): Promise<void> {
     this.#requireSignedIn();
     const session = this.#session.signal;
+    const retranslation = options.retranslation === true;
     try {
-      await requestTranslation(this.#api, articleId, session);
+      await requestTranslation(this.#api, articleId, session, retranslation);
     } catch (error) {
-      if (!(error instanceof ApiError && error.code === "translation_exists")) throw error;
+      if (retranslation || !(error instanceof ApiError && error.code === "translation_exists")) {
+        throw error;
+      }
     }
     // 待っている間にログアウトした ／ 別のユーザーでログインし直した
     throwIfSessionEnded(session);
-    this.#translationRequests.accept(articleId, this.#startedSyncs);
+    this.#translationRequests.accept(articleId, this.#startedSyncs, retranslation);
     this.#scheduleTranslationExpiry();
     this.#emit(new Set<Table>(["articles"]));
   }

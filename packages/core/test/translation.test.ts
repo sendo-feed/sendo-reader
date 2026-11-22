@@ -10,13 +10,21 @@ import { setup } from "./helpers";
 
 const TRANSLATED_AT = "2026-11-22T05:00:00.000Z";
 
-const queued = { language: "en", status: "queued", title: null, summary: null, translatedAt: null };
+const queued = {
+  language: "en",
+  status: "queued",
+  title: null,
+  summary: null,
+  translatedAt: null,
+  retranslated: false,
+};
 const translated = {
   language: "en",
   status: "translated",
   title: "コードモッドでリファクタリングする",
   summary: "API の変更を自動で当てる",
   translatedAt: TRANSLATED_AT,
+  retranslated: false,
 };
 
 /** 操作を送らずに、取るだけの同期（ops.test.ts と同じ） */
@@ -68,6 +76,7 @@ describe("記事の翻訳を受ける", () => {
     ["言語の形が違う", { ...queued, language: "EN-us" }],
     ["読めない時刻", { ...translated, translatedAt: "yesterday" }],
     ["文字列でないタイトル", { ...translated, title: 1 }],
+    ["真偽でない訳し直しの印", { ...translated, retranslated: "yes" }],
     ["オブジェクトでない", "translated"],
     ["配列", [translated]],
   ])("%s が届いても同期は止まらず、その記事は翻訳なしで置く", async (_name, translation) => {
@@ -79,6 +88,26 @@ describe("記事の翻訳を受ける", () => {
     expect((await core.getArticle(broken.id))?.title).toBe("Broken");
     expect((await core.getArticle(broken.id))?.translation).toBeNull();
     expect((await core.getArticle(ok.id))?.translation).toEqual(queued);
+  });
+
+  test("訳し直しの印を置き、替わったら置き換える。印に対応する前の sendo（項目がない）なら、訳し直していない", async () => {
+    const { server, core, feed } = await seeded();
+    const { retranslated: _, ...withoutFlag } = translated;
+    const old = server.deliver(feed.id, { title: "Old", translation: withoutFlag });
+    const article = server.deliver(feed.id, { title: "New", translation: translated });
+    await core.sync();
+    expect((await core.getArticle(old.id))?.translation?.retranslated).toBe(false);
+    expect((await core.getArticle(article.id))?.translation?.retranslated).toBe(false);
+
+    server.setTranslation(article.id, {
+      ...translated,
+      title: "Opus の訳",
+      translatedAt: "2026-11-22T06:00:00.000Z",
+      retranslated: true,
+    });
+    await core.sync();
+    const [listed] = (await core.listArticles()).filter((a) => a.id === article.id);
+    expect(listed?.translation).toMatchObject({ title: "Opus の訳", retranslated: true });
   });
 
   test("翻訳に対応する前の sendo が相手でも、同期は止まらない（翻訳なし）", async () => {

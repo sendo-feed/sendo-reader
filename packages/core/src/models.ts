@@ -95,6 +95,11 @@ export interface ArticleTranslation {
   summary: string | null;
   /** 訳した時刻（ミリ秒）。訳文がなければ null */
   translatedAt: number | null;
+  /**
+   * Opus で訳し直したか（sendo の docs/decisions/translation.md の 6）。訳し直せるのは、translated で
+   * これが false の記事だけ
+   */
+  retranslated: boolean;
 }
 
 export type SavedPage = {

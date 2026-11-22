@@ -8,13 +8,21 @@ import { setup } from "./helpers";
  * core のメモリーにだけ置く
  */
 
-const queued = { language: "en", status: "queued", title: null, summary: null, translatedAt: null };
+const queued = {
+  language: "en",
+  status: "queued",
+  title: null,
+  summary: null,
+  translatedAt: null,
+  retranslated: false,
+};
 const translated = (at: number) => ({
   language: "en",
   status: "translated",
   title: "訳したタイトル",
   summary: null,
   translatedAt: new Date(at).toISOString(),
+  retranslated: false,
 });
 const untranslated = { ...queued, status: "untranslated" };
 
@@ -205,5 +213,91 @@ describe("その場の翻訳を頼む", () => {
     await expect(core.requestTranslation(article.id)).rejects.toMatchObject({
       kind: "unauthorized",
     });
+  });
+});
+
+describe("Opus で訳し直してもらう（docs/decisions/translation.md の 5、6）", () => {
+  const retranslated = (at: number) => ({
+    ...translated(at),
+    title: "Opus で訳したタイトル",
+    retranslated: true,
+  });
+
+  test("受け付けられたらすぐ translating にし、訳し直しの印が届いたら忘れる", async () => {
+    const { server, core, article } = await seeded(translated(Date.now() - 60_000));
+    await core.requestTranslation(article.id, { retranslation: true });
+    expect(server.retranslationRequests).toEqual([article.id]);
+    expect(server.translationRequests).toEqual([]);
+    // 訳文はあるが、訳し直しが届くまでは translating にする（もとの訳文は残す）
+    expect(await core.getArticle(article.id)).toMatchObject({
+      translation: { status: "translating", title: "訳したタイトル", retranslated: false },
+      translationRequest: "requested",
+    });
+
+    await core.sync();
+    expect(await core.getArticle(article.id)).toMatchObject({
+      translation: { status: "translating" },
+      translationRequest: "requested",
+    });
+
+    server.setTranslation(article.id, retranslated(server.now));
+    await core.sync();
+    const done = await core.getArticle(article.id);
+    expect(done?.translation).toMatchObject({
+      status: "translated",
+      title: "Opus で訳したタイトル",
+      retranslated: true,
+    });
+    expect(done?.translationRequest).toBeUndefined();
+  });
+
+  test("sendo で訳し直せずに、印のない translated に戻ったら、訳せなかったことにする。頼み直せる", async () => {
+    const before = translated(Date.now() - 60_000);
+    const { server, core, article } = await seeded(before);
+    await core.requestTranslation(article.id, { retranslation: true });
+    await core.sync();
+    server.setTranslation(article.id, before);
+    await core.sync();
+    expect(await core.getArticle(article.id)).toMatchObject({
+      translation: { status: "translated", title: "訳したタイトル", retranslated: false },
+      translationRequest: "failed",
+    });
+
+    await core.requestTranslation(article.id, { retranslation: true });
+    expect(await core.getArticle(article.id)).toMatchObject({
+      translation: { status: "translating" },
+      translationRequest: "requested",
+    });
+    expect(server.retranslationRequests).toEqual([article.id, article.id]);
+  });
+
+  test("その場の翻訳の失敗（untranslated）と取り違えない：訳し直しの最中の translating では失敗にしない", async () => {
+    const { core, article } = await seeded(translated(Date.now() - 60_000));
+    await core.requestTranslation(article.id, { retranslation: true });
+    await core.sync();
+    expect((await core.getArticle(article.id))?.translationRequest).toBe("requested");
+    // 訳文はもとのまま（translatedAt がある）でも、届いたことにしない
+    expect((await core.getArticle(article.id))?.translation?.status).toBe("translating");
+  });
+
+  test("retranslation_not_allowed は、受け付けられたことにせず理由の code を付けて投げる", async () => {
+    const { server, core, article } = await seeded(retranslated(Date.now() - 60_000));
+    const error = await core
+      .requestTranslation(article.id, { retranslation: true })
+      .catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(ApiError);
+    expect(error).toMatchObject({ code: "retranslation_not_allowed" });
+    expect(server.retranslationRequests).toEqual([article.id]);
+    expect((await core.getArticle(article.id))?.translationRequest).toBeUndefined();
+    expect((await core.getArticle(article.id))?.translation?.status).toBe("translated");
+  });
+
+  test("訳し直しを頼んでも translation_exists は受け付けたことにしない（その場の翻訳だけの扱い）", async () => {
+    const { server, core, article } = await seeded(translated(Date.now() - 60_000));
+    server.translationRequestError = { status: 409, code: "translation_exists" };
+    await expect(
+      core.requestTranslation(article.id, { retranslation: true }),
+    ).rejects.toMatchObject({ code: "translation_exists" });
+    expect((await core.getArticle(article.id))?.translationRequest).toBeUndefined();
   });
 });

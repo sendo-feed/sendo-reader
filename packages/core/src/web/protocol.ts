@@ -21,7 +21,7 @@ import type { SyncStatus } from "../sync/scheduler";
  * 上げると、番号の違うタブどうしは、読み込み直すまでやり取りしない（「版が合わない」失敗を返す）。
  * ふつうの配備では上げない（版の混ざったタブも、そのまま使える）。
  */
-export const PROTOCOL_VERSION = 1;
+export const PROTOCOL_VERSION = 2;
 
 /**
  * 代表のワーカーと、やり取りの版の番号が合わない（docs/decisions/local-first.md の 5）。

@@ -507,3 +507,203 @@ test.describe("Translate", () => {
     await expect(otherView.getByRole("button", { name: "Translate", exact: true })).toHaveCount(0);
   });
 });
+
+/**
+ * Opus で訳し直してもらう（docs/decisions/translation.md の 3、5、6）。More actions に置き、確かめの
+ * 窓で選んでから頼む
+ */
+test.describe("Retranslate with Opus", () => {
+  const sonnet = (at: number) => ({
+    language: "en",
+    status: "translated",
+    title: "フィーチャートグル",
+    summary: null,
+    translatedAt: new Date(at).toISOString(),
+    retranslated: false,
+  });
+  const opus = (at: number) => ({
+    ...sonnet(at),
+    title: "機能フラグ",
+    retranslated: true,
+  });
+
+  async function open(page: Page, context: BrowserContext, translation: unknown) {
+    const server = new FakeSendo();
+    const feed = server.subscribe({ url: "https://blog.example/feed.xml", title: "Blog" });
+    const article = server.deliver(feed.id, {
+      title: "Feature Toggles",
+      url: "https://blog.example/toggles",
+      translation,
+    });
+    await routeFakeSendo(context, server);
+    await page.goto("/");
+    await signIn(page);
+    await page.locator(".article-list .item").first().click();
+    const view = page.locator(".article-view");
+    return { server, article, view };
+  }
+
+  const retranslateButton = (page: Page) =>
+    page.getByRole("dialog", { name: "Article actions" }).getByRole("button", {
+      name: "Retranslate with Opus",
+    });
+
+  async function openActions(page: Page) {
+    await page.locator(".article-view").getByRole("button", { name: "More actions" }).click();
+    await expect(page.getByRole("dialog", { name: "Article actions" })).toBeVisible();
+  }
+
+  test("確かめてから頼み、Translating になり、訳し直した訳文が届くと見出しが替わる", async ({
+    page,
+    context,
+  }) => {
+    const { server, article, view } = await open(page, context, sonnet(Date.now() - 60_000));
+    const heading = view.getByRole("heading", { level: 1 });
+    await expect(heading).toHaveText("フィーチャートグル");
+
+    // やめると頼まない
+    await openActions(page);
+    await retranslateButton(page).click();
+    const confirm = page.getByRole("dialog", { name: "Retranslate with Opus" });
+    await expect(confirm).toContainText(
+      "訳し直した訳文は、この記事を読むすべての人の訳文を置き換えます。",
+    );
+    await confirm.getByRole("button", { name: "Cancel" }).click();
+    await expect(confirm).toBeHidden();
+    expect(server.retranslationRequests).toEqual([]);
+
+    await openActions(page);
+    await retranslateButton(page).click();
+    await confirm.getByRole("button", { name: "Retranslate", exact: true }).click();
+    await expect(view.locator("header .translation")).toHaveText("・ EN · Translating");
+    expect(server.retranslationRequests).toEqual([article.id]);
+    expect(server.translationRequests).toEqual([]);
+    // もとの訳文は残り、訳し直しの最中は出さない
+    await expect(heading).toHaveText("フィーチャートグル");
+    await openActions(page);
+    await expect(retranslateButton(page)).toHaveCount(0);
+    await page.keyboard.press("Escape");
+
+    server.setTranslation(article.id, opus(Date.now()));
+    await page.getByRole("button", { name: "Sync now" }).click();
+    // この端末で頼んだ記事なので、開いたままでも訳し直した訳文に替える
+    await expect(heading).toHaveText("機能フラグ");
+    await expect(view.locator("header .translation")).toHaveText("・ EN · Translated");
+    await openActions(page);
+    await expect(retranslateButton(page)).toHaveCount(0);
+  });
+
+  test("sendo で訳し直せずに戻ったら日本語の文で知らせ、もとの訳文のまま、もう一度頼める", async ({
+    page,
+    context,
+  }) => {
+    const before = sonnet(Date.now() - 60_000);
+    const { server, article, view } = await open(page, context, before);
+    await openActions(page);
+    await retranslateButton(page).click();
+    const confirm = page.getByRole("dialog", { name: "Retranslate with Opus" });
+    await confirm.getByRole("button", { name: "Retranslate", exact: true }).click();
+    await expect(view.locator("header .translation")).toHaveText("・ EN · Translating");
+
+    server.setTranslation(article.id, before);
+    await page.getByRole("button", { name: "Sync now" }).click();
+    await expect(view.getByRole("alert")).toHaveText(
+      "訳し直せませんでした。もとの訳文のままです。More actions の Retranslate with Opus でもう一度頼めます。",
+    );
+    await expect(view.getByRole("heading", { level: 1 })).toHaveText("フィーチャートグル");
+    await expect(view.locator("header .translation")).toHaveText("・ EN · Translated");
+
+    await openActions(page);
+    await retranslateButton(page).click();
+    await confirm.getByRole("button", { name: "Retranslate", exact: true }).click();
+    await expect(view.locator("header .translation")).toHaveText("・ EN · Translating");
+    await expect(view.getByRole("alert")).toHaveCount(0);
+    expect(server.retranslationRequests).toEqual([article.id, article.id]);
+  });
+
+  test("断られたら（もう訳し直してあった）理由を出し、同期して出さなくなる。開いている見出しは替えない", async ({
+    page,
+    context,
+  }) => {
+    const { server, article, view } = await open(page, context, sonnet(Date.now() - 60_000));
+    // ほかの端末が訳し直したが、この端末はまだ同期していない
+    server.setTranslation(article.id, opus(Date.now()));
+    await openActions(page);
+    await retranslateButton(page).click();
+    await page
+      .getByRole("dialog", { name: "Retranslate with Opus" })
+      .getByRole("button", { name: "Retranslate", exact: true })
+      .click();
+    await expect(view.getByRole("alert")).toHaveText(
+      "この記事はもう訳し直したか、訳し直せる訳文がありません。",
+    );
+    // 断られたので同期し、訳し直しの印が届く（Sync now を押さなくても）
+    await expect
+      .poll(async () => {
+        await openActions(page);
+        const count = await retranslateButton(page).count();
+        await page.keyboard.press("Escape");
+        return count;
+      })
+      .toBe(0);
+    await expect(view.getByRole("heading", { level: 1 })).toHaveText("フィーチャートグル");
+  });
+
+  test("訳し直した記事と、訳文のない記事には出さない", async ({ page, context }) => {
+    const server = new FakeSendo();
+    const feed = server.subscribe({ url: "https://blog.example/feed.xml", title: "Blog" });
+    const now = Date.now();
+    server.deliver(feed.id, {
+      title: "Retranslated",
+      url: "https://blog.example/retranslated",
+      publishedAt: now - 1000,
+      translation: opus(now),
+    });
+    server.deliver(feed.id, {
+      title: "Queued",
+      url: "https://blog.example/queued",
+      publishedAt: now - 2000,
+      translation: { ...sonnet(0), status: "queued", title: null, translatedAt: null },
+    });
+    await routeFakeSendo(context, server);
+    await page.goto("/");
+    await signIn(page);
+    const view = page.locator(".article-view");
+    const items = page.locator(".article-list .item");
+
+    await items.nth(0).click();
+    await expect(view.getByRole("heading", { level: 1 })).toHaveText("機能フラグ");
+    await openActions(page);
+    await expect(page.getByRole("button", { name: "Show original text" })).toBeVisible();
+    await expect(retranslateButton(page)).toHaveCount(0);
+    await page.keyboard.press("Escape");
+
+    await items.nth(1).click();
+    await expect(view.getByRole("heading", { level: 1 })).toHaveText("Queued");
+    await openActions(page);
+    await expect(retranslateButton(page)).toHaveCount(0);
+  });
+
+  test("ほかの端末で訳し直されたら、同期のあとで出さない。開いている見出しは替えない", async ({
+    page,
+    context,
+  }) => {
+    const { server, article, view } = await open(page, context, sonnet(Date.now() - 60_000));
+    server.setTranslation(article.id, opus(Date.now()));
+    await page.getByRole("button", { name: "Sync now" }).click();
+    await expect(view.locator("header .translation")).toHaveText("・ EN · Translated");
+    await expect(view.getByRole("heading", { level: 1 })).toHaveText("フィーチャートグル");
+    await openActions(page);
+    await expect(retranslateButton(page)).toHaveCount(0);
+  });
+
+  test("オフラインのときは押せない", async ({ page, context }) => {
+    await open(page, context, sonnet(Date.now() - 60_000));
+    await openActions(page);
+    const button = retranslateButton(page);
+    await context.setOffline(true);
+    await expect(button).toBeDisabled();
+    await context.setOffline(false);
+    await expect(button).toBeEnabled();
+  });
+});

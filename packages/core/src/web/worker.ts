@@ -1,3 +1,4 @@
+import { ApiError } from "../api/errors";
 import type { Database } from "../db/database";
 import { TABLES, type Table } from "../models";
 import { DEFAULT_PREFETCH_CONTENTS, ReaderCore } from "../reader";
@@ -364,6 +365,15 @@ async function dispatch(
     }
     return { ok: true, value };
   } catch (error) {
+    // 訳し直しを断られたのは、手元の状態が古い（もう訳し直した、訳文がない）ため。同期して直す
+    // （docs/decisions/translation.md の 6）
+    if (
+      method === "requestTranslation" &&
+      error instanceof ApiError &&
+      error.code === "retranslation_not_allowed"
+    ) {
+      leader.scheduler.requestNow();
+    }
     return { ok: false, error: serializeError(error) };
   }
 }

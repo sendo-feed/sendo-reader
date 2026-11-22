@@ -1206,9 +1206,10 @@ export interface paths {
         };
         put?: never;
         /**
-         * 記事をその場で訳す
+         * 記事をその場で訳す、訳し直す
          * @description 訳文のない記事（翻訳の状態が queued か untranslated）を、Claude API でその場で訳す（docs/decisions/translation.md の 5）。
-         *     受け付けたら 202 を返し、裏で訳す。訳し終えると、GET /articles/{id}/translation で訳文が取れる（訳し終えなければ 404 の no_translation）。費用がかかるので、読む人が求めたときだけ呼ぶ。
+         *     本文で retranslate を true にすると、訳文のある記事（translated）を、Opus で 1 回だけ訳し直す（同じく 6）。訳し直した訳文で全員分を置き換え、訳し直しの印（差分同期の translation.retranslated）が付く。訳し直しの最中も、もとの訳文は GET で取れる。訳し直せなければ、もとの訳文のまま translated に戻る。
+         *     受け付けたら 202 を返し、裏で訳す。訳し終えると、GET /articles/{id}/translation で訳文が取れる（訳し終えなければ 404 の no_translation）。終わりは差分同期で届く。費用がかかるので、読む人が求めたときだけ呼ぶ。
          */
         post: {
             parameters: {
@@ -1219,7 +1220,11 @@ export interface paths {
                 };
                 cookie?: never;
             };
-            requestBody?: never;
+            requestBody?: {
+                content: {
+                    "application/json": components["schemas"]["TranslationRequest"];
+                };
+            };
             responses: {
                 /** @description 受け付けた。状態は translating になった */
                 202: {
@@ -1228,6 +1233,15 @@ export interface paths {
                     };
                     content: {
                         "application/json": components["schemas"]["TranslationRequestAccepted"];
+                    };
+                };
+                /** @description 本文が正しくない（invalid_request） */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
                     };
                 };
                 /** @description 記事がない（not_found） */
@@ -1239,8 +1253,17 @@ export interface paths {
                         "application/json": components["schemas"]["Error"];
                     };
                 };
-                /** @description 訳せない記事（translation_not_supported：日本語の記事、Discord の投稿、訳すかどうかをまだ決めていない記事）か、もう訳しているか訳し終えた（translation_exists） */
+                /** @description 訳せない記事（translation_not_supported：日本語の記事、Discord の投稿、訳すかどうかをまだ決めていない記事）、その場の翻訳を求めたが、もう訳しているか訳し終えた（translation_exists）、訳し直しを求めたが、訳文がないか、訳している最中か、もう訳し直した（retranslation_not_allowed） */
                 409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description 本文の Content-Type が application/json でない（unsupported_media_type） */
+                415: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -2588,6 +2611,10 @@ export interface components {
             /** @enum {string} */
             status: "translating";
         };
+        TranslationRequest: {
+            /** @description true なら訳し直す（Opus）。false か、なければ（本文がなくてもよい）、その場で訳す */
+            retranslate?: boolean;
+        };
         Folder: {
             id: string;
             name: string;
@@ -2712,7 +2739,7 @@ export interface components {
             /** @description 訳すかどうかを決めたときの、記事の主言語（ISO 639-1。判定できなければ und） */
             language: string;
             /**
-             * @description 翻訳の状態。queued は自動の翻訳を待っている、translating は訳している、translated は訳文がある、untranslated は訳せなかった（求めればその場で訳せる）
+             * @description 翻訳の状態。queued は自動の翻訳を待っている、translating は訳している（訳し直しの最中は、もとの訳文があり translatedAt も付く）、translated は訳文がある、untranslated は訳せなかった（求めればその場で訳せる）
              * @enum {string}
              */
             status: "queued" | "translating" | "translated" | "untranslated";
@@ -2725,6 +2752,8 @@ export interface components {
              * @description 訳した時刻。訳文がなければ null。変わったら、手元の訳した本文を GET /articles/{id}/translation で取り直す
              */
             translatedAt: string | null;
+            /** @description Opus で訳し直したか（docs/decisions/translation.md の 6）。訳し直せるのは、translated で、これが false の記事だけ */
+            retranslated: boolean;
         } | null;
         SyncRemovedArticle: {
             /** @description 記事の ID */

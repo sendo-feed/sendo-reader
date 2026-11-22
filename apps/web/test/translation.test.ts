@@ -14,6 +14,7 @@ const t = (
   title,
   summary: null,
   translatedAt: title === null ? null : 1,
+  retranslated: false,
 });
 
 describe("translationLabel", () => {
