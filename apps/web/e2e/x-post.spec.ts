@@ -1158,11 +1158,18 @@ async function reloadWithReservedBoxes(
   behavior["*"] = after;
   await page.reload();
   await expect(page.locator(".article-view h1")).toHaveText("X の投稿を引いた記事");
-  for (const n of [1, 2, 3, 4, 6]) {
+  // すぐに失敗する答え方では、1〜4 は元の引用に戻るので、まだ読み込まない 6 だけを確かめる
+  for (const n of after === "undefined" ? [6] : [1, 2, 3, 4, 6]) {
     await expect(post(page, n).locator("blockquote")).toHaveAttribute("hidden", "");
   }
   await expect(post(page, 6).locator(".reserved")).toHaveCount(1);
   return opened;
+}
+
+/** 位置と一緒に書いた投稿の大きさ（ID から高さ） */
+async function writtenSizes(page: Page): Promise<Record<string, number>> {
+  const state = (await articleState(page)) as { xPosts?: { id: string; height: number }[] };
+  return Object.fromEntries((state.xPosts ?? []).map((size) => [size.id, size.height]));
 }
 
 /** 投稿の枠（覚えた高さの空の枠か、iframe）の高さ */
@@ -1191,6 +1198,14 @@ test.describe("覚えた高さの枠を取ったあと", () => {
     const top = await paragraphTop(page, 79);
     await page.waitForTimeout(500);
     expect(Math.abs((await paragraphTop(page, 79)) - top)).toBeLessThan(1);
+    // 空の枠を出している投稿の大きさは、位置と一緒に書く
+    await letRemember(page);
+    expect(await writtenSizes(page)).toMatchObject({
+      [postId(1)]: 200,
+      [postId(2)]: 200,
+      [postId(3)]: 200,
+      [postId(4)]: 200,
+    });
     // 入り直したら、最初から読み込む
     const loaded = requested.frames.filter((url) => url.includes(postId(1))).length;
     await scrollTo(page, 0);
@@ -1253,6 +1268,10 @@ test.describe("覚えた高さの枠を取ったあと", () => {
       await expect(post(page, n).locator(".reserved")).toHaveCount(0);
       await expect(post(page, n).locator("blockquote")).not.toHaveAttribute("hidden", "");
     }
+    // 元の引用に戻した投稿の大きさは、書かない
+    await scrollTo(page, 30);
+    await letRemember(page);
+    expect(await writtenSizes(page)).toEqual({});
     // つながったら、表示範囲に入っているものを、元の引用から読み込む（枠は取り直さない）
     await context.setOffline(false);
     await expect(iframes(page)).toHaveCount(4);
@@ -1276,6 +1295,9 @@ test.describe("覚えた高さの枠を取ったあと", () => {
       await expect(post(page, n).locator(".reserved")).toHaveCount(0);
       await expect(post(page, n).locator("blockquote")).not.toHaveAttribute("hidden", "");
     }
+    await scrollTo(page, 30);
+    await letRemember(page);
+    expect(await writtenSizes(page)).toEqual({});
     server.removeSetting("desktop", "reader.xPosts");
     await page.getByRole("button", { name: "Sync now" }).click();
     await expect(iframes(page)).toHaveCount(4);
@@ -1307,8 +1329,38 @@ test.describe("覚えた高さの枠を取ったあと", () => {
       await expect(post(page, n).locator(".reserved")).toHaveCount(1);
       expect(await boxHeight(page, n)).toBe(200);
     }
+    // 裏に回ったときに書いた位置にも、空の枠の大きさが入っている
+    await expect
+      .poll(() => writtenSizes(page))
+      .toMatchObject({ [postId(1)]: 200, [postId(4)]: 200, [postId(6)]: 200 });
     await setHidden(page, false);
     await expect(iframes(page)).toHaveCount(4);
     expect(await boxHeight(page, 1)).toBe(200);
+  });
+  test("同じ投稿を 2 回引いた記事で、片方が失敗したら、もう片方の覚えた高さの枠も元の引用に戻す", async ({
+    page,
+    context,
+  }) => {
+    const behavior: Record<string, How> = { "*": "render:200" };
+    await openArticle(
+      page,
+      context,
+      `${quote(1)}${filler(80)}${quote(1)}${filler(5, 80)}`,
+      behavior,
+    );
+    const first = post(page, 1).first();
+    const second = post(page, 1).last();
+    await expect(first.locator("blockquote")).toHaveAttribute("hidden", "");
+    await second.scrollIntoViewIfNeeded();
+    await expect(second.locator("blockquote")).toHaveAttribute("hidden", "");
+    await scrollTo(page, 10);
+    await letRemember(page);
+    behavior["*"] = "undefined";
+    await page.reload();
+    await expect(page.locator(".article-view h1")).toHaveText("X の投稿を引いた記事");
+    // 先頭のものが失敗する。下の、まだ読み込んでいない枠も、元の引用に戻る
+    await expect(first.locator("blockquote")).not.toHaveAttribute("hidden", "");
+    await expect(second.locator(".reserved")).toHaveCount(0);
+    await expect(second.locator("blockquote")).not.toHaveAttribute("hidden", "");
   });
 });
