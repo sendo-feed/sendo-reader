@@ -229,9 +229,9 @@
   $effect(() => {
     const retry = () => {
       if (articleId === null) return;
-      if (translatedBody && translatedState === "unavailable" && openedTranslation !== null) {
+      // 原文を出している間も取り直す（訳文に戻したときに、取れなかったままにしない）
+      if (translatedState === "unavailable" && openedTranslation !== null) {
         void loadTranslatedContent(articleId, openedTranslation.translatedAt);
-        return;
       }
       if (pageLoading) return;
       if (contentState === "unavailable") {
@@ -558,6 +558,10 @@
     }
     showOriginal = !showOriginal;
     actionsOpen = false;
+    // 訳文に戻したとき、訳した本文が取れていなければ取り直す（つながっていれば読める）
+    if (!showOriginal && translatedState === "unavailable" && articleId !== null) {
+      void loadTranslatedContent(articleId, openedTranslation.translatedAt);
+    }
     onviewchange();
   }
 

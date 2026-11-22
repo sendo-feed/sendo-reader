@@ -193,6 +193,32 @@ describe("訳した本文を取る", () => {
     expect(await translationRows(db)).toEqual([]);
   });
 
+  test("取っている間に記事が手元から消えたら、置かない", async () => {
+    const { server, core, db, article } = await seeded();
+    server.translatedContents.set(article.id, "<p>訳</p>");
+    let release = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let entered = () => {};
+    const requested = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    server.onRequest = async (path) => {
+      if (!path.endsWith("/translation")) return;
+      entered();
+      await gate;
+    };
+    const fetching = core.fetchTranslatedContent(article.id, T1);
+    await requested;
+    server.removeFromInbox(article.id);
+    await core.sync();
+    release();
+    await fetching;
+    expect(await translationRows(db)).toEqual([]);
+    expect((await core.getContentStorage()).used).toBe(0);
+  });
+
   test("ログインしていなければ unauthorized", async () => {
     const { core, article } = await seeded();
     await core.signOut();
@@ -211,6 +237,37 @@ describe("手元の訳した本文を消す", () => {
     await core.sync();
     expect(await translationRows(db)).toEqual([]);
     expect((await core.getContentStorage()).used).toBe(0);
+  });
+
+  test("訳した本文を置いて上限を超えたら、既読の古い記事から消す。いま置いた記事と最後に開いた記事は残す", async () => {
+    const { server, core, db, feed } = await seeded();
+    const ids: string[] = [];
+    for (let i = 0; i < 3; i++) {
+      const article = server.deliver(feed.id, {
+        publishedAt: server.now - i,
+        translation: translated(T1),
+      });
+      server.translatedContents.set(article.id, "<p>訳</p>");
+      ids.push(article.id);
+    }
+    const [old, opened, fresh] = ids as [string, string, string];
+    await core.sync();
+    await core.setContentStorageLimit(50 * MB);
+    for (const id of [old, opened]) await core.fetchTranslatedContent(id, T1);
+    // 本文の大きさだけを大きく見せ、ちょうど上限にする（超えていないので、まだ消さない）
+    await db.run("update article_content_sizes set bytes = ?", [25 * MB]);
+    for (const id of [old, opened]) {
+      server.now += 1000;
+      await core.setRead(id, true);
+    }
+    await core.recordArticleOpen(opened);
+    expect((await core.getContentStorage()).used).toBe(50 * MB);
+
+    // 置いて上限を超えたので、既読の古い記事の分を消す
+    expect(await core.fetchTranslatedContent(fresh, T1)).toMatchObject({ status: "ready" });
+    expect((await translationRows(db)).map((row) => row.article_id)).toEqual(
+      [opened, fresh].sort(),
+    );
   });
 
   test("訳した本文は本文の量に数え、上限を超えたら、原文の本文と同じく既読の古い記事から消す", async () => {

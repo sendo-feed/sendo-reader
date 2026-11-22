@@ -155,6 +155,41 @@ test("オフラインで訳した本文が手元にないときは、訳した�
   await expect(view.locator(".summary")).toHaveCount(0);
 });
 
+test("オフラインで開いて原文に切り替え、つながってから訳文に戻すと、訳した本文を出す", async ({
+  page,
+  context,
+}) => {
+  const server = new FakeSendo();
+  const feed = server.subscribe({ url: "https://blog.example/feed.xml", title: "Blog" });
+  const article = server.deliver(feed.id, {
+    title: "Refactoring with Codemods",
+    summary: "Codemods are scripts.",
+    url: "https://blog.example/codemods",
+    translation: translated("コードモッドでリファクタリングする", new Date().toISOString()),
+  });
+  server.setArticleState(article.id, { read: true });
+  server.translatedContents.set(article.id, "<p>訳した本文</p>");
+  await routeFakeSendo(context, server);
+  await page.goto("/");
+  await signIn(page);
+  await page.locator(".article-list").getByRole("button", { name: "Unread only" }).click();
+  await expect(page.locator(".article-list .item")).toHaveCount(1);
+
+  await setOffline(context, server, true);
+  await page.locator(".article-list .item").first().click();
+  const view = page.locator(".article-view");
+  await expect(view.locator(".summary")).toHaveText("訳した要約。");
+  await page.keyboard.press("t");
+  await expect(view.getByRole("heading", { level: 1 })).toHaveText("Refactoring with Codemods");
+
+  await setOffline(context, server, false);
+  await page.keyboard.press("t");
+  await expect(view.getByRole("heading", { level: 1 })).toHaveText(
+    "コードモッドでリファクタリングする",
+  );
+  await expect(view.locator(".body")).toHaveText("訳した本文");
+});
+
 test("開いている間に訳し直されても、出している訳した本文は替えない。開き直すと新しい訳", async ({
   page,
   context,
