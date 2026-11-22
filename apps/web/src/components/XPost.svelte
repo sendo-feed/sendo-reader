@@ -37,13 +37,15 @@
   let openLink = $state<HTMLAnchorElement>();
 
   /**
-   * 覆いを外す。覆いにフォーカスがあったら（キーボードで押した）、外したあとは「Open on X」に移す
-   * （覆いが消えて、フォーカスを見失わないように。中はキーボードでは操作できない。embeds.md の 6）
+   * 覆いを外す。キーボード（Enter、Space）で押したときは、外したあと「Open on X」にフォーカスを移す
+   * （覆いが消えて、フォーカスを見失わないように。中はキーボードでは操作できない。embeds.md の 6）。
+   * ポインター（指、マウス）で押したときは移さない（続けて同じところを押して中を操作するので、
+   * リンクを出すためにスクロールさせない）。キーボードで押した click は detail が 0
    */
   async function uncover(event: MouseEvent): Promise<void> {
-    const focused = document.activeElement === event.currentTarget;
+    const byKeyboard = event.detail === 0 && document.activeElement === event.currentTarget;
     post?.uncover();
-    if (!focused) return;
+    if (!byKeyboard) return;
     await tick();
     openLink?.focus();
   }

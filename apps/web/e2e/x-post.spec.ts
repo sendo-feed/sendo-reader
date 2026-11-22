@@ -1666,4 +1666,23 @@ test.describe("ウィジェットの上の覆いとフォーカス", () => {
       await expect(next).toBeFocused();
     }
   });
+
+  test("覆いを指やマウスで押したときは、Open on X にフォーカスを移さず、スクロールしない", async ({
+    page,
+    context,
+  }) => {
+    // 背の高いウィジェット。Open on X は画面の外にある
+    await openArticle(page, context, `${quote(1)}${filler(40)}`, { "*": "render:1400" });
+    await expectShown(page, 1);
+    const link = post(page, 1).getByRole("link", { name: "Open on X" });
+    await expect(link).not.toBeInViewport();
+    const top = await scrollTopOf(page);
+    const box = await cover(page, 1).boundingBox();
+    if (box === null) throw new Error("覆いがない");
+    await page.mouse.click(box.x + box.width / 2, box.y + 100);
+    await expect(cover(page, 1)).toHaveCount(0);
+    await page.waitForTimeout(300);
+    await expect(link).not.toBeFocused();
+    expect(await scrollTopOf(page)).toBe(top);
+  });
 });
