@@ -13,7 +13,8 @@ sendo-reader で決めたことを、テーマごとに1ファイルで置く。
 | [設定の同期](settings.md) | 提案中 | 表示の設定を sendo に預け、端末の種類（スマホは `mobile`、ほかは `desktop`）ごとに引き継ぐ。項目ごとに手元の DB に置いて操作キューで送り、既定と同じ値は預けない。端末そのものに合わせる設定（本文を置く量の上限）は預けない。「未読」は一覧の絞り込みの状態で、別の画面にはしない。前の localStorage の設定は、同期してから sendo にない項目だけを送る |
 | [アカウントの画面](account.md) | 提案中 | 設定の画面でアクセストークンと OAuth の許可を管理し、OAuth の許可の画面を置く。どちらもネットワークが要る画面で、発行したトークンは一度だけ出して保存しない。許可は毎回、利用者が押して決める |
 | [速さの予算](performance.md) | 提案中 | 画面のスレッドの JS は gzip 後 100KB 以下、ワーカーは JS と wasm で 550KB 以下。キャッシュ済みの起動から記事まで 1 秒、操作の反応は 100ms |
-| [コンテナ版](container.md) | 提案中 | sendo と並べて、コンテナだけで配る（`ghcr.io/sendo-feed/sendo-reader`）。Cloudflare では動かさない。外からは reader のオリジン 1 つに見せ、sendo の `PUBLIC_URL` と `READER_URL` をそのオリジンにする。sendo のパスは許す一覧で中継し、WebSocket も含めて書き換えない。サーバーは Node（Hono）。sendo の機能はすべて使える前提にし、`/api/v1/features` は見ない |
+| [記事の中の X の投稿](embeds.md) | 提案中 | sendo が印を付けた X の引用を、表示範囲に入ったら、別のホスト名で配る隔離フレームの中の公式ウィジェットで出す。reader の CSP は `frame-src` を 1 つ足すだけ。隔離フレームのオリジンはコンテナの実行時の設定で、未設定なら出ない。失敗・オフライン・設定で切ったときは元の引用のまま。投稿の高さを幅と一緒に覚えて、読書位置を保つ |
+| [コンテナ版](container.md) | 提案中 | sendo と並べて、コンテナだけで配る（`ghcr.io/sendo-feed/sendo-reader`）。Cloudflare では動かさない。外からは reader のオリジン 1 つに見せ（X の投稿の隔離フレームのホスト名を除く）、sendo の `PUBLIC_URL` と `READER_URL` をそのオリジンにする。sendo のパスは許す一覧で中継し、WebSocket も含めて書き換えない。サーバーは Node（Hono）。sendo の機能はすべて使える前提にし、`/api/v1/features` は見ない |
 
 経緯を知りたいとき：
 
