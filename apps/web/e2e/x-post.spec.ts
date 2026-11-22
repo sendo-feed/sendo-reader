@@ -1136,3 +1136,179 @@ test.describe("読書位置（覚えた高さ）", () => {
     }
   });
 });
+
+/**
+ * 投稿 1〜4 と 6 を一度出して覚えさせ、答え方を替えてから、1〜4 が見えるところで読み込み直す。
+ * 読み込み直したあとは、どれも覚えた高さ（200px）の枠を取る。1〜4 は表示範囲に入っているので、
+ * そこに読み込み始め、6 は表示範囲の外で、空の枠のまま待つ
+ */
+async function reloadWithReservedBoxes(
+  page: Page,
+  context: BrowserContext,
+  after: How,
+  content = `${[1, 2, 3, 4].map(quote).join("")}${filler(80)}${quote(6)}`,
+): Promise<Opened> {
+  await page.setViewportSize({ width: 1280, height: 1400 });
+  const behavior: Record<string, How> = { "*": "render:200" };
+  const opened = await openArticle(page, context, content, behavior);
+  for (const n of [1, 2, 3, 4]) await expectShown(page, n);
+  await showPost(page, 6);
+  await scrollTo(page, 10);
+  await letRemember(page);
+  behavior["*"] = after;
+  await page.reload();
+  await expect(page.locator(".article-view h1")).toHaveText("X の投稿を引いた記事");
+  for (const n of [1, 2, 3, 4, 6]) {
+    await expect(post(page, n).locator("blockquote")).toHaveAttribute("hidden", "");
+  }
+  await expect(post(page, 6).locator(".reserved")).toHaveCount(1);
+  return opened;
+}
+
+/** 投稿の枠（覚えた高さの空の枠か、iframe）の高さ */
+async function boxHeight(page: Page, n: number): Promise<number | undefined> {
+  return (await post(page, n).locator(".reserved, iframe").boundingBox())?.height;
+}
+
+test.describe("覚えた高さの枠を取ったあと", () => {
+  test("読み込み中に表示範囲から出たら、覚えた高さの空の枠に戻し、数から外す。入り直したら読み込み直す", async ({
+    page,
+    context,
+  }) => {
+    const { requested } = await reloadWithReservedBoxes(page, context, "manual");
+    await expect(iframes(page)).toHaveCount(4);
+    for (const n of [1, 2, 3, 4]) expect(await boxHeight(page, n)).toBe(200);
+    // 下の投稿まで動かす。1〜4 は空の枠に戻り（高さは同じ、元の引用は出さない）、6 を始める
+    await scrollToEnd(page);
+    await expect(post(page, 6).locator("iframe")).toHaveCount(1);
+    for (const n of [1, 2, 3, 4]) {
+      await expect(post(page, n).locator("iframe")).toHaveCount(0);
+      await expect(post(page, n).locator(".reserved")).toHaveCount(1);
+      expect(await boxHeight(page, n)).toBe(200);
+      await expect(post(page, n).locator("blockquote")).toHaveAttribute("hidden", "");
+    }
+    // 見えている本文は動かない
+    const top = await paragraphTop(page, 79);
+    await page.waitForTimeout(500);
+    expect(Math.abs((await paragraphTop(page, 79)) - top)).toBeLessThan(1);
+    // 入り直したら、最初から読み込む
+    const loaded = requested.frames.filter((url) => url.includes(postId(1))).length;
+    await scrollTo(page, 0);
+    await expect(iframes(page)).toHaveCount(4);
+    await expect
+      .poll(() => requested.frames.filter((url) => url.includes(postId(1))).length)
+      .toBeGreaterThan(loaded);
+    await settle(page, 1, 200);
+    await expectShown(page, 1);
+    // 出たあとは、表示範囲から出ても外さない
+    await scrollToEnd(page);
+    await page.waitForTimeout(300);
+    await expect(post(page, 1).locator("iframe")).toHaveCount(1);
+  });
+
+  test("覚えた高さの枠が failed を受けたら、元の引用に戻し、やり直さない。大きさも書かない", async ({
+    page,
+    context,
+  }) => {
+    await reloadWithReservedBoxes(page, context, "undefined");
+    for (const n of [1, 2, 3, 4]) {
+      await expect(post(page, n).locator("blockquote")).not.toHaveAttribute("hidden", "");
+      await expect(post(page, n).locator(".reserved, iframe")).toHaveCount(0);
+    }
+    await scrollToEnd(page);
+    await page.waitForTimeout(300);
+    await scrollTo(page, 5);
+    await letRemember(page);
+    await expect(post(page, 1).locator(".reserved, iframe")).toHaveCount(0);
+    const state = (await articleState(page)) as { xPosts?: { id: string }[] };
+    expect((state.xPosts ?? []).map((size) => size.id)).not.toContain(postId(1));
+  });
+
+  test("覚えた高さの枠が、表示範囲に入ったまま 10 秒たっても出なければ、元の引用に戻す", async ({
+    page,
+    context,
+  }) => {
+    await page.clock.install();
+    await reloadWithReservedBoxes(page, context, "manual");
+    await expect(iframes(page)).toHaveCount(4);
+    await page.clock.fastForward(10_500);
+    await expect(iframes(page)).toHaveCount(0);
+    for (const n of [1, 2, 3, 4]) {
+      await expect(post(page, n).locator(".reserved")).toHaveCount(0);
+      await expect(post(page, n).locator("blockquote")).not.toHaveAttribute("hidden", "");
+    }
+  });
+
+  test("オフラインになったら、読み込み中の枠も、まだ読み込んでいない枠も、元の引用に戻す。つながったら引用から読み込む", async ({
+    page,
+    context,
+  }) => {
+    // 1〜4 は読み込み中、6 は覚えた高さの枠のまま、表示範囲の外にある
+    await reloadWithReservedBoxes(page, context, "manual");
+    await expect(iframes(page)).toHaveCount(4);
+
+    await context.setOffline(true);
+    await expect(iframes(page)).toHaveCount(0);
+    for (const n of [1, 2, 3, 4, 6]) {
+      await expect(post(page, n).locator(".reserved")).toHaveCount(0);
+      await expect(post(page, n).locator("blockquote")).not.toHaveAttribute("hidden", "");
+    }
+    // つながったら、表示範囲に入っているものを、元の引用から読み込む（枠は取り直さない）
+    await context.setOffline(false);
+    await expect(iframes(page)).toHaveCount(4);
+    expect(await boxHeight(page, 1)).toBe(0);
+    await expect(post(page, 1).locator("blockquote")).not.toHaveAttribute("hidden", "");
+    await expect(post(page, 6).locator(".reserved")).toHaveCount(0);
+    await settle(page, 1, 200);
+    await expectShown(page, 1);
+  });
+
+  test("設定を切ったと届いたら、覚えた高さの枠を元の引用に戻す。入れたら引用から読み込む", async ({
+    page,
+    context,
+  }) => {
+    const { server } = await reloadWithReservedBoxes(page, context, "manual");
+    await expect(iframes(page)).toHaveCount(4);
+    server.putSetting("desktop", "reader.xPosts", false);
+    await page.getByRole("button", { name: "Sync now" }).click();
+    await expect(iframes(page)).toHaveCount(0);
+    for (const n of [1, 2, 3, 4, 6]) {
+      await expect(post(page, n).locator(".reserved")).toHaveCount(0);
+      await expect(post(page, n).locator("blockquote")).not.toHaveAttribute("hidden", "");
+    }
+    server.removeSetting("desktop", "reader.xPosts");
+    await page.getByRole("button", { name: "Sync now" }).click();
+    await expect(iframes(page)).toHaveCount(4);
+    expect(await boxHeight(page, 1)).toBe(0);
+  });
+
+  test("出た高さが覚えた高さと違えば、その高さに付け直し、覚え直す", async ({ page, context }) => {
+    await reloadWithReservedBoxes(page, context, "render:260:300");
+    for (const n of [1, 2, 3, 4]) {
+      await expect.poll(() => boxHeight(page, n)).toBe(260);
+      await expectShown(page, n);
+    }
+    await scrollTo(page, 20);
+    await letRemember(page);
+    expect(await articleState(page)).toMatchObject({
+      xPosts: expect.arrayContaining([expect.objectContaining({ id: postId(1), height: 260 })]),
+    });
+  });
+
+  test("読み込み中に裏に回ったら、覚えた高さの空の枠に戻し、前に出たら読み込み直す", async ({
+    page,
+    context,
+  }) => {
+    await reloadWithReservedBoxes(page, context, "manual");
+    await expect(iframes(page)).toHaveCount(4);
+    await setHidden(page, true);
+    await expect(iframes(page)).toHaveCount(0);
+    for (const n of [1, 2, 3, 4]) {
+      await expect(post(page, n).locator(".reserved")).toHaveCount(1);
+      expect(await boxHeight(page, n)).toBe(200);
+    }
+    await setHidden(page, false);
+    await expect(iframes(page)).toHaveCount(4);
+    expect(await boxHeight(page, 1)).toBe(200);
+  });
+});

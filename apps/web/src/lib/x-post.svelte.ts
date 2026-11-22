@@ -116,15 +116,17 @@ export class XPostLoader {
     };
     const onOffline = () => {
       this.#online = false;
-      // 読み込み中のものは、失敗にせず取り消す。つながったら、表示範囲に入っているものから始め直す
+      // 読み込み中のものは、失敗にせず取り消す。覚えた高さの枠も、元の引用に戻す（embeds.md の 5）。
+      // つながったら、表示範囲に入っているものから、元の引用から読み込む
       this.#cancelLoading();
+      this.#dropReserved();
     };
     const onVisibility = () => {
       this.#shown = document.visibilityState === "visible";
-      // 裏に回った間は、ブラウザーが枠の描画を止め、rendered が来ない。読み込み中のものは、失敗に
-      // せず取り消し、前に出たら、表示範囲に入っているものから始め直す
+      // 裏に回った間は、ブラウザーが枠の描画を止め、rendered が来ない。表示範囲から出たのと同じに、
+      // 読み込み中のものは失敗にせず外し、前に出たら、表示範囲に入っているものから始め直す
       if (this.#shown) this.#pump();
-      else this.#cancelLoading();
+      else for (const post of this.#posts) if (post.phase === "loading") this.#release(post);
     };
     window.addEventListener("message", onMessage);
     document.addEventListener("visibilitychange", onVisibility);
@@ -182,6 +184,7 @@ export class XPostLoader {
     for (const post of this.#posts) {
       if (post.phase === "loading" || post.phase === "shown") this.#cancel(post);
     }
+    this.#dropReserved();
   }
 
   /** 記事が替わった。失敗の覚えと、出した投稿の大きさを捨てる */
@@ -256,7 +259,7 @@ export class XPostLoader {
       if (post === undefined) continue;
       post.visible = entry.isIntersecting;
       // 読み込み中に出たら、iframe を外して数から外す（Chromium は、画面の外の枠を解決させない）
-      if (!post.visible && post.phase === "loading") this.#cancel(post);
+      if (!post.visible && post.phase === "loading") this.#release(post);
     }
     this.#pump();
   }
@@ -286,6 +289,32 @@ export class XPostLoader {
 
   #cancelLoading(): void {
     for (const post of this.#posts) if (post.phase === "loading") this.#cancel(post);
+  }
+
+  /**
+   * 読み込み中の投稿が、表示範囲から出た（裏に回った）。iframe を外して、数から外す（失敗にはしない）。
+   * 覚えた高さの枠を取っていた投稿は、その高さの空の枠に戻し（位置を動かさない）、大きさも覚えたまま
+   * にする。ほかは、元の引用に戻す（embeds.md の 4、5）
+   */
+  #release(post: XPostFrame): void {
+    if (post.reserved === null) {
+      this.#cancel(post);
+      return;
+    }
+    this.#stopTimer(post);
+    post.phase = "idle";
+    post.frame = null;
+    post.src = null;
+    post.height = null;
+  }
+
+  /** 読み込んでいない投稿の、覚えた高さの枠を外して、元の引用に戻す（読み込めなくなった） */
+  #dropReserved(): void {
+    for (const post of this.#posts) {
+      if (post.phase !== "idle" || post.reserved === null) continue;
+      post.reserved = null;
+      this.#sizes.delete(post.id);
+    }
   }
 
   /** 読み込みを取り消して、元の引用に戻す（失敗にはしない） */
