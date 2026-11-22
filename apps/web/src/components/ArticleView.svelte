@@ -945,19 +945,44 @@
   let exportError = $state<string | null>(null);
 
   /**
-   * 手元の全文を、HTML か Markdown の 1 つのファイルにしてダウンロードさせる。フィードの本文を
-   * 出しているときも、書き出すのは全文。書き出しの部品は、使うときだけ読む（最初の JS に入れない）
+   * 書き出せるか。訳した本文を出していれば、それが手元にあるとき。原文の本文を出していれば（原文に
+   * 切り替えたときと、本文を訳さなかった記事）、全文が手元にあるとき（docs/decisions/translation.md
+   * の 3）
+   */
+  const canDownload = $derived(translatedBody ? translatedContent !== null : hasPageContent);
+
+  // 形式を選んでいる途中で書き出せなくなったら（頼んだ訳文が届いて、訳した本文を待っている、など）、
+  // 最初の操作に戻す。書き出している最中は、押したときの本文で書き出し終えるまで待つ
+  $effect(() => {
+    if (!canDownload && exporting === null) untrack(() => (choosingFormat = false));
+  });
+
+  /**
+   * 手元の本文を、HTML か Markdown の 1 つのファイルにしてダウンロードさせる。出している方を書き
+   * 出す：タイトルは見出しと同じ（訳文を出していれば訳したタイトル）、本文は、訳した本文を出して
+   * いればそれ、そうでなければ（原文、本文を訳さなかった記事）全文。フィードの本文を出しているとき
+   * も、書き出すのは全文。書き出しの部品は、使うときだけ読む（最初の JS に入れない）
    */
   async function download(format: "html" | "markdown") {
     const current = article;
     if (current === null || exporting !== null) return;
+    // 押したときに出している方（訳文か原文）を書き出す
+    const title = heading;
+    const translatedNodes = translatedBody ? (translatedContent?.nodes ?? null) : null;
+    if (translatedBody && translatedNodes === null) return;
     exporting = format;
     exportError = null;
     try {
-      const page = await reader.client.getArticleContent(current.id, "page");
-      if (page.status !== "ready") {
-        exportError = "全文が手元にないため、書き出せませんでした。";
-        return;
+      let nodes: ArticleContent["nodes"];
+      if (translatedNodes !== null) {
+        nodes = translatedNodes;
+      } else {
+        const page = await reader.client.getArticleContent(current.id, "page");
+        if (page.status !== "ready") {
+          exportError = "全文が手元にないため、書き出せませんでした。";
+          return;
+        }
+        nodes = page.content.nodes;
       }
       const [{ exportArticle, fetchImageAsDataUrl }, { downloadText }] = await Promise.all([
         import("@sendo-reader/core/export"),
@@ -965,13 +990,13 @@
       ]);
       const file = await exportArticle(
         {
-          title: current.title,
+          title,
           url: current.url,
           feedTitle: reader.feedTitle(current.feedId),
           author: current.author,
           publishedAt: current.publishedAt,
         },
-        page.content.nodes,
+        nodes,
         format,
         (src) => fetchImageAsDataUrl(src),
       );
@@ -1266,7 +1291,7 @@
         {pageNote === null ? "Show full text" : "Retry full text"}
       </button>
     {/if}
-    {#if hasPageContent && !choosingFormat}
+    {#if canDownload && !choosingFormat}
       <button type="button" onclick={() => (choosingFormat = true)}>Download</button>
     {/if}
     {#if exportError !== null}
