@@ -968,16 +968,16 @@ test.describe("読書位置（覚えた高さ）", () => {
     await expect(post(page, 1).locator("blockquote")).not.toHaveAttribute("hidden", "");
   });
 
-  test("設定を切ってあれば、枠を取らずに元の引用を出す", async ({ page, context }) => {
-    const { server } = await openArticle(page, context, `${quote(1)}${filler(60)}`, {
-      "*": "render:240",
-    });
+  test("設定を切ってあれば、戻ったときに枠を取らずに元の引用を出す", async ({ page, context }) => {
+    await openArticle(page, context, `${quote(1)}${filler(60)}`, { "*": "render:240" });
     await expectShown(page, 1);
     await scrollTo(page, 2000);
     await letRemember(page);
-    server.putSetting("desktop", "reader.xPosts", false);
-    await page.getByRole("button", { name: "Sync now" }).click();
-    await page.reload();
+    // 記事を離れてから切る（記事の項目には、出した投稿の大きさが残っている）
+    await leaveToSettings(page);
+    await page.getByRole("tab", { name: "Reading", exact: true }).click();
+    await page.getByLabel("Load X posts").uncheck();
+    await page.goBack();
     await expect(page.locator(".article-view h1")).toHaveText("X の投稿を引いた記事");
     await expect
       .poll(() => page.locator(".article-view").evaluate((node) => node.scrollTop))
@@ -1002,26 +1002,35 @@ test.describe("読書位置（覚えた高さ）", () => {
   });
 
   test("覚えた高さは、ほかの記事の同じ投稿に当てない", async ({ page, context }) => {
-    await openArticle(
+    const behavior: Record<string, How> = { "*": "render:240" };
+    const { articleId: firstId } = await openArticle(
       page,
       context,
       `${quote(1)}${filler(60)}`,
-      { "*": "render:240" },
+      behavior,
       (server, feedId) =>
         server.deliver(feedId, {
           title: "次の記事",
           summary: "要約",
-          content: `${filler(1)}${quote(1)}`,
+          content: `${filler(1)}${quote(1)}${filler(30, 1)}`,
           publishedAt: 0,
         }),
     );
     await expectShown(page, 1);
     await scrollTo(page, 2000);
     await letRemember(page);
+    // 次の記事の投稿は、読み込みを終えない（覚える大きさがない）
+    behavior["*"] = "manual";
     await page.keyboard.press("j");
     await expect(page.locator(".article-view h1")).toHaveText("次の記事");
     await expect(post(page, 1)).toBeAttached();
     await expect(post(page, 1).locator(".reserved")).toHaveCount(0);
+    // 次の記事の位置に、前の記事の投稿の大きさを書かない
+    await scrollTo(page, 1);
+    await letRemember(page);
+    const state = (await articleState(page)) as { id: string; xPosts?: unknown };
+    expect(state.id).not.toBe(firstId);
+    expect(state.xPosts).toBeUndefined();
   });
 
   test("位置を戻したあとに替えた本文には、覚えた高さを当てない", async ({ page, context }) => {
@@ -1049,6 +1058,52 @@ test.describe("読書位置（覚えた高さ）", () => {
     await expect(page.getByText("フィードの本文")).toBeAttached();
     await expect(post(page, 1).locator(".reserved")).toHaveCount(0);
     await expect(post(page, 1).locator("blockquote")).not.toHaveAttribute("hidden", "");
+  });
+
+  test("位置を戻したところで見えている覚えた高さの枠は、そこに読み込み、本文を動かさない", async ({
+    page,
+    context,
+  }) => {
+    await openArticle(page, context, `${filler(3)}${quote(1)}${filler(60, 3)}`, {
+      "*": "render:240:500",
+    });
+    await showPost(page, 1);
+    // 投稿が画面の上のほうに見えているところで、読み込み直す
+    await post(page, 1).evaluate((node) => node.scrollIntoView({ block: "start" }));
+    await scrollTo(page, (await scrollTopOf(page)) - 100);
+    await letRemember(page);
+    const before = await paragraphTop(page, 5);
+    await page.reload();
+    await expect(page.locator(".article-view h1")).toHaveText("X の投稿を引いた記事");
+    // 読み込みを始める前から、覚えた高さの枠を取っている
+    await expect(post(page, 1).locator(".reserved, iframe")).toHaveCount(1);
+    await expect
+      .poll(async () => Math.abs((await paragraphTop(page, 5)) - before))
+      .toBeLessThanOrEqual(16);
+    const settled = await paragraphTop(page, 5);
+    // 枠の中に読み込み、出ても、下の本文は動かない
+    await expect(post(page, 1).locator("iframe")).toHaveCount(1);
+    await expectShown(page, 1);
+    expect((await post(page, 1).locator("iframe").boundingBox())?.height).toBe(240);
+    expect(Math.abs((await paragraphTop(page, 5)) - settled)).toBeLessThan(1);
+  });
+
+  test("元の引用に戻した投稿の大きさは、位置と一緒に書かない", async ({ page, context }) => {
+    const { server } = await openArticle(page, context, `${quote(1)}${filler(60)}`, {
+      "*": "render:240",
+    });
+    await expectShown(page, 1);
+    await scrollTo(page, 2000);
+    await letRemember(page);
+    expect(await articleState(page)).toMatchObject({ xPosts: [{ id: postId(1) }] });
+    // 設定を切ったと届き、ウィジェットを外して元の引用に戻す
+    server.putSetting("desktop", "reader.xPosts", false);
+    await page.getByRole("button", { name: "Sync now" }).click();
+    await expect(post(page, 1).locator("blockquote")).not.toHaveAttribute("hidden", "");
+    await scrollTo(page, 2100);
+    await letRemember(page);
+    const state = (await articleState(page)) as { xPosts?: unknown };
+    expect(state.xPosts).toBeUndefined();
   });
 
   test("読み込み中の投稿を速く通り過ぎても、見えている本文が動かない", async ({

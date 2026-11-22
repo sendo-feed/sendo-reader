@@ -118,7 +118,6 @@ export class XPostLoader {
       this.#online = false;
       // 読み込み中のものは、失敗にせず取り消す。つながったら、表示範囲に入っているものから始め直す
       this.#cancelLoading();
-      this.#dropReserved();
     };
     const onVisibility = () => {
       this.#shown = document.visibilityState === "visible";
@@ -183,7 +182,6 @@ export class XPostLoader {
     for (const post of this.#posts) {
       if (post.phase === "loading" || post.phase === "shown") this.#cancel(post);
     }
-    this.#dropReserved();
   }
 
   /** 記事が替わった。失敗の覚えと、出した投稿の大きさを捨てる */
@@ -202,9 +200,13 @@ export class XPostLoader {
     this.#sizes = new Map(sizes.map((size) => [size.id, size]));
   }
 
-  /** 出した投稿の大きさ（履歴の項目に覚える） */
+  /**
+   * 出した投稿の大きさ（履歴の項目に覚える）。いま、ウィジェットか覚えた高さの枠を出している投稿の
+   * ものだけ（元の引用を出している投稿の大きさを書くと、位置と食い違う）。上限を超えたら、新しく
+   * 覚えたものを残す
+   */
   sizes(): XPostSize[] {
-    return [...this.#sizes.values()].slice(0, MAX_X_POST_SIZES);
+    return [...this.#sizes.values()].slice(-MAX_X_POST_SIZES);
   }
 
   /** 本文の中の投稿を登録する */
@@ -215,6 +217,8 @@ export class XPostLoader {
     if (remembered !== undefined && this.#enabled && this.#online) {
       if (frameWidth(element) === remembered.width) post.reserved = remembered.height;
     }
+    // 枠を取らなかった投稿は、元の引用を出すので、大きさを覚えておかない
+    if (post.reserved === null) this.#sizes.delete(id);
     this.#posts.add(post);
     this.#byElement.set(element, post);
     this.#observer?.observe(element);
@@ -282,13 +286,10 @@ export class XPostLoader {
     for (const post of this.#posts) if (post.phase === "loading") this.#cancel(post);
   }
 
-  /** 読み込んでいない投稿の、覚えた高さの枠を外して、元の引用に戻す（読み込めなくなった） */
-  #dropReserved(): void {
-    for (const post of this.#posts) if (post.phase === "idle") post.reserved = null;
-  }
-
   /** 読み込みを取り消して、元の引用に戻す（失敗にはしない） */
   #cancel(post: XPostFrame): void {
+    // 元の引用に戻すので、大きさも忘れる（出しているときに、位置と一緒に覚え直す）
+    if (post.phase !== "idle" || post.reserved !== null) this.#sizes.delete(post.id);
     this.#stopTimer(post);
     post.phase = "idle";
     post.frame = null;
