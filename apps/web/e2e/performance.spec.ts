@@ -16,6 +16,16 @@ test.describe("速さの予算", () => {
       server.deliver(feed.id, {
         title: `記事 ${i}`,
         publishedAt: server.now - i * 60_000,
+        // 2 番目の記事は自動の翻訳を待っている（Translate を測る）
+        ...(i === 1 && {
+          translation: {
+            language: "en",
+            status: "queued",
+            title: null,
+            summary: null,
+            translatedAt: null,
+          },
+        }),
         // 先頭の記事は訳し済み（訳文と原文の切り替えを測る）
         ...(i === 0 && {
           translation: {
@@ -130,5 +140,32 @@ test.describe("速さの予算", () => {
       console.log(`「t」の反応（${expected}）：${Math.round(elapsed)}ms`);
       expect(elapsed).toBeLessThan(100);
     }
+  });
+
+  test("Translate を押した反応は 100ms 以内", async ({ page, context }) => {
+    await page.locator(".article-list .item").nth(1).click();
+    const button = page.locator(".article-view").getByRole("button", { name: "Translate" });
+    await expect(button).toBeEnabled();
+    const cdp = await context.newCDPSession(page);
+    await cdp.send("Emulation.setCPUThrottlingRate", { rate: CPU_SLOWDOWN });
+
+    // 押したら、返事を待たずに押せなくする（二重に頼まない）
+    const elapsed = await page.evaluate(
+      () =>
+        new Promise<number>((resolve) => {
+          const start = performance.now();
+          document.querySelector<HTMLButtonElement>(".article-view button.translate")?.click();
+          const check = () => {
+            const button = document.querySelector<HTMLButtonElement>(
+              ".article-view button.translate",
+            );
+            if (button === null || button.disabled) resolve(performance.now() - start);
+            else requestAnimationFrame(check);
+          };
+          check();
+        }),
+    );
+    console.log(`「Translate」の反応：${Math.round(elapsed)}ms`);
+    expect(elapsed).toBeLessThan(100);
   });
 });

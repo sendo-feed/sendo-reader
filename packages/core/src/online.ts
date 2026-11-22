@@ -40,6 +40,21 @@ function parseFetchTime(value: unknown): number | null {
   return Number.isFinite(time) ? time : null;
 }
 
+/**
+ * 記事をその場で訳してもらう（sendo の POST /articles/{id}/translation。docs/decisions/translation.md
+ * の 4、6）。受け付けられたら（202）返る。断られたか届かなければ ApiError（code に理由）
+ */
+export async function requestTranslation(
+  api: SendoApi,
+  articleId: string,
+  signal: AbortSignal,
+): Promise<void> {
+  const { data, error, response } = await api
+    .client(signal)
+    .POST("/articles/{id}/translation", { params: { path: { id: articleId } } });
+  if (data === undefined) throw errorFromBody(response.status, error);
+}
+
 /** サイトの URL から、購読できるフィードの候補を探す。URL がフィードそのものなら、それだけを返す */
 export async function discoverFeeds(
   api: SendoApi,

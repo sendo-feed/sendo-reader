@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { type BrowserContext, expect, type Page, test } from "@playwright/test";
 import { FakeSendo, routeFakeSendo, signIn } from "./fake-sendo";
 
 /**
@@ -148,10 +148,8 @@ test("記事の画面で訳したタイトルを出し、原文に切り替え�
   await page.goForward();
   await expect(heading).toHaveText("<b>コードモッド</b>でリファクタリングする");
 
-  // 訳文のない記事では、切り替えが出ず、t は何もしない
+  // 訳文のない記事では、切り替えが出ない（t は Translate になる。下の Translate のテスト）
   await toggles.click();
-  await expect(heading).toHaveText("Feature Toggles");
-  await page.keyboard.press("t");
   await expect(heading).toHaveText("Feature Toggles");
   await view.getByRole("button", { name: "More actions" }).click();
   await expect(actions.getByRole("button", { name: "Show original text" })).toHaveCount(0);
@@ -235,12 +233,14 @@ test("訳文のない記事（untranslated、翻訳なし）では切り替え�
   for (const title of ["Untranslated", "No translation"]) {
     await list.locator(".item").filter({ hasText: title }).click();
     await expect(heading).toHaveText(title);
-    await page.keyboard.press("t");
-    await expect(heading).toHaveText(title);
     await more.click();
     await expect(actions.getByRole("button", { name: "Show original text" })).toHaveCount(0);
     await page.keyboard.press("Escape");
   }
+  // 翻訳の項目のない記事では、t は何もしない（Translate も出ない）
+  await page.keyboard.press("t");
+  await expect(heading).toHaveText("No translation");
+  expect(server.translationRequests).toEqual([]);
 
   await list.locator(".item").filter({ hasText: "リンクのない記事" }).click();
   await expect(heading).toHaveText("リンクのない記事");
@@ -260,5 +260,250 @@ test("操作の一覧に t がある", async ({ page, context }) => {
   await signIn(page);
   await expect(page.locator(".article-list .item")).toHaveCount(1);
   await page.keyboard.press("?");
-  await expect(page.getByRole("dialog")).toContainText("Show translation / original text");
+  await expect(page.getByRole("dialog")).toContainText(
+    "Translate / switch translation and original",
+  );
+});
+
+/** 記事の画面の Translate で、その場で訳してもらう（docs/decisions/translation.md の 4、6） */
+test.describe("Translate", () => {
+  const queued = {
+    language: "en",
+    status: "queued",
+    title: null,
+    summary: null,
+    translatedAt: null,
+  };
+
+  async function open(page: Page, context: BrowserContext, translation: unknown = queued) {
+    const server = new FakeSendo();
+    const feed = server.subscribe({ url: "https://blog.example/feed.xml", title: "Blog" });
+    const article = server.deliver(feed.id, { title: "Feature Toggles", translation });
+    await routeFakeSendo(context, server);
+    await page.goto("/");
+    await signIn(page);
+    await page.locator(".article-list .item").first().click();
+    const view = page.locator(".article-view");
+    await expect(view.getByRole("heading", { level: 1 })).toHaveText("Feature Toggles");
+    return { server, article, view };
+  }
+
+  test("押すとすぐ Translating になり、訳文が届くと見出しが訳したタイトルに替わる", async ({
+    page,
+    context,
+  }) => {
+    const { server, article, view } = await open(page, context);
+    const button = view.getByRole("button", { name: "Translate", exact: true });
+    await expect(view.locator("header .translation")).toHaveText("・ EN · Queued");
+    await button.click();
+    await expect(view.locator("header .translation")).toHaveText("・ EN · Translating");
+    await expect(button).toHaveCount(0);
+    expect(server.translationRequests).toEqual([article.id]);
+
+    server.setTranslation(article.id, {
+      language: "en",
+      status: "translated",
+      title: "フィーチャートグル",
+      summary: null,
+      translatedAt: new Date().toISOString(),
+    });
+    await page.getByRole("button", { name: "Sync now" }).click();
+    // この端末で頼んだ記事なので、開いたままでも訳文に替える
+    await expect(view.getByRole("heading", { level: 1 })).toHaveText("フィーチャートグル");
+    await expect(view.locator("header .translation")).toHaveText("・ EN · Translated");
+  });
+
+  test("sendo で訳せずに戻ったら日本語の文で知らせ、もう一度頼める", async ({ page, context }) => {
+    const { server, article, view } = await open(page, context);
+    await view.getByRole("button", { name: "Translate", exact: true }).click();
+    await expect(view.locator("header .translation")).toHaveText("・ EN · Translating");
+    server.setTranslation(article.id, { ...queued, status: "untranslated" });
+    await page.getByRole("button", { name: "Sync now" }).click();
+    await expect(view.getByRole("alert")).toHaveText(
+      "訳せませんでした。Translate でもう一度頼めます。",
+    );
+    await expect(view.locator("header .translation")).toHaveText("・ EN · Untranslated");
+    await view.getByRole("button", { name: "Translate", exact: true }).click();
+    await expect(view.locator("header .translation")).toHaveText("・ EN · Translating");
+    await expect(view.getByRole("alert")).toHaveCount(0);
+    expect(server.translationRequests).toEqual([article.id, article.id]);
+  });
+
+  test("訳せなかったあとでほかの端末が訳しても、開いている見出しは替えない", async ({
+    page,
+    context,
+  }) => {
+    const { server, article, view } = await open(page, context);
+    const heading = view.getByRole("heading", { level: 1 });
+    await view.getByRole("button", { name: "Translate", exact: true }).click();
+    await expect(view.locator("header .translation")).toHaveText("・ EN · Translating");
+    server.setTranslation(article.id, { ...queued, status: "untranslated" });
+    await page.getByRole("button", { name: "Sync now" }).click();
+    await expect(view.getByRole("alert")).toBeVisible();
+
+    // ほかの端末が頼み、訳し終えた
+    server.setTranslation(article.id, { ...queued, status: "translating" });
+    await page.getByRole("button", { name: "Sync now" }).click();
+    await expect(view.locator("header .translation")).toHaveText("・ EN · Translating");
+    server.setTranslation(article.id, {
+      language: "en",
+      status: "translated",
+      title: "フィーチャートグル",
+      summary: null,
+      translatedAt: new Date().toISOString(),
+    });
+    await page.getByRole("button", { name: "Sync now" }).click();
+    await expect(view.locator("header .translation")).toHaveText("・ EN · Translated");
+    await expect(heading).toHaveText("Feature Toggles");
+    await expect(view.getByRole("alert")).toHaveCount(0);
+  });
+
+  test("押したときにはもう訳し終えていても、訳文に替える", async ({ page, context }) => {
+    const { server, article, view } = await open(page, context);
+    // 手元はまだ queued のまま、sendo ではほかの端末が訳し終えている（translation_exists が返る）
+    server.setTranslation(article.id, {
+      language: "en",
+      status: "translated",
+      title: "フィーチャートグル",
+      summary: null,
+      translatedAt: new Date().toISOString(),
+    });
+    await view.getByRole("button", { name: "Translate", exact: true }).click();
+    await expect(view.getByRole("heading", { level: 1 })).toHaveText("フィーチャートグル");
+    await expect(view.locator("header .translation")).toHaveText("・ EN · Translated");
+    await expect(view.getByRole("alert")).toHaveCount(0);
+  });
+
+  test("断られたら理由を出し、また押せる", async ({ page, context }) => {
+    const { server, view } = await open(page, context);
+    server.translationRequestError = { status: 503, code: "translation_unavailable" };
+    const button = view.getByRole("button", { name: "Translate", exact: true });
+    await button.click();
+    await expect(view.getByRole("alert")).toContainText("この Sendo では翻訳を使えません");
+    await expect(button).toBeEnabled();
+    await expect(view.locator("header .translation")).toHaveText("・ EN · Queued");
+  });
+
+  test("translation_exists は、受け付けられたときと同じに出す", async ({ page, context }) => {
+    const { server, view } = await open(page, context);
+    server.translationRequestError = { status: 409, code: "translation_exists" };
+    await view.getByRole("button", { name: "Translate", exact: true }).click();
+    await expect(view.locator("header .translation")).toHaveText("・ EN · Translating");
+    await expect(view.getByRole("alert")).toHaveCount(0);
+  });
+
+  test("オフラインのときは押せない", async ({ page, context }) => {
+    const { view } = await open(page, context);
+    const button = view.getByRole("button", { name: "Translate", exact: true });
+    await context.setOffline(true);
+    await expect(button).toBeDisabled();
+    await context.setOffline(false);
+    await expect(button).toBeEnabled();
+  });
+
+  test("t で頼める", async ({ page, context }) => {
+    const { server, article, view } = await open(page, context);
+    await page.keyboard.press("t");
+    await expect(view.locator("header .translation")).toHaveText("・ EN · Translating");
+    expect(server.translationRequests).toEqual([article.id]);
+  });
+
+  test("und の untranslated の記事には出る。訳し済みと翻訳なしの記事には出ない", async ({
+    page,
+    context,
+  }) => {
+    const server = new FakeSendo();
+    const feed = server.subscribe({ url: "https://blog.example/feed.xml", title: "Blog" });
+    const now = Date.now();
+    server.deliver(feed.id, {
+      title: "und",
+      publishedAt: now - 1000,
+      translation: { ...queued, language: "und", status: "untranslated" },
+    });
+    server.deliver(feed.id, {
+      title: "done",
+      publishedAt: now - 2000,
+      translation: {
+        language: "en",
+        status: "translated",
+        title: "訳し済み",
+        summary: null,
+        translatedAt: new Date(now).toISOString(),
+      },
+    });
+    server.deliver(feed.id, { title: "日本語", publishedAt: now - 3000 });
+    await routeFakeSendo(context, server);
+    await page.goto("/");
+    await signIn(page);
+    const list = page.locator(".article-list");
+    const view = page.locator(".article-view");
+    const button = view.getByRole("button", { name: "Translate", exact: true });
+    await list.locator(".item").filter({ hasText: "und" }).click();
+    await expect(view.getByRole("heading", { level: 1 })).toHaveText("und");
+    // ラベルは出ないが、その場所に Translate を出す
+    await expect(view.locator("header .translation")).toHaveCount(0);
+    await expect(button).toBeVisible();
+    for (const title of ["訳し済み", "日本語"]) {
+      await list.locator(".item").filter({ hasText: title }).click();
+      await expect(view.getByRole("heading", { level: 1 })).toHaveText(title);
+      await expect(button).toHaveCount(0);
+    }
+  });
+
+  test("返る前にほかの記事に移っても止まらず、戻ると届いた状態で出る", async ({
+    page,
+    context,
+  }) => {
+    const server = new FakeSendo();
+    const feed = server.subscribe({ url: "https://blog.example/feed.xml", title: "Blog" });
+    const now = Date.now();
+    const article = server.deliver(feed.id, {
+      title: "Feature Toggles",
+      publishedAt: now - 1000,
+      translation: queued,
+    });
+    server.deliver(feed.id, { title: "Other", publishedAt: now - 2000, translation: queued });
+    let release = () => {};
+    server.translationRequestGate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    await routeFakeSendo(context, server);
+    await page.goto("/");
+    await signIn(page);
+    const list = page.locator(".article-list");
+    const view = page.locator(".article-view");
+    await list.getByRole("button", { name: "Unread only" }).click();
+    await list.locator(".item").filter({ hasText: "Feature Toggles" }).click();
+    await view.getByRole("button", { name: "Translate", exact: true }).click();
+    await expect.poll(() => server.translationRequests).toEqual([article.id]);
+
+    // 返る前にほかの記事に移る。そちらの Translate は押せる
+    await list.locator(".item").filter({ hasText: "Other" }).click();
+    await expect(view.getByRole("heading", { level: 1 })).toHaveText("Other");
+    await expect(view.getByRole("button", { name: "Translate", exact: true })).toBeEnabled();
+    release();
+
+    await list.locator(".item").filter({ hasText: "Feature Toggles" }).click();
+    await expect(view.locator("header .translation")).toHaveText("・ EN · Translating");
+    server.setTranslation(article.id, {
+      language: "en",
+      status: "translated",
+      title: "フィーチャートグル",
+      summary: null,
+      translatedAt: new Date(now).toISOString(),
+    });
+    await page.getByRole("button", { name: "Sync now" }).click();
+    await expect(view.getByRole("heading", { level: 1 })).toHaveText("フィーチャートグル");
+  });
+
+  test("ほかのタブでも Translating になり、押せなくなる", async ({ page, context }) => {
+    const { view } = await open(page, context);
+    const other = await context.newPage();
+    await other.goto(page.url());
+    const otherView = other.locator(".article-view");
+    await expect(otherView.locator("header .translation")).toHaveText("・ EN · Queued");
+    await view.getByRole("button", { name: "Translate", exact: true }).click();
+    await expect(otherView.locator("header .translation")).toHaveText("・ EN · Translating");
+    await expect(otherView.getByRole("button", { name: "Translate", exact: true })).toHaveCount(0);
+  });
 });

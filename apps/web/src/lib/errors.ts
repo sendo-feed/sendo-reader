@@ -57,6 +57,24 @@ export function describeError(error: unknown): string {
   return "うまくいきませんでした。";
 }
 
+/** その場の翻訳が sendo で訳せずに戻ったときの文（docs/decisions/translation.md の 6） */
+export const TRANSLATION_FAILED = "訳せませんでした。Translate でもう一度頼めます。";
+
+/** その場の翻訳を頼めなかったときの文（docs/decisions/translation.md の 6） */
+export function describeTranslationError(error: unknown): string {
+  if (error instanceof ApiError) {
+    switch (error.code) {
+      case "translation_unavailable":
+        return "この Sendo では翻訳を使えません（API キーが設定されていません）。";
+      case "translation_not_supported":
+        return "この記事は訳せません。";
+      case "not_found":
+        return "この記事は Sendo にもうありません。";
+    }
+  }
+  return describeError(error);
+}
+
 export function describeSavedPageError(error: SyncStatus["savedPageError"] | undefined): string {
   if (error === "limit")
     return "Sendo の保存上限に達しました。ページの保存を解除してからやり直してください。";

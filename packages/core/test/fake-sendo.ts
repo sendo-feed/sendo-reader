@@ -438,6 +438,12 @@ export class FakeSendo {
   omitHasContent = false;
   /** 翻訳に対応する前の版の sendo のふりをする（記事に translation を付けない） */
   omitTranslation = false;
+  /** その場の翻訳を頼まれた記事（POST /articles/{id}/translation） */
+  readonly translationRequests: string[] = [];
+  /** その場の翻訳の求めに、決めた失敗を返す（null なら sendo と同じに答える） */
+  translationRequestError: { status: number; code: string } | null = null;
+  /** その場の翻訳の求めに答える前に待つ（返る前にほかの操作をする場面を作る） */
+  translationRequestGate: Promise<void> | null = null;
 
   /** 画像の中継が返す状態（200 なら 1×1 の PNG）。502 は配信元から取れない、など */
   imageStatus = 200;
@@ -758,6 +764,10 @@ export class FakeSendo {
     if (request.method === "POST" && path === "/articles/mark-read") {
       return this.#markRead(body);
     }
+    match = /^\/articles\/([^/]+)\/translation$/.exec(path);
+    if (request.method === "POST" && match !== null) {
+      return this.#requestTranslation(decodeURIComponent(match[1] ?? ""));
+    }
     if (request.method === "POST" && path === "/folders") {
       // sendo の #48 と同じく、クライアントが決めた ID（小文字の UUID）を受ける
       this.folderRequests.push(body);
@@ -837,6 +847,30 @@ export class FakeSendo {
     }
     return error(404, "not_found", "Not Found");
   };
+
+  /**
+   * その場の翻訳を受け付ける（sendo の POST /articles/{id}/translation）。queued ／ untranslated
+   * なら translating にして 202。訳し終えるのは、テストが setTranslation で決める
+   */
+  async #requestTranslation(id: string): Promise<Response> {
+    this.translationRequests.push(id);
+    await this.translationRequestGate;
+    if (this.translationRequestError !== null) {
+      const { status, code } = this.translationRequestError;
+      return error(status, code, "translation request failed");
+    }
+    const row = this.inbox.get(id);
+    if (row === undefined) return error(404, "not_found", "article does not exist");
+    const translation = row.translation as { status?: unknown } | null;
+    if (translation === null || typeof translation !== "object") {
+      return error(409, "translation_not_supported", "this article is not translated");
+    }
+    if (translation.status !== "queued" && translation.status !== "untranslated") {
+      return error(409, "translation_exists", "the article is already translated");
+    }
+    this.setTranslation(id, { ...translation, status: "translating" });
+    return json(202, { status: "translating" });
+  }
 
   /** まとめて既読（ID で、またはカーソルを境界に。sendo の POST /articles/mark-read） */
   #markRead(body: Record<string, unknown>): Response {

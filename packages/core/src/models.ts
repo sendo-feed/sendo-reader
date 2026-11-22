@@ -67,6 +67,13 @@ export interface Article {
    * 訳さない記事、訳すかどうかがまだ決まっていない記事、翻訳に対応する前の sendo からの記事は null
    */
   translation: ArticleTranslation | null;
+  /**
+   * この端末で頼んだ、その場の翻訳（docs/decisions/translation.md の 6。core のメモリーにだけ
+   * あり、手元の DB には置かない）。requested は頼んで返事を待っている（印のある間は、翻訳の状態を
+   * translating にして出す）。failed は、sendo で訳せずに戻った（失敗の文を出す）。頼んでいなければ、
+   * 項目がない
+   */
+  translationRequest?: "requested" | "failed";
 }
 
 /** 翻訳の状態。queued は自動の翻訳を待っている、translating は訳している、translated は訳文がある */

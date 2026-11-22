@@ -57,6 +57,7 @@ export const READER_METHODS = [
   "discoverFeeds",
   "subscribe",
   "importOpml",
+  "requestTranslation",
 ] as const;
 
 export type ReaderMethod = (typeof READER_METHODS)[number];
@@ -99,6 +100,8 @@ export const SYNC_NOW_METHODS = new Set<Method>([
   "signOut",
   "subscribe",
   "importOpml",
+  // 頼んだ印は、受け付けたあとに始めた同期が終わったときに外す（docs/decisions/translation.md の 6）
+  "requestTranslation",
   "unsubscribeDiscord",
   "disconnectDiscord",
   // 移行待ちの設定は、同期を終えたときに送る
