@@ -26,7 +26,7 @@
    - 隔離フレームのページは、外部の `embed.js` と空の入れ物だけ。`embed.js` は `https://platform.twitter.com/widgets.js` を読み込み、`twttr.widgets.createTweet(id, 入れ物, { dnt: true, lang: "ja", conversation: "none", theme })` を呼ぶ。`color-scheme` は、ハッシュの `theme` から `document.documentElement.style.colorScheme` で付け、reader のテーマとそろえる
    - 隔離フレームのページの応答のヘッダー：`Content-Security-Policy: default-src 'none'; script-src 'self' https://platform.twitter.com; frame-src https://platform.twitter.com; base-uri 'none'; form-action 'none'`、`Referrer-Policy: no-referrer`、`X-Content-Type-Options: nosniff`、`Permissions-Policy`（reader と同じ）。ページに `<meta name="twitter:widgets:csp" content="on">` を置く。Trusted Types は入れない（`widgets.js` が止まる）。許すのは `platform.twitter.com` のホストだけで、パスまでは絞らない
    - やり取り：枠の `load` で、reader が `iframe.contentWindow.postMessage({ type: "sendo:x-post:hello" }, <隔離フレームのオリジン>)` を送る。隔離フレームは `event.source === window.parent` を確かめ、`event.origin` を送り先として覚える。隔離フレームが送るのは、覚えたオリジンに、次の 2 種類だけ
-     - `{ type: "sendo:x-post:rendered", height }`：`createTweet` の Promise が要素で解決したあと。`height` は、余白を含めた文書の高さ（整数）。解決の前には、高さを送らない。解決のあとは、文書の高さが変わるたびに、同じ形でもう一度送る（枠の幅が変わると、ウィジェットの高さも変わる）
+     - `{ type: "sendo:x-post:rendered", height }`：`createTweet` の Promise が要素で解決したあと。`height` は、余白を含めた入れ物の高さ（整数。枠の高さによらない値）。解決の前には、高さを送らない。解決のあとは、文書の高さが変わるたびに、同じ形でもう一度送る（枠の幅が変わると、ウィジェットの高さも変わる）
      - `{ type: "sendo:x-post:failed" }`：`widgets.js` の `onerror`、`twttr` がない、Promise が `undefined` で解決した、Promise が reject した
    - reader は、`event.origin` が隔離フレームのオリジンで、`event.source` がその iframe の `contentWindow` のメッセージだけを受ける。`height` は 1〜4000 の整数だけを受け、`style:` で付ける。2 回目からの `rendered` は、枠の高さを付け直すだけにする
 3. **隔離フレームの配り方と設定**：reader のコンテナが配る（[コンテナ版](container.md)の 2・4・5）。
@@ -42,8 +42,9 @@
    - 失敗は、`failed` を受け取ったとき、または、枠が表示範囲に入っている時間の合計が 10 秒になっても `rendered` が来ないとき（画面の外にいた時間は数えない）。失敗したら、iframe を外して元の引用のままにし、その記事を開いている間はやり直さない
    - 読み込みは、引用が表示範囲（ツールバーの下は数えない）に入ったときに始める。読書位置が決まる前は始めない。同時に読み込むのは 4 つまでで、待っている間に表示範囲から出たものは取り消す。読み込み中（`rendered` の前）に表示範囲から出たものも、iframe を外して元の引用に戻し、4 つの数から外す。入り直したら、最初から読み込む（10 秒も数え直す）
    - オフラインでは始めず、`online` で判定し直す。設定が「読み込まない」か、隔離フレームのオリジンが未設定なら、始めない（通信しない）。復元のために、画面の外の投稿を先に読み込むことはしない
-5. **読書位置**：`history.state` の記事の位置（[UI とツール](ui.md)の 1）に、投稿ごとの `{ 幅, 高さ }` を一緒に覚える。覚えるのは、表示範囲の中で `rendered` を受け取ったときの値だけ。
-   - 戻るときは、覚えた幅が今の枠の幅と同じ投稿に限り、読み込む前からその高さの枠を取る（元の引用は出さない）。読み込めないとき（隔離フレームのオリジンが未設定、設定が「読み込まない」、オフライン）は、枠を取らずに元の引用を出す。位置は、今のスクロール量のままで合う。枠は表示範囲に入ってから読み込み、失敗したら元の引用に戻す
+5. **読書位置**：`history.state` の記事の位置（[UI とツール](ui.md)の 1）に、投稿ごとの `{ 幅, 高さ }` を一緒に覚える。覚えるのは、表示範囲の中で `rendered` を受け取ったときの値だけで、受けるたびに、そのときの幅と高さで覚え直す。
+   - 戻るときは、覚えた幅が今の枠の幅と同じ投稿に限り、読み込む前からその高さの枠を取る（元の引用は出さない）。読み込めないとき（隔離フレームのオリジンが未設定、設定が「読み込まない」、オフライン）は、枠を取らずに元の引用を出す。位置は、今のスクロール量のままで合う。枠は表示範囲に入ってから読み込み、失敗したら元の引用に戻す。読み込みの途中で表示範囲から出たら、iframe を外して、覚えた高さの空の枠に戻す。読み込みを始める前に読み込めなくなったら、元の引用に戻す
+   - 読み込めずに元の引用を出した投稿が画面より上にあると、位置は、ウィジェットとの高さの差だけずれる。これは受け入れる
    - 初めて出す投稿が、画面より上で元の引用から置き換わるときは、ブラウザーのスクロール量の補正に任せる
    - 位置を、本文の要素を基準にして覚えることはしない
 6. **スワイプとキーボード**
@@ -51,7 +52,7 @@
    - reader の `window` の `blur` で、`document.activeElement` がウィジェットの iframe なら、本文に `focus({ preventScroll: true })` する。押したあとも `j` ／ `k` ／ `Esc` が効く。キーボードだけでウィジェットの中を操作することは、できない
 7. **X に伝わること**
    - 表示範囲に入った投稿ごとに、読者の IP、開いた時刻、投稿の ID、隔離フレームのホスト名が X に伝わる。`dnt: true` を付けるが、計測の通信（`syndication.x.com/i/jot/embeds`）は減らない（`dnt=1` が付くだけ）
-   - 通信の量は、投稿 1 つで約 450KB。動画付きは、再生を押す前から約 1.8MB
+   - 通信の量は、投稿 1 つで約 450KB。動画付きは、再生を押す前から約 1.8MB。読み込みの途中で表示範囲から出て、入り直した投稿は、読み込み直すので、もう一度伝わる
    - 隔離フレームの URL は、ハッシュまで丸ごと X に渡る。ハッシュには ID とテーマだけを入れ、reader のオリジンは入れない（`Referer` も付かない）。ただし、隔離フレームの中のスクリプトは、親のオリジンを知りうる（挨拶の `event.origin` など）。隔離フレームのホスト名を reader のドメインの下に置けば、そのドメインも X に伝わる
    - 隔離フレームのオリジンにも X の文書にも、クッキーや保存領域は置かれない。X が付けるのは、ボット対策のクッキー（`__cf_bm`。最上位のサイトごとに分かれる）だけ
 
