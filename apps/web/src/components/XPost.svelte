@@ -1,6 +1,6 @@
 <script lang="ts">
   import { xPostUrl } from "@sendo-reader/core";
-  import type { Snippet } from "svelte";
+  import { type Snippet, tick } from "svelte";
   import { useXPostLoader, type XPostFrame } from "../lib/x-post.svelte";
   import Icon from "./Icon.svelte";
 
@@ -34,6 +34,20 @@
     };
   });
 
+  let openLink = $state<HTMLAnchorElement>();
+
+  /**
+   * 覆いを外す。覆いにフォーカスがあったら（キーボードで押した）、外したあとは「Open on X」に移す
+   * （覆いが消えて、フォーカスを見失わないように。中はキーボードでは操作できない。embeds.md の 6）
+   */
+  async function uncover(event: MouseEvent): Promise<void> {
+    const focused = document.activeElement === event.currentTarget;
+    post?.uncover();
+    if (!focused) return;
+    await tick();
+    openLink?.focus();
+  }
+
   /** 枠の高さ。出たらその高さ、出るまでは覚えた高さ（embeds.md の 5）。どちらもなければ null */
   const boxHeight = $derived(post === null ? null : (post.height ?? post.reserved));
   /** 元の引用の代わりに、枠を出している */
@@ -50,6 +64,7 @@
           allow="fullscreen"
           referrerpolicy="no-referrer"
           title="X の投稿"
+          tabindex="-1"
           style:height={boxHeight === null ? undefined : `${boxHeight}px`}
           onload={(event) => {
             if (event.currentTarget instanceof HTMLIFrameElement) post?.hello(event.currentTarget);
@@ -65,7 +80,7 @@
           type="button"
           class="cover"
           aria-label="X の投稿を操作する"
-          onclick={() => post?.uncover()}
+          onclick={uncover}
         ></button>
       {/if}
     </div>
@@ -75,7 +90,7 @@
   {/if}
   <blockquote hidden={shown}>{@render children()}</blockquote>
   {#if href !== null}
-    <a class="open" {href} target="_blank" rel="noopener noreferrer nofollow">
+    <a class="open" {href} target="_blank" rel="noopener noreferrer nofollow" bind:this={openLink}>
       <Icon name="external" />
       <span>Open on X</span>
     </a>

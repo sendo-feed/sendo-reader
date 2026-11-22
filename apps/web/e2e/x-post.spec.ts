@@ -1487,9 +1487,12 @@ test.describe("ウィジェットの上の覆いとフォーカス", () => {
     );
     await page.keyboard.press("Enter");
     await expect(cover(page, 1)).toHaveCount(0);
+    // 外したあとは、Open on X に移る（フォーカスを見失わない）
+    await expect(post(page, 1).getByRole("link", { name: "Open on X" })).toBeFocused();
     await cover(page, 2).focus();
     await page.keyboard.press("Space");
     await expect(cover(page, 2)).toHaveCount(0);
+    await expect(post(page, 2).getByRole("link", { name: "Open on X" })).toBeFocused();
   });
 
   test("ウィジェットが表示範囲から出たら、覆いを掛け直す", async ({ page, context }) => {
@@ -1629,5 +1632,38 @@ test.describe("ウィジェットの上の覆いとフォーカス", () => {
     // ほかの窓やタブへ移った
     await page.evaluate(() => window.dispatchEvent(new Event("blur")));
     await expect(save).toBeFocused();
+  });
+
+  test("iframe は Tab キーの順に入らない。Tab で進むと、覆い、Open on X、後ろのリンクの順に移る", async ({
+    page,
+    context,
+  }) => {
+    await openArticle(
+      page,
+      context,
+      `<p><a href="https://example.com/before">前のリンク</a></p>${quote(1)}${quote(2)}` +
+        `<p><a href="https://example.com/after">後ろのリンク</a></p>`,
+      { [postId(1)]: "render:240", [postId(2)]: "manual" },
+    );
+    await expectShown(page, 1);
+    await expect(post(page, 2).locator("iframe")).toHaveCount(1);
+    for (const n of [1, 2]) {
+      await expect(post(page, n).locator("iframe")).toHaveAttribute("tabindex", "-1");
+    }
+    const body = page.locator(".article-view .body");
+    await body.getByRole("link", { name: "前のリンク" }).focus();
+    // 出たウィジェットは覆い → Open on X、読み込み中（覆いがない）は Open on X、の順に進み、本文に戻されない
+    const order = [
+      cover(page, 1),
+      post(page, 1).getByRole("link", { name: "Open on X" }),
+      // 読み込み中は元の引用を出しているので、引用の中のリンクにも止まる
+      post(page, 2).getByRole("link", { name: "日付" }),
+      post(page, 2).getByRole("link", { name: "Open on X" }),
+      body.getByRole("link", { name: "後ろのリンク" }),
+    ];
+    for (const next of order) {
+      await page.keyboard.press("Tab");
+      await expect(next).toBeFocused();
+    }
   });
 });
