@@ -80,7 +80,7 @@ test("記事の画面で訳したタイトルを出し、原文に切り替え�
   const feed = server.subscribe({ url: "https://blog.example/feed.xml", title: "Blog" });
   const now = Date.now();
   const translatedAt = new Date(now).toISOString();
-  const first = server.deliver(feed.id, {
+  server.deliver(feed.id, {
     title: "Refactoring with Codemods",
     summary: "Codemods are scripts.",
     url: "https://blog.example/codemods",
@@ -180,7 +180,75 @@ test("記事の画面で訳したタイトルを出し、原文に切り替え�
   await toggles.click();
   await codemods.click();
   await expect(heading).toHaveText("<b>コードモッド</b>でリファクタリングする");
-  expect(first.id).not.toBe(waiting.id);
+
+  // 原文にしてほかの画面（Saved）に移り、戻ると原文
+  await page.keyboard.press("t");
+  await expect(heading).toHaveText("Refactoring with Codemods");
+  await page.locator("nav.sidebar").getByRole("link", { name: "Saved" }).click();
+  await expect(heading).toHaveCount(0);
+  await page.goBack();
+  await expect(heading).toHaveText("Refactoring with Codemods");
+});
+
+test("訳文のない記事（untranslated、翻訳なし）では切り替えが出ず、URL のない訳し済みの記事でも More actions で切り替えられる", async ({
+  page,
+  context,
+}) => {
+  const server = new FakeSendo();
+  const feed = server.subscribe({ url: "https://blog.example/feed.xml", title: "Blog" });
+  const now = Date.now();
+  server.deliver(feed.id, {
+    title: "Untranslated",
+    publishedAt: now - 1000,
+    translation: {
+      language: "en",
+      status: "untranslated",
+      title: null,
+      summary: null,
+      translatedAt: null,
+    },
+  });
+  server.deliver(feed.id, { title: "No translation", publishedAt: now - 2000 });
+  server.deliver(feed.id, {
+    title: "No link",
+    url: null,
+    publishedAt: now - 3000,
+    translation: {
+      language: "en",
+      status: "translated",
+      title: "リンクのない記事",
+      summary: null,
+      translatedAt: new Date(now).toISOString(),
+    },
+  });
+  await routeFakeSendo(context, server);
+  await page.goto("/");
+  await signIn(page);
+
+  const list = page.locator(".article-list");
+  const view = page.locator(".article-view");
+  const heading = view.getByRole("heading", { level: 1 });
+  const more = view.getByRole("button", { name: "More actions" });
+  const actions = page.getByRole("dialog", { name: "Article actions" });
+  await expect(list.locator(".item")).toHaveCount(3);
+
+  for (const title of ["Untranslated", "No translation"]) {
+    await list.locator(".item").filter({ hasText: title }).click();
+    await expect(heading).toHaveText(title);
+    await page.keyboard.press("t");
+    await expect(heading).toHaveText(title);
+    await more.click();
+    await expect(actions.getByRole("button", { name: "Show original text" })).toHaveCount(0);
+    await page.keyboard.press("Escape");
+  }
+
+  await list.locator(".item").filter({ hasText: "リンクのない記事" }).click();
+  await expect(heading).toHaveText("リンクのない記事");
+  await more.click();
+  // 元のページがないので、全文は出さない
+  await expect(actions.getByRole("button", { name: "Show full text" })).toHaveCount(0);
+  await actions.getByRole("button", { name: "Show original text" }).click();
+  await expect(heading).toHaveText("No link");
 });
 
 test("操作の一覧に t がある", async ({ page, context }) => {

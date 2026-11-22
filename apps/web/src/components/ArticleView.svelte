@@ -880,7 +880,8 @@
           <Icon name="share" />
         </button>
       {/if}
-      {#if link !== null || hasPageContent}
+      <!-- 訳文と原文の切り替えは More actions に置くので、リンクも全文もない記事でも出す -->
+      {#if link !== null || hasPageContent || openedTranslation !== null}
         <button
           type="button"
           class="icon-button"
@@ -995,7 +996,8 @@
       </button>
     {:else if content?.source === "page" || pageLoading}
       <button type="button" onclick={() => showContent("feed")}>Show feed content</button>
-    {:else}
+    {:else if link !== null}
+      <!-- 全文は元のページから抜くので、リンクにできる URL のない記事では出さない -->
       <button
         type="button"
         disabled={contentState === "checking" || contentState === "loading"}
