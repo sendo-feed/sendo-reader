@@ -1,6 +1,7 @@
 <script lang="ts">
   import type { ContentNode } from "@sendo-reader/core";
   import RemoteImage from "./RemoteImage.svelte";
+  import XPost from "./XPost.svelte";
 
   /**
    * 記事の本文を出す（sendo の docs/decisions/content.md の 6）。本文を出すところは、この部品だけ。
@@ -12,6 +13,7 @@
    * - リンクは、新しいタブで開く（同じタブで開くと、読んでいた場所を失う）。target と rel は
    *   ここで付ける
    * - 画像は RemoteImage で出す（見えた分だけ取る。読めなければ出さない）
+   * - X の投稿の印のある引用は、XPost で出す（docs/decisions/embeds.md）
    * - 見た目は、ここの CSS だけで決まる（本文は class も style も持たない）。表とコードは、
    *   横にあふれたら、その中で動かす
    */
@@ -38,6 +40,8 @@
       <a href={node.href} target="_blank" rel="noopener noreferrer nofollow"
         >{@render render(node.children)}</a
       >
+    {:else if node.tag === "blockquote" && node.xPost !== undefined}
+      <XPost id={node.xPost}>{@render render(node.children)}</XPost>
     {:else if node.tag === "table"}
       <div class="table-scroll">
         <table>

@@ -120,6 +120,55 @@ describe("exportArticle（HTML）", () => {
   });
 });
 
+describe("exportArticle（X の投稿）", () => {
+  const ID = "1234567890123456789";
+  const URL = `https://x.com/i/web/status/${ID}`;
+  const quote = `<blockquote data-x-post="${ID}"><p>投稿の文</p>— 名前 (@user) <a href="https://twitter.com/user/status/${ID}">日付</a></blockquote>`;
+  // 文もリンクの文字も空の引用（fixture の B の形）
+  const empty = `<blockquote data-x-post="${ID}"><p></p> <a href="https://x.com/user/status/${ID}"></a></blockquote>`;
+
+  it("HTML では、引用のあとに、ID から組み立てた投稿へのリンクを書く", async () => {
+    const text = await html(quote);
+    expect(text).toContain(
+      `<blockquote><p>投稿の文</p>— 名前 (@user) <a href="https://twitter.com/user/status/${ID}" rel="noopener noreferrer nofollow">日付</a></blockquote>` +
+        `<p><a href="${URL}" rel="noopener noreferrer nofollow">${URL}</a></p>`,
+    );
+    expect(await html(empty)).toContain(
+      `<p><a href="${URL}" rel="noopener noreferrer nofollow">${URL}</a></p>`,
+    );
+  });
+
+  it("Markdown では、引用のあとに、投稿へのリンクを書く。引用が空でもリンクは残す", async () => {
+    expect(await markdown(quote)).toBe(
+      [
+        `> 投稿の文\n>\n> — 名前 (@user) [日付](https://twitter.com/user/status/${ID})`,
+        `[${URL}](${URL})`,
+      ].join("\n\n"),
+    );
+    // 文字の空のリンクは、今までどおり URL を文字にする
+    expect(await markdown(empty)).toBe(
+      [
+        `> [https://x.com/user/status/${ID}](https://x.com/user/status/${ID})`,
+        `[${URL}](${URL})`,
+      ].join("\n\n"),
+    );
+    expect(await markdown(`<blockquote data-x-post="${ID}"></blockquote>`)).toBe(
+      `[${URL}](${URL})`,
+    );
+    // 表のセルの中の引用も、リンクを落とさない
+    expect(await markdown(`<table><tr><td>${quote}</td></tr></table>`)).toContain(
+      `[${URL}](${URL})`,
+    );
+  });
+
+  it("印のない引用の書き出しは、変わらない", async () => {
+    expect(await html("<blockquote><p>引用</p></blockquote>")).toContain(
+      "<blockquote><p>引用</p></blockquote>\n</article>",
+    );
+    expect(await markdown("<blockquote><p>引用</p></blockquote>")).toBe("> 引用");
+  });
+});
+
 describe("exportArticle（Markdown）", () => {
   it("front matter と、タイトル・情報の行を付ける", async () => {
     const file = await exportArticle(article, parseContent("<p>本文</p>"), "markdown", noImages);

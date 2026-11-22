@@ -1,5 +1,6 @@
 import type { ContentElement, ContentNode } from "../models";
 import { toSafeHttpUrl, toSameOriginUrl } from "../url";
+import { toXPostId } from "./x-post";
 
 /**
  * 記事の本文の HTML を、通すと決めたタグと属性だけの木にする。
@@ -11,6 +12,8 @@ import { toSafeHttpUrl, toSameOriginUrl } from "../url";
  *
  * - 通すタグと属性は、sendo が配るものと同じ。知らないタグは、タグを落として中身だけ残す
  * - script ／ style ／ 埋め込みなどは、中身ごと落とす
+ * - X の投稿の印（blockquote の data-x-post）は、投稿の ID の形のときだけ通す（x-post.ts）。
+ *   ほかの data-* 属性は通さない
  * - リンクは http ／ https の絶対の URL だけ（toSafeHttpUrl。記事の URL と同じ決まり。sendo は
  *   mailto も通すが、reader の決定（docs/decisions/ui.md）は http ／ https だけなので、通さない）。画像は同じオリジンを指す URL だけ
  *   （sendo の中継。受け取ったまま使う）。そうでないリンクは中身だけ残し、画像は落とす
@@ -193,6 +196,9 @@ export function parseContent(html: string): ContentNode[] {
     } else if (name === "ol") {
       const first = toCount(read.get("start"));
       if (first !== null) element.start = first;
+    } else if (name === "blockquote") {
+      const xPost = toXPostId(read.get("data-x-post"));
+      if (xPost !== null) element.xPost = xPost;
     }
     elements += 1;
     append(element);
@@ -201,13 +207,13 @@ export function parseContent(html: string): ContentNode[] {
   return root;
 }
 
-/** 木の中に、出すもの（空白でない文字か、画像）があるか */
+/** 木の中に、出すもの（空白でない文字、画像、X の投稿）があるか */
 export function hasVisibleContent(nodes: readonly ContentNode[]): boolean {
-  // 深さは MAX_CONTENT_DEPTH までなので、再帰で足りる
+  // 深さは MAX_CONTENT_DEPTH までなので、再帰で足りる。X の投稿は、中が空でも開くリンクを出す
   return nodes.some((node) =>
     typeof node === "string"
       ? node.trim() !== ""
-      : node.tag === "img" || hasVisibleContent(node.children),
+      : node.tag === "img" || node.xPost !== undefined || hasVisibleContent(node.children),
   );
 }
 

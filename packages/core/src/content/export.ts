@@ -1,6 +1,7 @@
 import type { ContentElement, ContentNode } from "../models";
 import { toSafeHttpUrl } from "../url";
 import { isContentTag } from "./parse";
+import { xPostUrl } from "./x-post";
 
 /**
  * 記事の本文（core が作った木）を、1 つのファイル（HTML か Markdown）に書き出す。
@@ -13,6 +14,9 @@ import { isContentTag } from "./parse";
  * 画像は、ファイルだけで（ログインなしで）出せるよう、data: URI にして埋め込む。画像の URL は
  * 木にあるもの（sendo の中継）を受け取ったまま取りにいき、組み立てない・書き換えない
  * （docs/decisions/images.md の 1）。取れなかった画像は、代替テキストがあれば文字で残す。
+ *
+ * X の投稿（印の付いた引用）は、引用の文字のあとに、投稿へのリンク（ID から組み立てた URL）を
+ * 書く。ウィジェットは埋め込まない（docs/decisions/embeds.md）。
  */
 
 export type ExportFormat = "html" | "markdown";
@@ -266,6 +270,13 @@ function htmlNodes(
         }
         case "ol":
           return `<ol${node.start === undefined ? "" : ` start="${node.start}"`}>${children()}</ol>`;
+        case "blockquote": {
+          const quote = `<blockquote>${children()}</blockquote>`;
+          const url = node.xPost === undefined ? null : xPostUrl(node.xPost);
+          if (url === null) return quote;
+          const link = escapeHtml(url);
+          return `${quote}<p><a href="${link}" rel="noopener noreferrer nofollow">${link}</a></p>`;
+        }
         default:
           return `<${node.tag}>${children()}</${node.tag}>`;
       }
@@ -366,13 +377,17 @@ function markdownBlock(
       return ["---"];
     case "blockquote": {
       const inner = markdownBlocks(element.children, images).join("\n\n");
-      if (inner === "") return [];
-      return [
-        inner
-          .split("\n")
-          .map((line) => (line === "" ? ">" : `> ${line}`))
-          .join("\n"),
-      ];
+      const quote =
+        inner === ""
+          ? []
+          : [
+              inner
+                .split("\n")
+                .map((line) => (line === "" ? ">" : `> ${line}`))
+                .join("\n"),
+            ];
+      const link = markdownXPostLink(element);
+      return link === null ? quote : [...quote, link];
     }
     case "pre": {
       const text = plainText(element.children).replace(/^\n|\n$/g, "");
@@ -517,11 +532,22 @@ function markdownInline(
           return inlineCode(plainText(node.children));
         case "q":
           return `“${inner()}”`;
+        case "blockquote": {
+          // 表のセルの中などで、段落の中に入った引用
+          const link = markdownXPostLink(node);
+          return link === null ? ` ${inner()} ` : ` ${inner()} ${link} `;
+        }
         default:
           return BLOCK_TAGS.has(node.tag) ? ` ${inner()} ` : inner();
       }
     })
     .join("");
+}
+
+/** X の投稿へのリンク（Markdown）。X の投稿でなければ null */
+function markdownXPostLink(element: ContentElement): string | null {
+  const url = element.xPost === undefined ? null : xPostUrl(element.xPost);
+  return url === null ? null : `[${escapeMarkdown(url)}](${markdownUrl(url)})`;
 }
 
 /** 強調などの記号で囲む。前後の空白は、記号の外に出す（中に残すと、書式として読まれない） */

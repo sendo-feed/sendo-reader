@@ -1,4 +1,4 @@
-import { type BrowserContext, expect, type Page, test } from "@playwright/test";
+import { type BrowserContext, expect, type Locator, type Page, test } from "@playwright/test";
 import { FakeSendo, routeFakeSendo, signIn } from "./fake-sendo";
 
 /**
@@ -355,6 +355,112 @@ test("悪意のある本文でも、スクリプトは動かず、画面のス�
   );
   await view.getByRole("button", { name: "Save" }).click();
   await expect(view.getByRole("button", { name: "Unsave" })).toBeVisible();
+});
+
+/**
+ * X の投稿の印（data-x-post）の付いた引用（docs/decisions/embeds.md の 1）。sendo が付けた印の形の
+ * 本文を、そのまま届ける
+ */
+const X_POST_ID = "1234567890123456789";
+
+async function openXPost(page: Page, context: BrowserContext, content: string) {
+  const server = new FakeSendo();
+  const feed = server.subscribe({ url: "https://blog.example/feed.xml", title: "Blog" });
+  server.deliver(feed.id, { title: "X の投稿を引いた記事", summary: "要約", content });
+  const violations = await collectCspViolations(page);
+  /** reader のオリジンの外へ出たリクエスト */
+  const outside: string[] = [];
+  context.on("request", (request) => {
+    if (new URL(request.url()).origin !== new URL(page.url() || "http://localhost").origin) {
+      outside.push(request.url());
+    }
+  });
+  await routeFakeSendo(context, server);
+  await page.goto("/");
+  await signIn(page);
+  outside.length = 0;
+  await open(page, "X の投稿を引いた記事");
+  return { body: page.locator(".article-view .body"), violations, outside };
+}
+
+/** 「Open on X」のリンクが、ID から組み立てた行き先を、新しいタブで開く */
+async function expectOpenOnX(page: Page, context: BrowserContext, body: Locator) {
+  const link = body.getByRole("link", { name: "Open on X" });
+  await expect(link).toBeVisible();
+  await expect(link).toHaveAttribute("href", `https://x.com/i/web/status/${X_POST_ID}`);
+  await expect(link).toHaveAttribute("target", "_blank");
+  await expect(link).toHaveAttribute("rel", "noopener noreferrer nofollow");
+  // 押せる。開いた先は、外へ出さずに偽物で返す
+  await context.route("https://x.com/**", (route) =>
+    route.fulfill({ contentType: "text/html", body: "<title>x</title>" }),
+  );
+  const [popup] = await Promise.all([page.waitForEvent("popup"), link.click()]);
+  await expect(popup).toHaveURL(`https://x.com/i/web/status/${X_POST_ID}`);
+  await popup.close();
+}
+
+test("X の投稿の引用（公式の形）は、引用をそのまま出し、その下に Open on X のリンクを出す", async ({
+  page,
+  context,
+}) => {
+  const { body, violations, outside } = await openXPost(
+    page,
+    context,
+    `<p>前の段落</p><blockquote data-x-post="${X_POST_ID}"><p>投稿の文</p>— 名前 (@user) ` +
+      `<a href="https://twitter.com/user/status/${X_POST_ID}?s=20">2026年11月1日</a></blockquote>` +
+      "<blockquote><p>ふつうの引用</p></blockquote>",
+  );
+  const quote = body.locator(".x-post blockquote");
+  await expect(quote).toHaveText(`投稿の文— 名前 (@user) 2026年11月1日`);
+  // 引用の中のリンクは、そのまま
+  await expect(quote.getByRole("link", { name: "2026年11月1日" })).toHaveAttribute(
+    "href",
+    `https://twitter.com/user/status/${X_POST_ID}?s=20`,
+  );
+  // 印のない引用は、今までどおり（リンクを足さない）
+  await expect(body.locator("blockquote")).toHaveCount(2);
+  await expect(body.locator("blockquote", { hasText: "ふつうの引用" })).not.toHaveAttribute(
+    "class",
+    /x-post/,
+  );
+  await expect(body.getByRole("link", { name: "Open on X" })).toHaveCount(1);
+  // X を含め、外へは何も取りにいかない
+  expect(outside).toEqual([]);
+  expect(await violations()).toEqual([]);
+  await expectOpenOnX(page, context, body);
+});
+
+test("文もリンクの文字も空の X の投稿の引用でも、Open on X のリンクが見えて押せる", async ({
+  page,
+  context,
+}) => {
+  const { body, violations, outside } = await openXPost(
+    page,
+    context,
+    // fixture の B（文が空）の形
+    `<p>前の段落</p><blockquote data-x-post="${X_POST_ID}"><p></p> — (@user) ` +
+      `<a href="https://x.com/user/status/${X_POST_ID}"></a></blockquote><p>後の段落</p>`,
+  );
+  await expect(body.getByText("後の段落")).toBeVisible();
+  await expect(body.getByRole("link", { name: "Open on X" })).toHaveCount(1);
+  expect(outside).toEqual([]);
+  expect(await violations()).toEqual([]);
+  await expectOpenOnX(page, context, body);
+});
+
+test("リンクだけの X の投稿の引用も、本文として出し、Open on X のリンクを出す", async ({
+  page,
+  context,
+}) => {
+  // fixture の D の形。中に見える文字がなくても、要約に替えない
+  const { body, outside } = await openXPost(
+    page,
+    context,
+    `<blockquote data-x-post="${X_POST_ID}"><a href="https://x.com/user/status/${X_POST_ID}"></a></blockquote>`,
+  );
+  await expect(page.locator(".article-view .summary")).toHaveCount(0);
+  expect(outside).toEqual([]);
+  await expectOpenOnX(page, context, body);
 });
 
 test.describe("スマホ", () => {
