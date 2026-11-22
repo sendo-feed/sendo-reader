@@ -4,6 +4,7 @@
  *
  * HTTP の中継（proxy.ts）と同じく、書き換えない。
  * - 一覧（sendo-paths.ts）のパスだけを中継する。ほかの Upgrade は断る
+ * - X の投稿の隔離フレームのホスト名への Upgrade は、パスによらず断る（docs/decisions/embeds.md の 3）
  * - ヘッダーは、接続先で決まる Host と、1 回の接続にだけ関わるもの（Connection と Upgrade は
  *   残す）を除いて、そのまま渡す。Origin、Cookie、Sec-WebSocket-* もそのまま
  * - sendo が 101 を返したら、そのあとは両方向のバイト列を、フレームを読まずにそのまま流す。
@@ -18,6 +19,7 @@ import { request as httpRequest } from "node:http";
 import { request as httpsRequest } from "node:https";
 import type { Duplex } from "node:stream";
 import { isSendoPath } from "../sendo-paths";
+import { isXEmbedHost } from "../x-embed-origin";
 
 /** 中継から除くヘッダー（Connection と Upgrade は、Upgrade そのものなので残す） */
 const SKIPPED = new Set([
@@ -40,6 +42,8 @@ export const HANDSHAKE_TIMEOUT_MS = 10 * 1000;
 export type UpgradeRelayOptions = {
   /** テストで短くする */
   handshakeTimeoutMs?: number;
+  /** X の投稿の隔離フレームのオリジン（config.ts で確かめたもの）。未設定なら null */
+  xEmbedOrigin?: string | null;
 };
 
 export type UpgradeRelay = {
@@ -114,6 +118,10 @@ export function createUpgradeRelay(
   }
 
   function relay(request: IncomingMessage, socket: Duplex, head: Buffer): void {
+    if (options.xEmbedOrigin && isXEmbedHost(request.headers.host, options.xEmbedOrigin)) {
+      reject(socket, 404, "Not Found");
+      return;
+    }
     let url: URL;
     try {
       url = new URL(request.url ?? "/", "http://reader.invalid");

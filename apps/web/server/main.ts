@@ -7,12 +7,15 @@
  * - PORT：受けるポート。既定は 8080
  * - HOST：受けるアドレス。既定は 0.0.0.0
  * - DIST_DIR：画面のビルドの置き場。既定は、このバンドル（dist-server/server.mjs）から見た ../dist
+ * - X_EMBED_ORIGIN：X の投稿の隔離フレームのオリジン（https）。なければ、この機能は出ない
+ *   （docs/decisions/embeds.md の 3）
  */
 import { fileURLToPath } from "node:url";
 import { serve } from "@hono/node-server";
+import { contentSecurityPolicy } from "../security-headers";
 import { createReaderServer } from "./app";
-import { loadAssets } from "./assets";
-import { type Env, parsePort, parseSendoUrl } from "./config";
+import { loadAssets, withXEmbedOrigin } from "./assets";
+import { type Env, parsePort, parseSendoUrl, parseXEmbedOrigin } from "./config";
 import { createUpgradeRelay } from "./websocket";
 
 /** 止めるときに、処理中のリクエストを待つ上限 */
@@ -25,8 +28,18 @@ function distDirectory(env: Env): string {
 async function main(env: Env): Promise<void> {
   const sendoOrigin = parseSendoUrl(env.SENDO_URL);
   const port = parsePort(env.PORT);
-  const assets = await loadAssets(distDirectory(env));
-  const app = createReaderServer({ assets, sendoOrigin });
+  const xEmbedOrigin = parseXEmbedOrigin(env.X_EMBED_ORIGIN);
+  const loaded = await loadAssets(distDirectory(env));
+  // 設定があるときは、index.html と sw.js を書き換えて、読者に新しい版として届ける
+  const assets =
+    xEmbedOrigin === null
+      ? loaded
+      : await withXEmbedOrigin(
+          loaded,
+          xEmbedOrigin,
+          contentSecurityPolicy("production", { xEmbedOrigin }),
+        );
+  const app = createReaderServer({ assets, sendoOrigin, xEmbedOrigin });
 
   const server = serve(
     { fetch: app.fetch, port, hostname: env.HOST?.trim() || "0.0.0.0" },
@@ -35,11 +48,12 @@ async function main(env: Env): Promise<void> {
         address: info.address,
         port: info.port,
         sendo: sendoOrigin,
+        xEmbed: xEmbedOrigin,
       }),
   );
 
   // sendo の通知（WebSocket）の Upgrade を中継する（websocket.ts）
-  const relay = createUpgradeRelay(sendoOrigin);
+  const relay = createUpgradeRelay(sendoOrigin, { xEmbedOrigin });
   server.on("upgrade", relay.handle);
 
   let stopping = false;
