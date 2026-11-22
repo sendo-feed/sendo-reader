@@ -10,6 +10,8 @@ import {
   type WorkerMessage,
 } from "./protocol";
 
+export { PROTOCOL_VERSION, ProtocolMismatchError } from "./protocol";
+
 type Remote<T> = {
   [K in keyof T]: T[K] extends (...args: infer A) => infer R
     ? (...args: A) => Promise<Awaited<R>>

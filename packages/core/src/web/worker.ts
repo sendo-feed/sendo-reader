@@ -1,5 +1,5 @@
 import type { Database } from "../db/database";
-import type { Table } from "../models";
+import { TABLES, type Table } from "../models";
 import { DEFAULT_PREFETCH_CONTENTS, ReaderCore } from "../reader";
 import { SyncScheduler, type SyncStatus } from "../sync/scheduler";
 import { SyncUpdates, syncUpdatesUrl, type WebSocketLike } from "../sync/updates";
@@ -9,6 +9,8 @@ import {
   isMethod,
   type Method,
   type PeerMessage,
+  PROTOCOL_VERSION,
+  ProtocolMismatchError,
   READER_METHODS,
   type ReaderMethod,
   type Result,
@@ -32,6 +34,8 @@ export interface ReaderWorkerOptions {
    * 定期同期だけで動く（テストで使う）
    */
   webSocket?: ((url: string) => WebSocketLike) | null;
+  /** ワーカーどうしのやり取りの版の番号。既定は PROTOCOL_VERSION（テストで、版の違うタブを作る） */
+  protocolVersion?: number;
 }
 
 /** 代表として受けた呼び出しを覚えておく数 */
@@ -47,6 +51,10 @@ const VISIBLE_SYNC_AFTER_MS = 30_000;
  * タブからの呼び出しを BroadcastChannel で代表に渡す。代表のタブが閉じたら、待っていたワーカー
  * が代表を引き継ぎ、渡したまま答えの来ていない呼び出しを、新しい代表に送り直す（呼び出しは
  * どれも冪等にしてある）。
+ *
+ * 版の違うタブが混ざることがあるので、ワーカーどうしのやり取りには版の番号を付ける
+ * （docs/decisions/local-first.md の 5）。代表の番号を知るまで頼まず、合わなければ頼まずに
+ * ProtocolMismatchError で返す。代表も、番号の合わない頼みは処理せずに同じ失敗を返す。
  */
 export function runReaderWorker(options: ReaderWorkerOptions = {}): void {
   const namespace = options.namespace ?? "sendo-reader";
@@ -57,6 +65,7 @@ export function runReaderWorker(options: ReaderWorkerOptions = {}): void {
     addEventListener(type: "online", listener: () => void): void;
   };
   const workerId = crypto.randomUUID();
+  const version = options.protocolVersion ?? PROTOCOL_VERSION;
   const peers = new BroadcastChannel(`${namespace}:peers`);
 
   let leader: { core: ReaderCore; scheduler: SyncScheduler; updates: SyncUpdates | null } | null =
@@ -65,9 +74,12 @@ export function runReaderWorker(options: ReaderWorkerOptions = {}): void {
   let seeking = false;
   /** 開いた（開いている途中の）DB */
   let opened: Promise<Database> | null = null;
-  /** 今の代表（自分が代表でないとき） */
-  let currentLeader: string | null = null;
-  /** 代表に渡して、まだ答えの来ていない呼び出し */
+  /**
+   * 今の代表（自分が代表でないとき）と、その番号（名乗らなければ null）。分かるまでは null で、
+   * 自分のタブからの呼び出しを送らずに待たせる
+   */
+  let currentLeader: { id: string; version: number | null } | null = null;
+  /** 代表に渡して（番号を知るまでは、渡すのを待って）、まだ答えの来ていない呼び出し */
   const forwarded = new Map<number, Extract<TabMessage, { type: "call" }>>();
   /**
    * 代表として受けた呼び出し（同じ呼び出しを二重に動かさない）。タブは代表が替わったと思うと
@@ -94,8 +106,14 @@ export function runReaderWorker(options: ReaderWorkerOptions = {}): void {
           toTab({ type: "result", id: message.id, result }),
         );
       } else {
-        forwarded.set(message.id, message);
-        toPeers({ ...message, from: workerId });
+        if (currentLeader !== null && currentLeader.version !== version) {
+          // 番号の合わない代表には頼まない（処理されると、形の違う頼みで誤って動きうる）
+          toTab({ type: "result", id: message.id, result: mismatch(currentLeader.version) });
+        } else {
+          forwarded.set(message.id, message);
+          // 代表の番号を知るまでは送らない（名乗ったときに送る）
+          if (currentLeader !== null) forward(message);
+        }
         // 前に代表になれなかったら、もう一度なろうとする（ほかのタブが代表なら、その代表が
         // 答え、こちらはロックを待つだけ）
         seekLeadership();
@@ -110,7 +128,23 @@ export function runReaderWorker(options: ReaderWorkerOptions = {}): void {
     const message = event.data;
     switch (message.type) {
       case "call": {
-        if (leader === null || !isMethod(message.method)) return;
+        if (leader === null) return;
+        // 番号の違う頼みと、番号のない頼み（この決まりより前の版のタブ）は処理しない。
+        // 相手から見た相手（代表）の番号を返す
+        if (message.version !== version) {
+          toPeers({ type: "result", to: message.from, id: message.id, result: mismatch(version) });
+          return;
+        }
+        if (!isMethod(message.method)) {
+          const error = { name: "Error", message: "unknown method" };
+          toPeers({
+            type: "result",
+            to: message.from,
+            id: message.id,
+            result: { ok: false, error },
+          });
+          return;
+        }
         const key = `${message.from}:${message.id}`;
         if (handled.has(key)) return;
         handled.add(key);
@@ -127,25 +161,26 @@ export function runReaderWorker(options: ReaderWorkerOptions = {}): void {
         if (message.to !== workerId || !forwarded.delete(message.id)) return;
         toTab({ type: "result", id: message.id, result: message.result });
         return;
+      // 番号の合わない代表の知らせは、画面に渡さない（形や意味が違いうる）
       case "changed":
-        if (leader === null) toTab(message);
+        if (leader === null && message.version === version) {
+          toTab({ type: "changed", tables: message.tables });
+        }
         return;
       case "status":
-        if (leader === null) toTab(message);
+        if (leader === null && message.version === version) {
+          toTab({ type: "status", status: message.status });
+        }
         return;
       case "leader":
-        // 代表が替わったときだけ、答えの来ていない呼び出しを新しい代表に送り直す
-        // （同じ代表が名乗り直しただけなら、すでに受けているので送らない）
-        if (leader === null && message.leaderId !== currentLeader) {
-          currentLeader = message.leaderId;
-          for (const call of forwarded.values()) toPeers({ ...call, from: workerId });
+        // 代表が替わったときだけ動く（同じ代表が名乗り直しただけなら、すでに受けているので
+        // 送り直さない）
+        if (leader === null && message.leaderId !== currentLeader?.id) {
+          onLeader({ id: message.leaderId, version: message.version ?? null });
         }
         return;
       case "hello":
-        if (leader !== null) {
-          toPeers({ type: "leader", leaderId: workerId });
-          toPeers({ type: "status", status: leader.scheduler.status });
-        }
+        if (leader !== null) announce(leader);
         return;
       case "visible":
         if (leader !== null) onVisible(leader);
@@ -161,6 +196,37 @@ export function runReaderWorker(options: ReaderWorkerOptions = {}): void {
 
   toPeers({ type: "hello", from: workerId });
   seekLeadership();
+
+  function mismatch(peerVersion: number | null): Result {
+    return { ok: false, error: serializeError(new ProtocolMismatchError(peerVersion, version)) };
+  }
+
+  function forward(call: Extract<TabMessage, { type: "call" }>): void {
+    toPeers({ ...call, version, from: workerId });
+  }
+
+  /** 名乗る。今の同期の様子も送る（あとから開いたタブ、代表が替わったタブのため） */
+  function announce(current: { scheduler: SyncScheduler }): void {
+    toPeers({ type: "leader", version, leaderId: workerId });
+    toPeers({ type: "status", version, status: current.scheduler.status });
+  }
+
+  /** ほかのタブが代表になった（または、代表を知った） */
+  function onLeader(next: { id: string; version: number | null }): void {
+    const replaced = currentLeader !== null;
+    currentLeader = next;
+    if (next.version !== version) {
+      // 番号が合わない。答えの来ていない呼び出しも、待たせずに失敗で返す
+      const result = mismatch(next.version);
+      for (const call of forwarded.values()) toTab({ type: "result", id: call.id, result });
+      forwarded.clear();
+      return;
+    }
+    // 前の代表が書き込んでから答える前に閉じたかもしれず、番号の合わない代表の間の知らせも
+    // 渡していないので、すべての表を読み直させる（同期の様子は、新しい代表が名乗るときに送る）
+    if (replaced) toTab({ type: "changed", tables: [...TABLES] });
+    for (const call of forwarded.values()) forward(call);
+  }
 
   /**
    * 代表になれるまで待つ。なったら、ワーカーが終わるまでロックを持ち続ける。
@@ -207,7 +273,7 @@ export function runReaderWorker(options: ReaderWorkerOptions = {}): void {
     const scheduler = new SyncScheduler(core, {
       onStatus: (status: SyncStatus) => {
         toTab({ type: "status", status });
-        toPeers({ type: "status", status });
+        toPeers({ type: "status", version, status });
         updates?.update(status);
       },
     });
@@ -228,7 +294,7 @@ export function runReaderWorker(options: ReaderWorkerOptions = {}): void {
     core.onChange((tables) => {
       const changed: Table[] = [...tables];
       toTab({ type: "changed", tables: changed });
-      toPeers({ type: "changed", tables: changed });
+      toPeers({ type: "changed", version, tables: changed });
     });
     const current = { core, scheduler, updates };
 
@@ -239,7 +305,9 @@ export function runReaderWorker(options: ReaderWorkerOptions = {}): void {
       );
     }
     forwarded.clear();
-    toPeers({ type: "leader", leaderId: workerId });
+    announce(current);
+    // ほかの代表から引き継いだときは、すべての表を読み直させる（ほかの代表から替わったときと同じ）
+    if (currentLeader !== null) toTab({ type: "changed", tables: [...TABLES] });
     toTab({ type: "status", status: scheduler.status });
     scheduler.requestNow();
     updates?.update(scheduler.status);

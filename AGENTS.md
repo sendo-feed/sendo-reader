@@ -41,7 +41,7 @@ Sendo の公式リーダー。`packages/core`（同期エンジン）と `apps/w
   - `src/sync/`：差分同期（`pull.ts`）と操作キュー（`ops.ts` が操作ごとの「手元への反映・送り方・戻し方」、`queue.ts` が積む・まとめる・送る）。操作は手元への反映と同じトランザクションで積み、同期で届いた行の上に重ね直す。どの操作も冪等にする
   - `src/sync/scheduler.ts`：いつ同期するか（起動時、書き込みのあと、一定の間隔、sendo の通知を受けたとき、届かなければ間隔を延ばしてやり直す）
   - `src/sync/updates.ts`：sendo の通知（WebSocket の `/api/v1/sync/updates`）。代表のタブのワーカーだけがつなぎ、知らせを受けたら同期を頼む。閉じるコードごとの動きは sendo の `sync.md` の 9 と OpenAPI の説明に従う。つながらなくても定期同期で動く
-  - `src/web/`：Web の実装（UI には依存しない）。`worker.ts` はタブごとの Dedicated Worker で動き、Web Locks で決めた代表だけが DB（`database.ts`、opfs-sahpool）と同期を持ち、ほかのタブは BroadcastChannel で代表に頼む。`client.ts` は画面から使う窓口（`@sendo-reader/core/web`）。やり取りの形は `protocol.ts`
+  - `src/web/`：Web の実装（UI には依存しない）。`worker.ts` はタブごとの Dedicated Worker で動き、Web Locks で決めた代表だけが DB（`database.ts`、opfs-sahpool）と同期を持ち、ほかのタブは BroadcastChannel で代表に頼む。`client.ts` は画面から使う窓口（`@sendo-reader/core/web`）。やり取りの形は `protocol.ts`。版の違うタブが混ざるので、頼める処理、引数、答え、知らせ（変わった表、同期の様子）の形か意味を変えたら、`PROTOCOL_VERSION` を上げる（`docs/decisions/local-first.md` の 5）
   - `src/web/image-cache.ts`：画像のキャッシュ（Service Worker が入れる `sendo-images`）の名前と上限、消す・減らす処理。ログアウトとユーザーの切り替えで、手元の DB と一緒に消す
   - opfs-sahpool は、開くのに失敗すると既定でデータを消す。`preserveOnInitFailure` を外さない
   - `test/web/*.browser.test.ts`：Web の実装のテスト。Vitest のブラウザーモードで Chromium の中で動く（初回は `pnpm --filter @sendo-reader/core exec playwright install chromium`）。ワーカーからは、ページの偽の sendo に BroadcastChannel で話す（`test/web/fake-bridge.ts`）

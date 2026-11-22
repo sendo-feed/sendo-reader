@@ -1,6 +1,13 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
 import type { ApiError, SyncStatus, Table } from "../../src";
-import { connectReader, type ReaderClient } from "../../src/web/client";
+import { TABLES } from "../../src/models";
+import {
+  connectReader,
+  PROTOCOL_VERSION,
+  ProtocolMismatchError,
+  type ReaderClient,
+} from "../../src/web/client";
+import type { PeerMessage } from "../../src/web/protocol";
 import { FakeSendo } from "../fake-sendo";
 import { serveFakeSendo } from "./fake-bridge";
 
@@ -22,8 +29,11 @@ function world() {
   const namespace = `test-${crypto.randomUUID()}`;
   const server = new FakeSendo();
   cleanups.push(serveFakeSendo(server, `${namespace}:fake-sendo`));
-  /** タブを開く。"failing" なら、DB を開けないワーカーにする */
-  const open = (kind: "ok" | "failing" = "ok"): Tab => {
+  /**
+   * タブを開く。"failing" なら、DB を開けないワーカーにする。"other-version" なら、やり取りの
+   * 版の番号が違うワーカー（版の違うタブ）にする
+   */
+  const open = (kind: "ok" | "failing" | "other-version" = "ok"): Tab => {
     // Vite はワーカーのオプションを、その場に書いた値からしか読めない
     const worker =
       kind === "ok"
@@ -31,10 +41,15 @@ function world() {
             type: "module",
             name: namespace,
           })
-        : new Worker(new URL("./failing-reader-worker.ts", import.meta.url), {
-            type: "module",
-            name: namespace,
-          });
+        : kind === "failing"
+          ? new Worker(new URL("./failing-reader-worker.ts", import.meta.url), {
+              type: "module",
+              name: namespace,
+            })
+          : new Worker(new URL("./other-version-reader-worker.ts", import.meta.url), {
+              type: "module",
+              name: namespace,
+            });
     cleanups.push(() => worker.terminate());
     const client = connectReader(worker);
     const tab: Tab = { worker, client, changes: [], statuses: [] };
@@ -47,7 +62,47 @@ function world() {
     server.signInAs();
     expect(await tab.client.restoreSession()).toBe(true);
   };
-  return { server, open, signIn };
+  /** この決まりより前の版の代表（番号を名乗らない）を開き、代表になるまで待つ */
+  const openLegacyLeader = async () => {
+    const worker = new Worker(new URL("./legacy-leader-worker.ts", import.meta.url), {
+      type: "module",
+      name: namespace,
+    });
+    cleanups.push(() => worker.terminate());
+    const received: PeerMessage[] = [];
+    await new Promise<void>((resolve) => {
+      worker.addEventListener("message", (event: MessageEvent) => {
+        if (event.data.type === "leading") resolve();
+        if (event.data.type === "received") received.push(event.data.message);
+      });
+    });
+    /** 番号を付けずに、ほかのワーカーに送る */
+    const post = (message: unknown) => worker.postMessage({ type: "post", message });
+    return { worker, received, post };
+  };
+  /** ワーカーどうしのチャンネルに、ページから加わる（この決まりより前の版のタブを真似る） */
+  const joinPeers = () => {
+    const channel = new BroadcastChannel(`${namespace}:peers`);
+    cleanups.push(() => channel.close());
+    const messages: PeerMessage[] = [];
+    channel.addEventListener("message", (event: MessageEvent<PeerMessage>) => {
+      messages.push(event.data);
+    });
+    return { channel, messages };
+  };
+  return { server, open, signIn, openLegacyLeader, joinPeers };
+}
+
+/** 版が合わない失敗で、相手の番号が peerVersion であることを確かめる */
+async function expectMismatch(call: Promise<unknown>, peerVersion: number | null) {
+  const error = await call.then(
+    () => {
+      throw new Error("失敗するはずが、成功した");
+    },
+    (e: unknown) => e,
+  );
+  expect(error).toBeInstanceOf(ProtocolMismatchError);
+  expect(error).toMatchObject({ peerVersion, version: PROTOCOL_VERSION });
 }
 
 describe("1 つのタブ", () => {
@@ -272,5 +327,140 @@ describe("DB を開けなかったとき", () => {
     const ok = open();
     await signIn(ok);
     expect(await failing.client.isSignedIn()).toBe(true);
+  });
+});
+
+describe("版の違うタブが混ざったとき", () => {
+  test("代表の番号が違うと、あとから開いたタブの呼び出しはすぐ失敗し、代表は処理しない", async () => {
+    const { open, signIn } = world();
+    const other = open("other-version");
+    await signIn(other);
+    await other.client.syncNow();
+
+    const tab = open();
+    await expectMismatch(tab.client.createFolder("Tech"), PROTOCOL_VERSION + 1);
+    await expectMismatch(tab.client.isSignedIn(), PROTOCOL_VERSION + 1);
+    expect(await other.client.listFolders()).toEqual([]);
+  });
+
+  test("代表が番号を名乗らない（この決まりより前の版）と、頼みを送らずにすぐ失敗し、その知らせも画面に渡さない", async () => {
+    const { open, openLegacyLeader, joinPeers } = world();
+    const legacy = await openLegacyLeader();
+    const tab = open();
+    await expectMismatch(tab.client.createFolder("Tech"), null);
+    await expectMismatch(tab.client.isSignedIn(), null);
+    expect(legacy.received).toEqual([]);
+
+    const { messages } = joinPeers();
+    legacy.post({ type: "changed", tables: ["folders"] });
+    legacy.post({ type: "status", status: { signedIn: true } });
+    await vi.waitFor(() => {
+      expect(messages.map((m) => m.type)).toEqual(["changed", "status"]);
+    });
+    // 知らせが届いていれば、そのあとの呼び出しの答えより先に、画面に渡っている
+    await expectMismatch(tab.client.countPending(), null);
+    expect(tab.changes).toEqual([]);
+    expect(tab.statuses).toEqual([]);
+  });
+
+  test("番号のない頼み（この決まりより前の版のタブ）と番号の違う頼みは、代表が処理せずに失敗を返す", async () => {
+    const { open, signIn, joinPeers } = world();
+    const leader = open();
+    await signIn(leader);
+    const { channel, messages } = joinPeers();
+    const call = { type: "call", method: "createFolder", from: "old-tab" } as const;
+    channel.postMessage({ ...call, id: 1, args: ["Tech", crypto.randomUUID()] });
+    channel.postMessage({
+      ...call,
+      version: PROTOCOL_VERSION + 1,
+      id: 2,
+      args: ["News", crypto.randomUUID()],
+    });
+
+    await vi.waitFor(() => {
+      expect(messages.filter((m) => m.type === "result")).toHaveLength(2);
+    });
+    for (const id of [1, 2]) {
+      expect(messages).toContainEqual({
+        type: "result",
+        to: "old-tab",
+        id,
+        result: {
+          ok: false,
+          error: expect.objectContaining({
+            name: "ProtocolMismatchError",
+            peerVersion: PROTOCOL_VERSION,
+          }),
+        },
+      });
+    }
+    expect(await leader.client.listFolders()).toEqual([]);
+  });
+
+  test("答えを待っている間に代表が閉じ、番号の合わない代表に替わったら、待っていた呼び出しもすぐ失敗する", async () => {
+    const { server, open } = world();
+    const first = open();
+    expect(await first.client.isSignedIn()).toBe(false);
+    // 次の代表を待つ順：番号の違うタブ、そのあとに頼むタブ
+    const other = open("other-version");
+    // 番号の違うタブは、代表に頼めない（ワーカーが動き、代表のロックを待ち始めたことを確かめる）
+    await expect(other.client.isSignedIn()).rejects.toMatchObject({
+      name: "ProtocolMismatchError",
+      peerVersion: PROTOCOL_VERSION,
+    });
+    const tab = open();
+    expect(await tab.client.isSignedIn()).toBe(false);
+
+    let release = () => {};
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    // ログインを確かめている間は答えない
+    server.signInAs();
+    let holding = 0;
+    server.onRequest = async (path) => {
+      if (path === "GET /me") {
+        holding += 1;
+        await held;
+      }
+    };
+    const waiting = tab.client.restoreSession();
+    await vi.waitFor(() => expect(holding).toBeGreaterThan(0));
+    first.worker.terminate();
+    await expectMismatch(waiting, PROTOCOL_VERSION + 1);
+    release();
+  });
+
+  test("番号の合わない代表が閉じたら、代表を引き継いだタブにも、番号の合う代表に替わったタブにも、すべての表と同期の様子が届き、使える", async () => {
+    const { open, signIn, joinPeers } = world();
+    const other = open("other-version");
+    await signIn(other);
+    await other.client.syncNow();
+    const tabs = [open(), open()] as const;
+    for (const tab of tabs) await expectMismatch(tab.client.isSignedIn(), PROTOCOL_VERSION + 1);
+    tabs[0].statuses.length = 0;
+    tabs[1].statuses.length = 0;
+
+    // 番号の合わない代表の知らせは、画面に渡さない
+    const { messages } = joinPeers();
+    await other.client.createFolder("Tech");
+    await vi.waitFor(() => {
+      expect(messages).toContainEqual(expect.objectContaining({ type: "changed" }));
+    });
+    for (const tab of tabs) {
+      // 知らせが届いていれば、そのあとの呼び出しの答えより先に、画面に渡っている
+      await expectMismatch(tab.client.countPending(), PROTOCOL_VERSION + 1);
+      expect(tab.changes).toEqual([]);
+      expect(tab.statuses).toEqual([]);
+    }
+
+    other.worker.terminate();
+    for (const tab of tabs) {
+      await vi.waitFor(() => {
+        expect(tab.changes).toContainEqual([...TABLES].sort());
+        expect(tab.statuses.at(-1)).toMatchObject({ signedIn: true });
+      });
+      expect((await tab.client.listFolders()).map((f) => f.name)).toEqual(["Tech"]);
+    }
   });
 });
