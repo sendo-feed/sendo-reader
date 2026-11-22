@@ -558,8 +558,9 @@
     }
     showOriginal = !showOriginal;
     actionsOpen = false;
-    // 訳文に戻したとき、訳した本文が取れていなければ取り直す（つながっていれば読める）
-    if (!showOriginal && translatedState === "unavailable" && articleId !== null) {
+    // 訳文に戻したとき、訳した本文が取れていなければ取り直す（オフラインのときは、つながったら
+    // 取り直すので、ここでは取らない）
+    if (!showOriginal && translatedState === "unavailable" && online && articleId !== null) {
       void loadTranslatedContent(articleId, openedTranslation.translatedAt);
     }
     onviewchange();
