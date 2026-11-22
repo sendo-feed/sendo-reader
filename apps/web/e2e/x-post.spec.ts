@@ -966,6 +966,12 @@ test.describe("読書位置（覚えた高さ）", () => {
     await expect(post(page, 1).locator(".reserved")).toHaveCount(0);
     await expect(post(page, 1).locator("blockquote")).toBeAttached();
     await expect(post(page, 1).locator("blockquote")).not.toHaveAttribute("hidden", "");
+    // 元の引用を出している投稿の大きさは、次に位置を書くときに書かない
+    await page.evaluate(() => window.scrollBy({ top: 10 }));
+    await letRemember(page);
+    const state = (await articleState(page)) as { xPosts?: unknown } | undefined;
+    expect(state).toBeDefined();
+    expect(state?.xPosts).toBeUndefined();
   });
 
   test("設定を切ってあれば、戻ったときに枠を取らずに元の引用を出す", async ({ page, context }) => {

@@ -201,9 +201,9 @@ export class XPostLoader {
   }
 
   /**
-   * 出した投稿の大きさ（履歴の項目に覚える）。いま、ウィジェットか覚えた高さの枠を出している投稿の
-   * ものだけ（元の引用を出している投稿の大きさを書くと、位置と食い違う）。上限を超えたら、新しく
-   * 覚えたものを残す
+   * 出した投稿の大きさ（履歴の項目に覚える）。元の引用に戻した投稿のものは、書かない（元の引用の
+   * 高さで決まった位置と、食い違う）。本文から消えた投稿のものは残る（その本文を出すときにだけ当たる）。
+   * 上限を超えたら、新しく覚えたものを残す
    */
   sizes(): XPostSize[] {
     return [...this.#sizes.values()].slice(-MAX_X_POST_SIZES);
@@ -217,8 +217,10 @@ export class XPostLoader {
     if (remembered !== undefined && this.#enabled && this.#online) {
       if (frameWidth(element) === remembered.width) post.reserved = remembered.height;
     }
-    // 枠を取らなかった投稿は、元の引用を出すので、大きさを覚えておかない
+    // 枠を取らなかった投稿は、元の引用を出すので、大きさを覚えておかない。枠を取ったら、覚え直す
+    // （位置が決まる前に本文が替わり、同じ投稿を登録し直したとき）
     if (post.reserved === null) this.#sizes.delete(id);
+    else if (remembered !== undefined) this.#sizes.set(id, remembered);
     this.#posts.add(post);
     this.#byElement.set(element, post);
     this.#observer?.observe(element);
