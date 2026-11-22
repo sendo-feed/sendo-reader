@@ -1,7 +1,7 @@
 # ローカルファースト
 
 - 状態：提案中
-- 関連：[UI とツール](ui.md)、[コンテナ版](container.md)、[アカウントの画面](account.md)、[画像](images.md)、sendo の[差分同期](https://github.com/sendo-feed/sendo/blob/main/docs/decisions/sync.md)・[ユーザーと認証](https://github.com/sendo-feed/sendo/blob/main/docs/decisions/accounts.md)・[古い記事の片付け](https://github.com/sendo-feed/sendo/blob/main/docs/decisions/retention.md)、[技術構成](https://github.com/sendo-feed/sendo/blob/main/docs/tech-deck.md)（方針 03・06）
+- 関連：[UI とツール](ui.md)、[コンテナ版](container.md)、[アカウントの画面](account.md)、[画像](images.md)、[記事の中の X の投稿](embeds.md)、sendo の[差分同期](https://github.com/sendo-feed/sendo/blob/main/docs/decisions/sync.md)・[ユーザーと認証](https://github.com/sendo-feed/sendo/blob/main/docs/decisions/accounts.md)・[古い記事の片付け](https://github.com/sendo-feed/sendo/blob/main/docs/decisions/retention.md)、[技術構成](https://github.com/sendo-feed/sendo/blob/main/docs/tech-deck.md)（方針 03・06）
 
 ## 決定
 
@@ -71,8 +71,9 @@
 セッションのクッキーは HttpOnly なので、ページの JS からは読めない。それでも、XSS などでページに他人の JS が入ると、ページを開いている間はセッションで API を使われ（クッキーは同じオリジンへのリクエストに付く）、手元の記事や購読のデータも読まれる。そこで、次の対策を取る。
 
 - **CSP を厳しくする。** 本番（reader のコンテナのサーバー）と、手元の Vite の dev サーバー・preview で、画面のすべての応答に付ける。
-  - `default-src 'none'`、`script-src 'self' 'wasm-unsafe-eval'`（wasm のため）、`worker-src 'self'`、`connect-src 'self'`、`img-src 'self' data:`、`style-src 'self'`、`manifest-src 'self'`、`base-uri 'none'`、`form-action 'none'`、`frame-ancestors 'none'`、`object-src 'none'`
+  - `default-src 'none'`、`script-src 'self' 'wasm-unsafe-eval'`（wasm のため）、`worker-src 'self'`、`connect-src 'self'`、`img-src 'self' data:`、`style-src 'self'`、`manifest-src 'self'`、`base-uri 'none'`、`form-action 'none'`、`frame-ancestors 'none'`、`object-src 'none'`。X の投稿の隔離フレームのオリジンが設定してあるときだけ、`frame-src <隔離フレームのオリジン>` を足す
   - インラインのスクリプトと `eval` を許さない。ほかのオリジンへの通信を許さないので、手元のデータを `fetch` で外に送れない
+  - 例外は、X の投稿の隔離フレームのオリジン 1 つだけを、`frame-src` で iframe に許すこと（[記事の中の X の投稿](embeds.md)）。X のスクリプトは隔離フレームの中で動き、reader のオリジンでは動かない。隔離フレームに渡すのは、投稿の ID とテーマだけにする
   - 通知の WebSocket は、同じオリジンの `wss:`（手元は `ws:`）につなぐ。CSP Level 3 では、`connect-src 'self'` が同じホストとポートの `ws:` ／ `wss:` も許すので、CSP は緩めない。本番の CSP のまま、Playwright（Chromium）でつながることを確かめる。`'self'` を `wss:` に当てないブラウザでは接続が止められ、定期同期だけで動く
   - 記事のサムネイルやフィードのアイコンのために、`img-src` は緩めない。画像は sendo が中継し、同じオリジン（`/api/v1/images`）から読む（[画像](images.md)）
   - ほかに緩める必要が出たら、そのときに範囲を決めてこのファイルを直す

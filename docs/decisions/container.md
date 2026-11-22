@@ -1,7 +1,7 @@
 # コンテナ版
 
 - 状態：提案中
-- 関連：[UI とツール](ui.md)（4。配信と中継、手元の開発）、[ローカルファースト](local-first.md)（6 のログイン、「記事の本文」、「ページの守り」）、[アカウントの画面](account.md)（5 の OAuth の許可の画面）、sendo の[テックスタック](https://github.com/sendo-feed/sendo/blob/main/docs/decisions/tech-stack.md)（2）・[コンテナ版](https://github.com/sendo-feed/sendo/blob/main/docs/decisions/container.md)・[MCP サーバー](https://github.com/sendo-feed/sendo/blob/main/docs/decisions/mcp.md)（3・4）
+- 関連：[UI とツール](ui.md)（4。配信と中継、手元の開発）、[記事の中の X の投稿](embeds.md)（3。隔離フレームの配り方と設定）、[ローカルファースト](local-first.md)（6 のログイン、「記事の本文」、「ページの守り」）、[アカウントの画面](account.md)（5 の OAuth の許可の画面）、sendo の[テックスタック](https://github.com/sendo-feed/sendo/blob/main/docs/decisions/tech-stack.md)（2）・[コンテナ版](https://github.com/sendo-feed/sendo/blob/main/docs/decisions/container.md)・[MCP サーバー](https://github.com/sendo-feed/sendo/blob/main/docs/decisions/mcp.md)（3・4）
 
 sendo-reader は、[sendo のコンテナ版](https://github.com/sendo-feed/sendo/blob/main/docs/decisions/container.md)と並べて、コンテナだけで動かす。reader が公式の画面と中継を提供し、ログインや MCP の OAuth の許可も同じオリジンで扱う。
 
@@ -12,7 +12,7 @@ sendo-reader は、[sendo のコンテナ版](https://github.com/sendo-feed/send
    - タグと CPU は sendo にそろえる。`main` に入るたびに `main` と `sha-<コミット>` のタグで出し、amd64 と arm64 の両方で作る。版のタグは、sendo が版を切るときに一緒に決める
    - イメージは公開する（sendo のイメージと同じ）。使う人は `docker login` せずに取ってこられる
    - sendo の `compose.yaml` に reader のサービスを並べ、`docker compose pull && docker compose up -d` で sendo と一緒に更新する。reader は、sendo のヘルスチェックが通ってから始める（`depends_on` の `condition: service_healthy`）
-2. **外からは、reader のオリジン 1 つに見せる。**
+2. **外からは、reader のオリジン 1 つに見せる。** 例外は、X の投稿の隔離フレームのホスト名（下の 4。[記事の中の X の投稿](embeds.md)の 3）で、画面と sendo のどちらにも使わない
    - 外に出すのは reader のコンテナのポート（`compose.yaml` では `127.0.0.1:8080:8080`）だけにする。TLS は、sendo と同じく、手前に置くリバースプロキシ（Caddy など）や Cloudflare Tunnel で終える。コンテナは HTTP だけを受ける
    - sendo のコンテナは、ポートを外に出さない。reader のコンテナが、compose の中のネットワークで呼ぶ
    - sendo の `PUBLIC_URL` と `READER_URL` には、どちらも reader のオリジン（例：`https://reader.example.com`）を入れる。`PUBLIC_URL` は欠かせない。コンテナは HTTP だけを受けるので、ないと sendo から見える URL は、中継の先の URL（`http://sendo:8787`）か、ホスト名は合っていても `http` のままのオリジンになり、ログインの戻り先や `__Host-` のクッキーが合わない
@@ -33,9 +33,11 @@ sendo-reader は、[sendo のコンテナ版](https://github.com/sendo-feed/send
    - reader のコンテナが止まるときは、中継している WebSocket も切る。ブラウザはつなぎ直す（[ローカルファースト](local-first.md)の 3）
    - 応答の状態、ヘッダー（複数の `Set-Cookie` を含む）、本文をそのまま返す。本文は溜めずに流す（MCP、OPML の書き出しなど）
    - sendo の応答には、画面のセキュリティのヘッダーを足さない
-   - 中継の先は設定 `SENDO_URL` で変えられる（既定は compose の中の `http://sendo:8787`）。reader のコンテナに、ほかの設定は要らない（自分のオリジンも知らなくてよい）
+   - 中継の先は設定 `SENDO_URL` で変えられる（既定は compose の中の `http://sendo:8787`）。reader のコンテナに、ほかに欠かせない設定はない（自分のオリジンも知らなくてよい）
+   - X の投稿の隔離フレームを使うときだけ、設定 `X_EMBED_ORIGIN`（隔離フレームのオリジン）を足す。このホスト名への要求には、隔離フレームのページだけを返し、sendo には中継しない。未設定なら、この機能は出ない（[記事の中の X の投稿](embeds.md)の 3）
 5. **静的なファイルは、次のように返す。**
-   - `apps/web/security-headers.ts` のヘッダーを、静的なファイルのすべての応答に付ける。手元の Vite の dev サーバー・preview も同じところから付け、別に書き写さない
+   - `apps/web/security-headers.ts` のヘッダーを、静的なファイルのすべての応答に付ける。手元の Vite の dev サーバー・preview も同じところから付け、別に書き写さない。例外は、隔離フレームのホスト名への応答で、隔離フレームのページのヘッダーを付ける（[記事の中の X の投稿](embeds.md)の 2）
+   - `X_EMBED_ORIGIN` を設定したときは、起動時に、メモリーに読んだ `index.html` に隔離フレームのオリジンの `<meta>` を足し、CSP に `frame-src` を足し、`sw.js` の中の `index.html` の版の印を書き換える。書き換える場所が見つからなければ起動しない。未設定なら、ビルドしたものをそのまま返す（[記事の中の X の投稿](embeds.md)の 3）
    - キャッシュは、毎回確かめさせる（`Cache-Control: public, max-age=0, must-revalidate` と ETag で、変わっていなければ 304）。Service Worker（`sw.js`）が新しい版を見つけられるように、長く持たせない
    - JS、CSS、wasm などは、ブラウザが受けられれば圧縮して返す（brotli か gzip）
 6. **reader のコンテナのヘルスチェック（イメージの `HEALTHCHECK`）は、reader 自身が返す `/`（`index.html`）を見る。** `/healthz` は sendo に中継するので、reader のコンテナで見ると sendo の生死を見ることになる。reader のためだけのパスは足さない（sendo のパスと重なるおそれを増やさない）。
@@ -44,7 +46,7 @@ sendo-reader は、[sendo のコンテナ版](https://github.com/sendo-feed/send
    - sendo は、ページ本文の抽出と言語判定を常に動かし、欠いたままでは起動しない（sendo の[コンテナ版](https://github.com/sendo-feed/sendo/blob/main/docs/decisions/container.md)の 1〜3）。reader は、全文の取得を、いつでも使える機能として出す
    - `/features` は、この決定を実装する PR で使わなくする。その PR を含む reader のイメージが GHCR の `main` に出たら、sendo は `/features` を消してよい（sendo の[コンテナ版](https://github.com/sendo-feed/sendo/blob/main/docs/decisions/container.md)の 3）
    - 消したあとに、古い版の画面（Service Worker に残った版）が `/features` を呼んでも、404 を「全文を使えない」と受けて、全文の取得の操作を出さないだけで動き続ける。新しい版に切り替われば（[UI とツール](ui.md)の 5）、出る
-9. **テストは Node で動かす。** 中継するパスの振り分け、中継（ヘッダー、`Set-Cookie`、リダイレクト、ストリーム、WebSocket の Upgrade）、静的なファイルのヘッダーを、偽の sendo を相手に Vitest で確かめる。CI では、PR でイメージが作れて動くことを確かめ、`main` に入ったらイメージを出す（sendo と同じ形）。
+9. **テストは Node で動かす。** 中継するパスの振り分け、中継（ヘッダー、`Set-Cookie`、リダイレクト、ストリーム、WebSocket の Upgrade）、静的なファイルのヘッダー、`X_EMBED_ORIGIN` を設定したときの値の確かめ・振り分け・書き換えを、偽の sendo を相手に Vitest で確かめる。CI では、PR でイメージが作れて動くことを確かめ、`main` に入ったらイメージを出す（sendo と同じ形）。
 
 ## 理由
 
