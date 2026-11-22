@@ -458,6 +458,8 @@ test("リンクだけの X の投稿の引用も、本文として出し、Open 
     context,
     `<blockquote data-x-post="${X_POST_ID}"><a href="https://x.com/user/status/${X_POST_ID}"></a></blockquote>`,
   );
+  await expect(body.getByRole("link", { name: "Open on X" })).toBeVisible();
+  // 本文が出たあとで、要約に替わっていない
   await expect(page.locator(".article-view .summary")).toHaveCount(0);
   expect(outside).toEqual([]);
   await expectOpenOnX(page, context, body);

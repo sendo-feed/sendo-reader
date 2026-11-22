@@ -167,6 +167,22 @@ describe("X の投稿の印（data-x-post）", () => {
     ]);
   });
 
+  test("属性の名前の大文字、同じ属性の 2 つめ、文字参照は、ブラウザーと同じに読む", () => {
+    expect(parseContent('<BLOCKQUOTE DATA-X-POST="123">a</BLOCKQUOTE>')).toEqual([
+      { tag: "blockquote", xPost: "123", children: ["a"] },
+    ]);
+    // 同じ名前は、最初のものを採る
+    expect(parseContent('<blockquote data-x-post="x" data-x-post="123">a</blockquote>')).toEqual([
+      { tag: "blockquote", children: ["a"] },
+    ]);
+    expect(parseContent('<blockquote data-x-post="123" data-x-post="x">a</blockquote>')).toEqual([
+      { tag: "blockquote", xPost: "123", children: ["a"] },
+    ]);
+    expect(parseContent('<blockquote data-x-post="&#49;&#50;">a</blockquote>')).toEqual([
+      { tag: "blockquote", xPost: "12", children: ["a"] },
+    ]);
+  });
+
   test("blockquote でない要素の印と、ほかの data-* 属性は通さない", () => {
     const nodes = parseContent(
       `<p data-x-post="${ID}">a</p><div data-x-post="${ID}">b</div><q data-x-post="${ID}">c</q>` +
