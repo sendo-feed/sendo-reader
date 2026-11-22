@@ -920,7 +920,8 @@ test.describe("読書位置（覚えた高さ）", () => {
       { n: 2, height: 320 },
       { n: 3, height: 400 },
     ]) {
-      const box = post(page, n).locator(".reserved");
+      // 表示範囲に入っている枠は、すぐに読み込みを始める（読み込み中の iframe も、同じ高さを取る）
+      const box = post(page, n).locator(".reserved, iframe");
       await expect(box).toHaveCount(1);
       expect((await box.boundingBox())?.height).toBe(height);
       await expect(post(page, n).locator("blockquote")).toBeHidden();
@@ -945,7 +946,9 @@ test.describe("読書位置（覚えた高さ）", () => {
     await leaveToSettings(page);
     await page.goBack();
     await expect(page.locator(".article-view h1")).toHaveText("X の投稿を引いた記事");
-    await expect(post(page, 3).locator(".reserved")).toHaveCount(1);
+    // 表示範囲に入っている枠は、すぐに読み込みを始める（読み込み中の iframe も、同じ高さを取る）
+    await expect(post(page, 3).locator(".reserved, iframe")).toHaveCount(1);
+    await expect(post(page, 3).locator("blockquote")).toHaveAttribute("hidden", "");
     await expect
       .poll(async () => Math.abs((await paragraphTop(page, 20)) - before))
       .toBeLessThanOrEqual(16);
