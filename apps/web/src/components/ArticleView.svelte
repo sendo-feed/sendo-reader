@@ -393,6 +393,9 @@
     translateError = null;
     try {
       await reader.client.requestTranslation(id);
+      // 受け付けられた。訳文がすぐ届いて、core が頼んだ記事を忘れたあとに読み直しても、このタブで
+      // 頼んだ記事として訳文に替える（頼んだ印を読めるかどうかに頼らない）
+      if (articleId === id) requestSeen = true;
     } catch (error) {
       if (articleId === id) translateError = describeTranslationError(error);
     } finally {

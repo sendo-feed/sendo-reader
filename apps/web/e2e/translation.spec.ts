@@ -358,6 +358,22 @@ test.describe("Translate", () => {
     await expect(view.getByRole("alert")).toHaveCount(0);
   });
 
+  test("押したときにはもう訳し終えていても、訳文に替える", async ({ page, context }) => {
+    const { server, article, view } = await open(page, context);
+    // 手元はまだ queued のまま、sendo ではほかの端末が訳し終えている（translation_exists が返る）
+    server.setTranslation(article.id, {
+      language: "en",
+      status: "translated",
+      title: "フィーチャートグル",
+      summary: null,
+      translatedAt: new Date().toISOString(),
+    });
+    await view.getByRole("button", { name: "Translate", exact: true }).click();
+    await expect(view.getByRole("heading", { level: 1 })).toHaveText("フィーチャートグル");
+    await expect(view.locator("header .translation")).toHaveText("・ EN · Translated");
+    await expect(view.getByRole("alert")).toHaveCount(0);
+  });
+
   test("断られたら理由を出し、また押せる", async ({ page, context }) => {
     const { server, view } = await open(page, context);
     server.translationRequestError = { status: 503, code: "translation_unavailable" };
