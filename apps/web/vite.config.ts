@@ -2,7 +2,6 @@ import { execSync } from "node:child_process";
 import { existsSync, readFileSync, statSync } from "node:fs";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import path from "node:path";
-import type { Duplex } from "node:stream";
 import { svelte } from "@sveltejs/vite-plugin-svelte";
 import { defineConfig, type Plugin } from "vite";
 import { VitePWA } from "vite-plugin-pwa";
@@ -53,22 +52,14 @@ function xEmbedHostMiddleware(headers: Record<string, string>): Middleware {
   };
 }
 
-/** 隔離フレームのホスト名への WebSocket の Upgrade は断る（Vite の中継より先に） */
-function rejectXEmbedUpgrades(
-  httpServer:
-    | {
-        prependListener: (
-          event: "upgrade",
-          listener: (req: IncomingMessage, socket: Duplex) => void,
-        ) => unknown;
-      }
-    | null
-    | undefined,
-): void {
-  httpServer?.prependListener("upgrade", (req: IncomingMessage, socket: Duplex) => {
-    if (X_EMBED_ORIGIN === null || !isXEmbedHost(req.headers.host, X_EMBED_ORIGIN)) return;
-    socket.end("HTTP/1.1 404 Not Found\r\nConnection: close\r\nContent-Length: 0\r\n\r\n");
-  });
+/**
+ * 隔離フレームのホスト名への要求は、sendo に中継しない（WebSocket の Upgrade も）。Vite の中継の
+ * bypass で false を返すと、Vite が 404 を返して、中継しない
+ */
+function bypassXEmbedHost(req: IncomingMessage): false | undefined {
+  return X_EMBED_ORIGIN !== null && isXEmbedHost(req.headers.host, X_EMBED_ORIGIN)
+    ? false
+    : undefined;
 }
 
 /** preview が返すビルドのファイルのうち、ほかのパスの代わりに index.html を返すものか（SPA） */
@@ -98,7 +89,6 @@ function securityHeadersPlugin(): Plugin[] {
     {
       name: "sendo-reader:security-headers",
       configureServer(server) {
-        rejectXEmbedUpgrades(server.httpServer);
         server.middlewares.use(xEmbedHostMiddleware(developmentHeaders));
         server.middlewares.use((_req, res, next) => {
           for (const [name, value] of Object.entries(developmentHeaders)) {
@@ -108,7 +98,6 @@ function securityHeadersPlugin(): Plugin[] {
         });
       },
       async configurePreviewServer(server) {
-        rejectXEmbedUpgrades(server.httpServer);
         server.middlewares.use(xEmbedHostMiddleware(productionHeaders));
         server.middlewares.use((_req, res, next) => {
           for (const [name, value] of Object.entries(productionHeaders)) res.setHeader(name, value);
@@ -304,7 +293,8 @@ export default defineConfig({
       // ws: true で、sendo の通知（WebSocket の Upgrade）も中継する
       SENDO_NAVIGATION_DENYLIST.map((pattern) => [
         pattern.source,
-        { target: SENDO_DEV_URL, ws: true },
+        // preview も、この中継を引き継ぐ。隔離フレームのホスト名への要求は中継しない
+        { target: SENDO_DEV_URL, ws: true, bypass: bypassXEmbedHost },
       ]),
     ),
   },

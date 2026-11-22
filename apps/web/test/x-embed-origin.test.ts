@@ -23,6 +23,8 @@ describe("値の形", () => {
     "http://localhost:5173",
     "http://127.0.0.1",
     "http://127.0.0.1:4173/",
+    "https://localhost",
+    "https://127.0.0.1:8443",
   ])("開発用の %s は、dev サーバーと preview だけが受け付ける", (value) => {
     expect(toXEmbedOrigin(value, { allowDevelopment: true })).toBe(value.replace(/\/$/, ""));
     expect(toXEmbedOrigin(value, { allowDevelopment: false })).toBeNull();
@@ -43,6 +45,14 @@ describe("値の形", () => {
     "https://*.example",
     "https://embed.example.",
     "https://-embed.example",
+    "https://embed.example/.",
+    "https://embed.example/%2e",
+    "https://embed.example/a/..",
+    "https:embed.example",
+    "https:/embed.example",
+    "https://embed.example:",
+    "https://a..b",
+    "https://-a-.example",
     "javascript:alert(1)",
     "data:text/html,x",
     "",

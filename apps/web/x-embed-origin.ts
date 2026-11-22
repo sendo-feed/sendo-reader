@@ -15,8 +15,11 @@ export const X_EMBED_ORIGIN_META = "sendo-x-embed-origin";
 /** 開発のときだけ（dev サーバーと preview）受け付ける http のホスト名 */
 const DEVELOPMENT_HOSTNAMES = new Set(["localhost", "127.0.0.1"]);
 
-/** ホスト名に使ってよい文字（ASCII の英小文字・数字・ハイフン・点） */
-const HOSTNAME = /^[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?$/;
+/** ホスト名のラベル（ASCII の英小文字・数字・ハイフン。先頭と末尾はハイフンでない） */
+const LABEL = /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/;
+
+/** 値の形（スキーム、//、ホストとポート（空のポートなし）、あれば末尾の / だけ） */
+const ORIGIN_TEXT = /^https?:\/\/[^/?#@\\\s]*[^/?#@\\\s:]\/?$/i;
 
 export type XEmbedOriginOptions = {
   /** 開発用の http://localhost と http://127.0.0.1 を受け付けるか（dev サーバーと preview だけ） */
@@ -28,12 +31,16 @@ export type XEmbedOriginOptions = {
  * 形が合わなければ null。
  *
  * - https で、パス・クエリ・ハッシュ・認証情報がない
- * - ホスト名は、英小文字・数字・ハイフン・点だけ（* などの記号、末尾の点、IPv6 は受けない）
- * - 開発用には、http の localhost と 127.0.0.1（ホスト名は完全一致。ポートは問わない）
+ * - ホスト名は、英小文字・数字・ハイフンのラベルを点でつないだもの（* などの記号、空のラベル、
+ *   末尾の点、IPv6 は受けない）
+ * - 開発用には、http の localhost と 127.0.0.1（ホスト名は完全一致。ポートは問わない）。開発用でない
+ *   ときは、https でも localhost と 127.0.0.1 は受けない（コンテナのヘルスチェックや、手元で reader を
+ *   開くホスト名と重なる）
  */
 export function toXEmbedOrigin(value: string, options: XEmbedOriginOptions): string | null {
-  // URL として読むと消えてしまう、空のクエリ・ハッシュ・認証情報の印も受けない
-  if (/[?#@\\\s]/.test(value)) return null;
+  // URL として読むと消えてしまう、空のクエリ・ハッシュ・認証情報の印や、整えると消えるパス
+  // （/.、/a/..）も受けない
+  if (!ORIGIN_TEXT.test(value)) return null;
   let url: URL;
   try {
     url = new URL(value);
@@ -41,10 +48,12 @@ export function toXEmbedOrigin(value: string, options: XEmbedOriginOptions): str
     return null;
   }
   if (url.username !== "" || url.password !== "" || url.pathname !== "/") return null;
-  if (!HOSTNAME.test(url.hostname)) return null;
-  if (url.protocol === "https:") return url.origin;
+  if (!url.hostname.split(".").every((label) => LABEL.test(label))) return null;
+  const development = DEVELOPMENT_HOSTNAMES.has(url.hostname);
+  if (url.protocol === "https:")
+    return development && !options.allowDevelopment ? null : url.origin;
   if (url.protocol === "http:" && options.allowDevelopment) {
-    return DEVELOPMENT_HOSTNAMES.has(url.hostname) ? url.origin : null;
+    return development ? url.origin : null;
   }
   return null;
 }
