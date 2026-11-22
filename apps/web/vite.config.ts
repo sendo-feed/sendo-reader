@@ -305,7 +305,12 @@ export default defineConfig({
   // 読むので、Vite の事前バンドルに入れない
   worker: { format: "es" },
   optimizeDeps: { exclude: ["@sqlite.org/sqlite-wasm"] },
+  // 開発用の隔離フレームのオリジン（http://localhost と http://127.0.0.1 の、reader と違うほう）を
+  // 設定したときは、127.0.0.1 で待ち受ける。localhost の名前は、環境によって IPv6（::1）だけを指し、
+  // 127.0.0.1 に届かないため。ブラウザーは、localhost を 127.0.0.1 にも引くので、reader にも届く
+  ...(X_EMBED_ORIGIN?.startsWith("http:") ? { preview: { host: "127.0.0.1" } } : {}),
   server: {
+    ...(X_EMBED_ORIGIN?.startsWith("http:") ? { host: "127.0.0.1" } : {}),
     // 手元では、本番の reader のコンテナのサーバーと同じパス（sendo-paths.ts）を、sendo の pnpm dev
     // （ポート 8787）に中継する（docs/decisions/ui.md の 4）。^ で始まるキーは、Vite が正規表現として
     // パスとクエリに当てる

@@ -15,10 +15,15 @@ export type RunningPreview = { stop: () => Promise<void> };
 
 function status(port: number): Promise<number> {
   return new Promise((resolve) => {
-    const request = httpRequest(`http://localhost:${port}/`, (response) => {
-      response.resume();
-      resolve(response.statusCode ?? 0);
-    });
+    // preview は 127.0.0.1 で待ち受ける（vite.config.ts）。reader のホスト名（localhost）で頼む
+    const request = httpRequest(
+      `http://127.0.0.1:${port}/`,
+      { headers: { host: `localhost:${port}` } },
+      (response) => {
+        response.resume();
+        resolve(response.statusCode ?? 0);
+      },
+    );
     request.on("error", () => resolve(0));
     request.end();
   });

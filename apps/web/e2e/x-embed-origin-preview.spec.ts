@@ -19,10 +19,11 @@ const BUILT_SW = readFileSync(fileURLToPath(new URL("../dist/sw.js", import.meta
 
 type Answer = { status: number; headers: IncomingHttpHeaders; body: string };
 
-/** localhost の preview に、Host を決めて送る */
+/** preview に、Host を決めて送る */
 function send(host: string, path: string, method = "GET"): Promise<Answer> {
   return new Promise((resolve, reject) => {
-    const request = httpRequest(`http://localhost:${PORT}${path}`, {
+    // preview は 127.0.0.1 で待ち受ける（vite.config.ts）。Host は、引数で決める
+    const request = httpRequest(`http://127.0.0.1:${PORT}${path}`, {
       method,
       setHost: false,
       headers: { host },
@@ -46,7 +47,8 @@ function send(host: string, path: string, method = "GET"): Promise<Answer> {
 /** WebSocket の Upgrade を送り、返った状態を読む */
 function upgrade(host: string, path: string): Promise<number> {
   return new Promise((resolve, reject) => {
-    const request = httpRequest(`http://localhost:${PORT}${path}`, {
+    // preview は 127.0.0.1 で待ち受ける（vite.config.ts）。Host は、引数で決める
+    const request = httpRequest(`http://127.0.0.1:${PORT}${path}`, {
       setHost: false,
       headers: {
         host,
