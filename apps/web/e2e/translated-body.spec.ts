@@ -210,7 +210,8 @@ test("訳した要約で待っている間に訳文が替わったら、新し�
   const view = page.locator(".article-view");
   await expect(view.getByRole("heading", { level: 1 })).toHaveText("古い訳のタイトル");
   await expect(view.locator(".summary")).toHaveText("訳した要約。");
-  expect(server.translationContentRequests).toEqual([article.id]);
+  // 取っている間も訳した要約を出すので、取りにいったことは、届くのを待って確かめる
+  await expect.poll(() => server.translationContentRequests).toEqual([article.id]);
 
   // 同期で新しい訳した時刻が届いたら、タイトルと本文をまとめて新しい訳文に替える（取り直さない）
   await page.getByRole("button", { name: "Sync now" }).click();
