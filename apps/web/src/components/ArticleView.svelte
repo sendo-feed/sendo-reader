@@ -34,6 +34,8 @@
   let missing = $state(false);
   let scroller = $state<HTMLElement>();
   let toolbarHeight = $state(0);
+  /** 本文（見出しと本文）。X のウィジェットの中を押したあと、フォーカスをここに戻す */
+  let contentElement = $state<HTMLElement>();
 
   /**
    * 本文の中の X の投稿を読み込む順番と時間（docs/decisions/embeds.md の 4）。隔離フレームの
@@ -51,6 +53,27 @@
   let positioned = $state(false);
 
   $effect(() => xPosts?.connect());
+
+  /**
+   * X のウィジェットの中を押すと、フォーカスが iframe に移り、キーボードの操作（j ／ k ／ Esc など）が
+   * reader に届かなくなる。reader の窓からフォーカスが外れたとき、移った先がウィジェットの iframe なら、
+   * 本文にフォーカスを戻す（embeds.md の 6）。押した操作そのものは、取り消さない。ほかの窓やタブへ
+   * 移ったときは、何もしない。
+   *
+   * 戻すのは、blur を受けた処理が終わってから（ブラウザーが iframe にフォーカスを移し終える前に戻すと、
+   * 文書の上では本文にフォーカスがあるのに、キーの入力は iframe に届いたままになる）
+   */
+  $effect(() => {
+    if (xPosts === null) return;
+    const loader = xPosts;
+    const onBlur = () => {
+      const active = document.activeElement;
+      if (!(active instanceof HTMLIFrameElement) || !loader.contains(active)) return;
+      setTimeout(() => contentElement?.focus({ preventScroll: true }), 0);
+    };
+    window.addEventListener("blur", onBlur);
+    return () => window.removeEventListener("blur", onBlur);
+  });
 
   /** 表示範囲は、スクロールする欄（狭い画面ではページ全体）から、ツールバーに隠れる分を除いたところ */
   $effect(() => {
@@ -842,7 +865,7 @@
     </div>
 
     {#key articleId}
-      <div class="content" class:fade-in={fadeIn}>
+      <div class="content" class:fade-in={fadeIn} tabindex="-1" bind:this={contentElement}>
         <header>
           <p class="meta">
             <a class="feed" href={feedHref} onclick={(e) => handleLink(e, feedHref)}>
@@ -1073,6 +1096,11 @@
       opacity: 0;
       transform: translateY(0.375rem);
     }
+  }
+
+  /* フォーカスを戻すための受け皿（tabindex="-1"。Tab では止まらない）。枠は出さない */
+  .content:focus {
+    outline: none;
   }
 
   .content {

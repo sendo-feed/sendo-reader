@@ -42,20 +42,33 @@
 
 <div class="x-post" bind:this={element}>
   {#if post !== null && post.src !== null}
-    {#key post.attempt}
-      <iframe
-        src={post.src}
-        sandbox="allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox"
-        allow="fullscreen"
-        referrerpolicy="no-referrer"
-        title="X の投稿"
-        class:shown
-        style:height={boxHeight === null ? undefined : `${boxHeight}px`}
-        onload={(event) => {
-          if (event.currentTarget instanceof HTMLIFrameElement) post?.hello(event.currentTarget);
-        }}
-      ></iframe>
-    {/key}
+    <div class="frame" class:shown>
+      {#key post.attempt}
+        <iframe
+          src={post.src}
+          sandbox="allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox"
+          allow="fullscreen"
+          referrerpolicy="no-referrer"
+          title="X の投稿"
+          style:height={boxHeight === null ? undefined : `${boxHeight}px`}
+          onload={(event) => {
+            if (event.currentTarget instanceof HTMLIFrameElement) post?.hello(event.currentTarget);
+          }}
+        ></iframe>
+      {/key}
+      {#if post.height !== null && post.covered}
+        <!--
+          透明な覆い（embeds.md の 6）。iframe の中のタッチは reader に届かないので、覆いの上の
+          スワイプとスクロールを reader が受ける。押すと外れる（その押した操作は、中に届かない）
+        -->
+        <button
+          type="button"
+          class="cover"
+          aria-label="X の投稿を操作する"
+          onclick={() => post?.uncover()}
+        ></button>
+      {/if}
+    </div>
   {:else if boxHeight !== null}
     <!-- 覚えた高さの空の枠。表示範囲に入ったら、ここで読み込む -->
     <div class="reserved" style:height={`${boxHeight}px`}></div>
@@ -83,17 +96,33 @@
   }
 
   /* 幅は本文に合わせる（X のウィジェットは 550px で止まる）。出るまでは、場所を取らない */
+  .frame {
+    position: relative;
+    max-width: 550px;
+  }
+
+  .frame.shown {
+    margin-bottom: 0.5em;
+  }
+
   iframe {
     display: block;
     width: 100%;
-    max-width: 550px;
     height: 0;
     margin: 0;
     border: 0;
   }
 
-  iframe.shown {
-    margin-bottom: 0.5em;
+  /* ウィジェットと同じ大きさの、透明な覆い。iframe の高さが変わっても、ついていく */
+  .cover {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    cursor: pointer;
   }
 
   /* 出たときの iframe と同じ場所を取る */
