@@ -177,7 +177,9 @@ export interface UnreadCounts {
 }
 
 /** 手元の DB の表。変わったことを画面に知らせるときに使う */
-export type Table = "folders" | "feeds" | "articles" | "settings" | "savedPages";
+export const TABLES = ["folders", "feeds", "articles", "settings", "savedPages"] as const;
+
+export type Table = (typeof TABLES)[number];
 
 /**
  * 端末の種類。設定は、この種類ごとに sendo に預ける（docs/decisions/settings.md）。どちらとして

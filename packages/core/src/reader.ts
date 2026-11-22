@@ -61,6 +61,7 @@ import {
   type SavedPage,
   type SettingItem,
   type SettingsChange,
+  TABLES,
   type Table,
   type TranslatedContent,
   type UnreadCounts,
@@ -123,13 +124,7 @@ const CONTENT_STORAGE_LIMIT_KEY = "content.storageLimit";
  */
 const LAST_OPENED_KEY = "content.lastOpened";
 
-const ALL_TABLES: ReadonlySet<Table> = new Set<Table>([
-  "folders",
-  "feeds",
-  "articles",
-  "settings",
-  "savedPages",
-]);
+const ALL_TABLES: ReadonlySet<Table> = new Set<Table>(TABLES);
 
 export interface ReaderCoreOptions {
   db: Database;
