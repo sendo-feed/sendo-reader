@@ -21,6 +21,9 @@
 
   // reader のテーマとそろえる（違うと、描画のあとに白い四角が出る）
   document.documentElement.style.colorScheme = theme;
+  // 枠が中身より低い間に、スクロールバーで幅が縮むと、ウィジェットがその幅で組まれ、高さが枠の高さで
+  // 変わってしまう。スクロールさせない（高さは、reader が枠に付ける）
+  document.documentElement.style.overflow = "hidden";
   document.body.style.margin = "0";
   const container = document.getElementById("post");
   if (container === null) return;
@@ -88,7 +91,7 @@
             conversation: "none",
             theme,
           }),
-        ).then((element) => (element ? rendered() : fail()), fail);
+        ).then((element) => (element instanceof Element ? rendered() : fail()), fail);
       } catch {
         fail();
       }

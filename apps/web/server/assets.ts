@@ -101,20 +101,24 @@ export async function loadAssets(directory: string): Promise<Assets> {
 
 /**
  * X の投稿の隔離フレームのページ（apps/web/x-embed の index.html と embed.js。docs/decisions/embeds.md
- * の 2・3）を、起動するときにメモリーに読む。画面のビルド（dist）とは別に置き、reader のホスト名では
- * 返さず、Service Worker の precache にも入れない。隔離フレームのホスト名の / と /embed.js で返す
+ * の 2・3）。隔離フレームのホスト名の / と /embed.js で返す。画面のビルド（dist）とは別に、サーバーの
+ * バンドルに取り込む（x-embed-page.ts）ので、reader のホスト名では返さず、Service Worker の precache
+ * にも入らない
  */
+export function xEmbedPageAssets(html: string, script: string): Assets {
+  const encoder = new TextEncoder();
+  return new Map([
+    ["/", toAsset("index.html", encoder.encode(html))],
+    ["/embed.js", toAsset("embed.js", encoder.encode(script))],
+  ]);
+}
+
+/** 隔離フレームのページを、置き場所から読む（テストと、バンドルしない手元の確かめ用） */
 export async function loadXEmbedPage(directory: string): Promise<Assets> {
-  const page = new Map<string, Asset>();
-  page.set(
-    "/",
-    toAsset("index.html", new Uint8Array(await readFile(path.join(directory, "index.html")))),
+  return xEmbedPageAssets(
+    await readFile(path.join(directory, "index.html"), "utf8"),
+    await readFile(path.join(directory, "embed.js"), "utf8"),
   );
-  page.set(
-    "/embed.js",
-    toAsset("embed.js", new Uint8Array(await readFile(path.join(directory, "embed.js")))),
-  );
-  return page;
 }
 
 /**

@@ -251,15 +251,71 @@ test("親でない窓からの挨拶と、形の違うメッセージは無視�
       target?.postMessage(data, origin);
     }
   }, EMBED);
-  // 親でない窓（隔離フレームの中の X の iframe）から、挨拶
-  const x = page
-    .frames()
-    .find((candidate) => candidate.url().startsWith("https://platform.twitter.com"));
-  await x?.evaluate(() => {
-    window.parent.postMessage({ type: "sendo:x-post:hello" }, "*");
-  });
+  // 親でない窓（reader と同じオリジンの、別のウィンドウ）から、挨拶。受けてしまうと、送り先が reader の
+  // オリジンになり、親に届くので見える
+  await context.route(`${READER}not-parent.html`, (route) =>
+    route.fulfill({
+      contentType: "text/html",
+      body: `<!doctype html><script>opener.frames[0].postMessage({ type: "sendo:x-post:hello" }, "${EMBED}"); document.title = "sent";</script>`,
+    }),
+  );
+  const [popup] = await Promise.all([
+    page.waitForEvent("popup"),
+    page.evaluate((url) => {
+      window.open(url);
+    }, `${READER}not-parent.html`),
+  ]);
+  await expect(popup).toHaveTitle("sent");
+  await popup.close();
   await page.waitForTimeout(300);
   expect(await messages(page)).toEqual([]);
+
+  // 親から正しい挨拶を送れば、届く（ページは動いている）
+  await page.evaluate((origin) => {
+    document
+      .querySelector("iframe")
+      ?.contentWindow?.postMessage({ type: "sendo:x-post:hello" }, origin);
+  }, EMBED);
+  await expect.poll(() => messages(page)).toEqual([{ type: "sendo:x-post:rendered", height: 220 }]);
+});
+
+test("挨拶が 2 回来たら、最後の結果を送り直す", async ({ page, context }) => {
+  await routeX(context, "fake");
+  const frame = await openFrame(page, `#id=${ID}&theme=light`);
+  await createTweetCalled(frame);
+  await settle(frame, "element");
+  await expect.poll(() => messages(page)).toEqual([{ type: "sendo:x-post:rendered", height: 220 }]);
+  await page.evaluate((origin) => {
+    document
+      .querySelector("iframe")
+      ?.contentWindow?.postMessage({ type: "sendo:x-post:hello" }, origin);
+  }, EMBED);
+  await expect
+    .poll(() => messages(page))
+    .toEqual([
+      { type: "sendo:x-post:rendered", height: 220 },
+      { type: "sendo:x-post:rendered", height: 220 },
+    ]);
+});
+
+test("枠が中身より低くても、スクロールバーで入れ物の幅が縮まない", async ({ page, context }) => {
+  await routeX(context, "fake");
+  const frame = await openFrame(page, `#id=${ID}&theme=light`);
+  await page.evaluate(() => {
+    const element = document.querySelector("iframe");
+    if (element) element.height = "50";
+  });
+  await createTweetCalled(frame);
+  await settle(frame, "element");
+  await expect.poll(() => messages(page)).toEqual([{ type: "sendo:x-post:rendered", height: 220 }]);
+  expect(
+    await frame.evaluate(() => ({
+      overflow: document.documentElement.style.overflow,
+      width: document.getElementById("post")?.getBoundingClientRect().width,
+      // 枠の幅 550px から、iframe の既定の枠線（左右 2px ずつ）を除いた幅。スクロールバーの分は縮まない
+      viewport: document.documentElement.clientWidth,
+    })),
+  ).toEqual({ overflow: "hidden", width: 546, viewport: 546 });
 });
 
 for (const [name, widgets, how] of [

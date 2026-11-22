@@ -1,6 +1,9 @@
 import { type ChildProcess, spawn } from "node:child_process";
+import { readFileSync } from "node:fs";
+import { request as httpRequest } from "node:http";
 import { fileURLToPath } from "node:url";
 import { expect, type Page, test } from "@playwright/test";
+import { xEmbedPageHeaders } from "../security-headers";
 import { FakeSendo, routeFakeSendo } from "./fake-sendo";
 
 /**
@@ -208,6 +211,52 @@ test("設定ありから設定なしに替えると、同じ時点で frame-src 
   await page.reload();
   expect(await metaOrigin(page)).toBeNull();
   expect(await framed(page)).toBe(false);
+});
+
+/** コンテナのサーバーに、Host を決めて送る */
+function send(host: string, path: string): Promise<{ status: number; csp: string; body: string }> {
+  return new Promise((resolve, reject) => {
+    const request = httpRequest(`http://127.0.0.1:${PORT}${path}`, {
+      setHost: false,
+      headers: { host },
+    });
+    request.on("response", (response) => {
+      const chunks: Buffer[] = [];
+      response.on("data", (chunk: Buffer) => chunks.push(chunk));
+      response.on("end", () =>
+        resolve({
+          status: response.statusCode ?? 0,
+          csp: String(response.headers["content-security-policy"] ?? ""),
+          body: Buffer.concat(chunks).toString(),
+        }),
+      );
+    });
+    request.on("error", reject);
+    request.end();
+  });
+}
+
+test("コンテナは、バンドルに取り込んだ隔離フレームのページを、隔離フレームのホスト名でだけ返す", async () => {
+  running = await startServer({ X_EMBED_ORIGIN: EMBED });
+  const html = readFileSync(
+    fileURLToPath(new URL("../x-embed/index.html", import.meta.url)),
+    "utf8",
+  );
+  const script = readFileSync(
+    fileURLToPath(new URL("../x-embed/embed.js", import.meta.url)),
+    "utf8",
+  );
+  for (const path of ["/", "/?from=reader"]) {
+    const page = await send("embed.test", path);
+    expect(page.status, path).toBe(200);
+    expect(page.body, path).toBe(html);
+    expect(page.csp).toBe(xEmbedPageHeaders()["Content-Security-Policy"]);
+  }
+  const embed = await send("embed.test", "/embed.js?v=1");
+  expect(embed.status).toBe(200);
+  expect(embed.body).toBe(script);
+  // reader のホスト名では返さない
+  expect((await send(`localhost:${PORT}`, "/embed.js")).body).not.toBe(script);
 });
 
 test("コンテナは、形の合わない X_EMBED_ORIGIN では、理由を出して起動しない", async () => {
