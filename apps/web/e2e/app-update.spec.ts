@@ -37,12 +37,26 @@ async function startServer(distDir: string): Promise<Running> {
   };
   child.stdout?.on("data", collect);
   child.stderr?.on("data", collect);
-  await expect.poll(() => output, { timeout: 10_000 }).toContain("sendo-reader is listening");
+  try {
+    await expect
+      .poll(
+        () => {
+          // 起動に失敗したら（ポートが埋まっている、など）、待たずに落とす
+          if (child.exitCode !== null) throw new Error(`server exited:\n${output}`);
+          return output;
+        },
+        { timeout: 20_000 },
+      )
+      .toContain("sendo-reader is listening");
+  } catch (error) {
+    child.kill("SIGKILL");
+    throw error;
+  }
   return { process: child, output: () => output };
 }
 
 async function stopServer(running: Running): Promise<void> {
-  if (running.process.exitCode !== null) return;
+  if (running.process.exitCode !== null || running.process.signalCode !== null) return;
   const exited = new Promise((resolve) => running.process.once("exit", resolve));
   running.process.kill("SIGTERM");
   await exited;
@@ -140,8 +154,11 @@ test("開いている画面も、新しい版の Service Worker に替わり、�
     )
     .toBe(true);
   // 前に出ている間は、読み込み直さない。次に前に出たときに読み込み直す
+  await page.waitForTimeout(500);
+  expect(loads).toBe(1);
   expect(await version(page)).toBe("a");
   await Promise.all([page.waitForEvent("load"), bringToFront(page)]);
+  expect(loads).toBe(2);
   expect(await version(page)).toBe("b");
 
   // サーバーを止めても、Service Worker が新しい版を返す
