@@ -142,6 +142,12 @@
     cursor: pointer;
   }
 
+  /* app.css のボタンの hover の色（button:hover:not(:disabled)）で、ウィジェットを塗らない */
+  .cover:hover:not(:disabled),
+  .cover:active {
+    background: transparent;
+  }
+
   /* 出たときの iframe と同じ場所を取る */
   .reserved {
     max-width: 550px;

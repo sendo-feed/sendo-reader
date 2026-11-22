@@ -1435,6 +1435,19 @@ test.describe("ウィジェットの上の覆いとフォーカス", () => {
     await expect(cover(page, 1)).toHaveCount(1);
     const frameBox = await post(page, 1).locator("iframe").boundingBox();
     expect(await cover(page, 1).boundingBox()).toEqual(frameBox);
+    // ポインターを重ねても、押している間も、透明のまま（ウィジェットを塗らない）
+    const transparent = "rgba(0, 0, 0, 0)";
+    const background = () =>
+      cover(page, 1).evaluate((node) => getComputedStyle(node).backgroundColor);
+    expect(await background()).toBe(transparent);
+    await cover(page, 1).hover();
+    expect(await background()).toBe(transparent);
+    if (frameBox === null) throw new Error("枠がない");
+    await page.mouse.down();
+    expect(await background()).toBe(transparent);
+    await page.mouse.move(0, 0);
+    await page.mouse.up();
+    await expect(cover(page, 1)).toHaveCount(1);
     // 読み込み中、失敗して元の引用を出しているときは、覆いはない
     await expect(post(page, 2).locator("iframe")).toHaveCount(1);
     await expect(cover(page, 2)).toHaveCount(0);
