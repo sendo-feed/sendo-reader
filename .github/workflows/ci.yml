@@ -12,11 +12,17 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
+# 静的な検査とテスト、画面を通したテスト（3 つに分ける）、Lighthouse を、別々の機械で並べて動かす。
+# 画面を通したテストは 1 つずつ動かす（時間を測るテストがあるため。playwright.config.ts）ので、
+# 1 台で全部を流すと 10 分ほどかかる。機械を分ければ、時間を測るテストもほかのテストと重ならない。
+# 最後の Check がすべての結果をまとめるので、マージに必須の検査は Check の 1 つにしておけばよい
 jobs:
-  check:
-    name: Check
+  changes:
+    name: Changes
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 5
+    outputs:
+      docs_only: ${{ steps.changes.outputs.docs_only }}
     steps:
       # pull_request では、マージコミットとその第1親（マージ先）を比べて、変わったファイルを見る
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -24,8 +30,7 @@ jobs:
           fetch-depth: 2
           persist-credentials: false
 
-      # PR で変わったのが Markdown だけなら、決定の文書の検査だけを動かし、残りの段は飛ばす。
-      # ジョブごと飛ばさないのは、Check をマージに必須の検査にしても、成功として残すため。
+      # PR で変わったのが Markdown だけなら、決定の文書の検査だけを動かし、残りのジョブは飛ばす。
       # main への push では、いつもすべてを動かす
       - name: Detect docs-only change
         id: changes
@@ -39,33 +44,42 @@ jobs:
             echo "::notice::変わったのは Markdown だけなので、決定の文書の検査だけを動かす"
           fi
 
-      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
-        if: steps.changes.outputs.docs_only != 'true'
-
-      # pnpm のキャッシュは pnpm がないと使えないので、文書だけのとき（pnpm を入れない）は使わない
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: .node-version
-          cache: ${{ steps.changes.outputs.docs_only != 'true' && 'pnpm' || '' }}
 
       - name: Check decision docs
         run: node scripts/check-decisions.mjs
 
+  static:
+    name: Lint and unit tests
+    needs: changes
+    if: needs.changes.outputs.docs_only != 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+
       - name: Install
-        if: steps.changes.outputs.docs_only != 'true'
         run: pnpm install --frozen-lockfile
 
       - name: Lint
-        if: steps.changes.outputs.docs_only != 'true'
         run: pnpm exec biome ci .
 
       - name: Typecheck
-        if: steps.changes.outputs.docs_only != 'true'
         run: pnpm typecheck
 
       # OpenAPI から生成した型を手で直していないか（写した openapi.json から作り直して比べる）
       - name: Check generated API types
-        if: steps.changes.outputs.docs_only != 'true'
         run: |
           pnpm --filter @sendo-reader/core api:generate
           if [ -n "$(git status --porcelain -- packages/core/src/api)" ]; then
@@ -76,46 +90,121 @@ jobs:
 
       # packages/core の Web のテスト（ワーカー、OPFS、タブの間のやり取り）は Chromium で動かす
       - name: Install Chromium for browser tests
-        if: steps.changes.outputs.docs_only != 'true'
         run: pnpm --filter @sendo-reader/core exec playwright install --with-deps chromium
 
       - name: Test
-        if: steps.changes.outputs.docs_only != 'true'
         run: pnpm test
 
       - name: Build
-        if: steps.changes.outputs.docs_only != 'true'
         run: pnpm build
 
       # 画面のスレッドの JS と、DB のワーカーの JS・wasm が予算に収まっているか
       # （docs/decisions/performance.md）
       - name: Size budget
-        if: steps.changes.outputs.docs_only != 'true'
         run: pnpm size
 
-      # 画面を通したテストと、起動から記事が出るまでの時間・操作の反応の関所
-      # （docs/decisions/performance.md）
-      - name: End-to-end tests
-        if: steps.changes.outputs.docs_only != 'true'
-        run: pnpm e2e
+  # 画面を通したテストと、起動から記事が出るまでの時間・操作の反応の関所
+  # （docs/decisions/performance.md）。テストのファイルを 3 つの機械に分けて動かす
+  e2e:
+    name: End-to-end tests (${{ matrix.shard }}/3)
+    needs: changes
+    if: needs.changes.outputs.docs_only != 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Chromium
+        run: pnpm --filter @sendo-reader/web exec playwright install --with-deps chromium
+
+      - name: Build
+        run: pnpm build
+
+      - name: End-to-end tests
+        run: pnpm e2e --shard=${{ matrix.shard }}/3
+
+      # 時間切れ（timeout-minutes）は取り消しになり failure() に当たらないので、cancelled() も見る
       - name: Upload Playwright results
-        if: failure() && steps.changes.outputs.docs_only != 'true'
+        if: failure() || cancelled()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: playwright-results
+          name: playwright-results-${{ matrix.shard }}
           path: apps/web/test-results/
           retention-days: 14
 
-      # 初回の読み込み（キャッシュなし）を Lighthouse で測って残す。上限は試作してから決める
+  # 初回の読み込み（キャッシュなし）を Lighthouse で測って残す。上限は試作してから決める
+  lighthouse:
+    name: Lighthouse
+    needs: changes
+    if: needs.changes.outputs.docs_only != 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Build
+        run: pnpm build
+
       - name: Lighthouse
-        if: steps.changes.outputs.docs_only != 'true'
         run: pnpm --filter @sendo-reader/web lighthouse
 
+      # 結果を置くディレクトリ（.lighthouseci）は . で始まるので、include-hidden-files を付けないと
+      # 何も上がらない
       - name: Upload Lighthouse results
-        if: always() && steps.changes.outputs.docs_only != 'true'
+        if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: lighthouse
           path: apps/web/.lighthouseci/
+          include-hidden-files: true
+          if-no-files-found: error
           retention-days: 14
+
+  # 上のジョブの結果をまとめる。どれかが失敗か取り消しなら落とす。Markdown だけの PR で飛ばした
+  # ジョブ（skipped）は、成功として扱う
+  check:
+    name: Check
+    needs: [changes, static, e2e, lighthouse]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check results
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          echo "結果：$RESULTS"
+          for result in $RESULTS; do
+            if [ "$result" != "success" ] && [ "$result" != "skipped" ]; then
+              echo "::error::失敗したか取り消されたジョブがある（$RESULTS）"
+              exit 1
+            fi
+          done

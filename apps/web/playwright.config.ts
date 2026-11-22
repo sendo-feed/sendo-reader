@@ -16,13 +16,16 @@ export default defineConfig({
   reporter: process.env.CI ? [["list"], ["github"]] : "list",
   use: {
     baseURL: "http://localhost:4173",
-    trace: "retain-on-failure",
+    // CI では、やり直す回（retries）だけトレースを録る。全部のテストで録ると、そのぶん CPU を使い、
+    // 遅くなる。手元はやり直さないので、失敗したテストのトレースを残す
+    trace: process.env.CI ? "on-first-retry" : "retain-on-failure",
   },
   projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
   webServer: {
     command: "pnpm exec vite preview --port 4173 --strictPort",
     port: 4173,
     reuseExistingServer: !process.env.CI,
-    env: { SENDO_DEV_URL: `http://127.0.0.1:${FAKE_UPDATES_PORT}` },
+    // E2E_QUIET_UPDATES_REFUSED：偽の通知のサーバーがないときの、中継の断りのログを出さない（vite.config.ts）
+    env: { SENDO_DEV_URL: `http://127.0.0.1:${FAKE_UPDATES_PORT}`, E2E_QUIET_UPDATES_REFUSED: "1" },
   },
 });
