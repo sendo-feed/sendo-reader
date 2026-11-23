@@ -9,8 +9,8 @@ const STATUS_LABELS: Record<TranslationStatus, string> = {
 
 /**
  * 元の言語と翻訳の状態を 1 つにしたラベル（docs/decisions/translation.md の 1）。`EN · Translated` など。
- * 翻訳のない記事は null。言語が判定できなかった記事（und）は、訳文がないあいだは出さず、
- * 訳しているときと訳したあとは、言語を省いて出す
+ * 翻訳のない記事は null。言語が判定できなかった記事（und）は、言語を省いて状態だけを出す
+ * （Untranslated、Translating、Translated。sendo は und の記事を queued にしないので、届いても出さない）
  */
 export function translationLabel(
   translation: ArticleTranslation | null | undefined,
@@ -18,11 +18,7 @@ export function translationLabel(
   // 版の違うタブが代表のときは、翻訳の項目のない記事が届くことがある（undefined）
   if (translation == null) return null;
   const status = STATUS_LABELS[translation.status];
-  if (translation.language === "und") {
-    return translation.status === "translating" || translation.status === "translated"
-      ? status
-      : null;
-  }
+  if (translation.language === "und") return translation.status === "queued" ? null : status;
   return `${translation.language.toUpperCase()} · ${status}`;
 }
 

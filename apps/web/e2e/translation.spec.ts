@@ -408,7 +408,7 @@ test.describe("Translate", () => {
     expect(server.translationRequests).toEqual([article.id]);
   });
 
-  test("und の untranslated の記事には出る。訳し済みと翻訳なしの記事には出ない", async ({
+  test("und の untranslated の記事には出て、Untranslated のラベルの横に並ぶ。訳し済みと翻訳なしの記事には出ない", async ({
     page,
     context,
   }) => {
@@ -438,10 +438,12 @@ test.describe("Translate", () => {
     const list = page.locator(".article-list");
     const view = page.locator(".article-view");
     const button = view.getByRole("button", { name: "Translate", exact: true });
-    await list.locator(".item").filter({ hasText: "und" }).click();
+    const undItem = list.locator(".item").filter({ hasText: "und" });
+    // 一覧の行にも、言語を省いた Untranslated を出す（まだ訳すかどうかを決めていない記事と見分ける）
+    await expect(undItem.locator(".translation")).toHaveText(/Untranslated/);
+    await undItem.click();
     await expect(view.getByRole("heading", { level: 1 })).toHaveText("und");
-    // ラベルは出ないが、その場所に Translate を出す
-    await expect(view.locator("header .translation")).toHaveCount(0);
+    await expect(view.locator("header .translation")).toHaveText("・ Untranslated");
     await expect(button).toBeVisible();
     for (const title of ["訳し済み", "日本語"]) {
       await list.locator(".item").filter({ hasText: title }).click();
