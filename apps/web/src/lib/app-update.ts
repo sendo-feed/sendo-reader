@@ -9,7 +9,11 @@
  * - 画面が前に出たときと、一定の間隔で、新しい版があるかを確かめる
  * - 新しい版に替わったら、画面が裏にある間か、次に前に出たときに、読み込み直す。
  *   読んでいる最中には、読み込み直さない
+ * - 前に出ている間は読み込み直さないので、新しい版に替わったことを画面に知らせ（onUpdateReady）、
+ *   利用者がその場で切り替えられるようにする
  */
+
+import { AUTHORIZE_PATH } from "./authorize";
 
 /** 開いたままのときに、新しい版を確かめる間隔 */
 export const UPDATE_CHECK_INTERVAL_MS = 60 * 60 * 1000;
@@ -37,6 +41,32 @@ export interface AppUpdateEnvironment {
    */
   canReload: () => boolean;
   setInterval: (fn: () => void, ms: number) => unknown;
+  /**
+   * 新しい版に替わったが、まだ読み込み直していない（替わるたびに呼ぶ）。画面は、前に出ている間、
+   * そのことを知らせる。読み込み直せば画面ごと替わるので、「もう待っていない」は知らせない
+   */
+  onUpdateReady?: () => void;
+}
+
+/**
+ * 読み込み直すと消えるものを出している画面のパス。設定（発行したトークン）、購読の管理（入力中の
+ * フォーム・取り込み結果）、ブックマークレットからの追加、OAuth の許可
+ */
+const KEEP_PATHS: readonly string[] = ["/settings", "/manage", "/add", AUTHORIZE_PATH];
+
+/** このパスの画面は、読み込み直してよいか（新しい版の知らせの Reload を出してよいか） */
+export function canReloadAt(pathname: string): boolean {
+  return !KEEP_PATHS.includes(pathname);
+}
+
+/**
+ * 新しい版の知らせの文。ホーム画面のアプリには読み込み直す操作がないので、開き直すよう伝える
+ * （docs/decisions/ui.md の 5）
+ */
+export function updateReadyMessage(standalone: boolean): string {
+  return standalone
+    ? "新しい版があります。Reload を押すか、アプリを開き直すと切り替わります。"
+    : "新しい版があります。Reload を押すか、ページを読み込み直すと切り替わります。";
 }
 
 export function watchAppUpdate(env: AppUpdateEnvironment): void {
@@ -63,6 +93,7 @@ export function watchAppUpdate(env: AppUpdateEnvironment): void {
       return;
     }
     pending = true;
+    env.onUpdateReady?.();
     // 裏にあるなら、すぐ読み込み直す。前に出ているなら、裏に回るか、次に前に出るまで待つ
     if (env.document.visibilityState === "hidden") reloadIfReady();
   });
