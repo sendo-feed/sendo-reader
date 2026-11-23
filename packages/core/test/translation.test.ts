@@ -389,7 +389,7 @@ describe("訳したモデルと思考量を受ける（sendo の translation.md 
     });
   });
 
-  test("条件を持つ前の版の手元の DB は、ある記事を残したまま条件なしにし、その記事が届き直したら条件が入る", async () => {
+  test("条件を持つ前の版の手元の DB は、ある記事を残したまま条件なしにし、そのあと届いた記事には条件が入る", async () => {
     const server = new FakeSendo();
     const db = await openMemoryDb();
     await migrate(db, SCHEMA_VERSION - 1);
