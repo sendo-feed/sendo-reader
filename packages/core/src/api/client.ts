@@ -16,6 +16,9 @@ export const MAX_CONTENT_LENGTH = 1_000_000;
 /** 1 つのリクエストを待つ上限。止まった通信で同期がいつまでも終わらないようにする */
 export const REQUEST_TIMEOUT_MS = 30_000;
 
+// 未抽出の全文では、記事ページを取ったあと、Sendo が画像の取得と照合を終えるまで待つ。
+const PAGE_CONTENT_TIMEOUT_MS = 90_000;
+
 export interface SendoApiOptions {
   /** API の入口。画面では同じオリジンの "/api/v1"（reader Worker が sendo に中継する） */
   baseUrl: string;
@@ -28,7 +31,8 @@ export type SendoApi = ReturnType<typeof createSendoApi>;
 export function createSendoApi(options: SendoApiOptions) {
   const doFetch = options.fetch ?? ((input, init) => globalThis.fetch(input, init));
   const baseUrl = resolveBase(options.baseUrl.replace(/\/+$/, ""));
-  const timeoutMs = options.timeoutMs ?? REQUEST_TIMEOUT_MS;
+  const requestTimeoutMs = options.timeoutMs ?? REQUEST_TIMEOUT_MS;
+  const pageContentTimeoutMs = options.timeoutMs ?? PAGE_CONTENT_TIMEOUT_MS;
 
   /**
    * 送る。届かない、時間切れ、中断は ApiError("network") にする。
@@ -45,7 +49,11 @@ export function createSendoApi(options: SendoApiOptions) {
    * 本文も、ここで読み終えてから返す。ヘッダーのあとで本文が止まっても、時間切れとログアウトで
    * 終わるようにするため（呼ぶ側は、どれも本文をすべて読むので、流れのまま渡す利点はない）。
    */
-  async function send(request: Request, signal: AbortSignal | undefined): Promise<Response> {
+  async function send(
+    request: Request,
+    signal: AbortSignal | undefined,
+    timeoutMs = requestTimeoutMs,
+  ): Promise<Response> {
     const controller = new AbortController();
     const onAbort = () => controller.abort(signal?.reason);
     if (signal?.aborted === true) onAbort();
@@ -81,8 +89,8 @@ export function createSendoApi(options: SendoApiOptions) {
    * 生成した型付きのクライアント。中断の合図を結び付けて、呼び出しごとに作る
    * （openapi-fetch は Request しか渡さないので、合図をここで結び付ける）
    */
-  function client(signal?: AbortSignal) {
-    return createClient<paths>({ baseUrl, fetch: (request) => send(request, signal) });
+  function client(signal?: AbortSignal, timeoutMs?: number) {
+    return createClient<paths>({ baseUrl, fetch: (request) => send(request, signal, timeoutMs) });
   }
 
   return {
@@ -115,9 +123,13 @@ export function createSendoApi(options: SendoApiOptions) {
       signal?: AbortSignal,
       source: "feed" | "page" = "feed",
     ): Promise<{ html: string; source: string } | null> {
-      const { data, error, response } = await client(signal).GET("/articles/{id}/content", {
-        params: { path: { id }, ...(source === "page" ? { query: { source } } : {}) },
-      });
+      const timeoutMs = source === "page" ? pageContentTimeoutMs : requestTimeoutMs;
+      const { data, error, response } = await client(signal, timeoutMs).GET(
+        "/articles/{id}/content",
+        {
+          params: { path: { id }, ...(source === "page" ? { query: { source } } : {}) },
+        },
+      );
       if (response.status === 404) return null;
       if (data === undefined) throw errorFromBody(response.status, error);
       const body = data as { html?: unknown; source?: unknown } | null;
