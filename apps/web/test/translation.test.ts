@@ -27,6 +27,10 @@ describe("translationLabel", () => {
     expect(translationLabel(t("en", status))).toBe(label);
   });
 
+  test("und でない untranslated は、言語と一緒に出す", () => {
+    expect(translationLabel(t("en", "untranslated"))).toBe("EN · Untranslated");
+  });
+
   test("言語を大文字にする", () => {
     expect(translationLabel(t("zh", "translated"))).toBe("ZH · Translated");
   });
@@ -37,8 +41,8 @@ describe("translationLabel", () => {
     expect(translationLabel(undefined)).toBeNull();
   });
 
-  test("und は、訳文がないあいだは出さず、訳しているときと訳したあとは言語を省く", () => {
-    expect(translationLabel(t("und", "untranslated"))).toBeNull();
+  test("und は、言語を省いて状態だけを出す。queued（sendo は作らない）は出さない", () => {
+    expect(translationLabel(t("und", "untranslated"))).toBe("Untranslated");
     expect(translationLabel(t("und", "queued"))).toBeNull();
     expect(translationLabel(t("und", "translating"))).toBe("Translating");
     expect(translationLabel(t("und", "translated"))).toBe("Translated");
