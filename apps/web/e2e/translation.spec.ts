@@ -704,6 +704,7 @@ test.describe("Retranslate with Opus", () => {
         translation: { ...sonnet(now - 60_000), title: "フィーチャートグルの議論" },
       },
     );
+    server.translatedContents.set(second.id, "<p>議論の訳した本文</p>");
     await routeFakeSendo(context, server);
     await page.goto("/");
     await signIn(page);
@@ -721,9 +722,11 @@ test.describe("Retranslate with Opus", () => {
     await expect(view.locator("header .translation")).toHaveText("・ EN · Translating");
     expect(server.retranslationRequests).toEqual([first.id]);
 
-    // 写る先の記事を開いている間に、sendo が同じ元記事のほかの記事にも訳し直しを写した
+    // 写る先の記事を開いている間に、sendo が同じ元記事のほかの記事にも訳し直しを写した。訳した本文を
+    // 出すまで待つ（本文を待っている間に訳文が替われば替えるため。決定の 3）
     await items.nth(1).click();
     await expect(heading).toHaveText("フィーチャートグルの議論");
+    await expect(view.getByText("議論の訳した本文")).toBeVisible();
     server.setTranslation(first.id, opus(Date.now()));
     server.setTranslation(second.id, {
       ...opus(Date.now()),
