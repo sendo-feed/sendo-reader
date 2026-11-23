@@ -13,8 +13,8 @@ sendo が日本語に訳した記事を、reader でどう見せ、どう訳し�
 
 1. **一覧の行と記事の画面に、元の言語と翻訳の状態を 1 つのラベルで出す。** `EN · Queued`（バッチを待っている）、`EN · Translating`（その場の翻訳か訳し直しの最中）、`EN · Translated`（訳文がある）、`EN · Untranslated`（訳文がない）。
    - 言語は、sendo が配る ISO 639-1 を大文字にしたもの。状態は、差分同期で届いたものを手元の DB に置いて出す
-   - 翻訳の項目が届かない記事（日本語の記事、Discord の投稿、API キーのない sendo、翻訳に対応する前の sendo）には、ラベルを出さない
-   - 言語が判定できなかった記事（`und`）は、言語を省いて状態だけを出す（`Untranslated`、`Translating`、`Translated`）。sendo は `und` の記事を `queued` にしない
+   - 翻訳の項目が届かない記事（日本語の記事、Discord の投稿、sendo がまだ訳すかどうかを決めていない記事と決めずに終えた記事、API キーのない sendo、翻訳に対応する前の sendo）には、ラベルを出さない
+   - 言語が判定できなかった記事（`und`）は、言語を省いて状態だけを出す（`Untranslated`、`Translating`、`Translated`。`und` の記事は `queued` にならない。sendo の[記事の翻訳](https://github.com/sendo-feed/sendo/blob/main/docs/decisions/translation.md)の 1）
    - 色で分けず、一覧の行のメタ（フィード名、時刻）と同じ控えめな文字で出す。一覧の行ではメタの並びに、記事の画面では見出しの下のメタの並びに置く
 2. **一覧の行は、訳したタイトルがあれば、それを出す。**
 3. **記事の画面は、訳文があれば訳文を先に出し、原文に切り替えられる。**
@@ -27,7 +27,7 @@ sendo が日本語に訳した記事を、reader でどう見せ、どう訳し�
 ### 訳してもらう
 
 4. **訳文のない記事は、記事の画面の Translate で、その場で訳してもらう。** 押したときだけ頼み、開いただけでは頼まない。
-   - Translate は、状態が `queued` ／ `untranslated` の記事（`und` の記事も含む）で、記事の画面のラベルのすぐ横（ラベルがなければ、その場所）に出す。翻訳の項目が届かない記事には出さない
+   - Translate は、状態が `queued` ／ `untranslated` の記事（`und` の記事も含む）で、記事の画面のラベルのすぐ横に出す。翻訳の項目が届かない記事には出さない
    - 一覧の行には出さない（[UI とツール](ui.md)の 8）
 5. **訳文のある記事は、More actions の Retranslate with Opus で、訳し直してもらう。** 状態が `translated` で、まだ訳し直していない記事（ほかの記事から訳し直しが写って印が届いた記事も、訳し直したものとする）にだけ出す。
    - 押したら、確かめの窓で「訳し直した訳文は、この記事と、同じ元記事のほかの記事を読むすべての人の訳文を置き換える」と伝え、選んでから頼む（sendo は、同じ元記事のほかの記事にも訳し直しを写す。細部は sendo の[記事の翻訳](https://github.com/sendo-feed/sendo/blob/main/docs/decisions/translation.md)の 16）
