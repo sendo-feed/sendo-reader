@@ -246,6 +246,12 @@ test("読み込み直すと消えるものを出している画面では知ら�
 });
 
 test("Save a URL の窓を開いている間は知らせず、閉じたら知らせる", async ({ page }) => {
+  // 窓を開け閉めしても、画面の中で失敗しない（印を付ける effect が走り続けるなど）
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  page.on("console", (message) => {
+    if (message.type() === "error") errors.push(message.text());
+  });
   const loads = await openVersionA(page, `${READER}starred`, true);
   const before = loads();
   await page.getByRole("button", { name: "Save a URL" }).click();
@@ -263,4 +269,7 @@ test("Save a URL の窓を開いている間は知らせず、閉じたら知ら
   await expect(updateNotice(page)).toBeVisible();
   expect(loads()).toBe(before);
   expect(await version(page)).toBe("a");
+  expect(errors.filter((message) => /effect_update_depth_exceeded|svelte/i.test(message))).toEqual(
+    [],
+  );
 });

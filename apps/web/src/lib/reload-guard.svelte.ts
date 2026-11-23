@@ -6,22 +6,30 @@
  * lib/app-update.ts の canReloadPage を通して見る。$state なので、閉じたら知らせを出し直せる
  */
 class ReloadGuard {
-  #holds = $state(0);
+  /**
+   * 付いている印の数。hold() は部品の $effect の中から呼ばれるので、$state にしない。$state を読んで
+   * 書くと、その effect が自分の書いた値を見張ることになり、走り続ける
+   */
+  #count = 0;
+  /** 印が付いているか。書くだけで、hold() の中では読まない */
+  #held = $state(false);
 
   /** 印を付ける。返した関数で戻す（何度呼んでも 1 回だけ戻す） */
   hold(): () => void {
-    this.#holds += 1;
+    this.#count += 1;
+    this.#held = true;
     let released = false;
     return () => {
       if (released) return;
       released = true;
-      this.#holds -= 1;
+      this.#count -= 1;
+      this.#held = this.#count > 0;
     };
   }
 
   /** 印が付いている（読み込み直すと消えるものを出している） */
   get held(): boolean {
-    return this.#holds > 0;
+    return this.#held;
   }
 }
 
