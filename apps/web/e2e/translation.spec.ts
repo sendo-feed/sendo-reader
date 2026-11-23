@@ -767,9 +767,13 @@ test.describe("Retranslate with Opus", () => {
     const heading = view.getByRole("heading", { level: 1 });
     await view.getByRole("button", { name: "Translate", exact: true }).click();
     await expect(view.locator("header .translation")).toHaveText("・ EN · Translating");
+    server.translatedContents.set(article.id, "<p>訳した本文</p>");
     server.setTranslation(article.id, sonnet(Date.now() - 60_000));
     await page.getByRole("button", { name: "Sync now" }).click();
     await expect(heading).toHaveText("フィーチャートグル");
+    // 訳した本文を出すまで待つ（訳した要約を出して本文を待っている間に訳文が替われば、替えるため。
+    // 決定の 3）
+    await expect(view.getByText("訳した本文")).toBeVisible();
 
     // ほかの端末が訳し直した。この端末が頼んだものではない
     server.setTranslation(article.id, opus(Date.now()));
