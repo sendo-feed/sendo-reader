@@ -1,4 +1,4 @@
-import { describe, expect, test } from "vitest";
+import { describe, expect, test, vi } from "vitest";
 import { ApiError, type Table } from "../src";
 import { MAX_CONTENT_LENGTH } from "../src/api/client";
 import { EVICTABLE_CONTENTS_SQL } from "../src/db/content";
@@ -202,6 +202,82 @@ describe("本文を取る", () => {
 });
 
 describe("元ページの全文", () => {
+  test("全文が45秒後に届いても、木にして手元に置く", async () => {
+    const { core, server, feed } = await seeded();
+    const article = server.deliver(feed.id, { summary: "要約" });
+    server.pageContents.set(article.id, "<p>元ページの全文</p>");
+    await core.sync();
+    expect(await core.getArticleContent(article.id, "page")).toEqual({ status: "missing" });
+    expect(await core.getArticleContent(article.id)).toEqual({ status: "none" });
+
+    const started = Promise.withResolvers<void>();
+    server.onRequest = async (path) => {
+      if (path !== `GET /articles/${article.id}/content`) return;
+      started.resolve();
+      await new Promise<void>((resolve) => setTimeout(resolve, 45_000));
+    };
+
+    vi.useFakeTimers();
+    try {
+      const content = core.fetchArticleContent(article.id, "page");
+      const checked = expect(content).resolves.toEqual({
+        source: "page",
+        nodes: [{ tag: "p", children: ["元ページの全文"] }],
+      });
+      // 失敗時も、時計を進めている間に未処理の拒否を残さない。
+      void checked.catch(() => undefined);
+      await started.promise;
+      await vi.advanceTimersByTimeAsync(45_000);
+      await checked;
+      expect(await core.getArticleContent(article.id, "page")).toEqual({
+        status: "ready",
+        content: await content,
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  test.each([
+    { source: "feed", timeout: 30_000 },
+    { source: "page", timeout: 90_000 },
+  ] as const)("$source の応答が止まれば $timeout ms で中断する", async ({ source, timeout }) => {
+    const { core, server, feed } = await seeded();
+    const article = server.deliver(
+      feed.id,
+      source === "feed" ? { content: "<p>本文</p>" } : { summary: "要約" },
+    );
+    await core.sync();
+    expect(await core.getArticleContent(article.id, "page")).toEqual({ status: "missing" });
+    expect(await core.getArticleContent(article.id)).toEqual({
+      status: source === "feed" ? "missing" : "none",
+    });
+
+    const started = Promise.withResolvers<void>();
+    server.onRequest = async (path) => {
+      if (path !== `GET /articles/${article.id}/content`) return;
+      server.failNext("hang");
+      started.resolve();
+    };
+    vi.useFakeTimers();
+    try {
+      let settled = false;
+      const result = core.fetchArticleContent(article.id, source).catch((error: unknown) => {
+        settled = true;
+        return error;
+      });
+      await started.promise;
+      await vi.advanceTimersByTimeAsync(timeout - 1);
+      expect(settled).toBe(false);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(settled).toBe(true);
+      expect(await result).toMatchObject({ kind: "network" });
+      expect(await core.getArticleContent(article.id, source)).toEqual({ status: "missing" });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   test("要約だけの記事でも取得し、オフラインでは手元から返す。フィード本文とは混ぜない", async () => {
     const { server, core, feed } = await seeded();
     const article = server.deliver(feed.id, { summary: "要約" });
