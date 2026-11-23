@@ -46,21 +46,33 @@
     overflow-wrap: anywhere;
   }
 
-  /* 一覧の行では、行の高さに収まるよう、枠を低く、余白を狭くする */
-  .compact {
-    gap: 0.1875rem;
-  }
-
-  .compact .chip {
-    padding: 0 0.25rem;
-    line-height: 1.2;
-  }
-
   /* 線は塗りより濃くし、選んでいる行やマウスで指している行の背景の上でも、枠の形が分かるようにする */
   .chip.language {
     border-color: var(--language-chip-border);
     background: var(--language-chip);
     color: var(--on-language-chip);
     font-weight: 600;
+  }
+
+  /*
+   * 一覧の行では、行の高さに収まるよう、枠を低く、余白を狭くする。枠を折り返さず（1 行に保つ）、
+   * 幅が足りなければ状態の枠の文字を省略記号で切る（とても狭い画面と大きな文字のときだけ）
+   */
+  .compact {
+    flex-wrap: nowrap;
+    gap: 0.1875rem;
+    min-width: 0;
+  }
+
+  .compact .chip {
+    padding: 0 0.25rem;
+    overflow: hidden;
+    line-height: 1.2;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .compact .chip.language {
+    flex: none;
   }
 </style>

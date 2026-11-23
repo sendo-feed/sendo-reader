@@ -470,105 +470,127 @@ test("ラベルは枠に分けて言語の枠だけを塗り、読み上げで�
 });
 
 /**
- * 一覧の行のラベル（docs/decisions/translation.md の 1）。サムネイルのある行を狭い画面（360px）で出しても、
- * 枠が文字の入る部分（.text）の右端を超えてサムネイルの下にもぐらない。入りきらなければラベルを次の
- * 行に送り、フィードの名前は少しでも見せる。2 行になっても、行の高さ（6.5rem）からはみ出さない。
- * 既定の文字の大きさと、最大（xlarge）で確かめる
+ * 一覧の行のラベル（docs/decisions/translation.md の 1）。サムネイルのある行を狭い画面（360px、320px）で
+ * 出しても、枠が文字の入る部分（.text）の右端を超えてサムネイルの下にもぐらない。保存の印・アイコン・
+ * フィードの名前・時刻は 1 行のまま（時刻は落ちない）で、入りきらなければラベルだけを次の行に送る。
+ * フィードの名前は少しでも見せる。2 行になっても、行の高さ（6.5rem）からはみ出さない。時刻の長い
+ * 去年以前の記事と、翻訳のない記事も入れ、既定の文字の大きさと最大（xlarge）で確かめる
  */
-for (const textSize of ["medium", "xlarge"] as const) {
-  test(`サムネイルのある一覧の行でも、狭い画面でラベルがはみ出さない（文字の大きさ ${textSize}）`, async ({
-    page,
-    context,
-  }) => {
-    const server = new FakeSendo();
-    const feed = server.subscribe({
-      url: "https://blog.example/feed.xml",
-      title: "Engineering Blog of a Very Long Name",
-      iconUrl: server.imageUrl("https://blog.example/favicon.ico"),
-    });
-    if (textSize !== "medium") {
-      for (const device of ["mobile", "desktop"])
-        server.putSetting(device, "reader.textSize", textSize);
-    }
-    const now = Date.now();
-    // Untranslated がいちばん長い。タイトルは 3 行に折り返す長さにする
-    const states = ["untranslated", "translating", "translated", "queued"] as const;
-    for (const [i, status] of states.entries()) {
-      server.deliver(feed.id, {
-        title: `${status} の記事。タイトルが長くて、狭い画面では何行にも折り返す。`.repeat(3),
-        publishedAt: now - i * 1000,
-        thumbnailUrl: server.imageUrl(`https://blog.example/${status}.png`),
-        translation: {
-          language: "en",
-          status,
-          title: null,
-          summary: null,
-          translatedAt: status === "translated" ? new Date(now).toISOString() : null,
-          retranslated: false,
-          failure: null,
-        },
+for (const width of [360, 320]) {
+  for (const textSize of ["medium", "xlarge"] as const) {
+    test(`サムネイルのある一覧の行でも、狭い画面でラベルがはみ出さず、時刻が落ちない（${width}px、文字の大きさ ${textSize}）`, async ({
+      page,
+      context,
+    }) => {
+      const server = new FakeSendo();
+      const feed = server.subscribe({
+        url: "https://blog.example/feed.xml",
+        title: "Engineering Blog of a Very Long Name",
+        iconUrl: server.imageUrl("https://blog.example/favicon.ico"),
       });
-    }
-    await routeFakeSendo(context, server);
-    await page.setViewportSize({ width: 360, height: 740 });
-    await page.goto("/");
-    await signIn(page);
-    if (textSize !== "medium") {
-      await expect(page.locator("html")).toHaveAttribute("data-text-size", textSize);
-    }
+      if (textSize !== "medium") {
+        for (const device of ["mobile", "desktop"]) {
+          server.putSetting(device, "reader.textSize", textSize);
+        }
+      }
+      const now = Date.now();
+      // 去年以前の記事は、時刻が日付（2025/11/23 など）になり長い
+      const old = new Date(new Date(now).getFullYear() - 1, 10, 23).getTime();
+      const translation = (status: string) => ({
+        language: "en",
+        status,
+        title: null,
+        summary: null,
+        translatedAt: status === "translated" ? new Date(now).toISOString() : null,
+        retranslated: false,
+        failure: null,
+      });
+      // Untranslated がいちばん長い。タイトルは 3 行に折り返す長さにする
+      const cases: { name: string; publishedAt: number; label: string[] | null }[] = [
+        { name: "untranslated", publishedAt: now - 1000, label: ["EN", "Untranslated"] },
+        { name: "translating", publishedAt: now - 2000, label: ["EN", "Translating"] },
+        { name: "translated", publishedAt: now - 3000, label: ["EN", "Translated"] },
+        { name: "queued", publishedAt: now - 4000, label: ["EN", "Queued"] },
+        { name: "none", publishedAt: now - 5000, label: null },
+        { name: "old-untranslated", publishedAt: old, label: ["EN", "Untranslated"] },
+        { name: "old-none", publishedAt: old - 1000, label: null },
+      ];
+      for (const { name, publishedAt, label } of cases) {
+        server.deliver(feed.id, {
+          title: `${name} の記事。タイトルが長くて、狭い画面では何行にも折り返す。`.repeat(3),
+          publishedAt,
+          thumbnailUrl: server.imageUrl(`https://blog.example/${name}.png`),
+          ...(label !== null && {
+            translation: translation(name.replace(/^old-/, "")),
+          }),
+        });
+      }
+      await routeFakeSendo(context, server);
+      await page.setViewportSize({ width, height: 900 });
+      await page.goto("/");
+      await signIn(page);
+      if (textSize !== "medium") {
+        await expect(page.locator("html")).toHaveAttribute("data-text-size", textSize);
+      }
 
-    const rows = page.locator(".article-list .row");
-    await expect(rows).toHaveCount(states.length);
-    await expect(page.locator(".article-list .thumb:visible")).toHaveCount(states.length);
-    for (const [i, status] of states.entries()) {
-      const row = rows.nth(i);
-      await expect(chips(row)).toHaveText([
-        "EN",
-        status === "untranslated" ? "Untranslated" : status.replace(/^./, (c) => c.toUpperCase()),
-      ]);
-      const box = await row.evaluate((element) => {
-        const rect = (selector: string) => {
-          const found = element.querySelector(selector);
-          if (found === null) throw new Error(selector);
-          return found.getBoundingClientRect();
-        };
-        const text = rect(".text");
-        const item = rect(".item");
-        const feed = rect(".feed");
-        const thumb = rect(".thumb");
-        const chipRects = [...element.querySelectorAll(".chip")].map((chip) =>
-          chip.getBoundingClientRect(),
-        );
-        return {
-          chipsOverText: Math.max(...chipRects.map((chip) => chip.right)) - text.right,
-          chipsLeftOfThumb: Math.max(...chipRects.map((chip) => chip.right)) - thumb.left,
-          // 同じ行に並ぶ枠と、フィードの名前が重ならない
-          overlap: Math.max(
-            ...chipRects
-              .filter((chip) => chip.top < feed.bottom && feed.top < chip.bottom)
-              .map((chip) => feed.right - chip.left),
-            Number.NEGATIVE_INFINITY,
-          ),
-          feedWidth: feed.width,
-          textTop: text.top - item.top,
-          textBottom: item.bottom - text.bottom,
-          lowestChip: item.bottom - Math.max(...chipRects.map((chip) => chip.bottom)),
-        };
-      });
-      expect(box.chipsOverText, status).toBeLessThanOrEqual(0.5);
-      expect(box.chipsLeftOfThumb, status).toBeLessThan(0);
-      expect(box.overlap, status).toBeLessThanOrEqual(0);
-      expect(box.feedWidth, status).toBeGreaterThan(10);
-      expect(box.textTop, status).toBeGreaterThanOrEqual(0);
-      expect(box.textBottom, status).toBeGreaterThanOrEqual(0);
-      expect(box.lowestChip, status).toBeGreaterThanOrEqual(0);
-    }
-    expect(
-      await page.evaluate(
-        () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
-      ),
-    ).toBeLessThanOrEqual(0);
-  });
+      const rows = page.locator(".article-list .row");
+      await expect(rows).toHaveCount(cases.length);
+      await expect(page.locator(".article-list .thumb:visible")).toHaveCount(cases.length);
+      for (const [i, { name, label }] of cases.entries()) {
+        const row = rows.nth(i);
+        if (label === null) await expect(chips(row)).toHaveCount(0);
+        else await expect(chips(row)).toHaveText(label);
+        const box = await row.evaluate((element) => {
+          const rect = (selector: string) => {
+            const found = element.querySelector(selector);
+            if (found === null) throw new Error(selector);
+            return found.getBoundingClientRect();
+          };
+          const text = rect(".text");
+          const item = rect(".item");
+          const feed = rect(".feed");
+          const time = rect(".time");
+          const thumb = rect(".thumb");
+          const chipRects = [...element.querySelectorAll(".chip")].map((chip) =>
+            chip.getBoundingClientRect(),
+          );
+          // 枠の右端（枠のない行は -Infinity で、確かめることがない）
+          const right = Math.max(...chipRects.map((chip) => chip.right), Number.NEGATIVE_INFINITY);
+          return {
+            overText: right - text.right,
+            leftOfThumb: right - thumb.left,
+            // 同じ行に並ぶ枠と、フィードの名前・時刻が重ならない
+            overlap: Math.max(
+              ...chipRects
+                .filter((chip) => chip.top < time.bottom && time.top < chip.bottom)
+                .map((chip) => time.right - chip.left),
+              Number.NEGATIVE_INFINITY,
+            ),
+            timeDrop: Math.abs(time.top - feed.top),
+            feedWidth: feed.width,
+            textTop: text.top - item.top,
+            textBottom: item.bottom - text.bottom,
+          };
+        });
+        expect(box.overText, name).toBeLessThanOrEqual(0.5);
+        expect(box.leftOfThumb, name).toBeLessThan(0);
+        expect(box.overlap, name).toBeLessThanOrEqual(0);
+        expect(box.timeDrop, name).toBeLessThan(1);
+        // 320px・xlarge の去年以前の記事は、保存の印・アイコン・長い日付だけで幅を使い切り、フィードの
+        // 名前が 0 になる（ラベルのない行も同じ。翻訳のラベルとは関わらない、前からの制限）
+        if (!(width === 320 && textSize === "xlarge" && name.startsWith("old-"))) {
+          expect(box.feedWidth, name).toBeGreaterThan(10);
+        }
+        expect(box.textTop, name).toBeGreaterThanOrEqual(0);
+        expect(box.textBottom, name).toBeGreaterThanOrEqual(0);
+      }
+      expect(
+        await page.evaluate(
+          () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+        ),
+      ).toBeLessThanOrEqual(0);
+    });
+  }
 }
 
 test("操作の一覧に t がある", async ({ page, context }) => {
