@@ -570,7 +570,7 @@
 
   /**
    * Opus で訳し直してもらう（More actions の Retranslate with Opus を押し、確かめの窓で選んだとき）。
-   * 訳し直した訳文は全員分を置き換える（docs/decisions/translation.md の 5、6）
+   * 訳し直した訳文は、同じ元記事のほかの記事も含めて全員分を置き換える（docs/decisions/translation.md の 5、6）
    */
   async function retranslate(): Promise<void> {
     retranslateConfirmOpen = false;
@@ -1380,7 +1380,8 @@
 
 <Dialog bind:open={retranslateConfirmOpen} title="Retranslate with Opus">
   <p class="confirm">
-    訳し直した訳文は、この記事を読むすべての人の訳文を置き換えます。訳し直せるのは 1 回だけです。
+    訳し直した訳文は、この記事と、同じ元記事のほかの記事を読むすべての人の訳文を置き換えます。訳し直せるのは
+    1 回だけです。
   </p>
   <div class="choices">
     <button
