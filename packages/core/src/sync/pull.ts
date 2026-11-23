@@ -264,8 +264,9 @@ async function writeArticle(tx: Executor, article: Article): Promise<void> {
     `insert into articles (
        id, feed_id, url, title, summary, author, thumbnail_url, has_content, published_at,
        received_at, read_at, starred_at, translation_status, translation_language,
-       translation_title, translation_summary, translated_at, translation_retranslated, read_synced
-     ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
+       translation_title, translation_summary, translated_at, translation_retranslated,
+       translation_failure_kind, translation_failure_category, translation_failure_stage, read_synced
+     ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
      on conflict (id) do update set
        feed_id = excluded.feed_id, url = excluded.url, title = excluded.title,
        summary = excluded.summary, author = excluded.author,
@@ -277,7 +278,10 @@ async function writeArticle(tx: Executor, article: Article): Promise<void> {
        translation_title = excluded.translation_title,
        translation_summary = excluded.translation_summary,
        translated_at = excluded.translated_at,
-       translation_retranslated = excluded.translation_retranslated, read_synced = 0`,
+       translation_retranslated = excluded.translation_retranslated,
+       translation_failure_kind = excluded.translation_failure_kind,
+       translation_failure_category = excluded.translation_failure_category,
+       translation_failure_stage = excluded.translation_failure_stage, read_synced = 0`,
     [
       article.id,
       article.feedId,
@@ -297,6 +301,9 @@ async function writeArticle(tx: Executor, article: Article): Promise<void> {
       article.translation?.summary ?? null,
       article.translation?.translatedAt ?? null,
       article.translation?.retranslated === true ? 1 : 0,
+      article.translation?.failure?.kind ?? null,
+      article.translation?.failure?.category ?? null,
+      article.translation?.failure?.stage ?? null,
     ],
   );
 }

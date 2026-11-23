@@ -13,7 +13,13 @@
  * 組み立てる。sendo が使う項目の形を変えたら、ここが型チェックで止まる。
  */
 
-import { DEVICE_TYPES, type JsonValue, type SavedPage, TRANSLATION_STATUSES } from "../models";
+import {
+  DEVICE_TYPES,
+  type JsonValue,
+  type SavedPage,
+  TRANSLATION_STATUSES,
+  type TranslationFailure,
+} from "../models";
 import { normalizeSavedUrl, SAVED_ID_PATTERN } from "../saved";
 import type { SyncArticle, SyncPage, SyncSetting } from "../sync/page";
 import { toSameOriginUrl } from "../url";
@@ -24,6 +30,12 @@ type Schemas = components["schemas"];
 export type SyncChanges = Schemas["SyncChanges"];
 // フィードの取得状態はまだ使わないので、同期に必要な項目だけを検証する。
 type ParsedSyncFeed = Omit<Schemas["SyncFeed"], "status" | "lastErrorCode" | "relocationCandidate">;
+/** 確かめた記事。翻訳は、訳せなかった理由の知らない値も持つ形（ParsedTranslation） */
+type ParsedSyncArticle =
+  | Extract<Schemas["SyncArticle"], { deleted: true }>
+  | (Omit<Extract<Schemas["SyncArticle"], { deleted: false }>, "translation"> & {
+      translation: ParsedTranslation | null;
+    });
 
 /** sendo の応答を確かめて、core の中の形にする。形が違えば ApiError（server）を投げる */
 export function toSyncPage(body: unknown): SyncPage {
@@ -108,8 +120,12 @@ export function toSyncPage(body: unknown): SyncPage {
  * 確かめる（画面では HTML として出さない）。時刻は読める形であることを確かめる。画像の URL
  * （thumbnailUrl、iconUrl）は、core の中の形にするときに、同じオリジンを指すものだけを残す。
  */
-function parseSyncChanges(body: unknown): Omit<SyncChanges, "feeds" | "settings" | "savedPages"> & {
+function parseSyncChanges(body: unknown): Omit<
+  SyncChanges,
+  "feeds" | "settings" | "savedPages" | "articles"
+> & {
   feeds: ParsedSyncFeed[];
+  articles: ParsedSyncArticle[];
   settings: SyncChanges["settings"] | undefined;
   savedPages: SyncChanges["savedPages"];
 } {
@@ -166,7 +182,7 @@ function parseSyncChanges(body: unknown): Omit<SyncChanges, "feeds" | "settings"
         deleted: boolean(row.deleted, at("deleted")),
       };
     }),
-    articles: array(root.articles, "articles").map((value, i): Schemas["SyncArticle"] => {
+    articles: array(root.articles, "articles").map((value, i): ParsedSyncArticle => {
       const row = record(value, `articles[${i}]`);
       const at = (field: string) => `articles[${i}].${field}`;
       if (boolean(row.deleted, at("deleted"))) {
@@ -204,12 +220,12 @@ const LANGUAGE_PATTERN = /^(?:[a-z]{2}|und)$/;
  * 翻訳はラベルと訳したタイトルにしか使わないので、形が崩れていても（知らない状態、読めない時刻など）
  * 同期は止めず、その記事を翻訳なしとして扱う。sendo が状態を足しても、古い reader が止まらない
  */
-function parseTranslation(value: unknown): Schemas["SyncArticleTranslation"] {
+function parseTranslation(value: unknown): ParsedTranslation | null {
   if (value === undefined || value === null) return null;
   if (typeof value !== "object" || Array.isArray(value)) return null;
   const row = value as Record<string, unknown>;
   const status = TRANSLATION_STATUSES.find((s) => s === row.status);
-  const { language, title, summary, translatedAt, retranslated } = row;
+  const { language, title, summary, translatedAt, retranslated, failure } = row;
   if (status === undefined) return null;
   if (typeof language !== "string" || !LANGUAGE_PATTERN.test(language)) return null;
   if (!isNullableString(title) || !isNullableString(summary)) return null;
@@ -221,7 +237,36 @@ function parseTranslation(value: unknown): Schemas["SyncArticleTranslation"] {
   }
   // 訳し直しの印は、あとから足された項目。印に対応する前の sendo（項目がない）は、訳し直していない
   if (retranslated !== undefined && typeof retranslated !== "boolean") return null;
-  return { language, status, title, summary, translatedAt, retranslated: retranslated === true };
+  return {
+    language,
+    status,
+    title,
+    summary,
+    translatedAt,
+    retranslated: retranslated === true,
+    failure: parseTranslationFailure(failure),
+  };
+}
+
+/** 確かめた記事の翻訳。訳せなかった理由は、知らない値も捨てずに持つ（TranslationFailure） */
+type ParsedTranslation = Omit<Schemas["SyncArticleTranslation"] & object, "failure"> & {
+  failure: TranslationFailure | null;
+};
+
+/**
+ * 訳せなかった理由（あとから足された項目。sendo の docs/decisions/translation.md の 17）。理由に
+ * 対応する前の sendo（項目がない）は、理由なし。形が崩れていたら（文字列でない、など）、翻訳は残して
+ * 理由だけをなしにする。知らない値（sendo が種類を足した）は捨てずに持ち、画面がそのほかの失敗と
+ * して出す
+ */
+function parseTranslationFailure(value: unknown): TranslationFailure | null {
+  if (value === undefined || value === null) return null;
+  if (typeof value !== "object" || Array.isArray(value)) return null;
+  const { kind, category, stage } = value as Record<string, unknown>;
+  if (typeof kind !== "string" || typeof stage !== "string" || !isNullableString(category)) {
+    return null;
+  }
+  return { kind, category, stage };
 }
 
 function isNullableString(value: unknown): value is string | null {

@@ -296,6 +296,16 @@ const migrations: readonly (readonly string[])[] = [
     // 出すのでまれとして受け入れ、最初から同期し直させない
     "alter table articles add column translation_retranslated integer not null default 0",
   ],
+  [
+    // 訳せなかった理由（sendo の docs/decisions/translation.md の 17、この reader の translation.md の
+    // 1）。sendo が配ったまま、知らない値も置く。すでに手元にある行は null のまま。理由に対応する前の
+    // 版のあいだに理由の付いた記事は、その記事がもう一度届くまで理由の文が出ない（ラベルの
+    // Untranslated だけになる）。sendo と同じころに配るので対象はわずかとして受け入れ、最初から同期
+    // し直させない
+    "alter table articles add column translation_failure_kind text",
+    "alter table articles add column translation_failure_category text",
+    "alter table articles add column translation_failure_stage text",
+  ],
 ];
 
 export const SCHEMA_VERSION = migrations.length;
