@@ -2,13 +2,15 @@ import { leaderLockName } from "@sendo-reader/core/web";
 import { trimImageCache } from "@sendo-reader/core/web/image-cache";
 import { mount } from "svelte";
 import App from "./App.svelte";
-import { watchAppUpdate } from "./lib/app-update";
+import { canReloadPage, watchAppUpdate } from "./lib/app-update";
 import { AUTHORIZE_PATH } from "./lib/authorize";
 import { watchBackForwardCache } from "./lib/back-forward-cache";
 import { readerContext } from "./lib/context";
 import { startReader } from "./lib/reader";
+import { reloadGuard } from "./lib/reload-guard.svelte";
 import { ReaderState } from "./lib/state.svelte";
 import { trustedScriptUrl } from "./lib/trusted";
+import { updateNotice } from "./lib/update-notice.svelte";
 import Authorize from "./routes/Authorize.svelte";
 import "./app.css";
 // 表示の好み（テーマ、文字の大きさ）を、画面を出す前に当てる
@@ -60,18 +62,17 @@ if (location.pathname === AUTHORIZE_PATH) {
 
 // アプリの外枠と SQLite の wasm を Service Worker でキャッシュし、ネットワークがなくても起動する
 // （docs/decisions/ui.md）。新しい版に替わったら、画面が裏にある間か、次に前に出たときに
-// 読み込み直す。手元の dev サーバーでは使わない
+// 読み込み直し、前に出ている間は知らせる。手元の dev サーバーでは使わない
 if (import.meta.env.PROD && "serviceWorker" in navigator) {
   watchAppUpdate({
     container: navigator.serviceWorker,
     register: () => navigator.serviceWorker.register(trustedScriptUrl("/sw.js"), { scope: "/" }),
     document,
     reload: () => location.reload(),
-    // 設定（発行したトークン）、購読の管理（入力中のフォーム・取り込み結果）、OAuth の許可は、
-    // 読み込み直すと消えるものがある。ほかの画面に移ってから切り替える
-    canReload: () =>
-      !["/settings", "/manage", "/add", AUTHORIZE_PATH].includes(location.pathname) &&
-      document.querySelector('dialog[open][aria-label="Save a URL"]') === null,
+    // 読み込み直すと消えるものを出している画面では、ほかの画面に移ってから切り替える
+    canReload: () => canReloadPage(location.pathname, reloadGuard.held),
     setInterval: (fn, ms) => setInterval(fn, ms),
+    // 前に出ている間は読み込み直さないので、画面で知らせる（App.svelte）
+    onUpdateReady: () => updateNotice.ready(),
   });
 }

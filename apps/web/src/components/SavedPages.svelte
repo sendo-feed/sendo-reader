@@ -3,6 +3,7 @@
   import { useReader } from "../lib/context";
   import { describeError, describeSavedPageError } from "../lib/errors";
   import { formatDateTime, shortTime } from "../lib/format";
+  import { reloadGuard } from "../lib/reload-guard.svelte";
   import Dialog from "./Dialog.svelte";
   import Icon from "./Icon.svelte";
 
@@ -11,6 +12,9 @@
   let pages = $state<SavedPage[]>([]);
   let shown = $state(PAGE_SIZE);
   let addOpen = $state(false);
+  // 開いている間は、入力中の URL が読み込み直すと消えるので、新しい版への切り替えを待たせる
+  // （lib/reload-guard.svelte.ts）
+  $effect(() => (addOpen ? reloadGuard.hold() : undefined));
   let url = $state("");
   let error = $state<string | null>(null);
   let formError = $state<string | null>(null);

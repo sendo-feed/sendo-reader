@@ -4,12 +4,13 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { expect, type Page, test } from "@playwright/test";
-import { FakeSendo, routeFakeSendo } from "./fake-sendo";
+import { FakeSendo, routeFakeSendo, signIn } from "./fake-sendo";
 
 /**
  * 新しい版への切り替え（docs/decisions/ui.md の 5）を、本番のコンテナのサーバー
  * （dist-server/server.mjs。pnpm build で作る）で確かめる。画面のファイルを替えてサーバーを起動し直すと、
- * 開いている画面の Service Worker も新しい版に替わり、前に出たときに読み込み直す
+ * 開いている画面の Service Worker も新しい版に替わり、前に出たときに読み込み直す。前に出ている間は、
+ * 新しい版に替わったことを知らせる
  */
 
 const PORT = 4183;
@@ -100,41 +101,36 @@ function bringToFront(page: Page): Promise<void> {
   });
 }
 
-let directory = "";
-let running: Running | null = null;
+/** 新しい版の知らせ */
+function updateNotice(page: Page) {
+  return page.getByRole("status").filter({ hasText: "新しい版があります" });
+}
 
-test.beforeEach(async ({ context }) => {
-  directory = await mkdtemp(path.join(tmpdir(), "sendo-reader-app-update-"));
-  await routeFakeSendo(context, new FakeSendo());
-});
-
-test.afterEach(async () => {
-  if (running) await stopServer(running);
-  running = null;
-  await rm(directory, { recursive: true, force: true });
-});
-
-test("開いている画面も、新しい版の Service Worker に替わり、前に出たときに読み込み直す", async ({
-  page,
-}) => {
+/** 版 a の画面を開き、Service Worker が受け持つまで待つ。読み込みの回数を返す関数を返す */
+async function openVersionA(page: Page, url = READER, signedIn = false): Promise<() => number> {
   const a = await copyDist(directory, "a");
-  const b = await copyDist(directory, "b");
   running = await startServer(a);
   let loads = 0;
   page.on("load", () => {
     loads += 1;
   });
-  await page.goto(READER);
+  await page.goto(url);
+  if (signedIn) {
+    await signIn(page);
+    // ログインで、ページごと移って戻ってくる。戻った画面が出るまで待つ
+    await expect(page.getByRole("link", { name: "Settings" })).toBeVisible();
+  }
   await page.evaluate(() => navigator.serviceWorker.ready);
   await expect
     .poll(() => page.evaluate(() => navigator.serviceWorker.controller !== null))
     .toBe(true);
-  // 初めて入れたとき（受け持ち始めたとき）は、読み込み直さない
-  await page.waitForTimeout(500);
-  expect(loads).toBe(1);
-  expect(await version(page)).toBe("a");
+  return () => loads;
+}
 
-  await stopServer(running);
+/** サーバーを版 b に替え、画面を前に出して、Service Worker が版 b に替わるまで待つ */
+async function switchToVersionB(page: Page): Promise<void> {
+  const b = await copyDist(directory, "b");
+  if (running) await stopServer(running);
   running = await startServer(b);
   await page.evaluate(() => {
     Object.assign(window, { controllerChanged: false });
@@ -153,17 +149,127 @@ test("開いている画面も、新しい版の Service Worker に替わり、�
       { timeout: 15_000 },
     )
     .toBe(true);
-  // 前に出ている間は、読み込み直さない。次に前に出たときに読み込み直す
+}
+
+let directory = "";
+let running: Running | null = null;
+
+test.beforeEach(async ({ context }) => {
+  directory = await mkdtemp(path.join(tmpdir(), "sendo-reader-app-update-"));
+  await routeFakeSendo(context, new FakeSendo());
+});
+
+test.afterEach(async () => {
+  if (running) await stopServer(running);
+  running = null;
+  await rm(directory, { recursive: true, force: true });
+});
+
+test("開いている画面も、新しい版の Service Worker に替わり、前に出たときに読み込み直す", async ({
+  page,
+}) => {
+  const loads = await openVersionA(page);
+  // 初めて入れたとき（受け持ち始めたとき）は、読み込み直さず、知らせも出さない
   await page.waitForTimeout(500);
-  expect(loads).toBe(1);
+  expect(loads()).toBe(1);
+  expect(await version(page)).toBe("a");
+  await expect(updateNotice(page)).toHaveCount(0);
+
+  await switchToVersionB(page);
+  // 前に出ている間は、読み込み直さずに知らせる。次に前に出たときに読み込み直す
+  await expect(updateNotice(page)).toBeVisible();
+  await expect(updateNotice(page)).toContainText(
+    "新しい版があります。Reload を押すか、ページを読み込み直すと切り替わります。",
+  );
+  expect(loads()).toBe(1);
   expect(await version(page)).toBe("a");
   await Promise.all([page.waitForEvent("load"), bringToFront(page)]);
-  expect(loads).toBe(2);
+  expect(loads()).toBe(2);
   expect(await version(page)).toBe("b");
+  await expect(updateNotice(page)).toHaveCount(0);
 
   // サーバーを止めても、Service Worker が新しい版を返す
-  await stopServer(running);
+  if (running) await stopServer(running);
   running = null;
   await page.reload();
   expect(await version(page)).toBe("b");
+});
+
+test("新しい版の知らせの Reload で、その場で新しい版に切り替わる", async ({ page }) => {
+  const loads = await openVersionA(page);
+  await switchToVersionB(page);
+  await Promise.all([
+    page.waitForEvent("load"),
+    updateNotice(page).getByRole("button", { name: "Reload" }).click(),
+  ]);
+  expect(loads()).toBe(2);
+  expect(await version(page)).toBe("b");
+  await expect(updateNotice(page)).toHaveCount(0);
+});
+
+test("新しい版の知らせを閉じたら出し直さず、次に画面の表示が替わったときに自動で切り替わる", async ({
+  page,
+}) => {
+  const loads = await openVersionA(page);
+  await switchToVersionB(page);
+  await updateNotice(page).getByRole("button", { name: "Dismiss" }).click();
+  await expect(updateNotice(page)).toHaveCount(0);
+  // 前に出したままなら、出し直さず、読み込み直さない
+  await page.waitForTimeout(500);
+  await expect(updateNotice(page)).toHaveCount(0);
+  expect(loads()).toBe(1);
+  expect(await version(page)).toBe("a");
+  // 画面の表示が替わる（visibilitychange。裏に回る、前に出る）と、自動で読み込み直す
+  await Promise.all([page.waitForEvent("load"), bringToFront(page)]);
+  expect(await version(page)).toBe("b");
+  await expect(updateNotice(page)).toHaveCount(0);
+});
+
+test("読み込み直すと消えるものを出している画面では知らせず、ほかの画面に移ったら知らせる", async ({
+  page,
+}) => {
+  const loads = await openVersionA(page, READER, true);
+  await page.getByRole("link", { name: "Settings" }).click();
+  await expect(page).toHaveURL(/\/settings$/);
+  // ログインで、ページごと移って戻ってきている。ここから数える
+  const before = loads();
+  await switchToVersionB(page);
+  await page.waitForTimeout(500);
+  await expect(updateNotice(page)).toHaveCount(0);
+  expect(loads()).toBe(before);
+  // 一覧に戻ると出る（読み込み直してはいない）
+  await page.goBack();
+  await expect(page).not.toHaveURL(/\/settings$/);
+  await expect(updateNotice(page)).toBeVisible();
+  expect(loads()).toBe(before);
+  expect(await version(page)).toBe("a");
+});
+
+test("Save a URL の窓を開いている間は知らせず、閉じたら知らせる", async ({ page }) => {
+  // 窓を開け閉めしても、画面の中で失敗しない（印を付ける effect が走り続けるなど）
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  page.on("console", (message) => {
+    if (message.type() === "error") errors.push(message.text());
+  });
+  const loads = await openVersionA(page, `${READER}starred`, true);
+  const before = loads();
+  await page.getByRole("button", { name: "Save a URL" }).click();
+  const dialog = page.getByRole("dialog", { name: "Save a URL" });
+  await dialog.getByLabel("Page URL").fill("https://example.com/typing");
+  await switchToVersionB(page);
+  await page.waitForTimeout(500);
+  await expect(updateNotice(page)).toHaveCount(0);
+  // 入力中の窓は、読み込み直して消さない
+  await expect(dialog.getByLabel("Page URL")).toHaveValue("https://example.com/typing");
+  expect(loads()).toBe(before);
+  // 閉じたら、同じ画面のまま出る（読み込み直してはいない）
+  await page.keyboard.press("Escape");
+  await expect(dialog).toHaveCount(0);
+  await expect(updateNotice(page)).toBeVisible();
+  expect(loads()).toBe(before);
+  expect(await version(page)).toBe("a");
+  expect(errors.filter((message) => /effect_update_depth_exceeded|svelte/i.test(message))).toEqual(
+    [],
+  );
 });

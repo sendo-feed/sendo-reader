@@ -1,5 +1,10 @@
 import { describe, expect, test } from "vitest";
-import { type AppUpdateEnvironment, watchAppUpdate } from "../src/lib/app-update";
+import {
+  type AppUpdateEnvironment,
+  canReloadPage,
+  updateReadyMessage,
+  watchAppUpdate,
+} from "../src/lib/app-update";
 
 /** にせものの画面と Service Worker */
 function setup(options: { controlled?: boolean; visible?: boolean } = {}) {
@@ -15,6 +20,8 @@ function setup(options: { controlled?: boolean; visible?: boolean } = {}) {
     canReload: true,
     reloads: 0,
     checks: 0,
+    /** 新しい版に替わったと画面に知らせた回数 */
+    ready: 0,
     tick: () => {},
   };
   const env: AppUpdateEnvironment = {
@@ -44,6 +51,9 @@ function setup(options: { controlled?: boolean; visible?: boolean } = {}) {
     setInterval: (fn) => {
       state.tick = fn;
       return 0;
+    },
+    onUpdateReady: () => {
+      state.ready += 1;
     },
   };
   watchAppUpdate(env);
@@ -122,5 +132,63 @@ describe("アプリの新しい版への切り替え", () => {
     app.state.canReload = true;
     app.hide();
     expect(app.state.reloads).toBe(1);
+  });
+});
+
+describe("新しい版の知らせ", () => {
+  test("前に出ている間に替わったら、読み込み直さずに知らせる。裏に回れば、今までどおり読み込み直す", async () => {
+    const app = setup();
+    await settle();
+    app.newVersion();
+    expect(app.state.ready).toBe(1);
+    expect(app.state.reloads).toBe(0);
+    app.hide();
+    expect(app.state.reloads).toBe(1);
+    expect(app.state.ready).toBe(1);
+  });
+
+  test("初めて入れたときの受け持ちの始まりでは、知らせない", async () => {
+    const app = setup({ controlled: false });
+    await settle();
+    app.newVersion();
+    expect(app.state.ready).toBe(0);
+  });
+
+  test("読み込み直す前に、さらに新しい版に替わったら、また知らせる", async () => {
+    const app = setup();
+    await settle();
+    app.newVersion();
+    app.newVersion();
+    expect(app.state.ready).toBe(2);
+    expect(app.state.reloads).toBe(0);
+  });
+
+  test("読み込み直すと消えるものを出している画面で替わったときも知らせる（出すかは画面が決める）", async () => {
+    const app = setup();
+    await settle();
+    app.state.canReload = false;
+    app.newVersion();
+    expect(app.state.ready).toBe(1);
+    app.hide();
+    expect(app.state.reloads).toBe(0);
+  });
+
+  test("読み込み直すと消えるものを出している画面（パスと、出している間の印）", () => {
+    for (const path of ["/settings", "/manage", "/add", "/oauth/authorize"]) {
+      expect(canReloadPage(path, false)).toBe(false);
+    }
+    for (const path of ["/", "/starred", "/feeds/1", "/search"]) {
+      expect(canReloadPage(path, false)).toBe(true);
+    }
+    expect(canReloadPage("/", true)).toBe(false);
+  });
+
+  test("ホーム画面のアプリとブラウザーで、文を分ける", () => {
+    expect(updateReadyMessage(true)).toBe(
+      "新しい版があります。Reload を押すか、アプリを開き直すと切り替わります。",
+    );
+    expect(updateReadyMessage(false)).toBe(
+      "新しい版があります。Reload を押すか、ページを読み込み直すと切り替わります。",
+    );
   });
 });
