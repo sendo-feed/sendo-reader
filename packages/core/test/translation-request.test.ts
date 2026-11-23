@@ -221,10 +221,10 @@ describe("その場の翻訳を頼む", () => {
   });
 });
 
-describe("Opus で訳し直してもらう（docs/decisions/translation.md の 5、6）", () => {
+describe("品質優先の段階で訳し直してもらう（docs/decisions/translation.md の 5、6）", () => {
   const retranslated = (at: number) => ({
     ...translated(at),
-    title: "Opus で訳したタイトル",
+    title: "品質優先で訳したタイトル",
     retranslated: true,
   });
 
@@ -250,7 +250,7 @@ describe("Opus で訳し直してもらう（docs/decisions/translation.md の 5
     const done = await core.getArticle(article.id);
     expect(done?.translation).toMatchObject({
       status: "translated",
-      title: "Opus で訳したタイトル",
+      title: "品質優先で訳したタイトル",
       retranslated: true,
     });
     expect(done?.translationRequest).toBeUndefined();

@@ -877,6 +877,8 @@ export class FakeSendo {
       title?: unknown;
       summary?: unknown;
       translatedAt?: unknown;
+      model?: unknown;
+      effort?: unknown;
     } | null;
     if (translation === null || typeof translation !== "object" || !translation.translatedAt) {
       return error(404, "no_translation", "the article is not translated");
@@ -887,7 +889,9 @@ export class FakeSendo {
       summary: translation.summary ?? null,
       content,
       contentSource: content === null ? null : "page",
-      model: "claude-test",
+      // 訳したモデルと思考量は、差分同期で配る翻訳と同じもの（sendo の translation.md の 18）
+      model: typeof translation.model === "string" ? translation.model : "claude-test",
+      effort: typeof translation.effort === "string" ? translation.effort : null,
       translatedAt: translation.translatedAt,
     });
     const gate = this.translationResponseGate;
@@ -922,7 +926,8 @@ export class FakeSendo {
     } else if (translation.status !== "queued" && translation.status !== "untranslated") {
       return error(409, "translation_exists", "the article is already translated");
     }
-    // sendo は、訳せなかった理由を untranslated の記事にだけ付けて配る（sendo の translation.md の 17）
+    // sendo は、訳せなかった理由を untranslated の記事にだけ付けて配る（sendo の translation.md の 17）。
+    // 訳したモデルと思考量は、訳し直しの最中も、もとの訳文のもののまま（展開でそのまま残る）
     this.setTranslation(id, {
       ...translation,
       status: "translating",

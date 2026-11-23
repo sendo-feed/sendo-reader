@@ -17,7 +17,7 @@
   import type { ArticleListState } from "../lib/list.svelte";
   import { type ArticleSwipe, prefs } from "../lib/prefs.svelte";
   import { handleLink, router, viewHref } from "../lib/router.svelte";
-  import { translationFailureText, translationLabel } from "../lib/translation";
+  import { articleTranslationLabel, translationFailureText } from "../lib/translation";
   import { xEmbedOrigin } from "../lib/x-embed";
   import { setXPostLoader, XPostLoader } from "../lib/x-post.svelte";
   import type { XPostSize } from "../lib/x-post-size";
@@ -519,7 +519,8 @@
       (article.translation.status === "queued" || article.translation.status === "untranslated"),
   );
   /**
-   * Opus で訳し直してもらえる（訳文があり、まだ訳し直していない。docs/decisions/translation.md の 5）。
+   * 品質優先の段階で訳し直してもらえる（訳文があり、まだ訳し直していない。docs/decisions/translation.md
+   * の 5）。
    * 頼んだ印のある間は、core が状態を translating にして返すので出ない
    */
   const canRetranslate = $derived(
@@ -569,7 +570,8 @@
   }
 
   /**
-   * Opus で訳し直してもらう（More actions の Retranslate with Opus を押し、確かめの窓で選んだとき）。
+   * 品質優先の段階で訳し直してもらう（More actions の Retranslate (High quality) を押し、確かめの窓で
+   * 選んだとき）。
    * 訳し直した訳文は、同じ元記事のほかの記事も含めて全員分を置き換える（docs/decisions/translation.md の 5、6）
    */
   async function retranslate(): Promise<void> {
@@ -1074,8 +1076,11 @@
 
   /** 記事の URL は、http ／ https のものだけをリンクにする（記事のデータは信頼できない） */
   const link = $derived(article === null ? null : toSafeHttpUrl(article.url));
-  // 元の言語と翻訳の状態のラベル（docs/decisions/translation.md の 1）
-  const translation = $derived(article === null ? null : translationLabel(article.translation));
+  // 元の言語と翻訳の状態のラベル。Translated なら、訳したモデルと思考量を足す（docs/decisions/translation.md
+  // の 1）。出している本文ではなく、届いた翻訳（手元の DB）から出す
+  const translation = $derived(
+    article === null ? null : articleTranslationLabel(article.translation),
+  );
   // 訳せなかった理由の文（決定の 1）。頼んだ印のある間は、状態が translating なので出さない
   const failureText = $derived(
     article === null ? null : translationFailureText(article.translation),
@@ -1342,7 +1347,7 @@
           retranslateConfirmOpen = true;
         }}
       >
-        Retranslate with Opus
+        Retranslate (High quality)
       </button>
     {/if}
     {#if choosingFormat}
@@ -1392,9 +1397,9 @@
   </div>
 </Dialog>
 
-<Dialog bind:open={retranslateConfirmOpen} title="Retranslate with Opus">
+<Dialog bind:open={retranslateConfirmOpen} title="Retranslate (High quality)">
   <p class="confirm">
-    訳し直した訳文は、この記事と、同じ元記事のほかの記事を読むすべての人の訳文を置き換えます。訳し直せるのは
+    品質を優先するモデルで訳し直します。訳し直した訳文は、この記事と、同じ元記事のほかの記事を読むすべての人の訳文を置き換えます。訳し直せるのは
     1 回だけです。
   </p>
   <div class="choices">

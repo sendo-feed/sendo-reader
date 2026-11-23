@@ -306,6 +306,14 @@ const migrations: readonly (readonly string[])[] = [
     "alter table articles add column translation_failure_category text",
     "alter table articles add column translation_failure_stage text",
   ],
+  [
+    // 訳したモデルと思考量（sendo の docs/decisions/translation.md の 18、この reader の translation.md
+    // の 1）。sendo が配ったまま、知らない値も置く。すでに手元にある行は null のまま。条件に対応する前の
+    // sendo か reader の版で受けた記事は、その記事がもう一度届くまでラベルにモデルを足さない。決定の
+    // とおり、最初から同期し直させない
+    "alter table articles add column translation_model text",
+    "alter table articles add column translation_effort text",
+  ],
 ];
 
 export const SCHEMA_VERSION = migrations.length;

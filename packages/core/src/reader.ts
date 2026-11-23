@@ -1113,7 +1113,7 @@ export class ReaderCore {
   // --- 記事の翻訳を頼む（sendo に届かないとできない） ---
 
   /**
-   * 記事をその場で訳してもらう。options.retranslation なら、Opus で訳し直してもらう
+   * 記事をその場で訳してもらう。options.retranslation なら、品質優先の段階で訳し直してもらう
    * （docs/decisions/translation.md の 4〜6）。操作キューには積まず、sendo に届かなければ
    * ApiError（network）。受け付けられたら（その場の翻訳で、もう訳しているか、訳し終えていたときも）、
    * 頼んだ印を付けて、記事が変わったと知らせる。断られたら ApiError（code に理由）。同期は呼んだ側が

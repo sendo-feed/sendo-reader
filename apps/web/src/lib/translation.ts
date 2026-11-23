@@ -22,6 +22,53 @@ export function translationLabel(
   return `${translation.language.toUpperCase()} · ${status}`;
 }
 
+/** 系列の名前にするモデルの ID の頭（docs/decisions/translation.md の 1）。版は出さない */
+const MODEL_FAMILIES: readonly (readonly [prefix: string, name: string])[] = [
+  ["claude-sonnet-", "Sonnet"],
+  ["claude-haiku-", "Haiku"],
+  ["claude-opus-", "Opus"],
+];
+
+/**
+ * 訳したモデルの ID を、ラベルに出す名前にする（docs/decisions/translation.md の 1）。
+ * `claude-sonnet-` ／ `claude-haiku-` ／ `claude-opus-` で始まれば系列の名前（版は出さない）、
+ * ほかの ID は届いたまま
+ */
+export function modelName(model: string): string {
+  return MODEL_FAMILIES.find(([prefix]) => model.startsWith(prefix))?.[1] ?? model;
+}
+
+/**
+ * 記事の画面のラベルの終わりに足す、訳したモデルと思考量（`Haiku low`。docs/decisions/translation.md
+ * の 1）。届いた翻訳（手元の DB）の状態が translated のときだけで、Translating の間（頼んだ印のある
+ * 間は core が translating にして返す。訳し直しの最中も）は足さない。思考量は届いたまま出し、なければ
+ * モデルだけ。モデルがなければ（条件に対応する前の sendo や reader の版で受けた記事）null。文字でない
+ * 値と空の文字は、届かないものとする
+ */
+export function translationConditions(
+  translation: ArticleTranslation | null | undefined,
+): string | null {
+  if (translation == null || translation.status !== "translated") return null;
+  // 版の違うタブが代表のときは、条件の項目のない翻訳が届くことがある（undefined）
+  const { model, effort } = translation;
+  if (typeof model !== "string" || model === "") return null;
+  const name = modelName(model);
+  return typeof effort === "string" && effort !== "" ? `${name} ${effort}` : name;
+}
+
+/**
+ * 記事の画面に出すラベル。一覧の行と同じラベル（translationLabel）の終わりに、訳したモデルと思考量を
+ * 足す（`EN · Translated · Haiku low`。docs/decisions/translation.md の 1）。一覧の行には足さない
+ */
+export function articleTranslationLabel(
+  translation: ArticleTranslation | null | undefined,
+): string | null {
+  const label = translationLabel(translation);
+  if (label === null) return null;
+  const conditions = translationConditions(translation);
+  return conditions === null ? label : `${label} · ${conditions}`;
+}
+
 /**
  * 一覧の行に出すタイトル。訳したタイトルがあれば、それを出す（docs/decisions/translation.md の 2）。
  * 訳したタイトルが空なら、原文のタイトル
@@ -70,7 +117,9 @@ export function translationFailureText(
   }
   const category = failure.category === null ? undefined : REFUSAL_CATEGORIES.get(failure.category);
   const refused = `${category === undefined ? "" : `${category}の`}安全策で、翻訳を断られました。`;
+  // バッチで拒否された記事で、別のモデルで試すとは言い切らない（その場の翻訳で代わりのモデルを
+  // 使うかは、sendo の設定のモデルによる。決定の 1）
   return failure.stage === "batch"
-    ? `${refused}Translate を押すと、断られたときに別のモデルで試します（それでも断られることがあります）。`
+    ? `${refused}Translate で頼み直すと、通ることがあります。`
     : `${refused}頼み直しても、同じ結果になる見込みが高いです。`;
 }

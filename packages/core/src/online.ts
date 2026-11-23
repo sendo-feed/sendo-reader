@@ -41,7 +41,7 @@ function parseFetchTime(value: unknown): number | null {
 }
 
 /**
- * 記事をその場で訳してもらう。retranslation なら、Opus で訳し直してもらう（sendo の
+ * 記事をその場で訳してもらう。retranslation なら、品質優先の段階で訳し直してもらう（sendo の
  * POST /articles/{id}/translation。docs/decisions/translation.md の 4〜6）。受け付けられたら（202）
  * 返る。断られたか届かなければ ApiError（code に理由）
  */
