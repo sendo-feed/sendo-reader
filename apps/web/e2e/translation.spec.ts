@@ -684,7 +684,7 @@ test.describe("Retranslate with Opus", () => {
     await expect(retranslateButton(page)).toHaveCount(0);
   });
 
-  test("同じ元記事のほかの記事を訳し直して、訳し直しが写って印が届いた記事には出さない", async ({
+  test("同じ元記事のほかの記事を訳し直して、訳し直しが写って印が届いた記事には出さない。開いていれば見出しは替えず、失敗の文も出さない", async ({
     page,
     context,
   }) => {
@@ -701,34 +701,52 @@ test.describe("Retranslate with Opus", () => {
         title: "Feature Toggles (discussion)",
         url,
         publishedAt: now - 2000,
-        translation: sonnet(now - 60_000),
+        translation: { ...sonnet(now - 60_000), title: "フィーチャートグルの議論" },
       },
     );
     await routeFakeSendo(context, server);
     await page.goto("/");
     await signIn(page);
     const view = page.locator(".article-view");
+    const heading = view.getByRole("heading", { level: 1 });
     const items = page.locator(".article-list .item");
 
     await items.nth(0).click();
+    await expect(heading).toHaveText("フィーチャートグル");
     await openActions(page);
     await retranslateButton(page).click();
     const confirm = page.getByRole("dialog", { name: "Retranslate with Opus" });
     await expect(confirm).toContainText("同じ元記事のほかの記事を読むすべての人の訳文");
     await confirm.getByRole("button", { name: "Retranslate", exact: true }).click();
+    await expect(view.locator("header .translation")).toHaveText("・ EN · Translating");
     expect(server.retranslationRequests).toEqual([first.id]);
 
-    // sendo が、同じ元記事のほかの記事にも訳し直しを写した
-    server.setTranslation(first.id, opus(Date.now()));
-    server.setTranslation(second.id, opus(Date.now()));
-    await page.getByRole("button", { name: "Sync now" }).click();
-    await expect(view.getByRole("heading", { level: 1 })).toHaveText("機能フラグ");
-
+    // 写る先の記事を開いている間に、sendo が同じ元記事のほかの記事にも訳し直しを写した
     await items.nth(1).click();
-    await expect(view.getByRole("heading", { level: 1 })).toHaveText("機能フラグ");
-    await openActions(page);
-    await expect(page.getByRole("button", { name: "Show original text" })).toBeVisible();
-    await expect(retranslateButton(page)).toHaveCount(0);
+    await expect(heading).toHaveText("フィーチャートグルの議論");
+    server.setTranslation(first.id, opus(Date.now()));
+    server.setTranslation(second.id, {
+      ...opus(Date.now()),
+      title: "機能フラグの議論",
+    });
+    await page.getByRole("button", { name: "Sync now" }).click();
+    // この端末で頼んだ記事ではないので、開いている見出しは替えず、失敗の文も出さない
+    await expect
+      .poll(async () => {
+        await openActions(page);
+        const count = await retranslateButton(page).count();
+        await page.keyboard.press("Escape");
+        return count;
+      })
+      .toBe(0);
+    await expect(heading).toHaveText("フィーチャートグルの議論");
+    await expect(view.locator("header .translation")).toHaveText("・ EN · Translated");
+    await expect(view.getByText("訳し直せませんでした", { exact: false })).toHaveCount(0);
+    await expect(items.nth(1)).toContainText("機能フラグの議論");
+
+    // 頼んだ記事は、訳し直した訳文で出る
+    await items.nth(0).click();
+    await expect(heading).toHaveText("機能フラグ");
     expect(server.retranslationRequests).toEqual([first.id]);
   });
 
