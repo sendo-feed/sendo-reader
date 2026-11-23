@@ -2,7 +2,7 @@ import { leaderLockName } from "@sendo-reader/core/web";
 import { trimImageCache } from "@sendo-reader/core/web/image-cache";
 import { mount } from "svelte";
 import App from "./App.svelte";
-import { canReloadAt, watchAppUpdate } from "./lib/app-update";
+import { canReloadPage, watchAppUpdate } from "./lib/app-update";
 import { AUTHORIZE_PATH } from "./lib/authorize";
 import { watchBackForwardCache } from "./lib/back-forward-cache";
 import { readerContext } from "./lib/context";
@@ -69,9 +69,7 @@ if (import.meta.env.PROD && "serviceWorker" in navigator) {
     document,
     reload: () => location.reload(),
     // 読み込み直すと消えるものを出している画面では、ほかの画面に移ってから切り替える
-    canReload: () =>
-      canReloadAt(location.pathname) &&
-      document.querySelector('dialog[open][aria-label="Save a URL"]') === null,
+    canReload: () => canReloadPage(location.pathname, document),
     setInterval: (fn, ms) => setInterval(fn, ms),
     // 前に出ている間は読み込み直さないので、画面で知らせる（App.svelte）
     onUpdateReady: () => updateNotice.ready(),

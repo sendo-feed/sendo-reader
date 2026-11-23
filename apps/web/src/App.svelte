@@ -2,7 +2,7 @@
   import LeaveStalled from "./components/LeaveStalled.svelte";
   import UpdateReady from "./components/UpdateReady.svelte";
   import VersionMismatch from "./components/VersionMismatch.svelte";
-  import { canReloadAt } from "./lib/app-update";
+  import { canReloadPage } from "./lib/app-update";
   import { useReader } from "./lib/context";
   import { router } from "./lib/router.svelte";
   import { topNotice, updateNotice } from "./lib/update-notice.svelte";
@@ -15,7 +15,8 @@
       leaveStalled: state.leaveStalled,
       versionMismatch: state.versionMismatch !== null,
       updatePending: updateNotice.pending,
-      canReload: canReloadAt(router.url.pathname),
+      // 画面を移ったら決め直す。Save a URL の窓はモーダルなので、開いている間の知らせは押せない
+      canReload: canReloadPage(router.url.pathname, document),
     }),
   );
 </script>

@@ -1,7 +1,7 @@
 import { describe, expect, test } from "vitest";
 import {
   type AppUpdateEnvironment,
-  canReloadAt,
+  canReloadPage,
   updateReadyMessage,
   watchAppUpdate,
 } from "../src/lib/app-update";
@@ -173,13 +173,23 @@ describe("新しい版の知らせ", () => {
     expect(app.state.reloads).toBe(0);
   });
 
-  test("読み込み直すと消えるものを出している画面のパス", () => {
+  test("読み込み直すと消えるものを出している画面（パスと、開いている Save a URL の窓）", () => {
+    const noDialog = { querySelector: () => null };
     for (const path of ["/settings", "/manage", "/add", "/oauth/authorize"]) {
-      expect(canReloadAt(path)).toBe(false);
+      expect(canReloadPage(path, noDialog)).toBe(false);
     }
     for (const path of ["/", "/starred", "/feeds/1", "/search"]) {
-      expect(canReloadAt(path)).toBe(true);
+      expect(canReloadPage(path, noDialog)).toBe(true);
     }
+    const selectors: string[] = [];
+    const openDialog = {
+      querySelector: (selector: string) => {
+        selectors.push(selector);
+        return {} as Element;
+      },
+    };
+    expect(canReloadPage("/", openDialog)).toBe(false);
+    expect(selectors).toEqual(['dialog[open][aria-label="Save a URL"]']);
   });
 
   test("ホーム画面のアプリとブラウザーで、文を分ける", () => {

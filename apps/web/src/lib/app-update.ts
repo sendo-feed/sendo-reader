@@ -54,9 +54,19 @@ export interface AppUpdateEnvironment {
  */
 const KEEP_PATHS: readonly string[] = ["/settings", "/manage", "/add", AUTHORIZE_PATH];
 
-/** このパスの画面は、読み込み直してよいか（新しい版の知らせの Reload を出してよいか） */
-export function canReloadAt(pathname: string): boolean {
-  return !KEEP_PATHS.includes(pathname);
+/**
+ * いまの画面を読み込み直してよいか。読み込み直すと消えるものを出している画面（上のパス、開いている
+ * Save a URL の窓）では false。自動の読み込み直し（main.ts の canReload）と、新しい版の知らせ
+ * （App.svelte）の両方が、これで決める。条件を足すときは、ここに足す
+ */
+export function canReloadPage(
+  pathname: string,
+  document: Pick<Document, "querySelector">,
+): boolean {
+  return (
+    !KEEP_PATHS.includes(pathname) &&
+    document.querySelector('dialog[open][aria-label="Save a URL"]') === null
+  );
 }
 
 /**

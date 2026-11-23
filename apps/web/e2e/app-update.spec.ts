@@ -115,7 +115,11 @@ async function openVersionA(page: Page, url = READER, signedIn = false): Promise
     loads += 1;
   });
   await page.goto(url);
-  if (signedIn) await signIn(page);
+  if (signedIn) {
+    await signIn(page);
+    // ログインで、ページごと移って戻ってくる。戻った画面が出るまで待つ
+    await expect(page.getByRole("link", { name: "Settings" })).toBeVisible();
+  }
   await page.evaluate(() => navigator.serviceWorker.ready);
   await expect
     .poll(() => page.evaluate(() => navigator.serviceWorker.controller !== null))
@@ -203,7 +207,9 @@ test("新しい版の知らせの Reload で、その場で新しい版に切り
   await expect(updateNotice(page)).toHaveCount(0);
 });
 
-test("新しい版の知らせを閉じたら出し直さず、裏に回ったときに自動で切り替わる", async ({ page }) => {
+test("新しい版の知らせを閉じたら出し直さず、次に画面の表示が替わったときに自動で切り替わる", async ({
+  page,
+}) => {
   const loads = await openVersionA(page);
   await switchToVersionB(page);
   await updateNotice(page).getByRole("button", { name: "Dismiss" }).click();
@@ -213,7 +219,7 @@ test("新しい版の知らせを閉じたら出し直さず、裏に回った�
   await expect(updateNotice(page)).toHaveCount(0);
   expect(loads()).toBe(1);
   expect(await version(page)).toBe("a");
-  // 裏に回る（画面の表示が替わる）と、自動で読み込み直す
+  // 画面の表示が替わる（visibilitychange。裏に回る、前に出る）と、自動で読み込み直す
   await Promise.all([page.waitForEvent("load"), bringToFront(page)]);
   expect(await version(page)).toBe("b");
   await expect(updateNotice(page)).toHaveCount(0);
