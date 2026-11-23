@@ -25,22 +25,23 @@ const t = (
   retranslated: false,
 });
 
+const language = (text: string) => ({ kind: "language", text });
+const status = (text: string) => ({ kind: "status", text });
+const model = (text: string) => ({ kind: "model", text });
+const effort = (text: string) => ({ kind: "effort", text });
+
 describe("translationLabel", () => {
   test.each([
-    ["queued", "EN · Queued"],
-    ["translating", "EN · Translating"],
-    ["translated", "EN · Translated"],
-    ["untranslated", "EN · Untranslated"],
-  ] as const)("%s は %s", (status, label) => {
-    expect(translationLabel(t("en", status))).toBe(label);
-  });
-
-  test("und でない untranslated は、言語と一緒に出す", () => {
-    expect(translationLabel(t("en", "untranslated"))).toBe("EN · Untranslated");
+    ["queued", "Queued"],
+    ["translating", "Translating"],
+    ["translated", "Translated"],
+    ["untranslated", "Untranslated"],
+  ] as const)("%s は、言語の枠と %s の枠の 2 つ", (state, label) => {
+    expect(translationLabel(t("en", state))).toEqual([language("EN"), status(label)]);
   });
 
   test("言語を大文字にする", () => {
-    expect(translationLabel(t("zh", "translated"))).toBe("ZH · Translated");
+    expect(translationLabel(t("zh", "translated"))).toEqual([language("ZH"), status("Translated")]);
   });
 
   test("翻訳のない記事にはラベルを出さない", () => {
@@ -49,11 +50,21 @@ describe("translationLabel", () => {
     expect(translationLabel(undefined)).toBeNull();
   });
 
-  test("und は、言語を省いて状態だけを出す。queued（sendo は作らない）は出さない", () => {
-    expect(translationLabel(t("und", "untranslated"))).toBe("Untranslated");
+  test("und は、言語の枠を出さず状態の枠だけ。queued（sendo は作らない）は出さない", () => {
+    expect(translationLabel(t("und", "untranslated"))).toEqual([status("Untranslated")]);
     expect(translationLabel(t("und", "queued"))).toBeNull();
-    expect(translationLabel(t("und", "translating"))).toBe("Translating");
-    expect(translationLabel(t("und", "translated"))).toBe("Translated");
+    expect(translationLabel(t("und", "translating"))).toEqual([status("Translating")]);
+    expect(translationLabel(t("und", "translated"))).toEqual([status("Translated")]);
+  });
+
+  test("一覧の行には、Translated でもモデルと思考量の枠を足さない", () => {
+    expect(
+      translationLabel({
+        ...t("en", "translated", "訳"),
+        model: "claude-haiku-5-5",
+        effort: "low",
+      }),
+    ).toEqual([language("EN"), status("Translated")]);
   });
 });
 
@@ -137,21 +148,39 @@ describe("translationFailureText", () => {
 /** 訳したモデルと思考量（docs/decisions/translation.md の 1） */
 describe("modelName", () => {
   test.each([
-    ["claude-sonnet-5-5", "Sonnet"],
-    ["claude-haiku-5-5", "Haiku"],
-    ["claude-opus-5-5", "Opus"],
-    ["claude-haiku-4-5-20251001", "Haiku"],
-  ])("%s は系列の名前（%s）にし、版は出さない", (model, name) => {
-    expect(modelName(model)).toBe(name);
+    ["claude-sonnet-5-5", "Sonnet 5.5"],
+    ["claude-haiku-5-5", "Haiku 5.5"],
+    ["claude-opus-5-5", "Opus 5.5"],
+    ["claude-sonnet-5", "Sonnet 5"],
+    ["claude-opus-4-1", "Opus 4.1"],
+    ["claude-haiku-4-5-20251001", "Haiku 4.5"],
+    ["claude-sonnet-4-20250514", "Sonnet 4"],
+    // 副版は 0 でも出す
+    ["claude-sonnet-4-0", "Sonnet 4.0"],
+    // 版は 2 桁まで
+    ["claude-opus-10-12", "Opus 10.12"],
+    ["claude-opus-10-12-20300101", "Opus 10.12"],
+  ])("%s は %s（系列の名前と版。日付は出さない）", (id, name) => {
+    expect(modelName(id)).toBe(name);
   });
 
   test.each([
     ["知らない系列", "claude-fable-1"],
     ["ほかのモデル", "gpt-unknown"],
-    ["頭が途中まで", "claude-sonnet"],
-    ["大文字", "Claude-Haiku-5-5"],
-  ])("%s の ID は、届いたまま出す", (_name, model) => {
-    expect(modelName(model)).toBe(model);
+    ["版がない", "claude-sonnet"],
+    ["版が数字でない", "claude-sonnet-latest"],
+    ["系列が版のあと（古い形）", "claude-3-5-sonnet-20241022"],
+    ["大文字（頭）", "Claude-Haiku-5-5"],
+    ["大文字（系列）", "claude-Haiku-5-5"],
+    ["版が 3 つ", "claude-sonnet-5-5-1"],
+    ["版が 3 桁", "claude-sonnet-100"],
+    ["日付が 8 桁でない", "claude-sonnet-4-2025051"],
+    ["日付のあとに続き", "claude-haiku-4-5-20251001-v2"],
+    ["日付が 2 つ", "claude-sonnet-4-20250514-20250514"],
+    ["末尾がハイフン", "claude-sonnet-5-"],
+    ["前に余分", "us.claude-sonnet-5"],
+  ])("%s の ID（%s）は、届いたまま出す", (_name, id) => {
+    expect(modelName(id)).toBe(id);
   });
 });
 
@@ -159,59 +188,80 @@ describe("translationConditions と articleTranslationLabel", () => {
   const translated = (model: unknown, effort: unknown): ArticleTranslation =>
     ({ ...t("en", "translated", "訳"), model, effort }) as ArticleTranslation;
 
-  test("Translated の記事は、ラベルの終わりにモデルと思考量を足す", () => {
-    expect(translationConditions(translated("claude-haiku-5-5", "low"))).toBe("Haiku low");
-    expect(articleTranslationLabel(translated("claude-haiku-5-5", "low"))).toBe(
-      "EN · Translated · Haiku low",
-    );
-    expect(articleTranslationLabel(translated("claude-opus-5-5", "high"))).toBe(
-      "EN · Translated · Opus high",
-    );
+  test("Translated の記事は、言語と状態の枠のあとにモデルと思考量の枠を足す（4 つ）", () => {
+    expect(translationConditions(translated("claude-haiku-5-5", "low"))).toEqual([
+      model("Haiku 5.5"),
+      effort("low"),
+    ]);
+    expect(articleTranslationLabel(translated("claude-haiku-5-5", "low"))).toEqual([
+      language("EN"),
+      status("Translated"),
+      model("Haiku 5.5"),
+      effort("low"),
+    ]);
+    expect(articleTranslationLabel(translated("claude-opus-5-5", "high"))).toEqual([
+      language("EN"),
+      status("Translated"),
+      model("Opus 5.5"),
+      effort("high"),
+    ]);
   });
 
   test("知らないモデルの ID と思考量は、届いたまま出す", () => {
-    expect(articleTranslationLabel(translated("gpt-unknown", "ultra"))).toBe(
-      "EN · Translated · gpt-unknown ultra",
-    );
+    expect(articleTranslationLabel(translated("gpt-unknown", "ultra"))).toEqual([
+      language("EN"),
+      status("Translated"),
+      model("gpt-unknown"),
+      effort("ultra"),
+    ]);
   });
 
-  test("思考量がない（null、空、文字でない、項目なし）なら、モデルだけを足す", () => {
-    for (const effort of [null, "", 1, undefined]) {
-      expect(articleTranslationLabel(translated("claude-sonnet-5-5", effort))).toBe(
-        "EN · Translated · Sonnet",
-      );
+  test("思考量がない（null、空、文字でない、項目なし）なら、モデルの枠だけを足す", () => {
+    for (const value of [null, "", 1, undefined]) {
+      expect(articleTranslationLabel(translated("claude-sonnet-5-5", value))).toEqual([
+        language("EN"),
+        status("Translated"),
+        model("Sonnet 5.5"),
+      ]);
     }
   });
 
-  test("モデルがない（null、空、文字でない、項目なし）なら、思考量があっても何も足さない", () => {
-    for (const model of [null, "", 1, undefined]) {
-      expect(translationConditions(translated(model, "low"))).toBeNull();
-      expect(articleTranslationLabel(translated(model, "low"))).toBe("EN · Translated");
+  test("モデルがない（null、空、文字でない、項目なし）なら、思考量があってもどちらの枠も足さない", () => {
+    for (const value of [null, "", 1, undefined]) {
+      expect(translationConditions(translated(value, "low"))).toBeNull();
+      expect(articleTranslationLabel(translated(value, "low"))).toEqual([
+        language("EN"),
+        status("Translated"),
+      ]);
     }
     // 条件の項目のない翻訳（版の違うタブが代表のとき）
-    expect(articleTranslationLabel(t("en", "translated", "訳"))).toBe("EN · Translated");
+    expect(articleTranslationLabel(t("en", "translated", "訳"))).toEqual([
+      language("EN"),
+      status("Translated"),
+    ]);
   });
 
   test("Translated でない状態（Translating の間を含む）には足さない", () => {
-    for (const status of ["queued", "translating", "untranslated"] as const) {
+    for (const state of ["queued", "translating", "untranslated"] as const) {
       const translation = {
-        ...t("en", status),
+        ...t("en", state),
         model: "claude-haiku-5-5",
         effort: "low",
       };
       expect(translationConditions(translation)).toBeNull();
-      expect(articleTranslationLabel(translation)).toBe(translationLabel(translation));
+      expect(articleTranslationLabel(translation)).toEqual(translationLabel(translation));
     }
   });
 
-  test("und の記事は、言語を省いた状態のあとに足す。翻訳のない記事には出さない", () => {
+  test("und の記事は、状態の枠のあとに足す。翻訳のない記事には出さない", () => {
     expect(
       articleTranslationLabel({
         ...t("und", "translated", "訳"),
         model: "claude-haiku-5-5",
         effort: "low",
       }),
-    ).toBe("Translated · Haiku low");
+    ).toEqual([status("Translated"), model("Haiku 5.5"), effort("low")]);
+    expect(articleTranslationLabel(t("und", "queued"))).toBeNull();
     expect(articleTranslationLabel(null)).toBeNull();
     expect(articleTranslationLabel(undefined)).toBeNull();
   });

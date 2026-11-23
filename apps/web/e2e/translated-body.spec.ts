@@ -1,5 +1,8 @@
-import { type BrowserContext, expect, type Page, test } from "@playwright/test";
+import { type BrowserContext, expect, type Locator, type Page, test } from "@playwright/test";
 import { FakeSendo, routeFakeSendo, signIn } from "./fake-sendo";
+
+/** 翻訳のラベルの枠（docs/decisions/translation.md の 1）。枠ごとのテキストを並べた順に確かめる */
+const chips = (scope: Locator) => scope.locator(".translation .chip");
 
 /**
  * 訳した本文（docs/decisions/translation.md の 3、8、9）。訳文のある記事を開くと、全文ではなく
@@ -308,7 +311,7 @@ test("Translate で頼んだ記事は、訳文が届くと訳した本文に替�
   });
   await expect(view.locator(".body")).toHaveText("Full text");
   await view.getByRole("button", { name: "Translate", exact: true }).click();
-  await expect(view.locator("header .translation")).toHaveText("・ EN · Translating");
+  await expect(chips(view.locator("header"))).toHaveText(["EN", "Translating"]);
   server.setTranslation(article.id, translated("フィーチャートグル", new Date().toISOString()));
   await page.getByRole("button", { name: "Sync now" }).click();
   await expect(view.getByRole("heading", { level: 1 })).toHaveText("フィーチャートグル");

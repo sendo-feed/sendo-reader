@@ -24,6 +24,13 @@
   --accent-strong: #0b5f59;
   --on-accent: #ffffff;
   --danger: #b42318;
+  /*
+   * 翻訳のラベルの言語の枠（docs/decisions/translation.md の 1）。どの言語も同じ色で、文字との対比は 7:1 以上。
+   * 線は、選んでいる行（--selected）やマウスで指している行（--hover）の上でも枠の形が分かる濃さにする
+   */
+  --language-chip: #dbe8fb;
+  --language-chip-border: #8fb0de;
+  --on-language-chip: #1a4a85;
   --scrim: rgb(15 20 25 / 45%);
   --shadow: 0 8px 28px rgb(15 20 25 / 16%);
   --confetti-teal: #2dd4bf;
@@ -81,6 +88,9 @@
   --accent-strong: #7be0d3;
   --on-accent: #06221f;
   --danger: #f97066;
+  --language-chip: #203a5e;
+  --language-chip-border: #44699c;
+  --on-language-chip: #c4dafa;
   --scrim: rgb(0 0 0 / 60%);
   --shadow: 0 8px 28px rgb(0 0 0 / 50%);
 }
@@ -102,6 +112,9 @@
     --accent-strong: #7be0d3;
     --on-accent: #06221f;
     --danger: #f97066;
+    --language-chip: #203a5e;
+    --language-chip-border: #44699c;
+    --on-language-chip: #c4dafa;
     --scrim: rgb(0 0 0 / 60%);
     --shadow: 0 8px 28px rgb(0 0 0 / 50%);
   }

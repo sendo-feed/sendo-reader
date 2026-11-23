@@ -1,6 +1,8 @@
 <script lang="ts">
+  import type { TranslationChip } from "../lib/translation";
   import Icon from "./Icon.svelte";
   import RemoteImage from "./RemoteImage.svelte";
+  import TranslationLabel from "./TranslationLabel.svelte";
 
   let {
     title,
@@ -24,8 +26,8 @@
     thumbnailUrl?: string | null;
     href?: string;
     current?: boolean;
-    /** 元の言語と翻訳の状態のラベル（lib/translation.ts）。翻訳のない記事は null */
-    translationLabel?: string | null;
+    /** 元の言語と翻訳の状態の枠（lib/translation.ts）。翻訳のない記事は null */
+    translationLabel?: TranslationChip[] | null;
     onopen?: (event: MouseEvent) => void;
   } = $props();
 </script>
@@ -35,17 +37,19 @@
   <span class="text">
     <span class="title">{title}</span>
     <span class="meta">
-      <span class="saved-status">
-        {#if saved}
-          <Icon name="bookmark" filled />
-          <span class="visually-hidden">Saved</span>
-        {/if}
+      <span class="source">
+        <span class="saved-status">
+          {#if saved}
+            <Icon name="bookmark" filled />
+            <span class="visually-hidden">Saved</span>
+          {/if}
+        </span>
+        <span class="feed-icon"><RemoteImage src={feedIconUrl} /></span>
+        <span class="feed">{feedTitle}</span>
+        <span class="time">{time}</span>
       </span>
-      <span class="feed-icon"><RemoteImage src={feedIconUrl} /></span>
-      <span class="feed">{feedTitle}</span>
-      <span class="time">{time}</span>
       {#if translationLabel !== null}
-        <span class="translation">{translationLabel}</span>
+        <span class="translation-slot"><TranslationLabel chips={translationLabel} compact /></span>
       {/if}
     </span>
   </span>
@@ -132,13 +136,30 @@
     outline-offset: -2px;
   }
 
+  /*
+   * メタの並び。保存の印、フィードのアイコン、フィードの名前、時刻（.source）のあとに、翻訳のラベルを
+   * 置く（docs/decisions/translation.md の 1）。折り返すのは .source とラベルの間だけで、メタは
+   * 最大 2 行。.source の全体のあとにラベルが入りきらないとき（狭い画面、サムネイルのある行、大きな
+   * 文字、長い時刻）は、ラベルを次の行に送る。2 行になっても、タイトル 3 行と合わせて行の高さに
+   * 収まるよう、行の間を詰める
+   */
   .meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0 0.375rem;
+    align-items: baseline;
+    min-width: 0;
+    font-size: 0.75rem;
+    line-height: 1.35;
+    color: var(--muted);
+  }
+
+  /* 1 行で折り返さない。入りきらなければ、フィードの名前を縮めて省略記号で切る */
+  .source {
     display: flex;
     gap: 0.375rem;
     align-items: baseline;
     min-width: 0;
-    font-size: 0.75rem;
-    color: var(--muted);
   }
 
   /* 保存の有無でフィード名を動かさず、画像にも重ねない。既読になっても色を保つ */
@@ -176,15 +197,16 @@
     content: "/ ";
   }
 
-  /* 翻訳のラベル。色で分けず、時刻と同じ控えめな文字で出す（docs/decisions/translation.md の 1） */
-  .translation {
-    flex: none;
-    color: var(--faint);
-    white-space: nowrap;
-  }
-
-  .translation::before {
-    content: "/ ";
+  /*
+   * 翻訳のラベル（言語と状態の枠。docs/decisions/translation.md の 1）。時刻のあとに並べる
+   * （入りきらなければ、上のとおり次の行に送る）。枠で分かれるので、区切りの「/」は付けない。
+   * 次の行でも幅が足りないとき（とても狭い画面と大きな文字）は、枠の中の文字を省略記号で切り、
+   * 3 行にしない
+   */
+  .translation-slot {
+    display: inline-flex;
+    flex: 0 1 auto;
+    min-width: 0;
   }
 
   .title {
