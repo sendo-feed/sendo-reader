@@ -8,65 +8,81 @@ const STATUS_LABELS: Record<TranslationStatus, string> = {
 };
 
 /**
- * 元の言語と翻訳の状態を 1 つにしたラベル（docs/decisions/translation.md の 1）。`EN · Translated` など。
- * 翻訳のない記事は null。言語が判定できなかった記事（und）は、言語を省いて状態だけを出す
+ * ラベルの 1 つの枠（docs/decisions/translation.md の 1）。言語（`EN`）、状態（`Translated` など）、
+ * 記事の画面だけに足すモデル（`Haiku 5.5`）と思考量（`low`）。言語の枠だけ色を付け、ほかは線だけに
+ * する（components/TranslationLabel.svelte）
+ */
+export type TranslationChip = {
+  kind: "language" | "status" | "model" | "effort";
+  text: string;
+};
+
+/**
+ * 一覧の行のラベル（docs/decisions/translation.md の 1）。元の言語と翻訳の状態の枠（`[EN] [Translated]`）。
+ * 翻訳のない記事は null。言語が判定できなかった記事（und）は、言語の枠を出さず状態の枠だけを出す
  * （Untranslated、Translating、Translated。sendo は und の記事を queued にしないので、届いても出さない）
  */
 export function translationLabel(
   translation: ArticleTranslation | null | undefined,
-): string | null {
+): TranslationChip[] | null {
   // 版の違うタブが代表のときは、翻訳の項目のない記事が届くことがある（undefined）
   if (translation == null) return null;
-  const status = STATUS_LABELS[translation.status];
-  if (translation.language === "und") return translation.status === "queued" ? null : status;
-  return `${translation.language.toUpperCase()} · ${status}`;
+  const status: TranslationChip = { kind: "status", text: STATUS_LABELS[translation.status] };
+  if (translation.language === "und") return translation.status === "queued" ? null : [status];
+  return [{ kind: "language", text: translation.language.toUpperCase() }, status];
 }
 
-/** 系列の名前にするモデルの ID の頭（docs/decisions/translation.md の 1）。版は出さない */
-const MODEL_FAMILIES: readonly (readonly [prefix: string, name: string])[] = [
-  ["claude-sonnet-", "Sonnet"],
-  ["claude-haiku-", "Haiku"],
-  ["claude-opus-", "Opus"],
-];
+/**
+ * 系列の名前と版にするモデルの ID の形（docs/decisions/translation.md の 1）。ID 全体が
+ * `claude-<系列>-<主版>`、`claude-<系列>-<主版>-<副版>`、そのどちらかのあとに `-<日付>` が付いたもの。
+ * 系列は小文字の sonnet ／ haiku ／ opus、版は 1〜2 桁の数字、日付は 8 桁の数字
+ */
+const MODEL_ID = /^claude-(sonnet|haiku|opus)-(\d{1,2})(?:-(\d{1,2}))?(?:-\d{8})?$/;
+
+const MODEL_FAMILIES = { sonnet: "Sonnet", haiku: "Haiku", opus: "Opus" } as const;
 
 /**
- * 訳したモデルの ID を、ラベルに出す名前にする（docs/decisions/translation.md の 1）。
- * `claude-sonnet-` ／ `claude-haiku-` ／ `claude-opus-` で始まれば系列の名前（版は出さない）、
+ * 訳したモデルの ID を、ラベルに出す名前にする（docs/decisions/translation.md の 1）。形に合えば
+ * 系列の名前と版（`claude-haiku-4-5-20251001` → `Haiku 4.5`。日付は出さず、副版は 0 でも出す）、
  * ほかの ID は届いたまま
  */
 export function modelName(model: string): string {
-  return MODEL_FAMILIES.find(([prefix]) => model.startsWith(prefix))?.[1] ?? model;
+  const match = MODEL_ID.exec(model);
+  if (match === null) return model;
+  const [, family, major, minor] = match;
+  const version = minor === undefined ? major : `${major}.${minor}`;
+  return `${MODEL_FAMILIES[family as keyof typeof MODEL_FAMILIES]} ${version}`;
 }
 
 /**
- * 記事の画面のラベルの終わりに足す、訳したモデルと思考量（`Haiku low`。docs/decisions/translation.md
- * の 1）。届いた翻訳（手元の DB）の状態が translated のときだけで、Translating の間（頼んだ印のある
- * 間は core が translating にして返す。訳し直しの最中も）は足さない。思考量は届いたまま出し、なければ
- * モデルだけ。モデルがなければ（条件に対応する前の sendo や reader の版で受けた記事）null。文字でない
- * 値と空の文字は、届かないものとする
+ * 記事の画面のラベルの終わりに足す、訳したモデルと思考量の枠（`[Haiku 5.5] [low]`。
+ * docs/decisions/translation.md の 1）。届いた翻訳（手元の DB）の状態が translated のときだけで、
+ * Translating の間（頼んだ印のある間は core が translating にして返す。訳し直しの最中も）は足さない。
+ * 思考量は届いたまま出し、なければモデルの枠だけ。モデルがなければ（条件に対応する前の sendo や
+ * reader の版で受けた記事）null。文字でない値と空の文字は、届かないものとする
  */
 export function translationConditions(
   translation: ArticleTranslation | null | undefined,
-): string | null {
+): TranslationChip[] | null {
   if (translation == null || translation.status !== "translated") return null;
   // 版の違うタブが代表のときは、条件の項目のない翻訳が届くことがある（undefined）
   const { model, effort } = translation;
   if (typeof model !== "string" || model === "") return null;
-  const name = modelName(model);
-  return typeof effort === "string" && effort !== "" ? `${name} ${effort}` : name;
+  const chips: TranslationChip[] = [{ kind: "model", text: modelName(model) }];
+  if (typeof effort === "string" && effort !== "") chips.push({ kind: "effort", text: effort });
+  return chips;
 }
 
 /**
- * 記事の画面に出すラベル。一覧の行と同じラベル（translationLabel）の終わりに、訳したモデルと思考量を
- * 足す（`EN · Translated · Haiku low`。docs/decisions/translation.md の 1）。一覧の行には足さない
+ * 記事の画面のラベル。一覧の行と同じ枠（translationLabel）のあとに、訳したモデルと思考量の枠を
+ * 足す（`[EN] [Translated] [Haiku 5.5] [low]`。docs/decisions/translation.md の 1）。一覧の行には足さない
  */
 export function articleTranslationLabel(
   translation: ArticleTranslation | null | undefined,
-): string | null {
+): TranslationChip[] | null {
   const label = translationLabel(translation);
   if (label === null) return null;
-  const conditions = translationConditions(translation);
-  return conditions === null ? label : `${label} · ${conditions}`;
+  return [...label, ...(translationConditions(translation) ?? [])];
 }
 
 /**

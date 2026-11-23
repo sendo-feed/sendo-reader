@@ -24,6 +24,7 @@
   import ArticleBody from "./ArticleBody.svelte";
   import Dialog from "./Dialog.svelte";
   import Icon from "./Icon.svelte";
+  import TranslationLabel from "./TranslationLabel.svelte";
 
   let {
     articleId,
@@ -1076,7 +1077,7 @@
 
   /** 記事の URL は、http ／ https のものだけをリンクにする（記事のデータは信頼できない） */
   const link = $derived(article === null ? null : toSafeHttpUrl(article.url));
-  // 元の言語と翻訳の状態のラベル。Translated なら、訳したモデルと思考量を足す（docs/decisions/translation.md
+  // 元の言語と翻訳の状態の枠。Translated なら、訳したモデルと思考量の枠を足す（docs/decisions/translation.md
   // の 1）。出している本文ではなく、届いた翻訳（手元の DB）から出す
   const translation = $derived(
     article === null ? null : articleTranslationLabel(article.translation),
@@ -1248,7 +1249,8 @@
               <span>・ {article.author}</span>
             {/if}
             {#if translation !== null}
-              <span class="translation">・ {translation}</span>
+              <!-- 枠で分かれるので、区切りの「・」は付けない。入りきらなければ、ラベルごと次の行に送る -->
+              <TranslationLabel chips={translation} />
             {/if}
             {#if canTranslate}
               <!-- 訳文のない記事を、押したときだけ訳してもらう（ラベルのすぐ横。決定の 4） -->

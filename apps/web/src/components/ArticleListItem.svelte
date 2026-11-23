@@ -1,6 +1,8 @@
 <script lang="ts">
+  import type { TranslationChip } from "../lib/translation";
   import Icon from "./Icon.svelte";
   import RemoteImage from "./RemoteImage.svelte";
+  import TranslationLabel from "./TranslationLabel.svelte";
 
   let {
     title,
@@ -24,8 +26,8 @@
     thumbnailUrl?: string | null;
     href?: string;
     current?: boolean;
-    /** 元の言語と翻訳の状態のラベル（lib/translation.ts）。翻訳のない記事は null */
-    translationLabel?: string | null;
+    /** 元の言語と翻訳の状態の枠（lib/translation.ts）。翻訳のない記事は null */
+    translationLabel?: TranslationChip[] | null;
     onopen?: (event: MouseEvent) => void;
   } = $props();
 </script>
@@ -45,7 +47,7 @@
       <span class="feed">{feedTitle}</span>
       <span class="time">{time}</span>
       {#if translationLabel !== null}
-        <span class="translation">{translationLabel}</span>
+        <span class="translation-slot"><TranslationLabel chips={translationLabel} /></span>
       {/if}
     </span>
   </span>
@@ -176,15 +178,14 @@
     content: "/ ";
   }
 
-  /* 翻訳のラベル。色で分けず、時刻と同じ控えめな文字で出す（docs/decisions/translation.md の 1） */
-  .translation {
+  /*
+   * 翻訳のラベル（言語と状態の枠。docs/decisions/translation.md の 1）。時刻のあとに並べ、縮めない
+   * （長いフィードの名前のほうを切る）。枠で分かれるので、区切りの「/」は付けない
+   */
+  .translation-slot {
+    display: inline-flex;
     flex: none;
-    color: var(--faint);
-    white-space: nowrap;
-  }
-
-  .translation::before {
-    content: "/ ";
+    margin-left: 0.125rem;
   }
 
   .title {
