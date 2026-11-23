@@ -21,6 +21,8 @@ const queued = {
   translatedAt: null,
   retranslated: false,
   failure: null,
+  model: null,
+  effort: null,
 };
 const translated = {
   language: "en",
@@ -30,6 +32,8 @@ const translated = {
   translatedAt: TRANSLATED_AT,
   retranslated: false,
   failure: null,
+  model: "claude-sonnet-5-5",
+  effort: "medium",
 };
 
 /** 操作を送らずに、取るだけの同期（ops.test.ts と同じ） */
@@ -106,13 +110,20 @@ describe("記事の翻訳を受ける", () => {
 
     server.setTranslation(article.id, {
       ...translated,
-      title: "Opus の訳",
+      title: "品質優先で訳し直した訳",
+      model: "claude-opus-5-5",
+      effort: "high",
       translatedAt: "2026-11-22T06:00:00.000Z",
       retranslated: true,
     });
     await core.sync();
     const [listed] = (await core.listArticles()).filter((a) => a.id === article.id);
-    expect(listed?.translation).toMatchObject({ title: "Opus の訳", retranslated: true });
+    expect(listed?.translation).toMatchObject({
+      title: "品質優先で訳し直した訳",
+      model: "claude-opus-5-5",
+      effort: "high",
+      retranslated: true,
+    });
   });
 
   test("翻訳に対応する前の sendo が相手でも、同期は止まらない（翻訳なし）", async () => {
@@ -271,5 +282,142 @@ describe("訳せなかった理由を受ける（sendo の translation.md の 17
     server.setTranslation(article.id, refused);
     await core.sync();
     expect((await core.getArticle(article.id))?.translation?.failure).toEqual(refused.failure);
+  });
+});
+
+describe("訳したモデルと思考量を受ける（sendo の translation.md の 18、この reader の translation.md の 1）", () => {
+  const haiku = { ...translated, model: "claude-haiku-5-5", effort: "low" };
+
+  test("届いたモデルと思考量を置き、一覧と記事で渡す。替わったら置き換え、訳文がなくなったら消す", async () => {
+    const { server, core, feed } = await seeded();
+    const article = server.deliver(feed.id, { translation: haiku });
+    await core.sync();
+    expect((await core.getArticle(article.id))?.translation).toMatchObject({
+      model: "claude-haiku-5-5",
+      effort: "low",
+    });
+    const [listed] = await core.listArticles();
+    expect(listed?.translation).toMatchObject({ model: "claude-haiku-5-5", effort: "low" });
+
+    // 訳し直しの最中は、もとの訳文の条件のまま届く
+    server.setTranslation(article.id, { ...haiku, status: "translating" });
+    await core.sync();
+    expect((await core.getArticle(article.id))?.translation).toMatchObject({
+      status: "translating",
+      model: "claude-haiku-5-5",
+      effort: "low",
+    });
+    server.setTranslation(article.id, {
+      ...haiku,
+      model: "claude-opus-5-5",
+      effort: "high",
+      retranslated: true,
+      translatedAt: "2026-11-22T06:00:00.000Z",
+    });
+    await core.sync();
+    expect((await core.getArticle(article.id))?.translation).toMatchObject({
+      model: "claude-opus-5-5",
+      effort: "high",
+    });
+    server.setTranslation(article.id, queued);
+    await core.sync();
+    expect((await core.getArticle(article.id))?.translation).toMatchObject({
+      model: null,
+      effort: null,
+    });
+  });
+
+  test("知らないモデルの ID と思考量も、そのまま置く。思考量が null ならモデルだけ", async () => {
+    const { server, core, feed } = await seeded();
+    const unknown = server.deliver(feed.id, {
+      translation: { ...translated, model: "gpt-unknown", effort: "ultra" },
+    });
+    const noEffort = server.deliver(feed.id, {
+      translation: { ...haiku, effort: null },
+    });
+    await core.sync();
+    expect((await core.getArticle(unknown.id))?.translation).toMatchObject({
+      model: "gpt-unknown",
+      effort: "ultra",
+    });
+    expect((await core.getArticle(noEffort.id))?.translation).toMatchObject({
+      model: "claude-haiku-5-5",
+      effort: null,
+    });
+  });
+
+  test.each([
+    ["数", 5, 1],
+    ["真偽", true, false],
+    ["オブジェクト", { id: "claude-haiku-5-5" }, ["low"]],
+    ["空の文字", "", ""],
+  ])(
+    "モデルと思考量が文字でない・空（%s）でも同期は止まらず、届かないもの（null）として翻訳のほかの項目は使う",
+    async (_name, model, effort) => {
+      const { server, core, feed } = await seeded();
+      const article = server.deliver(feed.id, { translation: { ...haiku, model, effort } });
+      await core.sync();
+      expect((await core.getArticle(article.id))?.translation).toEqual({
+        ...haiku,
+        translatedAt: Date.parse(TRANSLATED_AT),
+        model: null,
+        effort: null,
+      });
+    },
+  );
+
+  test("思考量だけが文字でなくても、モデルは使う", async () => {
+    const { server, core, feed } = await seeded();
+    const article = server.deliver(feed.id, { translation: { ...haiku, effort: 1 } });
+    await core.sync();
+    expect((await core.getArticle(article.id))?.translation).toMatchObject({
+      model: "claude-haiku-5-5",
+      effort: null,
+    });
+  });
+
+  test("条件に対応する前の sendo（項目がない）でも同期は止まらず、モデルと思考量は null", async () => {
+    const { server, core, feed } = await seeded();
+    const { model: _m, effort: _e, ...withoutConditions } = haiku;
+    const article = server.deliver(feed.id, { translation: withoutConditions });
+    await core.sync();
+    expect((await core.getArticle(article.id))?.translation).toMatchObject({
+      status: "translated",
+      title: haiku.title,
+      model: null,
+      effort: null,
+    });
+  });
+
+  test("条件を持つ前の版の手元の DB は、ある記事を残したまま条件なしにし、その記事が届き直したら条件が入る", async () => {
+    const server = new FakeSendo();
+    const db = await openMemoryDb();
+    await migrate(db, SCHEMA_VERSION - 1);
+    await db.run(
+      `insert into articles (id, feed_id, title, published_at, received_at, translation_status,
+         translation_language, translated_at) values ('old', 'feed', 'Old', 1, 1, 'translated', 'en', 1)`,
+    );
+    const core = await ReaderCore.open({
+      db,
+      baseUrl: "https://sendo.test/api/v1",
+      fetch: server.fetch,
+      now: () => server.now,
+    });
+    expect((await core.getArticle("old"))?.translation).toMatchObject({
+      status: "translated",
+      model: null,
+      effort: null,
+    });
+    server.signInAs();
+    await core.restoreSession();
+    const feed = server.subscribe({ url: "https://example.com/feed.xml" });
+    const article = server.deliver(feed.id, { translation: translated });
+    await core.sync();
+    server.setTranslation(article.id, haiku);
+    await core.sync();
+    expect((await core.getArticle(article.id))?.translation).toMatchObject({
+      model: "claude-haiku-5-5",
+      effort: "low",
+    });
   });
 });

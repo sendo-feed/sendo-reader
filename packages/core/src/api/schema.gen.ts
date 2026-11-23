@@ -2599,8 +2599,16 @@ export interface components {
              * @enum {string|null}
              */
             contentSource: "feed" | "page" | null;
-            /** @description 訳したモデル */
+            /**
+             * @description 訳したモデル（Claude のモデルの ID。claude-sonnet-5-5 など）。応答が返したモデルで、拒否されて代わりのモデルに替わったときは代わりのモデル。同じ元記事から写した訳文は、写した元の訳文のモデル（docs/decisions/translation.md の 18）
+             * @example claude-sonnet-5-5
+             */
             model: string;
+            /**
+             * @description 訳したときの思考量（Claude API の effort。low ／ medium ／ high ／ xhigh ／ max）。Sendo の版によって値が増えることがあるので、読む側は知らない値もそのまま扱う。モデルと同じく、同じ元記事から写した訳文は写した元の訳文のもの（docs/decisions/translation.md の 18）。思考量を残していない訳文（思考量を残す前に送ったバッチの結果など）は null
+             * @example medium
+             */
+            effort: string | null;
             /**
              * Format: date-time
              * @description 訳した時刻
@@ -2752,9 +2760,19 @@ export interface components {
              * @description 訳した時刻。訳文がなければ null。変わったら、手元の訳した本文を GET /articles/{id}/translation で取り直す
              */
             translatedAt: string | null;
-            /** @description Opus で訳し直したか（docs/decisions/translation.md の 6）。訳し直せるのは、translated で、これが false の記事だけ */
+            /** @description 品質優先の段階で訳し直したか（docs/decisions/translation.md の 6）。訳し直せるのは、translated で、これが false の記事だけ */
             retranslated: boolean;
             failure: components["schemas"]["SyncArticleTranslationFailure"];
+            /**
+             * @description 訳したモデル（Claude のモデルの ID。claude-sonnet-5-5 など）。応答が返したモデルで、拒否されて代わりのモデルに替わったときは代わりのモデル。同じ元記事から写した訳文は、写した元の訳文のモデル（docs/decisions/translation.md の 18）。訳文のない記事（translatedAt が null）は null。訳し直しの最中（translating）は、もとの訳文のモデル
+             * @example claude-sonnet-5-5
+             */
+            model: string | null;
+            /**
+             * @description 訳したときの思考量（Claude API の effort。low ／ medium ／ high ／ xhigh ／ max）。Sendo の版によって値が増えることがあるので、読む側は知らない値もそのまま扱う。モデルと同じく、同じ元記事から写した訳文は写した元の訳文のもの（docs/decisions/translation.md の 18）。思考量を残していない訳文（思考量を残す前に送ったバッチの結果など）は null。訳文のない記事（translatedAt が null）も null。訳し直しの最中（translating）は、もとの訳文の思考量
+             * @example medium
+             */
+            effort: string | null;
         } | null;
         /** @description 訳せなかった理由（docs/decisions/translation.md の 17）。訳そうとして untranslated にした記事だけに付く。untranslated でない記事、言語が判定できなかった記事、訳すものがなく送らなかった記事、理由を残す前に untranslated になった記事は null */
         SyncArticleTranslationFailure: {

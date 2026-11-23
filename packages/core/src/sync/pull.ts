@@ -265,8 +265,9 @@ async function writeArticle(tx: Executor, article: Article): Promise<void> {
        id, feed_id, url, title, summary, author, thumbnail_url, has_content, published_at,
        received_at, read_at, starred_at, translation_status, translation_language,
        translation_title, translation_summary, translated_at, translation_retranslated,
-       translation_failure_kind, translation_failure_category, translation_failure_stage, read_synced
-     ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
+       translation_failure_kind, translation_failure_category, translation_failure_stage,
+       translation_model, translation_effort, read_synced
+     ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
      on conflict (id) do update set
        feed_id = excluded.feed_id, url = excluded.url, title = excluded.title,
        summary = excluded.summary, author = excluded.author,
@@ -281,7 +282,9 @@ async function writeArticle(tx: Executor, article: Article): Promise<void> {
        translation_retranslated = excluded.translation_retranslated,
        translation_failure_kind = excluded.translation_failure_kind,
        translation_failure_category = excluded.translation_failure_category,
-       translation_failure_stage = excluded.translation_failure_stage, read_synced = 0`,
+       translation_failure_stage = excluded.translation_failure_stage,
+       translation_model = excluded.translation_model,
+       translation_effort = excluded.translation_effort, read_synced = 0`,
     [
       article.id,
       article.feedId,
@@ -304,6 +307,8 @@ async function writeArticle(tx: Executor, article: Article): Promise<void> {
       article.translation?.failure?.kind ?? null,
       article.translation?.failure?.category ?? null,
       article.translation?.failure?.stage ?? null,
+      article.translation?.model ?? null,
+      article.translation?.effort ?? null,
     ],
   );
 }

@@ -96,8 +96,8 @@ export interface ArticleTranslation {
   /** 訳した時刻（ミリ秒）。訳文がなければ null */
   translatedAt: number | null;
   /**
-   * Opus で訳し直したか（sendo の docs/decisions/translation.md の 6）。訳し直せるのは、translated で
-   * これが false の記事だけ
+   * 品質優先の段階で訳し直したか（sendo の docs/decisions/translation.md の 6）。訳し直せるのは、
+   * translated でこれが false の記事だけ
    */
   retranslated: boolean;
   /**
@@ -106,6 +106,19 @@ export interface ArticleTranslation {
    * undefined のこともある
    */
   failure?: TranslationFailure | null;
+  /**
+   * 訳したモデルの ID（claude-haiku-5-5 など。sendo の docs/decisions/translation.md の 18）。sendo が
+   * 配ったまま持ち、知らない ID も捨てない。訳文のない記事、条件に対応する前の sendo か reader の版で
+   * 受けた記事は null。訳し直しの最中は、もとの訳文のモデル。版の違うタブが代表のときは undefined の
+   * こともある
+   */
+  model?: string | null;
+  /**
+   * 訳したときの思考量（low ／ medium ／ high など。sendo の docs/decisions/translation.md の 9）。
+   * 配ったまま持ち、知らない値も捨てない。思考量を残していない訳文は null。版の違うタブが代表のときは
+   * undefined のこともある
+   */
+  effort?: string | null;
 }
 
 /**

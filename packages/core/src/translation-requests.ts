@@ -15,7 +15,7 @@ interface Request {
   marked: boolean;
   /** 訳せなかった（sendo で、頼む前の状態に戻った）。失敗の文を出す */
   failed: boolean;
-  /** 訳し直し（Opus）を頼んだ。でなければ、その場の翻訳 */
+  /** 訳し直し（品質優先の段階）を頼んだ。でなければ、その場の翻訳 */
   retranslation: boolean;
 }
 

@@ -79,7 +79,7 @@ export { TRANSLATION_FAILED } from "./translation";
 
 /** 訳し直しが sendo で訳せずに戻ったときの文（docs/decisions/translation.md の 6） */
 export const RETRANSLATION_FAILED =
-  "訳し直せませんでした。もとの訳文のままです。More actions の Retranslate with Opus でもう一度頼めます。";
+  "訳し直せませんでした。もとの訳文のままです。More actions の Retranslate (High quality) でもう一度頼めます。";
 
 /** その場の翻訳と訳し直しを頼めなかったときの文（docs/decisions/translation.md の 6） */
 export function describeTranslationError(error: unknown): string {

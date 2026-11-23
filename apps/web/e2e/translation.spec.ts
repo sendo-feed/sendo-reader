@@ -251,6 +251,95 @@ test("訳文のない記事（untranslated、翻訳なし）では切り替え�
   await expect(heading).toHaveText("No link");
 });
 
+/**
+ * 記事の画面のラベルに、訳したモデルと思考量を足す（docs/decisions/translation.md の 1。sendo の
+ * translation.md の 18）。一覧の行と、訳文のない記事には足さない
+ */
+test("記事の画面のラベルに訳したモデルと思考量を足し、一覧の行と訳文のない記事には足さない", async ({
+  page,
+  context,
+}) => {
+  const server = new FakeSendo();
+  const feed = server.subscribe({ url: "https://blog.example/feed.xml", title: "Blog" });
+  const now = Date.now();
+  const translated = (title: string) => ({
+    language: "en",
+    status: "translated",
+    title,
+    summary: null,
+    translatedAt: new Date(now).toISOString(),
+    retranslated: false,
+    failure: null,
+  });
+  const cases: { title: string; translation: unknown; label: string }[] = [
+    {
+      title: "Haiku",
+      translation: { ...translated("ハイク"), model: "claude-haiku-5-5", effort: "low" },
+      label: "・ EN · Translated · Haiku low",
+    },
+    {
+      title: "Unknown",
+      translation: { ...translated("知らないモデル"), model: "gpt-unknown", effort: "ultra" },
+      label: "・ EN · Translated · gpt-unknown ultra",
+    },
+    {
+      title: "No effort",
+      translation: { ...translated("思考量なし"), model: "claude-sonnet-5-5", effort: null },
+      label: "・ EN · Translated · Sonnet",
+    },
+    {
+      title: "No model",
+      translation: { ...translated("モデルなし"), model: null, effort: "low" },
+      label: "・ EN · Translated",
+    },
+    {
+      // 条件に対応する前の sendo（項目がない）
+      title: "Old sendo",
+      translation: translated("古い sendo"),
+      label: "・ EN · Translated",
+    },
+    {
+      // 文字でない値と空の文字は、届かないもの。翻訳のほかの項目は使う
+      title: "Broken",
+      translation: { ...translated("壊れた条件"), model: 5, effort: "" },
+      label: "・ EN · Translated",
+    },
+    {
+      title: "Queued",
+      translation: {
+        ...translated("unused"),
+        status: "queued",
+        title: null,
+        translatedAt: null,
+        model: null,
+        effort: null,
+      },
+      label: "・ EN · Queued",
+    },
+  ];
+  for (const [i, { title, translation }] of cases.entries()) {
+    server.deliver(feed.id, { title, publishedAt: now - i * 1000, translation });
+  }
+  await routeFakeSendo(context, server);
+  await page.goto("/");
+  await signIn(page);
+
+  const list = page.locator(".article-list");
+  const view = page.locator(".article-view");
+  await expect(list.locator(".row")).toHaveCount(cases.length);
+  // 一覧の行には足さない
+  for (const [i, { label }] of cases.entries()) {
+    await expect(list.locator(".row").nth(i).locator(".translation")).toHaveText(
+      label.includes("Queued") ? "EN · Queued" : "EN · Translated",
+    );
+  }
+  await list.getByRole("button", { name: "Unread only" }).click();
+  for (const [i, { label }] of cases.entries()) {
+    await list.locator(".item").nth(i).click();
+    await expect(view.locator("header .translation")).toHaveText(label);
+  }
+});
+
 test("操作の一覧に t がある", async ({ page, context }) => {
   const server = new FakeSendo();
   const feed = server.subscribe({ url: "https://blog.example/feed.xml", title: "Blog" });
@@ -511,10 +600,10 @@ test.describe("Translate", () => {
 });
 
 /**
- * Opus で訳し直してもらう（docs/decisions/translation.md の 3、5、6）。More actions に置き、確かめの
- * 窓で選んでから頼む
+ * 品質優先の段階で訳し直してもらう（docs/decisions/translation.md の 1、3、5、6）。More actions に
+ * 置き、確かめの窓で選んでから頼む。記事の画面のラベルには、届いた翻訳のモデルと思考量を出す
  */
-test.describe("Retranslate with Opus", () => {
+test.describe("Retranslate (High quality)", () => {
   const sonnet = (at: number) => ({
     language: "en",
     status: "translated",
@@ -522,12 +611,18 @@ test.describe("Retranslate with Opus", () => {
     summary: null,
     translatedAt: new Date(at).toISOString(),
     retranslated: false,
+    model: "claude-sonnet-5-5",
+    effort: "medium",
   });
   const opus = (at: number) => ({
     ...sonnet(at),
     title: "機能フラグ",
     retranslated: true,
+    model: "claude-opus-5-5",
+    effort: "high",
   });
+  const SONNET_LABEL = "・ EN · Translated · Sonnet medium";
+  const OPUS_LABEL = "・ EN · Translated · Opus high";
 
   async function open(page: Page, context: BrowserContext, translation: unknown) {
     const server = new FakeSendo();
@@ -547,7 +642,7 @@ test.describe("Retranslate with Opus", () => {
 
   const retranslateButton = (page: Page) =>
     page.getByRole("dialog", { name: "Article actions" }).getByRole("button", {
-      name: "Retranslate with Opus",
+      name: "Retranslate (High quality)",
     });
 
   async function openActions(page: Page) {
@@ -562,11 +657,13 @@ test.describe("Retranslate with Opus", () => {
     const { server, article, view } = await open(page, context, sonnet(Date.now() - 60_000));
     const heading = view.getByRole("heading", { level: 1 });
     await expect(heading).toHaveText("フィーチャートグル");
+    await expect(view.locator("header .translation")).toHaveText(SONNET_LABEL);
 
-    // やめると頼まない
+    // やめると頼まない。窓はボタンと同じ名前で、品質を優先するモデルで訳し直すことと、置き換えを伝える
     await openActions(page);
     await retranslateButton(page).click();
-    const confirm = page.getByRole("dialog", { name: "Retranslate with Opus" });
+    const confirm = page.getByRole("dialog", { name: "Retranslate (High quality)" });
+    await expect(confirm).toContainText("品質を優先するモデルで訳し直します。");
     await expect(confirm).toContainText(
       "訳し直した訳文は、この記事と、同じ元記事のほかの記事を読むすべての人の訳文を置き換えます。",
     );
@@ -577,9 +674,14 @@ test.describe("Retranslate with Opus", () => {
     await openActions(page);
     await retranslateButton(page).click();
     await confirm.getByRole("button", { name: "Retranslate", exact: true }).click();
+    // 頼んだ印のある間と、訳し直しの最中（もとの訳文を出していて、届く条件ももとのもの）は、モデルと
+    // 思考量を足さない
     await expect(view.locator("header .translation")).toHaveText("・ EN · Translating");
     expect(server.retranslationRequests).toEqual([article.id]);
     expect(server.translationRequests).toEqual([]);
+    await page.getByRole("button", { name: "Sync now" }).click();
+    await expect(page.getByRole("button", { name: "Sync now" })).toBeEnabled();
+    await expect(view.locator("header .translation")).toHaveText("・ EN · Translating");
     // もとの訳文は残り、訳し直しの最中は出さない
     await expect(heading).toHaveText("フィーチャートグル");
     await openActions(page);
@@ -590,7 +692,7 @@ test.describe("Retranslate with Opus", () => {
     await page.getByRole("button", { name: "Sync now" }).click();
     // この端末で頼んだ記事なので、開いたままでも訳し直した訳文に替える
     await expect(heading).toHaveText("機能フラグ");
-    await expect(view.locator("header .translation")).toHaveText("・ EN · Translated");
+    await expect(view.locator("header .translation")).toHaveText(OPUS_LABEL);
     await openActions(page);
     await expect(retranslateButton(page)).toHaveCount(0);
   });
@@ -603,17 +705,17 @@ test.describe("Retranslate with Opus", () => {
     const { server, article, view } = await open(page, context, before);
     await openActions(page);
     await retranslateButton(page).click();
-    const confirm = page.getByRole("dialog", { name: "Retranslate with Opus" });
+    const confirm = page.getByRole("dialog", { name: "Retranslate (High quality)" });
     await confirm.getByRole("button", { name: "Retranslate", exact: true }).click();
     await expect(view.locator("header .translation")).toHaveText("・ EN · Translating");
 
     server.setTranslation(article.id, before);
     await page.getByRole("button", { name: "Sync now" }).click();
     await expect(view.getByRole("alert")).toHaveText(
-      "訳し直せませんでした。もとの訳文のままです。More actions の Retranslate with Opus でもう一度頼めます。",
+      "訳し直せませんでした。もとの訳文のままです。More actions の Retranslate (High quality) でもう一度頼めます。",
     );
     await expect(view.getByRole("heading", { level: 1 })).toHaveText("フィーチャートグル");
-    await expect(view.locator("header .translation")).toHaveText("・ EN · Translated");
+    await expect(view.locator("header .translation")).toHaveText(SONNET_LABEL);
 
     await openActions(page);
     await retranslateButton(page).click();
@@ -633,7 +735,7 @@ test.describe("Retranslate with Opus", () => {
     await openActions(page);
     await retranslateButton(page).click();
     await page
-      .getByRole("dialog", { name: "Retranslate with Opus" })
+      .getByRole("dialog", { name: "Retranslate (High quality)" })
       .getByRole("button", { name: "Retranslate", exact: true })
       .click();
     await expect(view.getByRole("alert")).toHaveText(
@@ -718,7 +820,7 @@ test.describe("Retranslate with Opus", () => {
     await expect(heading).toHaveText("フィーチャートグル");
     await openActions(page);
     await retranslateButton(page).click();
-    const confirm = page.getByRole("dialog", { name: "Retranslate with Opus" });
+    const confirm = page.getByRole("dialog", { name: "Retranslate (High quality)" });
     await expect(confirm).toContainText("同じ元記事のほかの記事を読むすべての人の訳文");
     await confirm.getByRole("button", { name: "Retranslate", exact: true }).click();
     await expect(view.locator("header .translation")).toHaveText("・ EN · Translating");
@@ -745,7 +847,7 @@ test.describe("Retranslate with Opus", () => {
       })
       .toBe(0);
     await expect(heading).toHaveText("フィーチャートグルの議論");
-    await expect(view.locator("header .translation")).toHaveText("・ EN · Translated");
+    await expect(view.locator("header .translation")).toHaveText(OPUS_LABEL);
     await expect(view.getByText("訳し直せませんでした", { exact: false })).toHaveCount(0);
     await expect(items.nth(1)).toContainText("機能フラグの議論");
 
@@ -762,7 +864,7 @@ test.describe("Retranslate with Opus", () => {
     const { server, article, view } = await open(page, context, sonnet(Date.now() - 60_000));
     server.setTranslation(article.id, opus(Date.now()));
     await page.getByRole("button", { name: "Sync now" }).click();
-    await expect(view.locator("header .translation")).toHaveText("・ EN · Translated");
+    await expect(view.locator("header .translation")).toHaveText(OPUS_LABEL);
     await expect(view.getByRole("heading", { level: 1 })).toHaveText("フィーチャートグル");
     await openActions(page);
     await expect(retranslateButton(page)).toHaveCount(0);
@@ -778,7 +880,7 @@ test.describe("Retranslate with Opus", () => {
     await openActions(page);
     await retranslateButton(page).click();
     await page
-      .getByRole("dialog", { name: "Retranslate with Opus" })
+      .getByRole("dialog", { name: "Retranslate (High quality)" })
       .getByRole("button", { name: "Retranslate", exact: true })
       .click();
     await expect(view.locator("header .translation")).toHaveText("・ EN · Translating");
@@ -792,7 +894,7 @@ test.describe("Retranslate with Opus", () => {
     await expect(view.locator("header .translation")).toHaveText("・ EN · Translating");
     server.setTranslation(article.id, opus(Date.now()));
     await page.getByRole("button", { name: "Sync now" }).click();
-    await expect(view.locator("header .translation")).toHaveText("・ EN · Translated");
+    await expect(view.locator("header .translation")).toHaveText(OPUS_LABEL);
     await expect(heading).toHaveText("フィーチャートグル");
   });
 
@@ -811,13 +913,13 @@ test.describe("Retranslate with Opus", () => {
     // 開いている間にバッチが終わった。開いている見出しは替えない（決定の 3）
     server.setTranslation(article.id, sonnet(Date.now() - 60_000));
     await page.getByRole("button", { name: "Sync now" }).click();
-    await expect(view.locator("header .translation")).toHaveText("・ EN · Translated");
+    await expect(view.locator("header .translation")).toHaveText(SONNET_LABEL);
     await expect(heading).toHaveText("Feature Toggles");
 
     await openActions(page);
     await retranslateButton(page).click();
     await page
-      .getByRole("dialog", { name: "Retranslate with Opus" })
+      .getByRole("dialog", { name: "Retranslate (High quality)" })
       .getByRole("button", { name: "Retranslate", exact: true })
       .click();
     await expect(view.locator("header .translation")).toHaveText("・ EN · Translating");
@@ -859,7 +961,7 @@ test.describe("Retranslate with Opus", () => {
     const { server, view } = await open(page, context, sonnet(Date.now() - 60_000));
     await openActions(page);
     await retranslateButton(page).click();
-    const confirm = page.getByRole("dialog", { name: "Retranslate with Opus" });
+    const confirm = page.getByRole("dialog", { name: "Retranslate (High quality)" });
     await expect(confirm).toBeVisible();
     await page.goBack();
     await expect(view.getByRole("heading", { level: 1 })).toHaveCount(0);
@@ -899,8 +1001,7 @@ test.describe("訳せなかった理由", () => {
   };
   const ON_DEMAND_TEXT =
     "サイバーセキュリティの安全策で、翻訳を断られました。頼み直しても、同じ結果になる見込みが高いです。";
-  const BATCH_TEXT =
-    "安全策で、翻訳を断られました。Translate を押すと、断られたときに別のモデルで試します（それでも断られることがあります）。";
+  const BATCH_TEXT = "安全策で、翻訳を断られました。Translate で頼み直すと、通ることがあります。";
 
   async function open(page: Page, context: BrowserContext, translation: unknown) {
     const server = new FakeSendo();

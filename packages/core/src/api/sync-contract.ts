@@ -225,7 +225,7 @@ function parseTranslation(value: unknown): ParsedTranslation | null {
   if (typeof value !== "object" || Array.isArray(value)) return null;
   const row = value as Record<string, unknown>;
   const status = TRANSLATION_STATUSES.find((s) => s === row.status);
-  const { language, title, summary, translatedAt, retranslated, failure } = row;
+  const { language, title, summary, translatedAt, retranslated, failure, model, effort } = row;
   if (status === undefined) return null;
   if (typeof language !== "string" || !LANGUAGE_PATTERN.test(language)) return null;
   if (!isNullableString(title) || !isNullableString(summary)) return null;
@@ -245,7 +245,19 @@ function parseTranslation(value: unknown): ParsedTranslation | null {
     translatedAt,
     retranslated: retranslated === true,
     failure: parseTranslationFailure(failure),
+    model: nonEmptyString(model),
+    effort: nonEmptyString(effort),
   };
+}
+
+/**
+ * 訳したモデルと思考量（あとから足された項目。sendo の docs/decisions/translation.md の 18、この
+ * reader の translation.md の 1）。ラベルに足すだけなので、条件に対応する前の sendo（項目がない）、
+ * 文字でない値、空の文字は届かないもの（null）とし、翻訳のほかの項目は使う。知らない値（sendo が
+ * モデルや思考量を足した）は捨てずに持ち、画面が届いたまま出す
+ */
+function nonEmptyString(value: unknown): string | null {
+  return typeof value === "string" && value !== "" ? value : null;
 }
 
 /** 確かめた記事の翻訳。訳せなかった理由は、知らない値も捨てずに持つ（TranslationFailure） */

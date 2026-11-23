@@ -1,8 +1,11 @@
 import type { ArticleTranslation, TranslationFailure } from "@sendo-reader/core";
 import { describe, expect, test } from "vitest";
 import {
+  articleTranslationLabel,
   listTitle,
+  modelName,
   TRANSLATION_FAILED,
+  translationConditions,
   translationFailureText,
   translationLabel,
 } from "../src/lib/translation";
@@ -90,12 +93,14 @@ describe("translationFailureText", () => {
     );
   });
 
-  test("拒否・バッチは、Translate で別のモデルで試せると出す", () => {
-    expect(
-      translationFailureText(withFailure({ kind: "refused", category: "bio", stage: "batch" })),
-    ).toBe(
-      "生物学の安全策で、翻訳を断られました。Translate を押すと、断られたときに別のモデルで試します（それでも断られることがあります）。",
+  test("拒否・バッチは、Translate で頼み直すと通ることがあると出し、別のモデルで試すとは言い切らない", () => {
+    const text = translationFailureText(
+      withFailure({ kind: "refused", category: "bio", stage: "batch" }),
     );
+    expect(text).toBe(
+      "生物学の安全策で、翻訳を断られました。Translate で頼み直すと、通ることがあります。",
+    );
+    expect(text).not.toContain("別のモデル");
   });
 
   test.each([
@@ -126,5 +131,88 @@ describe("translationFailureText", () => {
     expect(translationFailureText(t("und", "untranslated"))).toBeNull();
     expect(translationFailureText(null)).toBeNull();
     expect(translationFailureText(undefined)).toBeNull();
+  });
+});
+
+/** 訳したモデルと思考量（docs/decisions/translation.md の 1） */
+describe("modelName", () => {
+  test.each([
+    ["claude-sonnet-5-5", "Sonnet"],
+    ["claude-haiku-5-5", "Haiku"],
+    ["claude-opus-5-5", "Opus"],
+    ["claude-haiku-4-5-20251001", "Haiku"],
+  ])("%s は系列の名前（%s）にし、版は出さない", (model, name) => {
+    expect(modelName(model)).toBe(name);
+  });
+
+  test.each([
+    ["知らない系列", "claude-fable-1"],
+    ["ほかのモデル", "gpt-unknown"],
+    ["頭が途中まで", "claude-sonnet"],
+    ["大文字", "Claude-Haiku-5-5"],
+  ])("%s の ID は、届いたまま出す", (_name, model) => {
+    expect(modelName(model)).toBe(model);
+  });
+});
+
+describe("translationConditions と articleTranslationLabel", () => {
+  const translated = (model: unknown, effort: unknown): ArticleTranslation =>
+    ({ ...t("en", "translated", "訳"), model, effort }) as ArticleTranslation;
+
+  test("Translated の記事は、ラベルの終わりにモデルと思考量を足す", () => {
+    expect(translationConditions(translated("claude-haiku-5-5", "low"))).toBe("Haiku low");
+    expect(articleTranslationLabel(translated("claude-haiku-5-5", "low"))).toBe(
+      "EN · Translated · Haiku low",
+    );
+    expect(articleTranslationLabel(translated("claude-opus-5-5", "high"))).toBe(
+      "EN · Translated · Opus high",
+    );
+  });
+
+  test("知らないモデルの ID と思考量は、届いたまま出す", () => {
+    expect(articleTranslationLabel(translated("gpt-unknown", "ultra"))).toBe(
+      "EN · Translated · gpt-unknown ultra",
+    );
+  });
+
+  test("思考量がない（null、空、文字でない、項目なし）なら、モデルだけを足す", () => {
+    for (const effort of [null, "", 1, undefined]) {
+      expect(articleTranslationLabel(translated("claude-sonnet-5-5", effort))).toBe(
+        "EN · Translated · Sonnet",
+      );
+    }
+  });
+
+  test("モデルがない（null、空、文字でない、項目なし）なら、思考量があっても何も足さない", () => {
+    for (const model of [null, "", 1, undefined]) {
+      expect(translationConditions(translated(model, "low"))).toBeNull();
+      expect(articleTranslationLabel(translated(model, "low"))).toBe("EN · Translated");
+    }
+    // 条件の項目のない翻訳（版の違うタブが代表のとき）
+    expect(articleTranslationLabel(t("en", "translated", "訳"))).toBe("EN · Translated");
+  });
+
+  test("Translated でない状態（Translating の間を含む）には足さない", () => {
+    for (const status of ["queued", "translating", "untranslated"] as const) {
+      const translation = {
+        ...t("en", status),
+        model: "claude-haiku-5-5",
+        effort: "low",
+      };
+      expect(translationConditions(translation)).toBeNull();
+      expect(articleTranslationLabel(translation)).toBe(translationLabel(translation));
+    }
+  });
+
+  test("und の記事は、言語を省いた状態のあとに足す。翻訳のない記事には出さない", () => {
+    expect(
+      articleTranslationLabel({
+        ...t("und", "translated", "訳"),
+        model: "claude-haiku-5-5",
+        effort: "low",
+      }),
+    ).toBe("Translated · Haiku low");
+    expect(articleTranslationLabel(null)).toBeNull();
+    expect(articleTranslationLabel(undefined)).toBeNull();
   });
 });

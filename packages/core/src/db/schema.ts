@@ -291,7 +291,7 @@ const migrations: readonly (readonly string[])[] = [
   ],
   [
     // 訳し直しの印（docs/decisions/translation.md の 5）。すでに手元にある行は 0 のまま。印に対応する
-    // 前の版のあいだに訳し直された記事は、その記事がもう一度届くまで Retranslate with Opus が出て、
+    // 前の版のあいだに訳し直された記事は、その記事がもう一度届くまで Retranslate (High quality) が出て、
     // 押すと sendo が断る（同期し直しても、sendo の行が変わらなければ届かない）。訳し直しは印と同時に
     // 出すのでまれとして受け入れ、最初から同期し直させない
     "alter table articles add column translation_retranslated integer not null default 0",
@@ -305,6 +305,14 @@ const migrations: readonly (readonly string[])[] = [
     "alter table articles add column translation_failure_kind text",
     "alter table articles add column translation_failure_category text",
     "alter table articles add column translation_failure_stage text",
+  ],
+  [
+    // 訳したモデルと思考量（sendo の docs/decisions/translation.md の 18、この reader の translation.md
+    // の 1）。sendo が配ったまま、知らない値も置く。すでに手元にある行は null のまま。条件に対応する前の
+    // sendo か reader の版で受けた記事は、その記事がもう一度届くまでラベルにモデルを足さない。決定の
+    // とおり、最初から同期し直させない
+    "alter table articles add column translation_model text",
+    "alter table articles add column translation_effort text",
   ],
 ];
 

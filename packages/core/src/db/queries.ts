@@ -74,10 +74,12 @@ type ArticleRow = {
   translation_failure_kind: string | null;
   translation_failure_category: string | null;
   translation_failure_stage: string | null;
+  translation_model: string | null;
+  translation_effort: string | null;
 };
 
 const ARTICLE_COLUMNS =
-  "a.id, a.feed_id, a.url, a.title, a.summary, a.author, a.thumbnail_url, a.has_content, a.published_at, a.received_at, a.read_at, a.starred_at, a.translation_status, a.translation_language, a.translation_title, a.translation_summary, a.translated_at, a.translation_retranslated, a.translation_failure_kind, a.translation_failure_category, a.translation_failure_stage";
+  "a.id, a.feed_id, a.url, a.title, a.summary, a.author, a.thumbnail_url, a.has_content, a.published_at, a.received_at, a.read_at, a.starred_at, a.translation_status, a.translation_language, a.translation_title, a.translation_summary, a.translated_at, a.translation_retranslated, a.translation_failure_kind, a.translation_failure_category, a.translation_failure_stage, a.translation_model, a.translation_effort";
 
 /**
  * 一覧の範囲（どの記事を出すか。未読だけの絞り込みと並び順は含まない）。何も指定しなければ、
@@ -297,5 +299,7 @@ function toTranslation(row: ArticleRow): ArticleTranslation | null {
             category: row.translation_failure_category,
             stage: row.translation_failure_stage,
           },
+    model: row.translation_model,
+    effort: row.translation_effort,
   };
 }
