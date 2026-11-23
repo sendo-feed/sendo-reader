@@ -2754,6 +2754,22 @@ export interface components {
             translatedAt: string | null;
             /** @description Opus で訳し直したか（docs/decisions/translation.md の 6）。訳し直せるのは、translated で、これが false の記事だけ */
             retranslated: boolean;
+            failure: components["schemas"]["SyncArticleTranslationFailure"];
+        } | null;
+        /** @description 訳せなかった理由（docs/decisions/translation.md の 17）。訳そうとして untranslated にした記事だけに付く。untranslated でない記事、言語が判定できなかった記事、訳すものがなく送らなかった記事、理由を残す前に untranslated になった記事は null */
+        SyncArticleTranslationFailure: {
+            /**
+             * @description refused は Claude が訳すことを拒否した（stop_reason が refusal）、failed はそのほかの失敗（上限で切れた・読めない応答、回数切れ、容量、送るものがなかった、止まった翻訳を戻した など）
+             * @enum {string}
+             */
+            kind: "refused" | "failed";
+            /** @description 拒否の種類（拒否の応答の stop_details.category。cyber、bio など）。拒否でないときと、拒否の応答に種類がないときは null */
+            category: string | null;
+            /**
+             * @description どこで訳せなかったか。batch は自動のまとめた翻訳、on_demand は求めたその場の翻訳
+             * @enum {string}
+             */
+            stage: "batch" | "on_demand";
         } | null;
         SyncRemovedArticle: {
             /** @description 記事の ID */

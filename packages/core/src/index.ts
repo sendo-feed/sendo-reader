@@ -46,6 +46,7 @@ export type {
   SettingsChange,
   Table,
   TranslatedContent,
+  TranslationFailure,
   TranslationStatus,
   UnreadCounts,
   User,

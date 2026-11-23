@@ -100,6 +100,25 @@ export interface ArticleTranslation {
    * これが false の記事だけ
    */
   retranslated: boolean;
+  /**
+   * 訳せなかった理由（sendo の docs/decisions/translation.md の 17）。sendo は untranslated の記事に
+   * だけ付けて配る。理由に対応する前の sendo と、理由のない記事は null。版の違うタブが代表のときは
+   * undefined のこともある
+   */
+  failure?: TranslationFailure | null;
+}
+
+/**
+ * 訳せなかった理由。値は sendo が配ったまま持ち、知らない値（版の違う sendo）も捨てない。どう出すかは
+ * 画面が決める（docs/decisions/translation.md の 1。知らない値は、そのほかの失敗として出す）
+ */
+export interface TranslationFailure {
+  /** refused（拒否された）か failed（そのほかの失敗） */
+  kind: string;
+  /** 拒否の種類（cyber など）。なければ null */
+  category: string | null;
+  /** batch（バッチ）か on_demand（その場の翻訳） */
+  stage: string;
 }
 
 export type SavedPage = {

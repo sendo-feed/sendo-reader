@@ -74,8 +74,8 @@ export function describeError(error: unknown): string {
   return "うまくいきませんでした。";
 }
 
-/** その場の翻訳が sendo で訳せずに戻ったときの文（docs/decisions/translation.md の 6） */
-export const TRANSLATION_FAILED = "訳せませんでした。Translate でもう一度頼めます。";
+// その場の翻訳が sendo で訳せずに戻ったときの文。理由の文（translation.ts）と同じものを使う
+export { TRANSLATION_FAILED } from "./translation";
 
 /** 訳し直しが sendo で訳せずに戻ったときの文（docs/decisions/translation.md の 6） */
 export const RETRANSLATION_FAILED =

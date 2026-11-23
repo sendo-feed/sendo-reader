@@ -877,3 +877,130 @@ test.describe("Retranslate with Opus", () => {
     await expect(button).toBeEnabled();
   });
 });
+
+/**
+ * 訳せなかった理由（docs/decisions/translation.md の 1、6。sendo の translation.md の 17）。sendo が
+ * 配った理由を手元に置き、記事の画面のラベルの下に文を出す
+ */
+test.describe("訳せなかった理由", () => {
+  const untranslated = {
+    language: "en",
+    status: "untranslated",
+    title: null,
+    summary: null,
+    translatedAt: null,
+    retranslated: false,
+    failure: null,
+  };
+  /** 記事 007f6c3e-… と同じ形（その場の翻訳で cyber の拒否） */
+  const refusedOnDemand = {
+    ...untranslated,
+    failure: { kind: "refused", category: "cyber", stage: "on_demand" },
+  };
+  const ON_DEMAND_TEXT =
+    "サイバーセキュリティの安全策で、翻訳を断られました。頼み直しても、同じ結果になる見込みが高いです。";
+  const BATCH_TEXT =
+    "安全策で、翻訳を断られました。Translate を押すと、断られたときに別のモデルで試します（それでも断られることがあります）。";
+
+  async function open(page: Page, context: BrowserContext, translation: unknown) {
+    const server = new FakeSendo();
+    const feed = server.subscribe({ url: "https://blog.example/feed.xml", title: "Blog" });
+    const article = server.deliver(feed.id, { title: "Feature Toggles", translation });
+    await routeFakeSendo(context, server);
+    await page.goto("/");
+    await signIn(page);
+    await page.locator(".article-list .item").first().click();
+    const view = page.locator(".article-view");
+    await expect(view.getByRole("heading", { level: 1 })).toHaveText("Feature Toggles");
+    return { server, article, view };
+  }
+
+  test("その場の翻訳で拒否された記事には、種類を添えた理由の文を出す。一覧の行には出さず、読み込み直しても、ほかのタブでも同じ文が出る", async ({
+    page,
+    context,
+  }) => {
+    const { view } = await open(page, context, refusedOnDemand);
+    await expect(view.locator("header .translation")).toHaveText("・ EN · Untranslated");
+    await expect(view.locator(".translation-failure")).toHaveText(ON_DEMAND_TEXT);
+    // 理由があっても Translate は出す
+    await expect(view.getByRole("button", { name: "Translate", exact: true })).toBeEnabled();
+    // 開いただけでは、知らせ（alert）にしない
+    await expect(view.getByRole("alert")).toHaveCount(0);
+    await expect(page.locator(".article-list")).not.toContainText("安全策");
+
+    await page.reload();
+    await expect(page.locator(".article-view .translation-failure")).toHaveText(ON_DEMAND_TEXT);
+
+    const other = await context.newPage();
+    await other.goto(page.url());
+    await expect(other.locator(".article-view .translation-failure")).toHaveText(ON_DEMAND_TEXT);
+  });
+
+  test("開いている間に理由が届くと出し、ほかの端末の頼みで Translating になると消え、訳文が届いても出さない", async ({
+    page,
+    context,
+  }) => {
+    const { server, article, view } = await open(page, context, untranslated);
+    const note = view.locator(".translation-failure");
+    await expect(view.locator("header .translation")).toHaveText("・ EN · Untranslated");
+    await expect(note).toHaveCount(0);
+
+    server.setTranslation(article.id, {
+      ...untranslated,
+      failure: { kind: "refused", category: null, stage: "batch" },
+    });
+    await page.getByRole("button", { name: "Sync now" }).click();
+    await expect(note).toHaveText(BATCH_TEXT);
+
+    server.setTranslation(article.id, { ...untranslated, status: "translating" });
+    await page.getByRole("button", { name: "Sync now" }).click();
+    await expect(view.locator("header .translation")).toHaveText("・ EN · Translating");
+    await expect(note).toHaveCount(0);
+
+    server.setTranslation(article.id, {
+      ...untranslated,
+      status: "translated",
+      title: "フィーチャートグル",
+      translatedAt: new Date().toISOString(),
+    });
+    await page.getByRole("button", { name: "Sync now" }).click();
+    await expect(view.locator("header .translation")).toHaveText("・ EN · Translated");
+    await expect(note).toHaveCount(0);
+  });
+
+  test("この端末で頼んでいる間（Translating）は出さず、訳せずに理由が届いたら、理由の文だけを 1 回知らせる", async ({
+    page,
+    context,
+  }) => {
+    const { server, article, view } = await open(page, context, {
+      ...untranslated,
+      failure: { kind: "failed", category: null, stage: "batch" },
+    });
+    const note = view.locator(".translation-failure");
+    await expect(note).toHaveText("訳せませんでした。Translate でもう一度頼めます。");
+    await view.getByRole("button", { name: "Translate", exact: true }).click();
+    await expect(view.locator("header .translation")).toHaveText("・ EN · Translating");
+    await expect(note).toHaveCount(0);
+
+    server.setTranslation(article.id, refusedOnDemand);
+    await page.getByRole("button", { name: "Sync now" }).click();
+    await expect(view.getByRole("alert")).toHaveText(ON_DEMAND_TEXT);
+    // この端末の失敗の文は出さず、理由の文も 1 回だけ（決定の 6）
+    await expect(view.locator("header .content-note")).toHaveCount(1);
+    await expect(view.getByText("訳せませんでした。Translate でもう一度頼めます。")).toHaveCount(0);
+    await expect(view.locator("header .translation")).toHaveText("・ EN · Untranslated");
+  });
+
+  test("頼んだあと受け付けを取り消されてもとの理由のまま戻ったら、もとの理由の文を出す", async ({
+    page,
+    context,
+  }) => {
+    const { server, article, view } = await open(page, context, refusedOnDemand);
+    await view.getByRole("button", { name: "Translate", exact: true }).click();
+    await expect(view.locator("header .translation")).toHaveText("・ EN · Translating");
+    server.setTranslation(article.id, refusedOnDemand);
+    await page.getByRole("button", { name: "Sync now" }).click();
+    await expect(view.getByRole("alert")).toHaveText(ON_DEMAND_TEXT);
+    await expect(view.getByText("訳せませんでした。Translate でもう一度頼めます。")).toHaveCount(0);
+  });
+});

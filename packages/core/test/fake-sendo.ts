@@ -922,7 +922,12 @@ export class FakeSendo {
     } else if (translation.status !== "queued" && translation.status !== "untranslated") {
       return error(409, "translation_exists", "the article is already translated");
     }
-    this.setTranslation(id, { ...translation, status: "translating" });
+    // sendo は、訳せなかった理由を untranslated の記事にだけ付けて配る（sendo の translation.md の 17）
+    this.setTranslation(id, {
+      ...translation,
+      status: "translating",
+      ...("failure" in translation && { failure: null }),
+    });
     return json(202, { status: "translating" });
   }
 

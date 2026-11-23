@@ -17,7 +17,7 @@
   import type { ArticleListState } from "../lib/list.svelte";
   import { type ArticleSwipe, prefs } from "../lib/prefs.svelte";
   import { handleLink, router, viewHref } from "../lib/router.svelte";
-  import { translationLabel } from "../lib/translation";
+  import { translationFailureText, translationLabel } from "../lib/translation";
   import { xEmbedOrigin } from "../lib/x-embed";
   import { setXPostLoader, XPostLoader } from "../lib/x-post.svelte";
   import type { XPostSize } from "../lib/x-post-size";
@@ -1076,6 +1076,10 @@
   const link = $derived(article === null ? null : toSafeHttpUrl(article.url));
   // 元の言語と翻訳の状態のラベル（docs/decisions/translation.md の 1）
   const translation = $derived(article === null ? null : translationLabel(article.translation));
+  // 訳せなかった理由の文（決定の 1）。頼んだ印のある間は、状態が translating なので出さない
+  const failureText = $derived(
+    article === null ? null : translationFailureText(article.translation),
+  );
 
   const feedHref = $derived(
     article === null ? "/" : viewHref({ kind: "feed", id: article.feedId }),
@@ -1256,12 +1260,22 @@
           </p>
           {#if translateError !== null}
             <p class="content-note" role="alert">{translateError}</p>
-          {:else if article.translationRequest === "failed" && !translating}
-            <!-- 訳し直しの失敗では、もとの訳文（translated）に戻っている -->
+          {:else if article.translationRequest === "failed" && !translating && failureText === null}
+            <!-- 訳し直しの失敗では、もとの訳文（translated）に戻っている。その場の翻訳で理由が
+              届いていれば、下の理由の文だけを出す（決定の 6。同じことを 2 つ出さない） -->
             <p class="content-note" role="alert">
               {article.translation?.status === "translated"
                 ? RETRANSLATION_FAILED
                 : TRANSLATION_FAILED}
+            </p>
+          {/if}
+          {#if failureText !== null}
+            <!-- 訳せなかった理由（決定の 1）。この端末で頼んで訳せなかったときは、知らせる -->
+            <p
+              class="content-note translation-failure"
+              role={article.translationRequest === "failed" ? "alert" : null}
+            >
+              {failureText}
             </p>
           {/if}
         </header>

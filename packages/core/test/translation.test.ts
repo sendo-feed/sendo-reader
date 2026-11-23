@@ -1,7 +1,10 @@
 import { describe, expect, test } from "vitest";
+import { ReaderCore } from "../src";
 import { createSendoApi } from "../src/api/client";
+import { migrate, SCHEMA_VERSION } from "../src/db/schema";
 import { pull } from "../src/sync/pull";
-import { setup } from "./helpers";
+import { FakeSendo } from "./fake-sendo";
+import { openMemoryDb, setup } from "./helpers";
 
 /*
  * 記事の翻訳を、差分同期で受けて手元に置く（docs/decisions/translation.md、sendo の
@@ -17,6 +20,7 @@ const queued = {
   summary: null,
   translatedAt: null,
   retranslated: false,
+  failure: null,
 };
 const translated = {
   language: "en",
@@ -25,6 +29,7 @@ const translated = {
   summary: "API の変更を自動で当てる",
   translatedAt: TRANSLATED_AT,
   retranslated: false,
+  failure: null,
 };
 
 /** 操作を送らずに、取るだけの同期（ops.test.ts と同じ） */
@@ -164,5 +169,107 @@ describe("記事の翻訳を受ける", () => {
       language: "und",
       status: "translated",
     });
+  });
+});
+
+describe("訳せなかった理由を受ける（sendo の translation.md の 17、この reader の translation.md の 1）", () => {
+  /** 記事 007f6c3e-… と同じ形（その場の翻訳で cyber の拒否） */
+  const refused = {
+    ...queued,
+    status: "untranslated",
+    failure: { kind: "refused", category: "cyber", stage: "on_demand" },
+  };
+
+  test("届いた理由を置き、理由が消えたら（translating、訳文）消す", async () => {
+    const { server, core, feed } = await seeded();
+    const article = server.deliver(feed.id, { translation: refused });
+    await core.sync();
+    expect((await core.getArticle(article.id))?.translation?.failure).toEqual(refused.failure);
+    const [listed] = await core.listArticles();
+    expect(listed?.translation?.failure).toEqual(refused.failure);
+
+    server.setTranslation(article.id, { ...refused, status: "translating", failure: null });
+    await core.sync();
+    expect((await core.getArticle(article.id))?.translation).toMatchObject({
+      status: "translating",
+      failure: null,
+    });
+    server.setTranslation(article.id, translated);
+    await core.sync();
+    expect((await core.getArticle(article.id))?.translation?.failure).toBeNull();
+  });
+
+  test("知らない種類・どこで起きたか・拒否の種類も、そのまま置く。空の拒否の種類は null", async () => {
+    const { server, core, feed } = await seeded();
+    const unknown = { kind: "timeout", category: "unknown_category", stage: "scheduled" };
+    const a = server.deliver(feed.id, { translation: { ...refused, failure: unknown } });
+    const b = server.deliver(feed.id, {
+      translation: { ...refused, failure: { kind: "refused", category: null, stage: "batch" } },
+    });
+    await core.sync();
+    expect((await core.getArticle(a.id))?.translation?.failure).toEqual(unknown);
+    expect((await core.getArticle(b.id))?.translation?.failure).toEqual({
+      kind: "refused",
+      category: null,
+      stage: "batch",
+    });
+  });
+
+  test.each([
+    ["オブジェクトでない", "refused"],
+    ["配列", [refused.failure]],
+    ["文字列でない種類", { ...refused.failure, kind: 1 }],
+    ["どこで起きたかがない", { kind: "refused", category: "cyber" }],
+    ["文字列でも null でもない拒否の種類", { ...refused.failure, category: 1 }],
+  ])(
+    "理由の形が崩れていても（%s）同期は止まらず、翻訳は残して理由だけをなしにする",
+    async (_name, failure) => {
+      const { server, core, feed } = await seeded();
+      const broken = server.deliver(feed.id, { translation: { ...refused, failure } });
+      await core.sync();
+      expect((await core.getArticle(broken.id))?.translation).toMatchObject({
+        status: "untranslated",
+        failure: null,
+      });
+    },
+  );
+
+  test("理由に対応する前の sendo（項目がない）なら、理由なし", async () => {
+    const { server, core, feed } = await seeded();
+    const { failure: _, ...withoutFailure } = refused;
+    const article = server.deliver(feed.id, { translation: withoutFailure });
+    await core.sync();
+    expect((await core.getArticle(article.id))?.translation).toMatchObject({
+      status: "untranslated",
+      failure: null,
+    });
+  });
+
+  test("理由を持つ前の版の手元の DB は、ある記事を残したまま理由なしにし、そのあとの同期で理由が入る", async () => {
+    const server = new FakeSendo();
+    const db = await openMemoryDb();
+    await migrate(db, SCHEMA_VERSION - 1);
+    await db.run(
+      `insert into articles (id, feed_id, title, published_at, received_at, translation_status,
+         translation_language) values ('old', 'feed', 'Old', 1, 1, 'untranslated', 'en')`,
+    );
+    const core = await ReaderCore.open({
+      db,
+      baseUrl: "https://sendo.test/api/v1",
+      fetch: server.fetch,
+      now: () => server.now,
+    });
+    expect((await core.getArticle("old"))?.translation).toMatchObject({
+      status: "untranslated",
+      failure: null,
+    });
+    server.signInAs();
+    await core.restoreSession();
+    const feed = server.subscribe({ url: "https://example.com/feed.xml" });
+    const article = server.deliver(feed.id, { translation: { ...refused, failure: null } });
+    await core.sync();
+    server.setTranslation(article.id, refused);
+    await core.sync();
+    expect((await core.getArticle(article.id))?.translation?.failure).toEqual(refused.failure);
   });
 });
