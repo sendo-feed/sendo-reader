@@ -566,7 +566,7 @@ test.describe("Retranslate with Opus", () => {
     await retranslateButton(page).click();
     const confirm = page.getByRole("dialog", { name: "Retranslate with Opus" });
     await expect(confirm).toContainText(
-      "訳し直した訳文は、この記事を読むすべての人の訳文を置き換えます。",
+      "訳し直した訳文は、この記事と、同じ元記事のほかの記事を読むすべての人の訳文を置き換えます。",
     );
     await confirm.getByRole("button", { name: "Cancel" }).click();
     await expect(confirm).toBeHidden();
@@ -682,6 +682,54 @@ test.describe("Retranslate with Opus", () => {
     await expect(view.getByRole("heading", { level: 1 })).toHaveText("Queued");
     await openActions(page);
     await expect(retranslateButton(page)).toHaveCount(0);
+  });
+
+  test("同じ元記事のほかの記事を訳し直して、訳し直しが写って印が届いた記事には出さない", async ({
+    page,
+    context,
+  }) => {
+    const server = new FakeSendo();
+    const now = Date.now();
+    const url = "https://blog.example/toggles";
+    const first = server.deliver(
+      server.subscribe({ url: "https://blog.example/feed.xml", title: "Blog" }).id,
+      { title: "Feature Toggles", url, publishedAt: now - 1000, translation: sonnet(now - 60_000) },
+    );
+    const second = server.deliver(
+      server.subscribe({ url: "https://news.example/feed.xml", title: "News" }).id,
+      {
+        title: "Feature Toggles (discussion)",
+        url,
+        publishedAt: now - 2000,
+        translation: sonnet(now - 60_000),
+      },
+    );
+    await routeFakeSendo(context, server);
+    await page.goto("/");
+    await signIn(page);
+    const view = page.locator(".article-view");
+    const items = page.locator(".article-list .item");
+
+    await items.nth(0).click();
+    await openActions(page);
+    await retranslateButton(page).click();
+    const confirm = page.getByRole("dialog", { name: "Retranslate with Opus" });
+    await expect(confirm).toContainText("同じ元記事のほかの記事を読むすべての人の訳文");
+    await confirm.getByRole("button", { name: "Retranslate", exact: true }).click();
+    expect(server.retranslationRequests).toEqual([first.id]);
+
+    // sendo が、同じ元記事のほかの記事にも訳し直しを写した
+    server.setTranslation(first.id, opus(Date.now()));
+    server.setTranslation(second.id, opus(Date.now()));
+    await page.getByRole("button", { name: "Sync now" }).click();
+    await expect(view.getByRole("heading", { level: 1 })).toHaveText("機能フラグ");
+
+    await items.nth(1).click();
+    await expect(view.getByRole("heading", { level: 1 })).toHaveText("機能フラグ");
+    await openActions(page);
+    await expect(page.getByRole("button", { name: "Show original text" })).toBeVisible();
+    await expect(retranslateButton(page)).toHaveCount(0);
+    expect(server.retranslationRequests).toEqual([first.id]);
   });
 
   test("ほかの端末で訳し直されたら、同期のあとで出さない。開いている見出しは替えない", async ({
