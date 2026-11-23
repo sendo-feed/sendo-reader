@@ -47,7 +47,7 @@
       <span class="feed">{feedTitle}</span>
       <span class="time">{time}</span>
       {#if translationLabel !== null}
-        <span class="translation-slot"><TranslationLabel chips={translationLabel} /></span>
+        <span class="translation-slot"><TranslationLabel chips={translationLabel} compact /></span>
       {/if}
     </span>
   </span>
@@ -134,12 +134,19 @@
     outline-offset: -2px;
   }
 
+  /*
+   * 翻訳のラベルが入りきらないとき（狭い画面、サムネイルのある行、大きな文字）は、ラベルを次の行に
+   * 送る（docs/decisions/translation.md の 1）。2 行になっても、タイトル 3 行と合わせて行の高さに
+   * 収まるよう、行の間を詰める
+   */
   .meta {
     display: flex;
-    gap: 0.375rem;
+    flex-wrap: wrap;
+    gap: 0 0.375rem;
     align-items: baseline;
     min-width: 0;
     font-size: 0.75rem;
+    line-height: 1.35;
     color: var(--muted);
   }
 
@@ -160,8 +167,14 @@
     height: 1rem;
   }
 
+  /*
+   * フィードの名前は、入りきらなければ省略記号で切る。ラベルを次の行に送るかは、名前を 2.5rem まで
+   * 縮めて決める（名前の全体が入らないだけでは送らない）。縮めた分は、名前の幅まで広げる
+   */
   .feed {
+    flex: 1 1 2.5rem;
     min-width: 0;
+    max-width: max-content;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -180,12 +193,11 @@
 
   /*
    * 翻訳のラベル（言語と状態の枠。docs/decisions/translation.md の 1）。時刻のあとに並べ、縮めない
-   * （長いフィードの名前のほうを切る）。枠で分かれるので、区切りの「/」は付けない
+   * （入りきらなければ、上のとおり次の行に送る）。枠で分かれるので、区切りの「/」は付けない
    */
   .translation-slot {
     display: inline-flex;
     flex: none;
-    margin-left: 0.125rem;
   }
 
   .title {
