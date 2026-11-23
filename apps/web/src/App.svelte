@@ -4,6 +4,7 @@
   import VersionMismatch from "./components/VersionMismatch.svelte";
   import { canReloadPage } from "./lib/app-update";
   import { useReader } from "./lib/context";
+  import { reloadGuard } from "./lib/reload-guard.svelte";
   import { router } from "./lib/router.svelte";
   import { topNotice, updateNotice } from "./lib/update-notice.svelte";
   import Login from "./routes/Login.svelte";
@@ -15,8 +16,8 @@
       leaveStalled: state.leaveStalled,
       versionMismatch: state.versionMismatch !== null,
       updatePending: updateNotice.pending,
-      // 画面を移ったら決め直す。Save a URL の窓はモーダルなので、開いている間の知らせは押せない
-      canReload: canReloadPage(router.url.pathname, document),
+      // 画面を移ったとき、読み込み直すと消えるものを出し始めた ／ 閉じたときに決め直す
+      canReload: canReloadPage(router.url.pathname, reloadGuard.held),
     }),
   );
 </script>

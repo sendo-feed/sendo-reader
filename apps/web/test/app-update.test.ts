@@ -173,23 +173,14 @@ describe("新しい版の知らせ", () => {
     expect(app.state.reloads).toBe(0);
   });
 
-  test("読み込み直すと消えるものを出している画面（パスと、開いている Save a URL の窓）", () => {
-    const noDialog = { querySelector: () => null };
+  test("読み込み直すと消えるものを出している画面（パスと、出している間の印）", () => {
     for (const path of ["/settings", "/manage", "/add", "/oauth/authorize"]) {
-      expect(canReloadPage(path, noDialog)).toBe(false);
+      expect(canReloadPage(path, false)).toBe(false);
     }
     for (const path of ["/", "/starred", "/feeds/1", "/search"]) {
-      expect(canReloadPage(path, noDialog)).toBe(true);
+      expect(canReloadPage(path, false)).toBe(true);
     }
-    const selectors: string[] = [];
-    const openDialog = {
-      querySelector: (selector: string) => {
-        selectors.push(selector);
-        return {} as Element;
-      },
-    };
-    expect(canReloadPage("/", openDialog)).toBe(false);
-    expect(selectors).toEqual(['dialog[open][aria-label="Save a URL"]']);
+    expect(canReloadPage("/", true)).toBe(false);
   });
 
   test("ホーム画面のアプリとブラウザーで、文を分ける", () => {

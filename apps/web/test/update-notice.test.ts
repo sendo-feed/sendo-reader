@@ -1,4 +1,5 @@
 import { describe, expect, test } from "vitest";
+import { reloadGuard } from "../src/lib/reload-guard.svelte";
 import { topNotice, updateNotice } from "../src/lib/update-notice.svelte";
 
 const base = { leaveStalled: false, versionMismatch: false, updatePending: false, canReload: true };
@@ -30,5 +31,19 @@ describe("画面の上の知らせ", () => {
     expect(updateNotice.pending).toBe(false);
     updateNotice.ready();
     expect(updateNotice.pending).toBe(true);
+  });
+});
+
+describe("読み込み直すと消えるものを出している間の印", () => {
+  test("付けている間だけ held。重ねて付けたら、全部戻すまで held。同じ印を 2 回戻しても 1 回だけ", () => {
+    expect(reloadGuard.held).toBe(false);
+    const first = reloadGuard.hold();
+    const second = reloadGuard.hold();
+    expect(reloadGuard.held).toBe(true);
+    first();
+    first();
+    expect(reloadGuard.held).toBe(true);
+    second();
+    expect(reloadGuard.held).toBe(false);
   });
 });

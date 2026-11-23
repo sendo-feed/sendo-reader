@@ -244,3 +244,23 @@ test("読み込み直すと消えるものを出している画面では知ら�
   expect(loads()).toBe(before);
   expect(await version(page)).toBe("a");
 });
+
+test("Save a URL の窓を開いている間は知らせず、閉じたら知らせる", async ({ page }) => {
+  const loads = await openVersionA(page, `${READER}starred`, true);
+  const before = loads();
+  await page.getByRole("button", { name: "Save a URL" }).click();
+  const dialog = page.getByRole("dialog", { name: "Save a URL" });
+  await dialog.getByLabel("Page URL").fill("https://example.com/typing");
+  await switchToVersionB(page);
+  await page.waitForTimeout(500);
+  await expect(updateNotice(page)).toHaveCount(0);
+  // 入力中の窓は、読み込み直して消さない
+  await expect(dialog.getByLabel("Page URL")).toHaveValue("https://example.com/typing");
+  expect(loads()).toBe(before);
+  // 閉じたら、同じ画面のまま出る（読み込み直してはいない）
+  await page.keyboard.press("Escape");
+  await expect(dialog).toHaveCount(0);
+  await expect(updateNotice(page)).toBeVisible();
+  expect(loads()).toBe(before);
+  expect(await version(page)).toBe("a");
+});

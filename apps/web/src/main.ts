@@ -7,6 +7,7 @@ import { AUTHORIZE_PATH } from "./lib/authorize";
 import { watchBackForwardCache } from "./lib/back-forward-cache";
 import { readerContext } from "./lib/context";
 import { startReader } from "./lib/reader";
+import { reloadGuard } from "./lib/reload-guard.svelte";
 import { ReaderState } from "./lib/state.svelte";
 import { trustedScriptUrl } from "./lib/trusted";
 import { updateNotice } from "./lib/update-notice.svelte";
@@ -69,7 +70,7 @@ if (import.meta.env.PROD && "serviceWorker" in navigator) {
     document,
     reload: () => location.reload(),
     // 読み込み直すと消えるものを出している画面では、ほかの画面に移ってから切り替える
-    canReload: () => canReloadPage(location.pathname, document),
+    canReload: () => canReloadPage(location.pathname, reloadGuard.held),
     setInterval: (fn, ms) => setInterval(fn, ms),
     // 前に出ている間は読み込み直さないので、画面で知らせる（App.svelte）
     onUpdateReady: () => updateNotice.ready(),
