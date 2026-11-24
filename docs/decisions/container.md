@@ -42,11 +42,11 @@ sendo-reader は、[sendo のコンテナ版](https://github.com/sendo-feed/send
    - JS、CSS、wasm などは、ブラウザが受けられれば圧縮して返す（brotli か gzip）
 6. **reader のコンテナのヘルスチェック（イメージの `HEALTHCHECK`）は、reader 自身が返す `/`（`index.html`）を見る。** `/healthz` は sendo に中継するので、reader のコンテナで見ると sendo の生死を見ることになる。reader のためだけのパスは足さない（sendo のパスと重なるおそれを増やさない）。
 7. **サーバーは Node で書く。** HTTP は Hono と `@hono/node-server`（sendo と同じ）で受ける。コードは `apps/web/server/` に置き、ここだけ `node:*` を使ってよい。イメージには、画面のビルド（`vite build` の `dist`）と、依存ごと 1 つのファイルにまとめたサーバーを入れる。
-8. **sendo の機能は、すべて使える前提で作る（翻訳を除く）。`GET /api/v1/features` は見ない。**
-   - sendo は、ページ本文の抽出と言語判定を常に動かし、欠いたままでは起動しない（sendo の[コンテナ版](https://github.com/sendo-feed/sendo/blob/main/docs/decisions/container.md)の 1〜3）。reader は、全文の取得を、いつでも使える機能として出す
-   - 例外は、sendo に API キーがあるときだけ動く翻訳。reader は、記事に翻訳の項目が届いたときだけ、翻訳の表示と操作を出す（[記事の翻訳](translation.md)の 1、4）
-   - `/features` は、この決定を実装する PR で使わなくする。その PR を含む reader のイメージが GHCR の `main` に出たら、sendo は `/features` を消してよい（sendo の[コンテナ版](https://github.com/sendo-feed/sendo/blob/main/docs/decisions/container.md)の 3）
-   - 消したあとに、古い版の画面（Service Worker に残った版）が `/features` を呼んでも、404 を「全文を使えない」と受けて、全文の取得の操作を出さないだけで動き続ける。新しい版に切り替われば（[UI とツール](ui.md)の 5）、出る
+8. **設定によって有無が分かれる機能は、その機能の API の応答で判断する。** 機能一覧の `GET /api/v1/features` は使わない（sendo の[コンテナ版](https://github.com/sendo-feed/sendo/blob/main/docs/decisions/container.md)の 3）。
+   - sendo はページ本文の抽出と言語判定を常に動かす（sendo の同じ決定の 1、2）。reader は、機能の有無を事前に確かめずに全文を取り、取得に失敗したときは表示中の本文か要約を残す（[ローカルファースト](local-first.md)の「記事の本文」）
+   - 翻訳の表示と操作は、差分同期で記事ごとに届く翻訳の項目と状態に従う（[記事の翻訳](translation.md)の 1、4、5）
+   - Discord の設定画面は、`GET /api/v1/integrations/discord` の `available` が true のとき、接続状態に応じて接続か新規購読の操作を出す。設定を外して `available` が false になっても、接続が残っていれば連携解除を出し、購読済みのチャンネルには購読解除も出す
+   - Service Worker に残った古い版の画面が `GET /api/v1/features` を呼んで 404 を受けたときは、全文の取得の操作を出さずに動き続ける。現行の画面への切り替えは[UI とツール](ui.md)の 5 に従う
 9. **テストは Node で動かす。** 中継するパスの振り分け、中継（ヘッダー、`Set-Cookie`、リダイレクト、ストリーム、WebSocket の Upgrade）、静的なファイルのヘッダー、`X_EMBED_ORIGIN` を設定したときの値の確かめ・振り分け・書き換えを、偽の sendo を相手に Vitest で確かめる。CI では、PR でイメージが作れて動くことを確かめ、`main` に入ったらイメージを出す（sendo と同じ形）。
 
 ## 理由
@@ -74,9 +74,9 @@ sendo-reader は、[sendo のコンテナ版](https://github.com/sendo-feed/send
   - `security-headers.ts` をそのまま読み込めて、ヘッダーを 1 か所で保てる
   - 振り分けと中継を、ほかのテストと同じ Vitest で確かめられる
   - sendo と同じ道具（Node、Hono）で、2 つのコンテナの作りがそろう
-- **すべての機能を使える前提にする**
-  - sendo は機能を欠いたまま起動しないので、出し分けても、欠けた sendo を相手にすることがない。分岐とそのテストを残すと、使われないまま保つことになり、記事を開くたびに `/features` を呼ぶ
-  - reader が先に使わなくなれば、sendo はいつ消しても reader を壊さない。sendo が先に消しても、古い画面は 404 を「使えない」と受けるので壊れないが、新しい版に替わるまで全文の取得が出なくなる。reader から先に外す
+- **機能ごとの応答で判断する**
+  - 全文の抽出は sendo が常に動かすので、記事を開くときに機能の有無を問い合わせる必要がない
+  - 翻訳の表示と操作には記事ごとの状態が要り、Discord の設定画面には連携状態と購読一覧が要る。画面が読む応答に必要な情報がそろうので、機能一覧を別に取りにいかずに済む
 
 ## 検討した代替案
 
@@ -89,12 +89,12 @@ sendo-reader は、[sendo のコンテナ版](https://github.com/sendo-feed/send
 - **WebSocket は中継せず、sendo のポートを外に出してブラウザから直接つなぐ**：中継の作りが要らないが、外から見えるオリジンが 2 つになる。クッキーと `Origin` の確かめが合わなくなり、CSP の `connect-src` も緩めることになる。
 - **静的な配信のサーバー（Caddy、nginx）で返し、中継する**：配信と中継はよくこなれていて、イメージも小さい。ただ、設定の言語が 1 つ増え、ヘッダーを `security-headers.ts` とは別の形で書き出すことになる。振り分けを確かめるにも、サーバーを動かす必要がある。
 - **中継するパスを、`/` 以外は全部 sendo にする、ページの移動かどうかで分ける**：上の「許す一覧で中継する」の理由で採らない。
-- **`/features` を見た出し分けを残す**：sendo が機能を欠いた形で動くようになっても、そのまま対応できる。ただ、sendo は欠いたまま起動しないと決めていて、使われない分岐とテストが残る。
+- **機能一覧 API を読んで表示や操作を切り替える。** 機能の有無をまとめて判断できる。翻訳と Discord の画面には、一覧に加えて記事ごとの翻訳状態と Discord の連携状態が要るため、問い合わせと状態の管理が増える。
 
 ## 見直す条件
 
 - sendo が外に出すパスを足したり、変えたりしたとき。一覧を直す。
 - sendo が版を切るようになったとき。reader のイメージのタグも、そろえて決める。
-- sendo が、機能を欠いた形で動くようになったとき。8 の出し分けを決め直す。
+- sendo がページ本文の抽出を設定で切り替えるようになったときや、機能ごとの応答だけでは画面を出し分けられなくなったとき。8 の扱いを見直す。
 - サーバーを持たない人にも使ってもらう必要が出たとき（sendo の[テックスタック](https://github.com/sendo-feed/sendo/blob/main/docs/decisions/tech-stack.md)の見直す条件と一緒に）。
 - ネイティブ（Capacitor）で包むとき。アプリがどのオリジンを呼ぶかを決め直す。

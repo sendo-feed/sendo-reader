@@ -13,7 +13,7 @@ sendo が日本語に訳した記事を、reader でどう見せ、どう訳し�
 
 1. **一覧の行と記事の画面に、元の言語と翻訳の状態を、それぞれ角丸の枠で囲んで並べる**（`[EN] [Translated]`）。枠を並べたまとまりを「ラベル」と呼ぶ（記事の画面では、下で足すモデルと思考量の枠も含む）。状態は `Queued`（バッチを待っている）、`Translating`（その場の翻訳か訳し直しの最中）、`Translated`（訳文がある）、`Untranslated`（訳文がない）。
    - 言語は、sendo が配る ISO 639-1 を大文字にしたもの。状態は、差分同期で届いたものを手元の DB に置いて出す
-   - 翻訳の項目が届かない記事（日本語の記事、Discord の投稿、sendo がまだ訳すかどうかを決めていない記事と決めずに終えた記事、API キーのない sendo、翻訳に対応する前の sendo）には、ラベルを出さない
+   - 翻訳の項目が届かない記事（日本語の記事、Discord の投稿、sendo がまだ訳すかどうかを決めていない記事と決めずに終えた記事、API キーがなく翻訳の行が作られていない記事、翻訳に対応する前の sendo の記事）には、ラベルを出さない
    - 言語が判定できなかった記事（`und`）は、言語の枠を出さず、状態の枠だけを出す（`Untranslated`、`Translating`、`Translated`。`und` の記事は `queued` にならない。sendo の[記事の翻訳](https://github.com/sendo-feed/sendo/blob/main/docs/decisions/translation.md)の 1）
    - 言語の枠だけ、どの言語も同じ 1 色で塗る（色は `apps/web/src/app.css` の変数）。状態の枠と、記事の画面だけに足すモデルと思考量の枠は、線だけにして色で分けない。一覧の行ではメタ（フィード名、時刻）の並びに、記事の画面では見出しの下のメタの並びに置く
    - 記事の画面では、出している状態が `Translated` のとき、状態の枠のあとに、訳したときのモデルと思考量を、それぞれ 1 つの枠で足す（`[EN] [Translated] [Haiku 5.5] [low]`）。sendo が配る条件から出す（訳文の代表の部分を作った条件で、同じ元記事から写した訳文は、写した元の条件。sendo の[記事の翻訳](https://github.com/sendo-feed/sendo/blob/main/docs/decisions/translation.md)の 18）。一覧の行には足さない
