@@ -140,16 +140,19 @@ export class ArticleListState {
       return;
     }
     this.loading = true;
-    const page = await this.#client.listArticles({ ...this.#query, limit: PAGE });
-    // あとから始めた読み出しがある。結果は当てず、そちらが終わるのを待つ（そちらの失敗は、
-    // そちらを呼んだ側に返す）
-    if (current !== this.#generation) return this.#loading.catch(() => {});
-    this.#removed.clear();
-    this.#after = cursorOf(page.at(-1));
-    this.#articles = page;
-    this.hasMore = page.length === PAGE;
-    this.fresh = 0;
-    this.loading = false;
+    try {
+      const page = await this.#client.listArticles({ ...this.#query, limit: PAGE });
+      // あとから始めた読み出しがある。結果は当てず、そちらが終わるのを待つ（そちらの失敗は、
+      // そちらを呼んだ側に返す）
+      if (current !== this.#generation) return this.#loading.catch(() => {});
+      this.#removed.clear();
+      this.#after = cursorOf(page.at(-1));
+      this.#articles = page;
+      this.hasMore = page.length === PAGE;
+      this.fresh = 0;
+    } finally {
+      if (current === this.#generation) this.loading = false;
+    }
   }
 
   /** 続きを読む。読んでいる最中に頼まれたら、その読み出しが終わるのを待つ */

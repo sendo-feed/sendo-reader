@@ -132,7 +132,7 @@
   function onTab(event: MouseEvent, href: string) {
     if (currentTab === href && isPlainClick(event)) {
       event.preventDefault();
-      if (href === "/") void listView?.reload();
+      if (href === "/") void listView?.reload().catch(() => {});
       else listView?.scrollToTop();
       return;
     }

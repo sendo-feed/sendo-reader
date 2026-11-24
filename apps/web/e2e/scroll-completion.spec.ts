@@ -1,4 +1,5 @@
 import { expect, type Page, test } from "@playwright/test";
+import type { TabMessage, WorkerMessage } from "../../../packages/core/src/web/protocol";
 import { FakeSendo, routeFakeSendo, signIn } from "./fake-sendo";
 
 function seed(count: number, enabled = true) {
@@ -274,6 +275,134 @@ test("スマホの All を押し直すと、手元の未読だけで開き直す
   await expect(rows).toHaveCount(0);
   await expect(list.getByText("すべて読み終えました。")).toBeVisible();
 });
+
+declare global {
+  interface Window {
+    holdNextListPage: boolean;
+    heldListPages: ((fail?: boolean) => void)[];
+  }
+}
+
+/** ワーカーで実際に一覧を読み、指定した応答だけを画面に返す前に止める。 */
+async function holdListPageResults(page: Page) {
+  await page.addInitScript(() => {
+    window.holdNextListPage = false;
+    window.heldListPages = [];
+    window.Worker = class extends Worker {
+      constructor(url: string | URL, options?: WorkerOptions) {
+        super(url, options);
+        const held = new Set<number>();
+        const post = this.postMessage.bind(this);
+        this.postMessage = (
+          message: TabMessage,
+          options: Transferable[] | StructuredSerializeOptions = [],
+        ) => {
+          if (
+            window.holdNextListPage &&
+            message.type === "call" &&
+            message.method === "listArticles" &&
+            (message.args[0] as { after?: unknown }).after === undefined
+          ) {
+            window.holdNextListPage = false;
+            held.add(message.id);
+          }
+          if (Array.isArray(options)) post(message, options);
+          else post(message, options);
+        };
+        this.addEventListener("message", (event: MessageEvent<WorkerMessage>) => {
+          const reply = event.data;
+          if (reply.type !== "result" || !held.delete(reply.id)) return;
+          event.stopImmediatePropagation();
+          window.heldListPages.push((fail = false) => {
+            const data: WorkerMessage = fail
+              ? {
+                  type: "result",
+                  id: reply.id,
+                  result: {
+                    ok: false,
+                    error: { name: "Error", message: "一覧を読み出せなかった" },
+                  },
+                }
+              : reply;
+            this.dispatchEvent(new MessageEvent("message", { data }));
+          });
+        });
+      }
+    };
+  });
+}
+
+for (const overlap of [false, true]) {
+  test(`スマホの All の読み直しが失敗しても、スクロール既読を続けられる（読み直しの重なり=${overlap}）`, async ({
+    page,
+    context,
+  }) => {
+    const { server, feed } = seed(20);
+    const errors: Error[] = [];
+    page.on("pageerror", (error) => errors.push(error));
+    await holdListPageResults(page);
+    await routeFakeSendo(context, server);
+    await page.setViewportSize({ width: 390, height: 700 });
+    await page.goto("/");
+    await signIn(page);
+    const list = page.locator(".article-list");
+    const rows = list.locator(".row");
+    const unreadRows = list.locator(".row.unread");
+    const count = list.locator("header .to-top .count");
+    const all = page.getByRole("navigation", { name: "Main" }).getByRole("link", { name: "All" });
+    await expect(unreadRows).toHaveCount(20);
+    await expect(count).toHaveText("20");
+
+    if (overlap) {
+      server.deliver(feed.id, { title: "新着の記事", publishedAt: Date.now() + 1000 });
+      await page.getByRole("button", { name: "Menu", exact: true }).click();
+      await page.getByRole("button", { name: "Sync now", exact: true }).click();
+      await page.keyboard.press("Escape");
+      await expect(list.getByRole("button", { name: "1 new", exact: true })).toBeVisible();
+      await expect(count).toHaveText("21");
+    }
+    await context.setOffline(true);
+
+    async function reloadAndHold(total: number) {
+      await page.evaluate(() => {
+        window.holdNextListPage = true;
+      });
+      await all.click();
+      await expect.poll(() => page.evaluate(() => window.heldListPages.length)).toBe(total);
+    }
+
+    async function passSeveralRows() {
+      for (let i = 0; i < 4; i++) {
+        await scroll(page, 100);
+        await page.waitForTimeout(60);
+      }
+    }
+
+    await reloadAndHold(1);
+    if (overlap) await reloadAndHold(2);
+    await page.evaluate(() => window.heldListPages[0]?.(true));
+    await expect(rows).toHaveCount(20);
+
+    if (overlap) {
+      // あとから始めた読み出しが終わるまでは、行を通り過ぎても既読にしない
+      await passSeveralRows();
+      await page.waitForTimeout(400);
+      await expect(unreadRows).toHaveCount(20);
+      await expect(count).toHaveText("21");
+      await page.evaluate(() => window.heldListPages[1]?.());
+      await expect(unreadRows).toHaveCount(21);
+      await expect(rows.first()).toContainText("新着の記事");
+      await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(0);
+    }
+
+    const before = overlap ? 21 : 20;
+    await passSeveralRows();
+    await expect.poll(() => unreadRows.count()).toBeLessThan(before);
+    await expect.poll(async () => Number(await count.textContent())).toBeLessThan(before);
+    await expect(rows).toHaveCount(before);
+    expect(errors).toEqual([]);
+  });
+}
 
 for (const reducedMotion of ["no-preference", "reduce"] as const) {
   test(`表示中の記事を読み切り、末尾の次のスワイプで新着を開く（動きの設定=${reducedMotion}）`, async ({
