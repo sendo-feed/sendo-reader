@@ -6,13 +6,16 @@
    * 新しい版に替わったが、まだ読み込み直していないことを知らせる（docs/decisions/ui.md の 5）。
    * 裏に回れば自動で読み込み直すので、閉じてもよい。Reload で、その場で切り替えられる
    */
+  let { failed }: { failed: boolean } = $props();
   const message = updateReadyMessage(isStandalone());
 </script>
 
-<div class="update-ready" role="status">
-  <p>{message}</p>
+<div class="update-ready" class:failed role="status">
+  <p>{failed ? "新しい版がありますが、切り替えられませんでした。" : message}</p>
   <div class="actions">
-    <button type="button" class="primary" onclick={() => location.reload()}>Reload</button>
+    {#if !failed}
+      <button type="button" class="primary" onclick={() => location.reload()}>Reload</button>
+    {/if}
     <button type="button" onclick={() => updateNotice.dismiss()}>Dismiss</button>
   </div>
 </div>
@@ -45,6 +48,10 @@
     color: var(--text);
     font-size: 0.9375rem;
     box-shadow: var(--shadow);
+  }
+
+  .failed {
+    border-color: var(--danger);
   }
 
   p {
