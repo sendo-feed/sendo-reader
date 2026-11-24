@@ -300,11 +300,13 @@ test.describe("狭い画面", () => {
     await expect(updateNotice(page)).toBeVisible();
     expect(loads()).toBe(before);
 
-    // 下のバーの上にあり、重ならない
+    // 下のバーのすぐ上にあり、重ならない
     const notice = await updateNotice(page).boundingBox();
     const bar = await tabs.boundingBox();
     if (notice === null || bar === null) throw new Error("知らせか下のバーの位置が分からない");
-    expect(notice.y + notice.height).toBeLessThanOrEqual(bar.y);
+    const gap = bar.y - (notice.y + notice.height);
+    expect(gap).toBeGreaterThanOrEqual(0);
+    expect(gap).toBeLessThanOrEqual(24);
 
     // 下のバーのタブを押せる
     await tabs.getByRole("link", { name: "Saved" }).click();

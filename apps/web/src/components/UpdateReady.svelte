@@ -58,7 +58,10 @@
     gap: 0.5rem;
   }
 
-  /* 狭い画面（docs/decisions/ui.md の 6）：取り消しの知らせと同じ高さ。下のバーのない画面でも同じ */
+  /*
+   * 狭い画面（docs/decisions/ui.md の 6）：取り消しの知らせと同じ高さ。下のバーのない画面（ログインの画面
+   * など）でも、どの画面か見分けずに同じ高さに出す（画面の下の側には違いない）
+   */
   @media (max-width: 56rem) {
     .update-ready {
       bottom: calc(4.5rem + env(safe-area-inset-bottom, 0px));
