@@ -222,8 +222,8 @@
       pageAttempted ||
       contentState === "checking" ||
       contentState === "loading" ||
-      // 本文も届かなかった（オフライン）。つながって本文を取り直してから取る
-      contentState === "unavailable"
+      // フィード本文が届かなくても、オンラインなら別の取得先から全文を取れることがある
+      (contentState === "unavailable" && !online)
     )
       return;
     const id = articleId;
@@ -240,9 +240,11 @@
       }
       if (pageLoading) return;
       if (contentState === "unavailable") {
-        // 本文が届いたら、上の自動の取得が全文も取る
+        // 要約を残してフィード本文を取り直し、そのあとで全文の自動取得を再開する
+        contentState = "loading";
         void loadContent(articleId);
-      } else if (autoPageFailed) {
+      }
+      if (autoPageFailed) {
         // もう一度、自動で取らせる
         autoPageFailed = false;
         pageAttempted = false;
@@ -1310,7 +1312,7 @@
             {#each paragraphs as text, index (index)}
               <p class="summary">{text}</p>
             {/each}
-            {#if contentState === "unavailable"}
+            {#if contentState === "unavailable" && !pageLoading && pageNote === null}
               <p class="content-note" role="status">
                 この記事には本文があります。sendo につながったら読めます。
               </p>

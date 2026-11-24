@@ -1,4 +1,4 @@
-import { expect, type Page, test } from "@playwright/test";
+import { type BrowserContext, expect, type Page, test } from "@playwright/test";
 import { FakeSendo, routeFakeSendo, signIn } from "./fake-sendo";
 
 function seed() {
@@ -20,6 +20,121 @@ async function chooseContent(page: Page, name: string) {
   await actions(page).getByRole("button", { name, exact: true }).click();
   await expect(actions(page)).not.toBeVisible();
 }
+
+async function translatedArticleWithUnavailableFeed(page: Page, context: BrowserContext) {
+  const server = new FakeSendo();
+  const feed = server.subscribe({ url: "https://example.com/feed", title: "Blog" });
+  const article = server.deliver(feed.id, {
+    title: "原文の記事",
+    summary: "Comments",
+    content: "<p>Comments</p>",
+    translation: {
+      language: "en",
+      status: "translated",
+      title: "訳した記事",
+      summary: "訳した要約",
+      translatedAt: new Date(server.now).toISOString(),
+    },
+  });
+  server.translatedContents.set(article.id, "<p>訳した本文</p>");
+  server.pageContents.set(article.id, "<p>ページから取った原文の全文</p>");
+  // 先読みより前に記事を開く手順に頼らず、既読の記事を Saved から開く
+  server.setArticleState(article.id, { read: true, starred: true });
+  await routeFakeSendo(context, server);
+  const contentUrl = (url: URL) => url.pathname === `/api/v1/articles/${article.id}/content`;
+  let offline = false;
+  await context.route(
+    (url) => contentUrl(url) && url.searchParams.get("source") !== "page",
+    (route) =>
+      offline
+        ? route.abort("internetdisconnected")
+        : route.fulfill({ status: 503, json: { error: { code: "unavailable", message: "test" } } }),
+  );
+  await page.goto("/");
+  await signIn(page);
+  await page.locator("nav.sidebar").getByRole("link", { name: "Saved" }).click();
+  await page.locator(".article-list .item", { hasText: "訳した記事" }).click();
+  const view = page.locator(".article-view");
+  await expect(view.locator(".body")).toHaveText("訳した本文");
+  const pageUrl = (url: URL) => contentUrl(url) && url.searchParams.get("source") === "page";
+  return {
+    view,
+    pageUrl,
+    setOffline: async (value: boolean) => {
+      offline = value;
+      await context.setOffline(value);
+      await expect.poll(() => page.evaluate(() => navigator.onLine)).toBe(!value);
+    },
+  };
+}
+
+test("原文のフィード本文が 503 でも、全文を自動で一度取得する", async ({ page, context }) => {
+  const { view, pageUrl } = await translatedArticleWithUnavailableFeed(page, context);
+  let release!: () => void;
+  const blocked = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  let requests = 0;
+  await context.route(pageUrl, async (route) => {
+    requests += 1;
+    await blocked;
+    await route.fallback();
+  });
+  await chooseContent(page, "Show original text");
+  await expect(view.getByRole("status")).toHaveText("全文を取得しています…");
+  await expect(view.locator(".summary")).toHaveText("Comments");
+  release();
+  await expect(view.locator(".body")).toHaveText("ページから取った原文の全文");
+  expect(requests).toBe(1);
+});
+
+test("フィード本文も全文も届かなければ要約を残し、手動で全文を取り直せる", async ({
+  page,
+  context,
+}) => {
+  const { view, pageUrl, setOffline } = await translatedArticleWithUnavailableFeed(page, context);
+  let requests = 0;
+  await context.route(pageUrl, (route) => {
+    requests += 1;
+    return requests <= 2 ? route.abort("failed") : route.fallback();
+  });
+  await chooseContent(page, "Show original text");
+  await expect.poll(() => requests).toBe(1);
+  const unavailable = "この記事には本文があります。sendo につながったら読めます。";
+  await expect(view.getByRole("status")).toHaveText(unavailable);
+  await expect(view.locator(".summary")).toHaveText("Comments");
+
+  // フィード本文と全文の両方が届かなかった場合も、再接続で自動取得をやり直せる
+  await setOffline(true);
+  await setOffline(false);
+  await expect.poll(() => requests).toBe(2);
+  await expect(view.getByRole("status")).toHaveText(unavailable);
+  await chooseContent(page, "Show full text");
+  await expect(view.locator(".body")).toHaveText("ページから取った原文の全文");
+  expect(requests).toBe(3);
+});
+
+test("オフラインで原文に切り替えると、再接続後に取得できる全文を出す", async ({
+  page,
+  context,
+}) => {
+  const { view, pageUrl, setOffline } = await translatedArticleWithUnavailableFeed(page, context);
+  let requests = 0;
+  await context.route(pageUrl, (route) => {
+    requests += 1;
+    return route.fallback();
+  });
+  await setOffline(true);
+  await chooseContent(page, "Show original text");
+  await expect(view.locator(".summary")).toHaveText("Comments");
+  await expect(view.getByRole("status")).toHaveText(
+    "この記事には本文があります。sendo につながったら読めます。",
+  );
+  expect(requests).toBe(0);
+  await setOffline(false);
+  await expect(view.locator(".body")).toHaveText("ページから取った原文の全文");
+  expect(requests).toBe(1);
+});
 
 test("記事を開くと全文を自動取得し、切り替え・オフラインの再表示ができる", async ({
   page,
