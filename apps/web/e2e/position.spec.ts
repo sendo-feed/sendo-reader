@@ -61,6 +61,97 @@ async function openBelow(page: Page): Promise<string> {
 /** 位置を書くのは、動かし終えて少ししてから */
 const settle = (page: Page) => page.waitForTimeout(500);
 
+declare global {
+  interface Window {
+    releaseListPage?: () => void;
+  }
+}
+
+/** 次のページは実際に読み、位置を戻す側に答えを届けるところだけ遅らせる。 */
+async function holdNextListPage(page: Page) {
+  await page.addInitScript(() => {
+    window.Worker = class extends Worker {
+      constructor(url: string | URL, options?: WorkerOptions) {
+        super(url, options);
+        let pageCallId: number | undefined;
+        const post = this.postMessage.bind(this);
+        this.postMessage = (
+          message: unknown,
+          transfer: Transferable[] | StructuredSerializeOptions = [],
+        ) => {
+          const call = message as {
+            type: string;
+            method?: string;
+            id?: number;
+            args?: { after?: unknown }[];
+          };
+          if (call.type === "call" && call.method === "listArticles" && call.args?.[0]?.after) {
+            pageCallId ??= call.id;
+          }
+          if (Array.isArray(transfer)) post(message, transfer);
+          else post(message, transfer);
+        };
+        const hold = (event: MessageEvent) => {
+          if (
+            pageCallId === undefined ||
+            event.data.type !== "result" ||
+            event.data.id !== pageCallId
+          )
+            return;
+          event.stopImmediatePropagation();
+          this.removeEventListener("message", hold);
+          window.releaseListPage = () => {
+            this.dispatchEvent(new MessageEvent("message", { data: event.data }));
+          };
+        };
+        this.addEventListener("message", hold);
+      }
+    };
+  });
+}
+
+test.describe("狭い画面で一覧の位置を戻している間", () => {
+  test.use({ viewport: { width: 390, height: 780 }, hasTouch: true });
+
+  test("一覧から開いた記事は、続きの読み出しが終わっても先頭にいる", async ({ page, context }) => {
+    const { server } = seed({ "reader.unreadOnly": false }, 80);
+    await routeFakeSendo(context, server);
+    await page.goto("/");
+    await signIn(page);
+    const rows = page.locator(".article-list .row");
+    const scrollToEnd = () =>
+      page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
+    await expect(rows).toHaveCount(50);
+    await scrollToEnd();
+    await expect(rows).toHaveCount(80);
+    await scrollToEnd();
+    const lastId = await rows.last().getAttribute("data-article");
+    await expect
+      .poll(() =>
+        page.evaluate((id) => {
+          const anchor = history.state?.list?.anchor;
+          return anchor?.id === id ? anchor.offset : 0;
+        }, lastId),
+      )
+      .toBeLessThan(-100);
+
+    await holdNextListPage(page);
+    await page.reload();
+    await expect(rows).toHaveCount(50);
+    await page.waitForFunction(() => window.releaseListPage !== undefined);
+
+    await rows.nth(1).locator(".item").tap();
+    const article = page.locator(".article-view");
+    await expect(article.getByRole("heading", { level: 1 })).toHaveText("記事 1");
+    await expect(article.locator(".summary")).toBeVisible();
+    expect(await page.evaluate(() => window.scrollY)).toBe(0);
+
+    await page.evaluate(() => window.releaseListPage?.());
+    await expect(rows).toHaveCount(80);
+    expect(await page.evaluate(() => window.scrollY)).toBe(0);
+  });
+});
+
 for (const width of [1200, 390]) {
   test(`末尾の余白でも再読み込みと戻るで同じ位置に戻る（幅${width}）`, async ({
     page,
