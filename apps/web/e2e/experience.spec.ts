@@ -430,15 +430,15 @@ test("狭い画面では、メニューを左から開き、一覧と記事を�
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("2 番目");
   await expect(page.getByRole("button", { name: "Save", exact: true })).toBeVisible();
   await touchArticle("touchmove", -140);
-  await expect(page.locator(".star-hint")).toHaveText("Save");
-  await expect(page.locator(".star-hint")).toHaveClass(/armed/);
+  await expect(page.locator(".swipe-hint")).toHaveText("Save");
+  await expect(page.locator(".swipe-hint")).toHaveClass(/armed/);
   // 記事の画面はそのまま（後ろに一覧を見せない）
   await expect(list).toBeHidden();
   await touchArticle("touchend", -140);
   await expect(page.getByRole("button", { name: "Unsave" })).toBeVisible();
   await expect(page.getByRole("status").filter({ hasText: "Saved に入れました。" })).toBeVisible();
   await expect(view).not.toHaveClass(/moved/);
-  await expect(page.locator(".star-hint")).toHaveCount(0);
+  await expect(page.locator(".swipe-hint")).toHaveCount(0);
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("2 番目");
   // もう一度スワイプすると、保存をやめる
   await flickArticle(-140, 10);

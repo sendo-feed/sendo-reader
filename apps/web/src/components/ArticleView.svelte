@@ -5,7 +5,7 @@
     type TranslatedContent,
     toSafeHttpUrl,
   } from "@sendo-reader/core";
-  import { tick, untrack } from "svelte";
+  import { onDestroy, tick, untrack } from "svelte";
   import { useReader } from "../lib/context";
   import {
     describeTranslationError,
@@ -288,6 +288,8 @@
   $effect(() => {
     const id = articleId;
     untrack(() => {
+      // 本文が入れ替わると、古い本文に触れた指の touchend は届かない
+      if (id !== shownId) abandon();
       fadeIn = id !== null && !settling && (shownId !== null || !layout.pageScroll);
       shownId = id;
       recordedOpen = null;
@@ -711,8 +713,8 @@
    *
    * 記事は指に付いて横に動き、離したら、外へ流して操作するか、元の位置へ戻す。戻る動きでは、
    * 狭い画面なら記事の後ろに一覧を見せる（onpeek）。次・前の記事へは、外へ流したあと、
-   * 次の記事を反対の側から入れる。保存の切り替えでは、記事を外へ流さず、少しだけ動かして空いた
-   * ところに、何をするかを出す。離したら、切り替えて元の位置へ戻す
+   * 次の記事を反対の側から入れる。保存の切り替えと元のサイトを開く操作では、記事を少しだけ
+   * 動かして、空いたところに何をするかを出す。離したら、操作して元の位置へ戻す
    */
 
   /** 記事を、指で横に動かしている分（px） */
@@ -723,8 +725,8 @@
   let settling = $state(false);
   /** 記事を、元の位置からずらしている */
   const moved = $derived(dragX !== 0 || settling);
-  /** 保存を切り替える向きに動かしている（記事を欄の中で動かし、空いたところに印を出す） */
-  let starring = $state(false);
+  /** 記事を開いたまま行う操作を、スワイプで空いたところに出す */
+  let swipeHint = $state<"star" | "open" | null>(null);
 
   /** 外へ流す・元に戻す時間（ミリ秒）。CSS の transition と揃える */
   const SLIDE = 220;
@@ -733,12 +735,15 @@
   /** これより短くても、これより速く（px/ミリ秒）はじいたら、操作する */
   const FLICK_DISTANCE = 30;
   const FLICK_SPEED = 0.5;
-  /** 保存を切り替える向きには、これより先へは動かさない（px） */
-  const STAR_REACH = 112;
-  /** 保存を切り替えるところまで動かした */
-  const starArmed = $derived(Math.abs(dragX) >= SWIPE_DISTANCE);
+  /** 記事を開いたまま行う操作では、これより先へは動かさない（px） */
+  const SWIPE_HINT_REACH = 112;
 
   interface Gesture {
+    target: Element;
+    articleId: string;
+    /** 途中で設定が同期されても、出したヒントと実行する操作をそろえる */
+    articleLeft: ArticleSwipe;
+    articleRight: ArticleSwipe;
     startX: number;
     startY: number;
     /** 横に動かしている（true）、縦に動かしている（false）、まだ分からない（null） */
@@ -753,8 +758,16 @@
   let gesture: Gesture | null = null;
 
   /** その向き（dx が正なら右へ）のスワイプに割り当てた操作 */
-  function actionFor(dx: number): ArticleSwipe {
-    return dx < 0 ? prefs.value.swipes.articleLeft : prefs.value.swipes.articleRight;
+  function actionFor(dx: number, current: Gesture): ArticleSwipe {
+    const action = dx < 0 ? current.articleLeft : current.articleRight;
+    // 途中で記事が替わった場合も、スワイプを始めた記事以外のリンクを開かない
+    if (
+      action === "open" &&
+      (link === null || articleId !== current.articleId || article?.id !== current.articleId)
+    ) {
+      return "none";
+    }
+    return action;
   }
 
   function startPeek(current: Gesture) {
@@ -764,39 +777,55 @@
   }
 
   function onTouchStart(event: TouchEvent) {
+    // 2 本目の指が触れた（拡大など）ときは、動かしていた記事を元に戻す
+    abandon();
     const touch = event.touches[0];
-    if (event.touches.length !== 1 || touch === undefined) {
-      // 2 本目の指が触れた（拡大など）。動かしていた記事は元に戻す
-      abandon();
+    const target = event.target;
+    if (
+      event.touches.length !== 1 ||
+      touch === undefined ||
+      settling ||
+      article === null ||
+      !(target instanceof Element) ||
+      startsInSideScroller(target)
+    )
       return;
-    }
-    gesture =
-      !settling && article !== null && !startsInSideScroller(event.target)
-        ? {
-            startX: touch.clientX,
-            startY: touch.clientY,
-            sideways: null,
-            lastX: touch.clientX,
-            lastTime: event.timeStamp,
-            speed: 0,
-            peeking: false,
-          }
-        : null;
+
+    const { articleLeft, articleRight } = prefs.value.swipes;
+    gesture = {
+      target,
+      articleId: article.id,
+      articleLeft,
+      articleRight,
+      startX: touch.clientX,
+      startY: touch.clientY,
+      sideways: null,
+      lastX: touch.clientX,
+      lastTime: event.timeStamp,
+      speed: 0,
+      peeking: false,
+    };
+    // 全文が届いて要約が外れても、その指のイベントは触れ始めた要素に届く
+    target.addEventListener("touchmove", onTouchMove, { passive: false });
+    target.addEventListener("touchend", onTouchEnd);
+    target.addEventListener("touchcancel", abandon);
   }
 
   /** 横に動かしている間は、ページを縦に動かさない（そのため、受け身でない listener で受ける） */
-  function onTouchMove(event: TouchEvent) {
+  function onTouchMove(event: Event) {
+    if (!(event instanceof TouchEvent)) return;
     const touch = event.touches[0];
     const current = gesture;
     if (current === null || touch === undefined || current.sideways === false) return;
     const dx = touch.clientX - current.startX;
     const dy = touch.clientY - current.startY;
+    const action = actionFor(dx, current);
     if (current.sideways === null) {
       if (Math.abs(dx) < 10 && Math.abs(dy) < 10) return;
       current.sideways =
         Math.abs(dx) > Math.abs(dy) * 2 &&
         getSelection()?.isCollapsed !== false &&
-        actionFor(dx) !== "none";
+        action !== "none";
       if (!current.sideways) return;
       dragging = true;
     }
@@ -806,15 +835,14 @@
       current.lastX = touch.clientX;
       current.lastTime = event.timeStamp;
     }
-    const action = actionFor(dx);
     if (action === "back") startPeek(current);
-    starring = action === "star";
+    swipeHint = action === "star" || action === "open" ? action : null;
     // 何も割り当てていない向きには、ほとんど動かさない（手ごたえだけ）
     dragX =
       action === "none"
         ? dx * 0.1
-        : action === "star"
-          ? Math.max(-STAR_REACH, Math.min(STAR_REACH, dx))
+        : swipeHint !== null
+          ? Math.max(-SWIPE_HINT_REACH, Math.min(SWIPE_HINT_REACH, dx))
           : dx;
   }
 
@@ -835,10 +863,10 @@
     return false;
   }
 
-  function onTouchEnd(event: TouchEvent) {
+  function onTouchEnd(event: Event) {
+    if (!(event instanceof TouchEvent)) return;
     const touch = event.changedTouches[0];
-    const current = gesture;
-    gesture = null;
+    const current = takeGesture();
     if (current === null || touch === undefined || current.sideways === false) return;
     const dx = touch.clientX - current.startX;
     const dy = touch.clientY - current.startY;
@@ -849,7 +877,7 @@
     ) {
       return;
     }
-    const action = actionFor(dx);
+    const action = actionFor(dx, current);
     // 指を止めてから離したなら、はじいたことにはしない
     const speed = event.timeStamp - current.lastTime > 100 ? 0 : current.speed;
     const flick = Math.abs(dx) >= FLICK_DISTANCE && speed * Math.sign(dx) >= FLICK_SPEED;
@@ -861,13 +889,28 @@
       void star(current.peeking);
       return;
     }
+    if (action === "open") {
+      // 新しいタブは、指を離したイベントの中で開く
+      openOriginal();
+      if (current.peeking) onpeek(false);
+      void settleBack(false);
+      return;
+    }
     if (action === "back") startPeek(current);
     void complete(action, dx < 0 ? -1 : 1, current.peeking);
   }
 
-  function abandon() {
+  function takeGesture() {
     const current = gesture;
     gesture = null;
+    current?.target.removeEventListener("touchmove", onTouchMove);
+    current?.target.removeEventListener("touchend", onTouchEnd);
+    current?.target.removeEventListener("touchcancel", abandon);
+    return current;
+  }
+
+  function abandon() {
+    const current = takeGesture();
     if (current?.sideways === true) void settleBack(current.peeking);
   }
 
@@ -891,14 +934,14 @@
   async function settleBack(peeking: boolean) {
     if (dragX === 0 && !peeking) {
       dragging = false;
-      starring = false;
+      swipeHint = null;
       return;
     }
     settling = true;
     await slide(0);
     if (peeking) onpeek(false);
     settling = false;
-    starring = false;
+    swipeHint = null;
   }
 
   /** 保存を切り替えるところまで動かして離した。切り替えてから、元の位置に戻す */
@@ -910,17 +953,17 @@
     showNotice(on ? "Saved に入れました。" : "Saved から外しました。");
     await slide(0);
     settling = false;
-    starring = false;
+    swipeHint = null;
   }
 
   /** 操作するところまで動かして離した。記事を外へ流してから、操作する */
   async function complete(
-    action: Exclude<ArticleSwipe, "none">,
+    action: "back" | "next" | "previous",
     direction: 1 | -1,
     peeking: boolean,
   ) {
     settling = true;
-    starring = false;
+    swipeHint = null;
     const from = articleId;
     const width = scroller?.clientWidth || window.innerWidth;
     await slide(direction * width);
@@ -945,12 +988,7 @@
     settling = false;
   }
 
-  $effect(() => {
-    const node = scroller;
-    if (node === undefined) return;
-    node.addEventListener("touchmove", onTouchMove, { passive: false });
-    return () => node.removeEventListener("touchmove", onTouchMove);
-  });
+  onDestroy(takeGesture);
 
   /** 共有したときなどの、少しの間出す知らせ */
   let notice = $state<string | null>(null);
@@ -1121,26 +1159,28 @@
   aria-live="polite"
   bind:this={scroller}
   ontouchstart={onTouchStart}
-  ontouchend={onTouchEnd}
-  ontouchcancel={abandon}
   class:moved
   class:dragging
-  class:starring
+  class:swipe-in-place={swipeHint !== null}
   style:--drag={`${dragX}px`}
 >
   {#if article !== null}
-    {#if starring}
-      <!-- 保存を切り替える向きに動かしている間、空いたところに何をするかを出す -->
+    {#if swipeHint !== null}
       <div
-        class="star-hint"
-        class:armed={starArmed}
+        class="swipe-hint"
+        class:armed={Math.abs(dragX) >= SWIPE_DISTANCE}
         class:end={dragX < 0}
         style:opacity={Math.min(1, Math.abs(dragX) / SWIPE_DISTANCE)}
         aria-hidden="true"
       >
         <span>
-          <Icon name="bookmark" filled={article.starredAt === null} />
-          {article.starredAt === null ? "Save" : "Unsave"}
+          {#if swipeHint === "open"}
+            <Icon name="external" />
+            Open original
+          {:else}
+            <Icon name="bookmark" filled={article.starredAt === null} />
+            {article.starredAt === null ? "Save" : "Unsave"}
+          {/if}
         </span>
       </div>
     {/if}
@@ -1466,33 +1506,33 @@
    * 指で横にスワイプしている間と、離したあとに外へ流す・元に戻す間。広い画面では、欄の中で
    * 中身を動かす（欄の外にははみ出さない）
    */
-  .article-view.moved > :not(dialog, .star-hint) {
+  .article-view.moved > :not(dialog, .swipe-hint) {
     transform: translateX(var(--drag));
     transition: transform 0.22s cubic-bezier(0.2, 0.8, 0.2, 1);
   }
 
-  .article-view.dragging > :not(dialog, .star-hint) {
+  .article-view.dragging > :not(dialog, .swipe-hint) {
     transition: none;
   }
 
   @media (prefers-reduced-motion: reduce) {
-    .article-view.moved > :not(dialog, .star-hint) {
+    .article-view.moved > :not(dialog, .swipe-hint) {
       transition: none;
     }
   }
 
   /*
-   * 保存を切り替える向きに動かしている間の印。動かない場所（欄の縦の真ん中あたり）に置き、
+   * 記事を開いたまま行う操作の印。動かない場所（欄の縦の真ん中あたり）に置き、
    * 記事が動いて空いたところの真ん中に出す
    */
-  .star-hint {
+  .swipe-hint {
     position: sticky;
     top: 0;
     flex: none;
     height: 0;
   }
 
-  .star-hint > span {
+  .swipe-hint > span {
     position: absolute;
     top: 35vh;
     left: calc(var(--drag) / 2);
@@ -1502,16 +1542,17 @@
     color: var(--muted);
     font-size: 0.8125rem;
     font-weight: 600;
+    white-space: nowrap;
     transform: translateX(-50%);
   }
 
-  .star-hint.end > span {
+  .swipe-hint.end > span {
     left: auto;
     right: calc(var(--drag) / -2);
     transform: translateX(50%);
   }
 
-  .star-hint.armed > span {
+  .swipe-hint.armed > span {
     color: var(--accent);
   }
 
@@ -1704,15 +1745,15 @@
 
     /*
      * 狭い画面では、記事をまるごと動かす（戻る動きでは、後ろに一覧が見える）。
-     * 横にはみ出した分は、Reader が切り取る。保存の切り替えでは、広い画面と同じく中身を動かす
+     * 横にはみ出した分は、Reader が切り取る。記事を開いたまま行う操作では、広い画面と同じく中身を動かす
      * （記事の画面は動かさず、空いたところに印を出す）
      */
-    .article-view.moved:not(.starring) > :not(dialog) {
+    .article-view.moved:not(.swipe-in-place) > :not(dialog) {
       transform: none;
       transition: none;
     }
 
-    .article-view.moved:not(.starring) {
+    .article-view.moved:not(.swipe-in-place) {
       box-shadow: var(--shadow);
       transform: translateX(var(--drag));
       transition: transform 0.22s cubic-bezier(0.2, 0.8, 0.2, 1);
