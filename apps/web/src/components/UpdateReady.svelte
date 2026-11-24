@@ -18,20 +18,26 @@
 </div>
 
 <style>
+  /*
+   * 広い画面では右下に、狭い画面では下のバー（記事の画面では記事の操作）の上に出す
+   * （docs/decisions/ui.md の 5）。見出しの操作は覆わない。
+   *
+   * 画面の下に出るほかのもの（取り消しの知らせ、記事の画面の知らせ）、開いているメニュー、窓は、
+   * この知らせより手前にする。そのため重なり順は低く（1）し、App.svelte で画面より前に置く
+   * （同じ重なり順のものは、あとに置いたほうが手前になる）。取り消しの知らせは 4、メニューは 2〜3、
+   * 窓は top layer
+   */
   .update-ready {
     position: fixed;
-    top: calc(1rem + env(safe-area-inset-top, 0px));
     right: 1rem;
-    left: 1rem;
-    /* 読み終えたときのお祝い（z-index 5）より上に出す */
-    z-index: 6;
+    bottom: calc(1rem + env(safe-area-inset-bottom, 0px));
+    z-index: 1;
     display: flex;
     flex-wrap: wrap;
     align-items: center;
     gap: 0.75rem;
     width: fit-content;
-    max-width: min(36rem, calc(100vw - 2rem));
-    margin-inline: auto;
+    max-width: min(24rem, calc(100vw - 2rem));
     padding: 0.75rem 1rem;
     border: 1px solid var(--border-strong);
     border-radius: var(--radius);
@@ -50,5 +56,14 @@
     display: flex;
     flex: none;
     gap: 0.5rem;
+  }
+
+  /* 狭い画面（docs/decisions/ui.md の 6）：取り消しの知らせと同じ高さ。下のバーのない画面でも同じ */
+  @media (max-width: 56rem) {
+    .update-ready {
+      bottom: calc(4.5rem + env(safe-area-inset-bottom, 0px));
+      left: 1rem;
+      margin-inline: auto;
+    }
   }
 </style>
