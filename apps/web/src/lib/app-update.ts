@@ -6,17 +6,18 @@
  * 読み込み直す操作がなく、ほかのアプリから戻っても読み込み直さないので、そのままでは、いつまでも
  * 新しい版にならない。そこで、
  *
- * - 画面が前に出たときと、一定の間隔で、新しい版があるかを確かめる
+ * - 起動したとき、画面が前に出たとき、一定の間隔で、サーバーの版も確かめる
  * - 新しい版に替わったら、画面が裏にある間か、次に前に出たときに、読み込み直す。
  *   読んでいる最中には、読み込み直さない
- * - 前に出ている間は読み込み直さないので、新しい版に替わったことを画面に知らせ（onUpdateReady）、
- *   利用者がその場で切り替えられるようにする
+ * - 前に出ている間は、利用者がその場で切り替えられるように知らせる。取り込みに失敗したときも知らせる
  */
 
 import { AUTHORIZE_PATH } from "./authorize";
 
 /** 開いたままのときに、新しい版を確かめる間隔 */
 export const UPDATE_CHECK_INTERVAL_MS = 60 * 60 * 1000;
+/** 版の応答が止まったときも、Service Worker 自身の確認に進める */
+const VERSION_TIMEOUT_MS = 5_000;
 
 interface Listenable {
   addEventListener(type: string, listener: () => void): void;
@@ -90,8 +91,10 @@ function sameVersion(a: AppVersion, b: AppVersion): boolean {
 }
 
 async function serverVersion(env: AppUpdateEnvironment): Promise<AppVersion | null> {
+  const abort = new AbortController();
+  const timer = setTimeout(() => abort.abort(), VERSION_TIMEOUT_MS);
   try {
-    const response = await env.fetch("/version.json", { cache: "no-store" });
+    const response = await env.fetch("/version.json", { cache: "no-store", signal: abort.signal });
     if (!response.ok) return null;
     const version: unknown = await response.json();
     if (
@@ -109,6 +112,8 @@ async function serverVersion(env: AppUpdateEnvironment): Promise<AppVersion | nu
     }
   } catch {
     // オフラインや、版のファイルを持たないサーバーの index.html など
+  } finally {
+    clearTimeout(timer);
   }
   return null;
 }
@@ -154,6 +159,10 @@ export function watchAppUpdate(env: AppUpdateEnvironment): void {
   let update: Update | null = null;
   let reloading = false;
   let checkId = 0;
+  let versionRequests = 0;
+  let lastCompared = { id: 0, version: env.version };
+  let previousVisibility = env.document.visibilityState;
+  const waitingForWorkerReload = () => update?.kind === "ready" && update.version === null;
 
   const setUpdate = (next: Update | null) => {
     update = next;
@@ -190,34 +199,65 @@ export function watchAppUpdate(env: AppUpdateEnvironment): void {
   const registration = Promise.resolve()
     .then(() => env.serviceWorker?.register() ?? null)
     .catch(() => null);
+  let workerCheck: { version: AppVersion | null; result: ReturnType<typeof installUpdate> } | null =
+    null;
 
-  const check = async (reason: "startup" | "interval" | "visibility"): Promise<void> => {
+  const checkWorker = async (version: AppVersion | null, current: unknown) => {
+    while (workerCheck !== null) {
+      const attempt = workerCheck;
+      if (version === null || (attempt.version !== null && sameVersion(attempt.version, version)))
+        return attempt.result;
+
+      // 別の版の取り込み結果を使わず、その取り込みが終わってから確かめる
+      await attempt.result;
+      if (reloading || !sameVersion(lastCompared.version, version) || controller() !== current) {
+        return "unavailable";
+      }
+    }
+    const result = registration
+      .then((worker) => (worker === null ? ("unavailable" as const) : installUpdate(worker)))
+      .finally(() => {
+        workerCheck = null;
+      });
+    workerCheck = { version, result };
+    return result;
+  };
+
+  const check = async (reason: "startup" | "interval" | "visibility" | "resume"): Promise<void> => {
     if (reloading) return;
     const id = ++checkId;
     const current = controller();
-    const isCurrent = () => id === checkId && !reloading && current === controller();
+    const stillControlledBySameWorker = () => !reloading && current === controller();
+    versionRequests += 1;
     const version = await serverVersion(env);
-    if (!isCurrent()) return;
+    versionRequests -= 1;
+    if (!stillControlledBySameWorker()) return;
 
-    // Service Worker の切り替えを知ったあとは、その次の切り替えも controllerchange で知る。
-    // /version.json が変わらないコンテナ設定の変更もあるため、SW 自身の確認は続ける
-    const waitingForWorkerReload = update?.kind === "ready" && update.version === null;
-    if (waitingForWorkerReload || version === null || sameVersion(env.version, version)) {
-      if (!waitingForWorkerReload && version !== null && update !== null) setUpdate(null);
-      if (reason !== "startup" && current !== null) {
-        const worker = await registration;
-        if (isCurrent()) void worker?.update().catch(() => {});
-      }
+    if (version === null) {
+      // 別の版の取得が進んでいれば、その結果で worker の更新を試す
+      if (versionRequests === 0 && checkId > 1) void checkWorker(null, current);
+      return;
+    }
+    if (id < lastCompared.id || (current === null && id !== checkId)) return;
+    lastCompared = { id, version };
+
+    if (waitingForWorkerReload() || sameVersion(env.version, version)) {
+      if (!waitingForWorkerReload() && update !== null) setUpdate(null);
+      if (reason !== "startup") void checkWorker(null, current);
       return;
     }
 
     if (current === null) {
+      if (reason !== "startup") void checkWorker(null, current);
       const pendingVersion = update?.kind === "ready" ? update.version : null;
       const samePending = pendingVersion !== null && sameVersion(pendingVersion, version);
       const hidden = env.document.visibilityState === "hidden";
       if (!samePending) setUpdate({ kind: "ready", version });
 
-      if (reason === "visibility" && (samePending || (hidden && pendingVersion !== null))) {
+      if (
+        pendingVersion !== null &&
+        (reason === "resume" || (reason === "visibility" && (samePending || hidden)))
+      ) {
         reloadIfAllowed();
       } else if (pendingVersion === null && hidden && env.canReload()) {
         // 裏で初めて新版を見つけたときも、再取得してから自動で読み込み直す
@@ -226,10 +266,14 @@ export function watchAppUpdate(env: AppUpdateEnvironment): void {
       return;
     }
 
-    const worker = await registration;
-    if (worker === null || !isCurrent()) return;
-    const result = await installUpdate(worker);
-    if (!isCurrent() || (update?.kind === "ready" && update.version === null)) return;
+    const result = await checkWorker(version, current);
+    // あとから版の取得に失敗しても、取り込みを始めた版が redundant になったことは知らせる
+    if (
+      !stillControlledBySameWorker() ||
+      !sameVersion(lastCompared.version, version) ||
+      waitingForWorkerReload()
+    )
+      return;
     if (result === "unchanged") workerReady();
     if (
       result === "failed" &&
@@ -240,9 +284,12 @@ export function watchAppUpdate(env: AppUpdateEnvironment): void {
   };
 
   env.document.addEventListener("visibilitychange", () => {
-    if (update?.kind === "ready" && update.version === null) reloadIfAllowed();
-    else if (update?.kind === "ready" || env.document.visibilityState === "visible") {
-      void check("visibility");
+    const visible = env.document.visibilityState === "visible";
+    const resumed = previousVisibility === "hidden" && visible;
+    previousVisibility = env.document.visibilityState;
+    if (waitingForWorkerReload()) reloadIfAllowed();
+    else if (update?.kind === "ready" || visible) {
+      void check(resumed ? "resume" : "visibility");
     }
   });
   env.setInterval(() => void check("interval"), UPDATE_CHECK_INTERVAL_MS);

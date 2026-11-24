@@ -457,7 +457,6 @@ test.describe("Service Worker を使わない画面", () => {
       await page.goto(READER);
       const received = await response;
       expect(received.status()).toBe(status);
-      await received.finished();
       await expect(page.getByText("Sendo", { exact: true })).toBeVisible();
       await expect(updateNotice(page)).toHaveCount(0);
       expect(errors).toEqual([]);
@@ -467,7 +466,6 @@ test.describe("Service Worker を使わない画面", () => {
 
 test("precache の取り込みに失敗した版では Reload を出さず、同じ版なら Dismiss 後も出し直さない", async ({
   page,
-  context,
 }) => {
   const loads = await openVersionA(page);
   await serveVersion("b", true);
@@ -484,11 +482,27 @@ test("precache の取り込みに失敗した版では Reload を出さず、同
   expect(loads()).toBe(1);
   expect(await version(page)).toBe("a");
   await notice.getByRole("button", { name: "Dismiss" }).click();
-  const retry = context.waitForEvent("request", {
-    predicate: (request) => new URL(request.url()).pathname === "/missing.js",
+  await page.evaluate(async () => {
+    const registration = await navigator.serviceWorker.getRegistration();
+    if (!registration) throw new Error("登録した worker が見つからない");
+    const failed = new Promise<void>((resolve) => {
+      registration.addEventListener(
+        "updatefound",
+        () => {
+          const worker = registration.installing;
+          const check = () => {
+            if (worker?.state === "redundant") resolve();
+          };
+          worker?.addEventListener("statechange", check);
+          check();
+        },
+        { once: true },
+      );
+    });
+    Object.assign(window, { failed });
   });
   await bringToFront(page);
-  await retry;
+  await page.evaluate(() => (window as unknown as { failed: Promise<void> }).failed);
   await expect(notice).toHaveCount(0);
   expect(loads()).toBe(1);
 
@@ -523,7 +537,8 @@ test("強制再読み込みで新版が出ていれば、あとから新版の w
     session.send("Page.reload", { ignoreCache: true }),
   ]);
   expect(await version(page)).toBe("b");
-  // 本番どおり登録し、画面 b の入口が precache に入るまで待つ
+  await bringToFront(page);
+  // 通常の確認で画面 b の入口が precache に入るまで待つ
   await expect
     .poll(() =>
       page.evaluate(async () => {

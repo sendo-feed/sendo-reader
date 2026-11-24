@@ -1,4 +1,4 @@
-import { describe, expect, test } from "vitest";
+import { describe, expect, test, vi } from "vitest";
 import {
   type AppUpdateEnvironment,
   type AppUpdateNotice,
@@ -19,7 +19,7 @@ function setup(
     visible?: boolean;
     unsupported?: boolean;
     server?: typeof A;
-    fetch?: () => Promise<Response>;
+    fetch?: (init: RequestInit) => Promise<Response>;
   } = {},
 ) {
   const listeners = new Map<string, () => void>();
@@ -36,6 +36,7 @@ function setup(
     checks: 0,
     notices: [] as (AppUpdateNotice | null)[],
     server: options.server ?? A,
+    offline: false,
     requests: [] as { path: string; init: RequestInit }[],
     tick: () => {},
     install: "unchanged" as "unchanged" | "installing" | "unavailable",
@@ -77,7 +78,8 @@ function setup(
     version: A,
     fetch: (path, init) => {
       state.requests.push({ path, init });
-      return options.fetch?.() ?? Promise.resolve(Response.json(state.server));
+      if (state.offline) return Promise.reject(new Error("オフライン"));
+      return options.fetch?.(init) ?? Promise.resolve(Response.json(state.server));
     },
     document: {
       ...listenable("doc"),
@@ -252,7 +254,10 @@ describe("/version.json との比較", () => {
     app.state.tick();
     await settle();
     expect(app.state.requests).toEqual(
-      Array.from({ length: 3 }, () => ({ path: "/version.json", init: { cache: "no-store" } })),
+      Array.from({ length: 3 }, () => ({
+        path: "/version.json",
+        init: { cache: "no-store", signal: expect.any(AbortSignal) },
+      })),
     );
     expect(app.state.notices).toEqual([]);
   });
@@ -287,6 +292,21 @@ describe("/version.json との比較", () => {
     await settle();
     expect(app.state.notices).toEqual(["ready", "ready", null]);
     expect(app.state.reloads).toBe(0);
+  });
+
+  test("裏に回ったときにオフラインでも、前に戻ってさらに新版を取れたら再読み込みする", async () => {
+    const app = setup({ unsupported: true, server: B });
+    await settle();
+    app.state.offline = true;
+    app.hide();
+    await settle();
+    expect(app.state.reloads).toBe(0);
+
+    app.state.offline = false;
+    app.state.server = C;
+    app.show();
+    await settle();
+    expect(app.state.reloads).toBe(1);
   });
 
   test("自動で読み込み直すための取得中に窓を開いたら、閉じるまで待つ", async () => {
@@ -354,6 +374,87 @@ describe("/version.json との比較", () => {
     app.state.tick();
     await settle();
     expect(app.state.notices).toEqual(["failed", "ready"]);
+  });
+
+  test("取り込み中に別の確認が重なり、版を取れなくなっても取り込みの失敗を知らせる", async () => {
+    const app = setup();
+    await settle();
+    app.state.server = B;
+    app.state.install = "installing";
+    app.show();
+    await settle();
+
+    app.state.offline = true;
+    app.state.tick();
+    await settle();
+    app.finishInstall("redundant");
+    await settle();
+    expect(app.state.notices).toEqual(["failed"]);
+    expect(app.state.checks).toBe(1);
+  });
+
+  test("版の応答が止まっても、時間切れのあとで worker の更新を確かめる", async () => {
+    vi.useFakeTimers();
+    try {
+      const app = setup({
+        fetch: ({ signal }) =>
+          new Promise((_resolve, reject) => {
+            signal?.addEventListener("abort", () => reject(signal.reason), { once: true });
+          }),
+      });
+      app.show();
+      await vi.runAllTimersAsync();
+      expect(app.state.checks).toBe(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  test("版の応答が遅い間に別の取得が失敗しても、遅れて届いた新版の取り込みを試す", async () => {
+    let sendVersion: (response: Response) => void = () => {};
+    const response = new Promise<Response>((resolve) => {
+      sendVersion = resolve;
+    });
+    const fetch = vi
+      .fn()
+      .mockResolvedValueOnce(Response.json(A))
+      .mockReturnValueOnce(response)
+      .mockRejectedValueOnce(new Error("一時的に通信できない"));
+    const app = setup({ fetch });
+    await settle();
+    app.state.install = "installing";
+    app.show();
+    app.state.tick();
+    await settle();
+    expect(app.state.checks).toBe(0);
+
+    sendVersion(Response.json(B));
+    await settle();
+    app.finishInstall("redundant");
+    await settle();
+    expect(app.state.notices).toEqual(["failed"]);
+  });
+
+  test("B を取り込んでいる間に C を見つけたら、B の結果を使わずに C を取り込む", async () => {
+    const app = setup();
+    await settle();
+    app.state.server = B;
+    app.state.install = "installing";
+    app.show();
+    await settle();
+    app.state.server = C;
+    app.state.tick();
+    await settle();
+    expect(app.state.checks).toBe(1);
+
+    app.finishInstall("redundant");
+    await settle();
+    expect(app.state.notices).toEqual([]);
+    expect(app.state.checks).toBe(2);
+    app.finishInstall("activated");
+    app.newVersion();
+    await settle();
+    expect(app.state.notices).toEqual(["ready"]);
   });
 
   test("sw.js に届かなくても知らせず、取り込む worker がなかったときは Reload を知らせる", async () => {
