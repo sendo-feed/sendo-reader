@@ -526,11 +526,14 @@
    */
   export async function restore(anchor: ListAnchor): Promise<void> {
     const generation = list.generation;
+    const url = router.url;
     const target = await list.seek(anchor);
     if (target === null || list.generation !== generation) return;
     // 見ていた記事より前が、すべて一覧から消えていた。先頭のまま出す
     if (target.id !== anchor.id && target.id === list.articles[0]?.id) return;
     await tick();
+    // 狭い画面ではページ全体を動かす。待っている間に画面が替わったら、戻ってきていても動かさない
+    if (layout.pageScroll && (router.url !== url || router.articleId !== null)) return;
     const row = rowOf(target.id);
     if (row === null || scrollTopOf(scroller) > 0) return;
     const offset = target.id === anchor.id ? anchor.offset : 0;
