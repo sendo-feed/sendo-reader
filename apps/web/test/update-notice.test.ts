@@ -1,36 +1,37 @@
 import { describe, expect, test } from "vitest";
 import { reloadGuard } from "../src/lib/reload-guard.svelte";
-import { topNotice, updateNotice } from "../src/lib/update-notice.svelte";
+import { selectNotice, updateNotice } from "../src/lib/update-notice.svelte";
 
-const base = { leaveStalled: false, versionMismatch: false, updatePending: false, canReload: true };
+const base = { leaveStalled: false, versionMismatch: false, update: null, canReload: true };
 
-describe("画面の上の知らせ", () => {
+describe("画面に出す知らせ", () => {
   test("新しい版の知らせは、閉じていない新しい版があり、読み込み直してよい画面でだけ出す", () => {
-    expect(topNotice(base)).toBeNull();
-    expect(topNotice({ ...base, updatePending: true })).toBe("updateReady");
-    expect(topNotice({ ...base, updatePending: true, canReload: false })).toBeNull();
+    expect(selectNotice(base)).toBeNull();
+    expect(selectNotice({ ...base, update: "ready" })).toBe("ready");
+    expect(selectNotice({ ...base, update: "failed" })).toBe("failed");
+    expect(selectNotice({ ...base, update: "ready", canReload: false })).toBeNull();
   });
 
   test("このタブがいま使えないことを言う知らせを、新しい版の知らせより先に出す", () => {
-    expect(topNotice({ ...base, updatePending: true, versionMismatch: true })).toBe(
+    expect(selectNotice({ ...base, update: "ready", versionMismatch: true })).toBe(
       "versionMismatch",
     );
     expect(
-      topNotice({ ...base, updatePending: true, versionMismatch: true, leaveStalled: true }),
+      selectNotice({ ...base, update: "ready", versionMismatch: true, leaveStalled: true }),
     ).toBe("leaveStalled");
   });
 
   test("閉じたら出さず、さらに新しい版に替わったら、また出す", () => {
-    expect(updateNotice.pending).toBe(false);
-    updateNotice.ready();
-    expect(updateNotice.pending).toBe(true);
+    expect(updateNotice.visible).toBeNull();
+    updateNotice.show("ready");
+    expect(updateNotice.visible).toBe("ready");
     updateNotice.dismiss();
-    expect(updateNotice.pending).toBe(false);
+    expect(updateNotice.visible).toBeNull();
     // 閉じたあとに何度閉じても、次の版までは出さない
     updateNotice.dismiss();
-    expect(updateNotice.pending).toBe(false);
-    updateNotice.ready();
-    expect(updateNotice.pending).toBe(true);
+    expect(updateNotice.visible).toBeNull();
+    updateNotice.show("ready");
+    expect(updateNotice.visible).toBe("ready");
   });
 });
 

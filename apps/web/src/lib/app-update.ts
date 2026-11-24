@@ -22,30 +22,41 @@ interface Listenable {
   addEventListener(type: string, listener: () => void): void;
 }
 
-interface Registration {
+interface InstallingWorker extends Listenable {
+  readonly state: ServiceWorkerState;
+  removeEventListener(type: string, listener: () => void): void;
+}
+
+interface Registration extends Listenable {
+  readonly installing: InstallingWorker | null;
+  readonly waiting: InstallingWorker | null;
+  removeEventListener(type: string, listener: () => void): void;
   update(): Promise<unknown>;
 }
 
+export interface AppVersion {
+  readonly commit: string;
+  readonly builtAt: string;
+}
+
+export type AppUpdateNotice = "ready" | "failed";
+
 /** 使うものだけを、形で受ける（テストでは、にせものを渡す） */
 export interface AppUpdateEnvironment {
-  /** navigator.serviceWorker */
-  container: Listenable & { readonly controller: unknown };
-  /** Service Worker を登録する */
-  register: () => Promise<Registration>;
+  serviceWorker:
+    | (Listenable & {
+        readonly controller: unknown;
+        register: () => Promise<Registration>;
+      })
+    | null;
+  version: AppVersion;
+  fetch: (path: string, init: RequestInit) => Promise<Response>;
   document: Listenable & { readonly visibilityState: string };
-  /** 画面を読み込み直す */
   reload: () => void;
-  /**
-   * 今は読み込み直してよいか。読み込み直すと消えるもの（発行したばかりのアクセストークンの表示
-   * など）を出している画面では、false を返す。次に画面が前に出た ／ 裏に回ったときに、もう一度聞く
-   */
+  /** 読み込み直すと消えるものを出している間は false */
   canReload: () => boolean;
   setInterval: (fn: () => void, ms: number) => unknown;
-  /**
-   * 新しい版に替わったが、まだ読み込み直していない（替わるたびに呼ぶ）。画面は、前に出ている間、
-   * そのことを知らせる。読み込み直せば画面ごと替わるので、「もう待っていない」は知らせない
-   */
-  onUpdateReady?: () => void;
+  onNotice: (notice: AppUpdateNotice | null) => void;
 }
 
 /**
@@ -74,44 +85,166 @@ export function updateReadyMessage(standalone: boolean): string {
     : "新しい版があります。Reload を押すか、ページを読み込み直すと切り替わります。";
 }
 
-export function watchAppUpdate(env: AppUpdateEnvironment): void {
-  // 初めて入れたときも、Service Worker が画面を受け持ち始めて controllerchange が起きる。
-  // それは版の切り替えではないので、読み込み直さない
-  let controlled = env.container.controller !== null;
-  /** 新しい版に替わったが、まだ読み込み直していない */
-  let pending = false;
-  let registration: Registration | null = null;
+function sameVersion(a: AppVersion, b: AppVersion): boolean {
+  return a.commit === b.commit && a.builtAt === b.builtAt;
+}
 
-  const check = () => {
-    // 届かない、などで確かめられなくても、次の機会にまた確かめる
-    registration?.update().catch(() => {});
+async function serverVersion(env: AppUpdateEnvironment): Promise<AppVersion | null> {
+  try {
+    const response = await env.fetch("/version.json", { cache: "no-store" });
+    if (!response.ok) return null;
+    const version: unknown = await response.json();
+    if (
+      typeof version === "object" &&
+      version !== null &&
+      "commit" in version &&
+      typeof version.commit === "string" &&
+      version.commit.trim() !== "" &&
+      "builtAt" in version &&
+      typeof version.builtAt === "string" &&
+      Number.isFinite(Date.parse(version.builtAt)) &&
+      new Date(version.builtAt).toISOString() === version.builtAt
+    ) {
+      return { commit: version.commit, builtAt: version.builtAt };
+    }
+  } catch {
+    // オフラインや、版のファイルを持たないサーバーの index.html など
+  }
+  return null;
+}
+
+/** update() は取り込みの完了を待たないので、見つけた worker の状態も確かめる */
+async function installUpdate(
+  registration: Registration,
+): Promise<"unchanged" | "installed" | "failed" | "unavailable"> {
+  let installing = registration.installing ?? registration.waiting;
+  const found = () => {
+    installing = registration.installing ?? installing;
   };
-  const reloadIfReady = () => {
-    if (!pending || !env.canReload()) return;
-    pending = false;
+  registration.addEventListener("updatefound", found);
+  try {
+    await registration.update();
+    installing = registration.installing ?? registration.waiting ?? installing;
+  } catch {
+    if (installing === null) return "unavailable";
+  } finally {
+    registration.removeEventListener("updatefound", found);
+  }
+
+  const worker = installing;
+  if (worker === null) return "unchanged";
+  return new Promise((resolve) => {
+    const onState = () => {
+      if (worker.state === "installing" || worker.state === "parsed") return;
+      worker.removeEventListener("statechange", onState);
+      resolve(worker.state === "redundant" ? "failed" : "installed");
+    };
+    worker.addEventListener("statechange", onState);
+    onState();
+  });
+}
+
+type Update =
+  | { kind: "ready"; version: AppVersion | null }
+  | { kind: "failed"; version: AppVersion };
+
+export function watchAppUpdate(env: AppUpdateEnvironment): void {
+  const controller = () => env.serviceWorker?.controller ?? null;
+  let previousController = controller();
+  let update: Update | null = null;
+  let reloading = false;
+  let checkId = 0;
+
+  const setUpdate = (next: Update | null) => {
+    update = next;
+    env.onNotice(next?.kind ?? null);
+  };
+  const reloadIfAllowed = () => {
+    if (reloading || !env.canReload()) return;
+    reloading = true;
     env.reload();
   };
+  const workerReady = () => {
+    setUpdate({ kind: "ready", version: null });
+    if (env.document.visibilityState === "hidden") reloadIfAllowed();
+  };
 
-  env.container.addEventListener("controllerchange", () => {
-    if (!controlled) {
-      controlled = true;
+  env.serviceWorker?.addEventListener("controllerchange", () => {
+    const before = previousController;
+    const current = controller();
+    previousController = current;
+    if (reloading || current === null || current === before) return;
+    if (before !== null) {
+      workerReady();
       return;
     }
-    pending = true;
-    env.onUpdateReady?.();
-    // 裏にあるなら、すぐ読み込み直す。前に出ているなら、裏に回るか、次に前に出るまで待つ
-    if (env.document.visibilityState === "hidden") reloadIfReady();
-  });
-  env.document.addEventListener("visibilitychange", () => {
-    if (pending) reloadIfReady();
-    else if (env.document.visibilityState === "visible") check();
-  });
-  env.setInterval(check, UPDATE_CHECK_INTERVAL_MS);
 
-  void env.register().then(
-    (result) => {
-      registration = result;
-    },
-    () => {},
-  );
+    // 初めての受け持ちや強制再読み込みのあと、画面が最新なら知らせない
+    void serverVersion(env).then((version) => {
+      if (reloading || controller() !== current || version === null) return;
+      if (!sameVersion(env.version, version)) workerReady();
+      else if (update !== null) setUpdate(null);
+    });
+  });
+
+  const registration = Promise.resolve()
+    .then(() => env.serviceWorker?.register() ?? null)
+    .catch(() => null);
+
+  const check = async (reason: "startup" | "interval" | "visibility"): Promise<void> => {
+    if (reloading) return;
+    const id = ++checkId;
+    const current = controller();
+    const isCurrent = () => id === checkId && !reloading && current === controller();
+    const version = await serverVersion(env);
+    if (!isCurrent()) return;
+
+    // Service Worker の切り替えを知ったあとは、その次の切り替えも controllerchange で知る。
+    // /version.json が変わらないコンテナ設定の変更もあるため、SW 自身の確認は続ける
+    const waitingForWorkerReload = update?.kind === "ready" && update.version === null;
+    if (waitingForWorkerReload || version === null || sameVersion(env.version, version)) {
+      if (!waitingForWorkerReload && version !== null && update !== null) setUpdate(null);
+      if (reason !== "startup" && current !== null) {
+        const worker = await registration;
+        if (isCurrent()) void worker?.update().catch(() => {});
+      }
+      return;
+    }
+
+    if (current === null) {
+      const pendingVersion = update?.kind === "ready" ? update.version : null;
+      const samePending = pendingVersion !== null && sameVersion(pendingVersion, version);
+      const hidden = env.document.visibilityState === "hidden";
+      if (!samePending) setUpdate({ kind: "ready", version });
+
+      if (reason === "visibility" && (samePending || (hidden && pendingVersion !== null))) {
+        reloadIfAllowed();
+      } else if (pendingVersion === null && hidden && env.canReload()) {
+        // 裏で初めて新版を見つけたときも、再取得してから自動で読み込み直す
+        await check("visibility");
+      }
+      return;
+    }
+
+    const worker = await registration;
+    if (worker === null || !isCurrent()) return;
+    const result = await installUpdate(worker);
+    if (!isCurrent() || (update?.kind === "ready" && update.version === null)) return;
+    if (result === "unchanged") workerReady();
+    if (
+      result === "failed" &&
+      !(update?.kind === "failed" && sameVersion(update.version, version))
+    ) {
+      setUpdate({ kind: "failed", version });
+    }
+  };
+
+  env.document.addEventListener("visibilitychange", () => {
+    if (update?.kind === "ready" && update.version === null) reloadIfAllowed();
+    else if (update?.kind === "ready" || env.document.visibilityState === "visible") {
+      void check("visibility");
+    }
+  });
+  env.setInterval(() => void check("interval"), UPDATE_CHECK_INTERVAL_MS);
+  void check("startup");
 }

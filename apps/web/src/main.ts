@@ -63,16 +63,26 @@ if (location.pathname === AUTHORIZE_PATH) {
 // アプリの外枠と SQLite の wasm を Service Worker でキャッシュし、ネットワークがなくても起動する
 // （docs/decisions/ui.md）。新しい版に替わったら、画面が裏にある間か、次に前に出たときに
 // 読み込み直し、前に出ている間は知らせる。手元の dev サーバーでは使わない
-if (import.meta.env.PROD && "serviceWorker" in navigator) {
+if (import.meta.env.PROD) {
+  const container = navigator.serviceWorker;
   watchAppUpdate({
-    container: navigator.serviceWorker,
-    register: () => navigator.serviceWorker.register(trustedScriptUrl("/sw.js"), { scope: "/" }),
+    serviceWorker: container
+      ? {
+          get controller() {
+            return container.controller;
+          },
+          addEventListener: (type, listener) => container.addEventListener(type, listener),
+          register: () => container.register(trustedScriptUrl("/sw.js"), { scope: "/" }),
+        }
+      : null,
+    version: __APP_VERSION__,
+    fetch: (path, init) => fetch(path, init),
     document,
     reload: () => location.reload(),
     // 読み込み直すと消えるものを出している画面では、ほかの画面に移ってから切り替える
     canReload: () => canReloadPage(location.pathname, reloadGuard.held),
     setInterval: (fn, ms) => setInterval(fn, ms),
     // 前に出ている間は読み込み直さないので、画面で知らせる（App.svelte）
-    onUpdateReady: () => updateNotice.ready(),
+    onNotice: (notice) => updateNotice.show(notice),
   });
 }

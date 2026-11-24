@@ -251,12 +251,22 @@ function appVersion(): { commit: string; builtAt: string } {
   return { commit: commit.slice(0, 7), builtAt: new Date().toISOString() };
 }
 
+const version = JSON.stringify(appVersion());
+
 export default defineConfig({
   ...(process.env.E2E_QUIET_UPDATES_REFUSED === "1" ? { customLogger: e2eLogger() } : {}),
-  define: { __APP_VERSION__: JSON.stringify(appVersion()) },
+  define: { __APP_VERSION__: version },
   plugins: [
     svelte(),
     ...securityHeadersPlugin(),
+    {
+      name: "sendo-reader:app-version",
+      apply: "build",
+      generateBundle() {
+        // workbox の globPatterns に JSON は含めない。そのままサーバーに問い合わせる
+        this.emitFile({ type: "asset", fileName: "version.json", source: version });
+      },
+    },
     // アプリの外枠と SQLite の wasm をキャッシュして、ネットワークがなくても起動する
     // （docs/decisions/ui.md）。登録は src/main.ts で、Trusted Types のポリシーを通して行う
     VitePWA({
