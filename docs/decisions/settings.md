@@ -29,10 +29,11 @@
    | `reader.hideReadFeeds` | 真偽 | `false` |
    | `reader.collapsed` | 畳んでいるフォルダの ID の配列（200 個まで） | `[]` |
    | `reader.swipe.listLeft` ／ `listRight` | `"none"` ／ `"read"` ／ `"star"` | `"read"` ／ `"star"` |
-   | `reader.swipe.articleLeft` ／ `articleRight` | `"none"` ／ `"back"` ／ `"next"` ／ `"previous"` ／ `"star"` | `"none"` ／ `"back"` |
+   | `reader.swipe.articleLeft` ／ `articleRight` | `"none"` ／ `"back"` ／ `"next"` ／ `"previous"` ／ `"star"` ／ `"open"`（元のサイトを開く） | `"none"` ／ `"back"` |
    | `reader.xPosts` | 真偽（X の投稿を、公式ウィジェットで読み込む） | `true` |
    | `reader.list:<一覧のパス>` | その一覧で変えたもの（`unreadOnly`） | なし |
 
+   - Settings → Reading → Swipe で、記事の左・右それぞれのスワイプに Open original を割り当てられる。記事タイトルのリンクがあるとき、そのリンクを新しいタブで開く
    - **「未読」は、一覧の絞り込みの状態で、一覧の種類ではない。** 未読だけを集めた別の画面は持たない。どの一覧（All、フォルダ、フィード）も、未読だけを出すか、既読も出すかを、同じ切り替えで選ぶ。既定は、未読だけ
    - **記事の一覧の並び順は、選ばせない。** どの一覧も新しい順（Recently Read は読んだ順）に並べ、並び順の項目は持たない。前の版が預けた `reader.oldestFirst` と、一覧ごとの設定の中の `oldestFirst` は、読まずに無視する。sendo から探して消すことはしない（一覧ごとの設定は、その一覧で未読だけを切り替えたときに置き直される）
    - **既定と同じ値は、預けない。** 既定に戻したら、項目を消す（`remove`）。既定を変えたとき、変えていない人には新しい既定が当たる
