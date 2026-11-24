@@ -181,6 +181,13 @@ test("開いている画面も、新しい版の Service Worker に替わり、�
   await expect(updateNotice(page)).toContainText(
     "新しい版があります。Reload を押すか、ページを読み込み直すと切り替わります。",
   );
+  // 広い画面では右下に出す（見出しの操作を覆わない）
+  const box = await updateNotice(page).boundingBox();
+  const viewport = page.viewportSize();
+  if (box === null || viewport === null) throw new Error("知らせか画面の大きさが分からない");
+  expect(viewport.width - (box.x + box.width)).toBeLessThan(40);
+  expect(viewport.height - (box.y + box.height)).toBeLessThan(40);
+  expect(box.y).toBeGreaterThan(viewport.height / 2);
   expect(loads()).toBe(1);
   expect(await version(page)).toBe("a");
   await Promise.all([page.waitForEvent("load"), bringToFront(page)]);
@@ -269,7 +276,53 @@ test("Save a URL の窓を開いている間は知らせず、閉じたら知ら
   await expect(updateNotice(page)).toBeVisible();
   expect(loads()).toBe(before);
   expect(await version(page)).toBe("a");
+  // 知らせを出している間も、見出しの Save a URL を押せる。開いている間は消え、閉じるとまた出る
+  await page.getByRole("button", { name: "Save a URL" }).click();
+  await expect(dialog).toBeVisible();
+  await expect(updateNotice(page)).toHaveCount(0);
+  await page.keyboard.press("Escape");
+  await expect(updateNotice(page)).toBeVisible();
   expect(errors.filter((message) => /effect_update_depth_exceeded|svelte/i.test(message))).toEqual(
     [],
   );
+});
+
+test.describe("狭い画面", () => {
+  test.use({ viewport: { width: 390, height: 780 } });
+
+  test("知らせは下のバーの上に出し、下のバーとメニューの操作を覆わない", async ({ page }) => {
+    const loads = await openVersionA(page, READER, false);
+    await signIn(page);
+    const tabs = page.getByRole("navigation", { name: "Main" });
+    await expect(tabs).toBeVisible();
+    const before = loads();
+    await switchToVersionB(page);
+    await expect(updateNotice(page)).toBeVisible();
+    expect(loads()).toBe(before);
+
+    // 下のバーのすぐ上にあり、重ならない
+    const notice = await updateNotice(page).boundingBox();
+    const bar = await tabs.boundingBox();
+    if (notice === null || bar === null) throw new Error("知らせか下のバーの位置が分からない");
+    const gap = bar.y - (notice.y + notice.height);
+    expect(gap).toBeGreaterThanOrEqual(0);
+    expect(gap).toBeLessThanOrEqual(24);
+
+    // 下のバーのタブを押せる
+    await tabs.getByRole("link", { name: "Saved" }).click();
+    await expect(page).toHaveURL(/\/starred$/);
+
+    // メニューを開くと、メニューの下のほうの操作を押せる（知らせより手前）
+    await tabs.getByRole("button", { name: "Menu" }).click();
+    await expect(page.getByRole("link", { name: "Settings" })).toBeVisible();
+    const center = { x: notice.x + notice.width / 2, y: notice.y + notice.height / 2 };
+    const covered = await page.evaluate(
+      ({ x, y }) => document.elementFromPoint(x, y)?.closest(".update-ready") === null,
+      center,
+    );
+    expect(covered).toBe(true);
+    await page.getByRole("link", { name: "Settings" }).click();
+    await expect(page).toHaveURL(/\/settings$/);
+    expect(loads()).toBe(before);
+  });
 });
