@@ -58,6 +58,8 @@ export class ArticleListState {
 
   readonly #client: ReaderClient;
   #query: ArticleQuery = {};
+  /** 出している一覧を読み出した条件（show で条件を替えると、別のオブジェクトになる） */
+  #loadedQuery: ArticleQuery | undefined;
   /** 読み出した末尾の位置。既読・未読を変えても、続きを読む境界は動かさない */
   #after: ArticleCursor | undefined;
   /** 最近読んだ一覧から外れた記事の前後。開いている記事・選択中の記事から移るときに使う */
@@ -139,17 +141,23 @@ export class ArticleListState {
       this.loading = false;
       return;
     }
+    const query = this.#query;
     this.loading = true;
-    const page = await this.#client.listArticles({ ...this.#query, limit: PAGE });
-    // あとから始めた読み出しがある。結果は当てず、そちらが終わるのを待つ（そちらの失敗は、
-    // そちらを呼んだ側に返す）
-    if (current !== this.#generation) return this.#loading.catch(() => {});
-    this.#removed.clear();
-    this.#after = cursorOf(page.at(-1));
-    this.#articles = page;
-    this.hasMore = page.length === PAGE;
-    this.fresh = 0;
-    this.loading = false;
+    try {
+      const page = await this.#client.listArticles({ ...query, limit: PAGE });
+      // あとから始めた読み出しがある。結果は当てず、そちらが終わるのを待つ（そちらの失敗は、
+      // そちらを呼んだ側に返す）
+      if (current !== this.#generation) return this.#loading.catch(() => {});
+      this.#removed.clear();
+      this.#after = cursorOf(page.at(-1));
+      this.#articles = page;
+      this.hasMore = page.length === PAGE;
+      this.fresh = 0;
+      this.#loadedQuery = query;
+    } finally {
+      // 失敗しても同じ条件の一覧なら使える。別の一覧の記事をスクロールで既読にはしない
+      if (current === this.#generation && this.#loadedQuery === query) this.loading = false;
+    }
   }
 
   /** 続きを読む。読んでいる最中に頼まれたら、その読み出しが終わるのを待つ */

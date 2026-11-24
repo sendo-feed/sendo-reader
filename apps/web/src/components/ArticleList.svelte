@@ -548,12 +548,18 @@
     clearTimeout(flushTimer);
     if (passed.size > 0) void flushPassed();
     list.reloaded += 1;
-    finishedScroll = null;
-    completed = false;
     const loading = list.load();
     const generation = list.generation;
-    await loading;
+    try {
+      await loading;
+    } catch (error) {
+      // 待つ間は行の通知を処理しなかったので、いま見えている位置から見直す
+      if (generation === list.generation) rewatch(true);
+      throw error;
+    }
     if (generation !== list.generation) return;
+    finishedScroll = null;
+    completed = false;
     list.cursorId = null;
     passed.clear();
     // 狭い画面で記事を読んでいる間は、一覧だけを更新し、本文の位置は動かさない
