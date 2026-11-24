@@ -113,43 +113,56 @@ async function holdNextListPage(page: Page) {
 test.describe("狭い画面で一覧の位置を戻している間", () => {
   test.use({ viewport: { width: 390, height: 780 }, hasTouch: true });
 
-  test("一覧から開いた記事は、続きの読み出しが終わっても先頭にいる", async ({ page, context }) => {
-    const { server } = seed({ "reader.unreadOnly": false }, 80);
-    await routeFakeSendo(context, server);
-    await page.goto("/");
-    await signIn(page);
-    const rows = page.locator(".article-list .row");
-    const scrollToEnd = () =>
-      page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
-    await expect(rows).toHaveCount(50);
-    await scrollToEnd();
-    await expect(rows).toHaveCount(80);
-    await scrollToEnd();
-    const lastId = await rows.last().getAttribute("data-article");
-    await expect
-      .poll(() =>
-        page.evaluate((id) => {
-          const anchor = history.state?.list?.anchor;
-          return anchor?.id === id ? anchor.offset : 0;
-        }, lastId),
-      )
-      .toBeLessThan(-100);
+  for (const [closeArticle, name] of [
+    [false, "一覧から開いた記事は、続きの読み出しが終わっても先頭にいる"],
+    [true, "記事から戻った一覧は、続きの読み出しが終わっても開く前の位置にいる"],
+  ] as const) {
+    test(name, async ({ page, context }) => {
+      const { server } = seed({ "reader.unreadOnly": false }, 80);
+      await routeFakeSendo(context, server);
+      await page.goto("/");
+      await signIn(page);
+      const rows = page.locator(".article-list .row");
+      const scrollToEnd = () =>
+        page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
+      await expect(rows).toHaveCount(50);
+      await scrollToEnd();
+      await expect(rows).toHaveCount(80);
+      await scrollToEnd();
+      const lastId = await rows.last().getAttribute("data-article");
+      await expect
+        .poll(() =>
+          page.evaluate((id) => {
+            const anchor = history.state?.list?.anchor;
+            return anchor?.id === id ? anchor.offset : 0;
+          }, lastId),
+        )
+        .toBeLessThan(-100);
 
-    await holdNextListPage(page);
-    await page.reload();
-    await expect(rows).toHaveCount(50);
-    await page.waitForFunction(() => window.releaseListPage !== undefined);
+      await holdNextListPage(page);
+      await page.reload();
+      await expect(rows).toHaveCount(50);
+      await page.waitForFunction(() => window.releaseListPage !== undefined);
 
-    await rows.nth(1).locator(".item").tap();
-    const article = page.locator(".article-view");
-    await expect(article.getByRole("heading", { level: 1 })).toHaveText("記事 1");
-    await expect(article.locator(".summary")).toBeVisible();
-    expect(await page.evaluate(() => window.scrollY)).toBe(0);
+      const listTop = await page.evaluate(() => window.scrollY);
+      await rows.nth(1).locator(".item").tap();
+      const article = page.locator(".article-view");
+      await expect(article.getByRole("heading", { level: 1 })).toHaveText("記事 1");
+      await expect(article.locator(".summary")).toBeVisible();
+      expect(await page.evaluate(() => window.scrollY)).toBe(0);
 
-    await page.evaluate(() => window.releaseListPage?.());
-    await expect(rows).toHaveCount(80);
-    expect(await page.evaluate(() => window.scrollY)).toBe(0);
-  });
+      if (closeArticle) {
+        // 下に貼り付くボタンへ Playwright が先にスクロールしないようにする
+        await article.getByRole("button", { name: "Back", exact: true }).dispatchEvent("click");
+        await expect(page).not.toHaveURL(/article=/);
+        await expect(rows.nth(1)).toBeVisible();
+      }
+
+      await page.evaluate(() => window.releaseListPage?.());
+      await expect(rows).toHaveCount(80);
+      expect(await page.evaluate(() => window.scrollY)).toBe(closeArticle ? listTop : 0);
+    });
+  }
 });
 
 for (const width of [1200, 390]) {
