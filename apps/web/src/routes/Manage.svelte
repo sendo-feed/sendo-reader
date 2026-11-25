@@ -7,6 +7,7 @@
   import Feeds from "../components/manage/Feeds.svelte";
   import Folders from "../components/manage/Folders.svelte";
   import ImportOpml from "../components/manage/ImportOpml.svelte";
+  import Workspaces from "../components/manage/Workspaces.svelte";
   import { useReader } from "../lib/context";
 
   const reader = useReader();
@@ -15,9 +16,24 @@
   let addOpen = $state(false);
   let importOpen = $state(false);
   let folderOpen = $state(false);
+  let workspacesOpen = $state(false);
   let editing = $state<Folder | null>(null);
   let notice = $state("");
+  const workspaceError = $derived(reader.status?.workspaceError);
+  const syncMessage = $derived(
+    workspaceError === "not_empty"
+      ? "購読が残っているため、ワークスペースを削除できませんでした。"
+      : workspaceError === "exists"
+        ? "同じ名前のワークスペースがあるため、変更できませんでした。"
+        : "ワークスペースの変更を同期できませんでした。",
+  );
   let feedsView = $state<Feeds>();
+
+  const accountId = $derived(reader.user?.id);
+  $effect(() => {
+    void accountId;
+    workspacesOpen = false;
+  });
 
   function editFolder(folder: Folder | null) {
     editing = folder;
@@ -48,6 +64,9 @@
         <option value="folders">フォルダごと</option>
         <option value="oldest">最新記事が古い順</option>
       </select>
+      {#if reader.workspacesAvailable}
+        <button type="button" onclick={() => (workspacesOpen = true)}>Workspaces</button>
+      {/if}
       <button type="button" class="new-folder" onclick={() => editFolder(null)}>
         <Icon name="plus" />
         New folder
@@ -66,18 +85,32 @@
   <footer>
     <button type="button" class="link" onclick={() => (importOpen = true)}>Import OPML</button>
   </footer>
+  {#if workspaceError != null}
+    <p class="error" role="alert">{syncMessage}</p>
+  {/if}
   <p class="notice" role="status">{notice}</p>
 </main>
 
+<Dialog bind:open={workspacesOpen} title="Workspaces">
+  {#if workspacesOpen && reader.workspacesAvailable}
+    <Workspaces />
+    {#if workspaceError != null}
+      <p class="error" role="alert">{syncMessage}</p>
+    {/if}
+  {/if}
+</Dialog>
+
 <Dialog bind:open={addOpen} title="Add feed">
-  <AddFeed
-    onsubscribed={(feed) => {
-      addOpen = false;
-      query = "";
-      feedsView?.reveal(feed.folderId);
-      notice = `${feedName(feed)} を購読しました。`;
-    }}
-  />
+  {#if addOpen}
+    <AddFeed
+      onsubscribed={(feed) => {
+        addOpen = false;
+        query = "";
+        feedsView?.reveal(feed.folderId);
+        notice = `${feedName(feed)} を購読しました。`;
+      }}
+    />
+  {/if}
   <div class="bookmarklet">
     <Bookmarklet />
   </div>
@@ -203,6 +236,10 @@
     margin: 0;
     color: var(--muted);
     font-size: 0.875rem;
+  }
+
+  .error {
+    color: var(--danger);
   }
 
   .notice:empty {
