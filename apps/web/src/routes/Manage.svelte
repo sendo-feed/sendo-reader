@@ -149,6 +149,7 @@
   {#if folderOpen && folderVisible}
     <Folders
       folder={editing}
+      oncreated={(id) => reader.offerNewFolder(id)}
       oncomplete={(message) => {
         folderOpen = false;
         notice = reader.workspaceIds === undefined ? message : "フォルダを更新しました。";

@@ -123,7 +123,7 @@
       <label for="feed-folder">Folder</label>
       <select id="feed-folder" bind:value={folderId}>
         <option value="">No folder</option>
-        {#each reader.folders as folder (folder.id)}
+        {#each reader.folderDestinations as folder (folder.id)}
           <option value={folder.id}>{folder.name}</option>
         {/each}
       </select>
