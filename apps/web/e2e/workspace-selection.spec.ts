@@ -74,3 +74,32 @@ test("選択中の購読だけを表示し、記事を直接開いても再読�
   await dialog.getByRole("button", { name: "Close", exact: true }).click();
   await expect(page.getByRole("main")).toContainText("Hidden feed");
 });
+
+test("選択を保ったまま新しい空のフォルダへ最初の購読を移せる", async ({ context, page }) => {
+  const server = new FakeSendo();
+  server.workspacesSupported = true;
+  const workspace = server.createWorkspace("Public");
+  server.createFolder("Hidden folder");
+  server.subscribe({
+    url: "https://public.example/feed",
+    title: "Public feed",
+    workspaceId: workspace.id,
+  });
+  await routeFakeSendo(context, server);
+  await page.goto("/manage");
+  await signIn(page);
+  await page.getByRole("button", { name: /^Workspaces:/ }).click();
+  const picker = page.getByRole("dialog", { name: "Workspaces", exact: true });
+  await picker.getByRole("button", { name: "Only Public", exact: true }).click();
+  await picker.getByRole("button", { name: "Close", exact: true }).click();
+  await page.getByRole("button", { name: "New folder", exact: true }).click();
+  const editor = page.getByRole("dialog", { name: "New folder", exact: true });
+  await editor.getByRole("textbox", { name: "Folder name" }).fill("Public folder");
+  await editor.getByRole("button", { name: "Create folder", exact: true }).click();
+  const destination = page.getByRole("combobox", { name: "Move Public feed to folder" });
+  await expect(destination.getByRole("option", { name: "Hidden folder" })).toHaveCount(0);
+  await destination.selectOption({ label: "Public folder" });
+  await expect(page.getByRole("region", { name: "Public folder", exact: true })).toContainText(
+    "Public feed",
+  );
+});

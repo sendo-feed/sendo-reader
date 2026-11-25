@@ -192,7 +192,7 @@
 
 {#snippet folderOptions()}
   <option value="">No folder</option>
-  {#each reader.folders as folder (folder.id)}
+  {#each reader.folderDestinations as folder (folder.id)}
     <option value={folder.id}>{folder.name}</option>
   {/each}
 {/snippet}

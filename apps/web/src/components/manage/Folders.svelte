@@ -8,10 +8,12 @@
     folder,
     oncomplete,
     oncancel,
+    oncreated,
   }: {
     folder: Folder | null;
     oncomplete: (message: string) => void;
     oncancel: () => void;
+    oncreated?: (id: string) => void;
   } = $props();
 
   const reader = useReader();
@@ -26,8 +28,14 @@
     busy = true;
     message = null;
     try {
-      if (folder === null) await reader.client.createFolder(name);
-      else await reader.client.renameFolder(folder.id, name);
+      if (folder === null) {
+        const scope = reader.workspaceIds;
+        const userId = reader.user?.id;
+        const id = await reader.client.createFolder(name);
+        if (scope === reader.workspaceIds && userId === reader.user?.id) oncreated?.(id);
+      } else {
+        await reader.client.renameFolder(folder.id, name);
+      }
       oncomplete(`「${name.trim()}」を保存しました。`);
     } catch (error) {
       message = describeError(error);

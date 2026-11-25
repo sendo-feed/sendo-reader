@@ -64,6 +64,13 @@ export class ReaderState {
     const visible = new Set(this.feeds.map((feed) => feed.folderId));
     return this.#folders.filter((folder) => visible.has(folder.id));
   });
+  #createdFolderIds = $state.raw<readonly string[]>([]);
+  folderDestinations = $derived.by(() => {
+    const visible = new Set(this.folders.map((folder) => folder.id));
+    return this.#folders.filter(
+      (folder) => visible.has(folder.id) || this.#createdFolderIds.includes(folder.id),
+    );
+  });
   unread = $state<UnreadCounts>(emptyUnread());
   /** 今日（この端末の日付で）既読にした記事の数。進み具合の内訳に出す */
   readToday = $state(0);
@@ -206,6 +213,7 @@ export class ReaderState {
       this.workspacesAvailable = false;
       this.workspaces = [];
       this.#folders = [];
+      this.#createdFolderIds = [];
       this.allFeeds = [];
       this.unread = emptyUnread();
       this.readToday = 0;
@@ -216,11 +224,16 @@ export class ReaderState {
 
   selectWorkspaces(ids: readonly string[] | undefined): void {
     if (this.user === null) return;
+    this.#createdFolderIds = [];
     this.workspaceIds = ids === undefined ? undefined : [...new Set(ids)].sort();
     saveWorkspaceSelection(this.user.id, this.workspaceIds);
     this.unread = emptyUnread();
     this.readToday = 0;
     void this.#loadUnread();
+  }
+
+  offerNewFolder(id: string): void {
+    if (this.workspaceIds !== undefined) this.#createdFolderIds = [...this.#createdFolderIds, id];
   }
 
   async #loadAll(): Promise<void> {
