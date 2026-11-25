@@ -1,5 +1,6 @@
 import { errorFromBody, type SendoApi } from "./api/client";
 import type { Database, Executor } from "./db/database";
+import { putFeed } from "./db/feeds";
 import { listFeeds } from "./db/queries";
 import type { Feed, FeedFetchTimes } from "./models";
 import { reapplyPending } from "./sync/queue";
@@ -83,12 +84,16 @@ export async function discoverFeeds(
 export async function subscribe(
   db: Database,
   api: SendoApi,
-  input: { url: string; folderId: string | null },
+  input: { url: string; folderId: string | null; workspaceId: string | null },
   signal: AbortSignal,
   afterWrite: (tx: Executor, feed: Feed) => Promise<void> = async () => {},
 ): Promise<Feed | null> {
   const { data, error, response } = await api.client(signal).POST("/feeds", {
-    body: { url: input.url, folderId: input.folderId },
+    body: {
+      url: input.url,
+      folderId: input.folderId,
+      ...(input.workspaceId !== null && { workspaceId: input.workspaceId }),
+    },
   });
   if (data === undefined) throw errorFromBody(response.status, error);
   const { feed } = data;
@@ -99,30 +104,17 @@ export async function subscribe(
     displayName: feed.displayName ?? null,
     siteUrl: feed.siteUrl,
     folderId: feed.folderId,
+    ...(typeof feed.subscriptionId === "string" && {
+      subscriptionId: feed.subscriptionId,
+      workspaceId: feed.workspaceId ?? null,
+    }),
     // 購読したばかりのフィードには、まだアイコンがないことが多い（あとから、同期で届く）
     iconUrl: toSameOriginUrl(feed.iconUrl),
     createdAt: Date.parse(feed.createdAt),
   };
   return db.transaction(async (tx) => {
     signal.throwIfAborted();
-    await tx.run(
-      `insert into feeds (id, url, title, display_name, site_url, folder_id, icon_url, created_at)
-       values (?, ?, ?, ?, ?, ?, ?, ?)
-       on conflict (id) do update set
-         url = excluded.url, title = excluded.title, display_name = excluded.display_name,
-         site_url = excluded.site_url,
-         folder_id = excluded.folder_id, icon_url = excluded.icon_url`,
-      [
-        received.id,
-        received.url,
-        received.title,
-        received.displayName,
-        received.siteUrl,
-        received.folderId,
-        received.iconUrl,
-        received.createdAt,
-      ],
-    );
+    await putFeed(tx, received);
     await afterWrite(tx, received);
     await reapplyPending(tx);
     return (await listFeeds(tx)).find((local) => local.id === received.id) ?? null;

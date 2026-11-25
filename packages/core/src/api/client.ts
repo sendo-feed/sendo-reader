@@ -101,6 +101,7 @@ export function createSendoApi(options: SendoApiOptions) {
       const url = new URL(`${baseUrl}/sync`);
       if (cursor !== null) url.searchParams.set("cursor", cursor);
       url.searchParams.set("includeSaved", "true");
+      url.searchParams.set("includeWorkspaces", "true");
       const response = await send(new Request(url), signal);
       if (!response.ok) throw await toApiError(response);
       let body: unknown;

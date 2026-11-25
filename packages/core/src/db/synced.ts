@@ -30,6 +30,7 @@ export async function clearSyncedRows(tx: Executor): Promise<void> {
   await tx.run("delete from articles");
   await tx.run("delete from feeds");
   await tx.run("delete from folders");
+  await tx.run("delete from workspaces");
   await deleteSetting(tx, CURSOR_KEY);
   await deleteSetting(tx, COMPLETE_CURSOR_KEY);
 }

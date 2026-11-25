@@ -49,6 +49,7 @@ import {
   putStoredTranslatedContent,
   type StoredTranslatedContent,
 } from "./db/translated-content";
+import { listWorkspaces, workspacesAvailable } from "./db/workspaces";
 import {
   type Article,
   type ArticleContent,
@@ -66,6 +67,7 @@ import {
   type TranslatedContent,
   type UnreadCounts,
   type User,
+  type Workspace,
 } from "./models";
 import {
   discoverFeeds,
@@ -90,6 +92,7 @@ import {
   type MarkReadScope,
   type Operation,
   scopeCondition,
+  type WorkspaceOperation,
 } from "./sync/ops";
 import { getCompleteCursor, type PullResult, pull } from "./sync/pull";
 import {
@@ -778,6 +781,82 @@ export class ReaderCore {
     );
   }
 
+  async createWorkspace(name: string, id: string = crypto.randomUUID()): Promise<string> {
+    if (!FOLDER_ID_PATTERN.test(id)) {
+      throw new RangeError("ワークスペースの ID は小文字の UUID にする");
+    }
+    const normalized = normalizeWorkspaceName(name);
+    await this.#writeWorkspace(() => ({
+      kind: "createWorkspace",
+      workspaceId: id,
+      name: normalized,
+      at: this.#now(),
+    }));
+    return id;
+  }
+
+  renameWorkspace(id: string, name: string): Promise<void> {
+    const normalized = normalizeWorkspaceName(name);
+    return this.#writeWorkspace(() => ({
+      kind: "renameWorkspace",
+      workspaceId: id,
+      name: normalized,
+    }));
+  }
+
+  deleteWorkspace(id: string): Promise<void> {
+    return this.#writeWorkspace(async (tx) => {
+      const [member] = await tx.all("select 1 from feeds where workspace_id = ? limit 1", [id]);
+      if (member !== undefined) {
+        throw new ApiError(
+          "invalid",
+          "購読を先に移動するか解除してください",
+          409,
+          "workspace_not_empty",
+        );
+      }
+      return { kind: "deleteWorkspace", workspaceId: id };
+    });
+  }
+
+  moveFeedToWorkspace(
+    feedId: string,
+    subscriptionId: string,
+    workspaceId: string | null,
+  ): Promise<void> {
+    return this.#writeWorkspace(async (tx) => {
+      const [feed] = await tx.all("select 1 from feeds where id = ? and subscription_id = ?", [
+        feedId,
+        subscriptionId,
+      ]);
+      if (feed === undefined) {
+        throw new ApiError("not_found", "購読が変わったため、現在の購読を選び直してください");
+      }
+      if (workspaceId !== null) await requireLocalWorkspace(tx, workspaceId);
+      return {
+        kind: "moveFeedToWorkspace",
+        feedId,
+        subscriptionId,
+        workspaceId,
+      };
+    });
+  }
+
+  async #writeWorkspace(
+    build: (tx: Executor) => WorkspaceOperation | Promise<WorkspaceOperation>,
+  ): Promise<void> {
+    this.#requireSignedIn();
+    const session = this.#session.signal;
+    const op = await this.#db.transaction(async (tx) => {
+      throwIfSessionEnded(session);
+      await requireWorkspacesAvailable(tx);
+      const op = await build(tx);
+      await this.#enqueue(tx, op);
+      return op;
+    });
+    this.#emit(new Set<Table>(op.kind === "moveFeedToWorkspace" ? ["feeds"] : ["workspaces"]));
+  }
+
   /** フィードを別のフォルダに移す。null ならフォルダなし */
   moveFeed(feedId: string, folderId: string | null): Promise<void> {
     const resolved = folderId === null ? null : (this.#folderIds.get(folderId) ?? folderId);
@@ -929,37 +1008,52 @@ export class ReaderCore {
    * 返すのは手元の状態（応答を待っている間にした操作を重ねたもの）。待っている間に購読を
    * やめていれば null。
    */
-  async subscribe(url: string, folderId: string | null = null): Promise<Feed | null> {
+  async subscribe(
+    url: string,
+    folderId: string | null = null,
+    workspaceId: string | null = null,
+  ): Promise<Feed | null> {
     this.#requireSignedIn();
-    const feed = await this.#online(async (signal) => {
-      const wanted = folderId === null ? null : (this.#folderIds.get(folderId) ?? folderId);
-      // 呼ぶ前に積んだフォルダの作成は、ここまでに送ってある。sendo にあるフォルダにだけ、
-      // そのまま購読する（あとから作った、断られて消えたフォルダには、購読してから移す）
-      const ready = wanted !== null && (await this.#isFolderOnSendo(wanted));
-      return subscribe(
-        this.#db,
-        this.#api,
-        { url, folderId: ready ? wanted : null },
-        signal,
-        async (tx, feed) => {
-          // sendo はすでに購読していたフィードのフォルダを変えずに返すので、ここで移す。
-          // ただし、待っている間にこのフィードを操作していたら（移動、購読の停止）、そちらを採る。
-          // 移す先のフォルダを待っている間に消していたら、移さない（フォルダなしのまま）。
-          // 待っている間の操作は、この列が空くまで送られないので、必ずキューに残っている
-          const [later] = await tx.all<{ id: number }>(
-            "select id from pending_ops where key = ? and kind in ('moveFeed', 'unsubscribe') limit 1",
-            [feed.id],
-          );
-          const [target] =
-            wanted === null
-              ? [{ id: null }]
-              : await tx.all<{ id: string }>("select id from folders where id = ?", [wanted]);
-          if (feed.folderId !== wanted && later === undefined && target !== undefined) {
-            await this.#enqueue(tx, { kind: "moveFeed", feedId: feed.id, folderId: wanted }, true);
-          }
-        },
-      );
-    });
+    const feed = await this.#online(
+      async (signal) => {
+        const wanted = folderId === null ? null : (this.#folderIds.get(folderId) ?? folderId);
+        // 呼ぶ前に積んだフォルダの作成は、ここまでに送ってある。sendo にあるフォルダにだけ、
+        // そのまま購読する（あとから作った、断られて消えたフォルダには、購読してから移す）
+        const ready = wanted !== null && (await this.#isFolderOnSendo(wanted));
+        return subscribe(
+          this.#db,
+          this.#api,
+          { url, folderId: ready ? wanted : null, workspaceId },
+          signal,
+          async (tx, feed) => {
+            // sendo はすでに購読していたフィードのフォルダを変えずに返すので、ここで移す。
+            // ただし、待っている間にこのフィードを操作していたら（移動、購読の停止）、そちらを採る。
+            // 移す先のフォルダを待っている間に消していたら、移さない（フォルダなしのまま）。
+            // 待っている間の操作は、この列が空くまで送られないので、必ずキューに残っている
+            const [later] = await tx.all<{ id: number }>(
+              "select id from pending_ops where key = ? and kind in ('moveFeed', 'unsubscribe') limit 1",
+              [feed.id],
+            );
+            const [target] =
+              wanted === null
+                ? [{ id: null }]
+                : await tx.all<{ id: string }>("select id from folders where id = ?", [wanted]);
+            if (feed.folderId !== wanted && later === undefined && target !== undefined) {
+              await this.#enqueue(
+                tx,
+                { kind: "moveFeed", feedId: feed.id, folderId: wanted },
+                true,
+              );
+            }
+          },
+        );
+      },
+      async (tx) => {
+        if (workspaceId === null) return;
+        await requireWorkspacesAvailable(tx);
+        await requireLocalWorkspace(tx, workspaceId);
+      },
+    );
     this.#emit(new Set<Table>(["feeds"]));
     return feed;
   }
@@ -1021,7 +1115,10 @@ export class ReaderCore {
    * 積んだ操作は、この操作が終わるまで送らない（応答を書き込むときに、上に重ね直す）。
    * sendo とのやり取りの列の中で行う。
    */
-  async #online<T>(fn: (signal: AbortSignal) => Promise<T>): Promise<T> {
+  async #online<T>(
+    fn: (signal: AbortSignal) => Promise<T>,
+    prepare?: (tx: Executor) => Promise<void>,
+  ): Promise<T> {
     const signal = this.#session.signal;
     const barrier = { id: this.#lastOpId };
     this.#barriers.add(barrier);
@@ -1029,6 +1126,7 @@ export class ReaderCore {
     // 列の中で、それらを含む最後の番号まで境界を上げる（あとから呼んだ書き込みより前に済む）
     const ready = this.#db.transaction(async (tx) => {
       barrier.id = Math.max(barrier.id, await lastPendingId(tx));
+      await prepare?.(tx);
     });
     ready.catch(() => undefined);
     try {
@@ -1066,6 +1164,14 @@ export class ReaderCore {
 
   listFolders(): Promise<Folder[]> {
     return listFolders(this.#db);
+  }
+
+  listWorkspaces(): Promise<Workspace[]> {
+    return listWorkspaces(this.#db);
+  }
+
+  workspacesAvailable(): Promise<boolean> {
+    return workspacesAvailable(this.#db);
   }
 
   listFeeds(): Promise<Feed[]> {
@@ -1639,6 +1745,7 @@ async function clearAll(tx: Executor): Promise<void> {
   await tx.run("delete from articles");
   await tx.run("delete from feeds");
   await tx.run("delete from folders");
+  await tx.run("delete from workspaces");
   await tx.run("delete from synced_settings");
   await clearSavedPages(tx);
   // 本文を置く量の上限は、端末ごとの設定なので残す
@@ -1671,6 +1778,30 @@ function requireDeviceType(value: unknown): asserts value is DeviceType {
   if (!DEVICE_TYPES.some((type) => type === value)) {
     throw new RangeError("端末の種類は mobile か desktop");
   }
+}
+
+async function requireWorkspacesAvailable(db: Executor): Promise<void> {
+  if (!(await workspacesAvailable(db))) {
+    throw new ApiError(
+      "invalid",
+      "ワークスペースに対応した Sendo と同期してください",
+      400,
+      "workspaces_unavailable",
+    );
+  }
+}
+
+async function requireLocalWorkspace(db: Executor, id: string): Promise<void> {
+  const [row] = await db.all("select 1 from workspaces where id = ? and deleted_locally = 0", [id]);
+  if (row === undefined) throw new ApiError("not_found", "ワークスペースがありません");
+}
+
+function normalizeWorkspaceName(value: string): string {
+  const name = value.trim();
+  if (name.length === 0 || name.length > 200) {
+    throw new RangeError("ワークスペース名は1〜200文字で指定してください");
+  }
+  return name;
 }
 
 /**

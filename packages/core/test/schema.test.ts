@@ -99,6 +99,7 @@ describe("手元の DB のスキーマ", () => {
       "settings",
       "sqlite_sequence",
       "synced_settings",
+      "workspaces",
     ]);
   });
 

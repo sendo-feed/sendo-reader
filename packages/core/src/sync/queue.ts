@@ -5,6 +5,7 @@ import type { Table } from "../models";
 import {
   applyLocally,
   isRetryable,
+  isWorkspaceOperation,
   keyOf,
   merge,
   type Operation,
@@ -101,6 +102,8 @@ export async function countPending(db: Executor): Promise<number> {
 
 /** 同期で届いた行の上に、まだ送り終えていない操作を重ねる（楽観的な更新を保つ） */
 export async function reapplyPending(tx: Executor): Promise<void> {
+  // 削除を先に表示したあとで購読が戻ったら、そのワークスペースも見えるようにする。
+  await tx.run("update workspaces set deleted_locally = 0 where deleted_locally = 1");
   for (const { op } of await listPending(tx)) await applyLocally(tx, op);
 }
 
@@ -190,6 +193,15 @@ export async function push(
           if (sent.savedPage === undefined) await removeSavedPage(tx, op.id);
           else await putSavedPage(tx, sent.savedPage);
         }
+        if (op.kind === "deleteWorkspace") {
+          await tx.run("delete from workspaces where id = ?", [op.workspaceId]);
+        }
+        if (op.kind === "moveFeedToWorkspace") {
+          await tx.run(
+            "update feeds set synced_workspace_id = ? where id = ? and subscription_id = ?",
+            [op.workspaceId, op.feedId, op.subscriptionId],
+          );
+        }
         await complete(tx, next.id, next.rev);
         if (sent.remap !== undefined) {
           await remapFolderId(tx, sent.remap.from, sent.remap.to);
@@ -246,7 +258,9 @@ export async function push(
               ? ["savedPages"]
               : op.kind === "setSettings"
                 ? ["settings"]
-                : ["folders", "feeds", "articles"],
+                : isWorkspaceOperation(op)
+                  ? ["workspaces", "feeds"]
+                  : ["folders", "feeds", "articles"],
           ),
         );
       }

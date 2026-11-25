@@ -1,7 +1,7 @@
 import { describe, expect, test } from "vitest";
 import { ReaderCore } from "../src";
 import { createSendoApi } from "../src/api/client";
-import { migrate, SCHEMA_VERSION } from "../src/db/schema";
+import { migrate } from "../src/db/schema";
 import { pull } from "../src/sync/pull";
 import { FakeSendo } from "./fake-sendo";
 import { openMemoryDb, setup } from "./helpers";
@@ -259,7 +259,7 @@ describe("訳せなかった理由を受ける（sendo の translation.md の 17
   test("理由を持つ前の版の手元の DB は、ある記事を残したまま理由なしにし、そのあとの同期で理由が入る", async () => {
     const server = new FakeSendo();
     const db = await openMemoryDb();
-    await migrate(db, SCHEMA_VERSION - 1);
+    await migrate(db, 19);
     await db.run(
       `insert into articles (id, feed_id, title, published_at, received_at, translation_status,
          translation_language) values ('old', 'feed', 'Old', 1, 1, 'untranslated', 'en')`,
@@ -392,7 +392,7 @@ describe("訳したモデルと思考量を受ける（sendo の translation.md 
   test("条件を持つ前の版の手元の DB は、ある記事を残したまま条件なしにし、そのあと届いた記事には条件が入る", async () => {
     const server = new FakeSendo();
     const db = await openMemoryDb();
-    await migrate(db, SCHEMA_VERSION - 1);
+    await migrate(db, 20);
     await db.run(
       `insert into articles (id, feed_id, title, published_at, received_at, translation_status,
          translation_language, translated_at) values ('old', 'feed', 'Old', 1, 1, 'translated', 'en', 1)`,

@@ -75,8 +75,9 @@ export function connectReader(worker: Worker): ReaderClient {
   for (const method of READER_METHODS) {
     client[method] = (...args: unknown[]) => call(method, args);
   }
-  // 代表が入れ替わると呼び出しを送り直すので、二重に作らないよう、フォルダの ID はこちらで決める
+  // 代表が入れ替わって同じ呼び出しを送り直すときも同じ ID で作る。
   client.createFolder = (name: string) => call("createFolder", [name, crypto.randomUUID()]);
+  client.createWorkspace = (name: string) => call("createWorkspace", [name, crypto.randomUUID()]);
   client.recordArticleOpen = (articleId: string) =>
     call("recordArticleOpen", [articleId, crypto.randomUUID(), Date.now()]);
   client.syncNow = () => call("syncNow", []);

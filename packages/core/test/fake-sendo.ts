@@ -27,7 +27,7 @@
  * client_id、redirect_uri、response_type、scope、state だけを見る（PKCE などは見ない）。
  */
 
-type TableName = "folders" | "feeds" | "articles" | "settings" | "savedPages";
+type TableName = "folders" | "feeds" | "articles" | "settings" | "savedPages" | "workspaces";
 
 interface SavedPageRow {
   id: string;
@@ -65,6 +65,8 @@ interface FeedRow {
   displayName: string | null;
   siteUrl: string | null;
   folderId: string | null;
+  workspaceId: string | null;
+  subscriptionId: string;
   iconUrl: string | null;
   lastFetchedAt: number | null;
   lastSuccessfulFetchAt: number | null;
@@ -104,6 +106,7 @@ interface Cursor {
   /** 設定の位置。設定を配る前の版が出したカーソルには、ない */
   settings?: number;
   savedPages?: number;
+  workspaces?: number;
   /** 最初の同期の途中なら、その範囲の起点（直近 30 日の始まり） */
   initialSince?: number;
   /** 最後まで送り終えた（この応答の hasMore が false だった） */
@@ -184,6 +187,8 @@ export class FakeSendo {
   /** sendo で OAuth を使う設定があるか。なければ許可の画面の API は 404（oauth_disabled） */
   oauthEnabled = true;
 
+  workspacesSupported = false;
+  readonly workspaces = new Map<string, FolderRow>();
   readonly folders = new Map<string, FolderRow>();
   /** ほかの人のフォルダが使っている ID（POST /folders で、その ID では作れない） */
   readonly foreignFolderIds = new Set<string>();
@@ -226,6 +231,7 @@ export class FakeSendo {
     articles: 0,
     settings: 0,
     savedPages: 0,
+    workspaces: 0,
   };
   /** 消した印を回収した範囲。これより古いカーソルでは差分を出せない */
   readonly #purgedUpTo: Record<TableName, number> = {
@@ -234,6 +240,7 @@ export class FakeSendo {
     articles: 0,
     settings: 0,
     savedPages: 0,
+    workspaces: 0,
   };
   readonly #failures: Failure[] = [];
   /** "hang-body" で止めた本文のうち、読み手に取り消されたものの数 */
@@ -292,6 +299,12 @@ export class FakeSendo {
     return row;
   }
 
+  createWorkspace(name: string, id: string = crypto.randomUUID()): FolderRow {
+    const row = { id, name, createdAt: this.now, deletedAt: null, seq: this.#bump("workspaces") };
+    this.workspaces.set(id, row);
+    return row;
+  }
+
   deleteFolder(id: string): void {
     const folder = this.#mustGet(this.folders, id);
     for (const feed of this.feeds.values()) {
@@ -308,6 +321,7 @@ export class FakeSendo {
     url: string;
     title?: string;
     folderId?: string | null;
+    workspaceId?: string | null;
     id?: string;
     iconUrl?: string | null;
   }) {
@@ -318,6 +332,8 @@ export class FakeSendo {
       displayName: null,
       siteUrl: null,
       folderId: input.folderId ?? null,
+      workspaceId: input.workspaceId ?? null,
+      subscriptionId: crypto.randomUUID(),
       iconUrl: input.iconUrl ?? null,
       lastFetchedAt: null,
       lastSuccessfulFetchAt: null,
@@ -655,6 +671,7 @@ export class FakeSendo {
       return this.#sync(
         url.searchParams.get("cursor"),
         this.savedPagesSupported && url.searchParams.get("includeSaved") === "true",
+        this.workspacesSupported && url.searchParams.get("includeWorkspaces") === "true",
         user.id,
       );
     }
@@ -711,7 +728,7 @@ export class FakeSendo {
     }
     if (request.method === "GET" && path === "/feeds") {
       const items = [...this.feeds.values()].filter((row) => row.deletedAt === null);
-      return json(200, { items: items.map(feedJson) });
+      return json(200, { items: items.map((feed) => this.#feedJson(feed)) });
     }
     if (request.method === "GET" && path === "/feeds/discover") {
       const target = url.searchParams.get("url") ?? "";
@@ -731,7 +748,16 @@ export class FakeSendo {
       if (!this.settingsSupported) return error(404, "not_found", "not found");
       return this.#settings(request.method, path.slice("/settings/".length), body);
     }
+    if (this.workspacesSupported && (path === "/workspaces" || path.startsWith("/workspaces/"))) {
+      return this.#workspaceRequest(request.method, path, body);
+    }
     if (request.method === "POST" && path === "/feeds") {
+      const workspaceId = this.workspacesSupported
+        ? (body.workspaceId as string | null | undefined)
+        : undefined;
+      if (typeof workspaceId === "string" && this.workspaces.get(workspaceId)?.deletedAt !== null) {
+        return error(400, "workspace_not_found", "workspace does not exist");
+      }
       const feedUrl = String(body.url ?? "");
       const folderId = (body.folderId as string | null | undefined) ?? null;
       if (folderId !== null && this.folders.get(folderId)?.deletedAt !== null) {
@@ -740,11 +766,16 @@ export class FakeSendo {
       const existing = [...this.feeds.values()].find(
         (row) => row.url === feedUrl && row.deletedAt === null,
       );
-      if (existing !== undefined) return json(200, { feed: feedJson(existing) });
+      if (existing !== undefined) return json(200, { feed: this.#feedJson(existing) });
       if (!this.fetchable.has(feedUrl)) return error(422, "feed_not_found", "no feed");
       const title = this.fetchable.get(feedUrl) ?? undefined;
-      const created = this.subscribe({ url: feedUrl, folderId, ...(title ? { title } : {}) });
-      return json(201, { feed: feedJson(created) });
+      const created = this.subscribe({
+        url: feedUrl,
+        folderId,
+        workspaceId: workspaceId ?? null,
+        ...(title ? { title } : {}),
+      });
+      return json(201, { feed: this.#feedJson(created) });
     }
 
     const contentMatch = /^\/articles\/([^/]+)\/content$/.exec(path);
@@ -839,13 +870,25 @@ export class FakeSendo {
       }
       if (request.method === "PATCH") {
         const folderId = body.folderId as string | null | undefined;
+        const workspaceId = this.workspacesSupported
+          ? (body.workspaceId as string | null | undefined)
+          : undefined;
+        if (workspaceId !== undefined && body.subscriptionId !== feed.subscriptionId) {
+          return error(404, "not_found", "subscription does not exist");
+        }
+        if (
+          typeof workspaceId === "string" &&
+          this.workspaces.get(workspaceId)?.deletedAt !== null
+        ) {
+          return error(400, "workspace_not_found", "workspace does not exist");
+        }
         const displayName = body.displayName;
         if (typeof folderId === "string" && this.folders.get(folderId)?.deletedAt !== null) {
           return error(400, "folder_not_found", "folder does not exist");
         }
         const name = typeof displayName === "string" ? displayName.trim() : displayName;
         if (
-          (folderId === undefined && name === undefined) ||
+          (folderId === undefined && name === undefined && workspaceId === undefined) ||
           (name !== undefined &&
             name !== null &&
             (typeof name !== "string" || name.length === 0 || name.length > 200))
@@ -853,9 +896,10 @@ export class FakeSendo {
           return error(400, "invalid_request", "invalid subscription update");
         }
         if (folderId !== undefined) feed.folderId = folderId;
+        if (workspaceId !== undefined) feed.workspaceId = workspaceId;
         if (name !== undefined) feed.displayName = name;
         feed.seq = this.#bump("feeds");
-        return json(200, { feed: feedJson(feed) });
+        return json(200, { feed: this.#feedJson(feed) });
       }
       if (request.method === "DELETE") {
         this.unsubscribe(feed.id);
@@ -1166,7 +1210,64 @@ export class FakeSendo {
     return new Response(null, { status: 204 });
   }
 
-  #sync(rawCursor: string | null, includeSaved: boolean, userId: string): Response {
+  #feedJson(feed: FeedRow) {
+    return {
+      ...feedJson(feed),
+      ...(this.workspacesSupported && {
+        workspaceId: feed.workspaceId,
+        subscriptionId: feed.subscriptionId,
+      }),
+    };
+  }
+
+  #workspaceRequest(method: string, path: string, body: Record<string, unknown>): Response {
+    const active = [...this.workspaces.values()].filter(
+      (workspace) => workspace.deletedAt === null,
+    );
+    if (method === "GET") return json(200, { items: active.map(folderJson) });
+    const name = String(body.name ?? "").trim();
+    const id =
+      method === "POST"
+        ? String(body.id ?? "")
+        : decodeURIComponent(path.slice("/workspaces/".length));
+    const current = active.find((workspace) => workspace.id === id);
+    if (method === "DELETE") {
+      if (current !== undefined) {
+        if (
+          [...this.feeds.values()].some(
+            (feed) => feed.deletedAt === null && feed.workspaceId === id,
+          )
+        ) {
+          return error(409, "workspace_not_empty", "subscriptions remain");
+        }
+        current.deletedAt = this.now;
+        current.seq = this.#bump("workspaces");
+      }
+      return new Response(null, { status: 204 });
+    }
+    if (name === "" || name.length > 200 || !UUID.test(id))
+      return error(400, "invalid_request", "invalid workspace");
+    if (method === "POST" && current !== undefined)
+      return json(200, { workspace: folderJson(current) });
+    if (active.some((workspace) => workspace.name === name && workspace.id !== id)) {
+      return error(409, "workspace_exists", "duplicate workspace");
+    }
+    if (method === "POST") {
+      if (this.workspaces.has(id)) return error(409, "workspace_id_taken", "id taken");
+      return json(201, { workspace: folderJson(this.createWorkspace(name, id)) });
+    }
+    if (current === undefined) return error(404, "not_found", "workspace does not exist");
+    current.name = name;
+    current.seq = this.#bump("workspaces");
+    return json(200, { workspace: folderJson(current) });
+  }
+
+  #sync(
+    rawCursor: string | null,
+    includeSaved: boolean,
+    includeWorkspaces: boolean,
+    userId: string,
+  ): Response {
     const cursor = rawCursor === null ? null : decodeCursor(rawCursor);
     if (
       (rawCursor !== null && cursor === null) ||
@@ -1186,9 +1287,12 @@ export class FakeSendo {
     const since: Required<Pick<Cursor, TableName>> & Cursor = {
       settings: 0,
       savedPages: 0,
+      workspaces: 0,
       ...(cursor ?? { folders: 0, feeds: 0, articles: 0, done: false }),
     };
     const settingsInitial = cursor === null || cursor.settings === undefined;
+    if (includeWorkspaces && cursor?.workspaces === undefined) since.feeds = 0;
+    const workspacesInitial = cursor?.workspaces === undefined;
     const savedInitial = cursor === null || cursor.savedPages === undefined;
     const initialSince = cursor === null ? this.now - 30 * DAY : cursor.initialSince;
     const initial = initialSince !== undefined;
@@ -1218,6 +1322,13 @@ export class FakeSendo {
               .filter(([, seq]) => seq > since.articles)
               .map(([id, seq]) => ({ seq, removed: id }))),
       ].sort(bySeq),
+      workspaces: includeWorkspaces
+        ? [...this.workspaces.values()]
+            .filter(
+              (row) => row.seq > since.workspaces && !(workspacesInitial && row.deletedAt !== null),
+            )
+            .sort(bySeq)
+        : [],
       savedPages: includeSaved
         ? [...(this.#savedPages.get(userId)?.values() ?? [])]
             .filter((row) => row.seq > since.savedPages && !(savedInitial && row.deleted))
@@ -1239,8 +1350,16 @@ export class FakeSendo {
       articles: [] as (typeof pending)["articles"],
       settings: [] as SettingRow[],
       savedPages: [] as SavedPageRow[],
+      workspaces: [] as FolderRow[],
     };
-    for (const table of ["folders", "feeds", "articles", "settings", "savedPages"] as const) {
+    for (const table of [
+      "folders",
+      "feeds",
+      "articles",
+      "settings",
+      "savedPages",
+      "workspaces",
+    ] as const) {
       const rows = pending[table];
       const taken = rows.slice(0, room);
       room -= taken.length;
@@ -1260,6 +1379,7 @@ export class FakeSendo {
 
     if (!this.settingsSupported) delete next.settings;
     if (!includeSaved) delete next.savedPages;
+    if (!includeWorkspaces) delete next.workspaces;
 
     return json(200, {
       cursor: encodeCursor(next),
@@ -1282,6 +1402,13 @@ export class FakeSendo {
             ),
           }
         : {}),
+      ...(includeWorkspaces && {
+        workspaces: page.workspaces.map((row) =>
+          row.deletedAt === null
+            ? { ...folderJson(row), deleted: false }
+            : { id: row.id, deleted: true },
+        ),
+      }),
       folders: page.folders.map((row) => ({
         id: row.id,
         name: row.name,
@@ -1295,6 +1422,11 @@ export class FakeSendo {
         displayName: row.displayName,
         siteUrl: row.siteUrl,
         folderId: row.folderId,
+        ...(includeWorkspaces &&
+          row.deletedAt === null && {
+            workspaceId: row.workspaceId,
+            subscriptionId: row.subscriptionId,
+          }),
         iconUrl: row.iconUrl,
         createdAt: iso(row.createdAt),
         deleted: row.deletedAt !== null,
