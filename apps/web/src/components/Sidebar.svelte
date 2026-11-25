@@ -185,11 +185,12 @@
     </span>
   </button>
 
+  {#if reader.workspacesAvailable || reader.workspaceIds !== undefined}
+    <WorkspaceSelector compact={prefs.value.sidebarCollapsed} />
+  {/if}
+
   <div class="scroll">
     <div class="views">
-      {#if reader.workspacesAvailable || reader.workspaceIds !== undefined}
-        <WorkspaceSelector compact={prefs.value.sidebarCollapsed} />
-      {/if}
       {@render item({ kind: "all" }, "All", reader.unread.total, "inbox")}
       {@render item({ kind: "recentlyRead" }, "Recently Read", 0, "history")}
       {@render item({ kind: "starred" }, "Saved", 0, "bookmark")}

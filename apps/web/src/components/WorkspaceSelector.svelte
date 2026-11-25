@@ -25,6 +25,8 @@
   }
 </script>
 
+<svelte:window onpopstate={() => (open = false)} />
+
 <button
   type="button"
   class="workspace-switch"
@@ -86,9 +88,8 @@
   }
 
   .workspace-switch {
-    width: 100%;
     min-height: 2.5rem;
-    margin-bottom: 0.25rem;
+    margin: 0 0.5rem 0.25rem;
     padding: 0.3rem 0.5rem;
     background: var(--surface);
     text-align: left;

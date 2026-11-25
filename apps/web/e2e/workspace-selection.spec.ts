@@ -91,7 +91,7 @@ test("ワークスペースを All の上から切り替えられ、サイドバ
       title: `${name} feed`,
       workspaceId: workspace.id,
     });
-    server.deliver(feed.id, { title: `${name} article` });
+    server.deliver(feed.id, { title: `${name} article`, url: null });
   }
   await routeFakeSendo(context, server);
   await page.goto("/");
@@ -117,15 +117,28 @@ test("ワークスペースを All の上から切り替えられ、サイドバ
   await dialog.getByRole("button", { name: "Close", exact: true }).click();
   await expect(list.getByText("Personal article")).toBeVisible();
 
+  await nav.getByRole("link", { name: "Recently Read", exact: true }).click();
+  await choice.click();
+  await expect(dialog).toBeVisible();
+  await page.goBack();
+  await expect(page).toHaveURL("/");
+  await expect(dialog).toBeHidden();
+
   await page.setViewportSize({ width: 390, height: 844 });
   await expect(page.getByRole("button", { name: /^Workspaces:/ })).toBeHidden();
   const menu = page.getByRole("button", { name: "Menu", exact: true });
   await menu.click();
+  await expect(choice.getByText("All workspaces", { exact: true })).toBeVisible();
   await nav.getByRole("link", { name: /^Personal feed/ }).click();
   await expect(menu).toHaveAttribute("aria-expanded", "false");
-  await expect(list.getByText("Personal article")).toBeVisible();
-  await menu.click();
-  await expect(choice.getByText("All workspaces", { exact: true })).toBeVisible();
+  await list.getByText("Personal article").click();
+  await expect(page.getByRole("heading", { name: "Personal article", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: /^Workspaces:/ })).toBeHidden();
+  await page.getByRole("button", { name: "More actions", exact: true }).click();
+  await page
+    .getByRole("dialog", { name: "Article actions", exact: true })
+    .getByRole("button", { name: "Open sidebar", exact: true })
+    .click();
   await choice.click();
   await dialog.getByRole("button", { name: "Only Public", exact: true }).click();
   await expect(page).toHaveURL("/");

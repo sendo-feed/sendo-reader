@@ -772,6 +772,7 @@
         scopeChecking={detailChecking}
         {list}
         onstep={step}
+        onmenu={() => (menuOpen = true)}
         onpeek={peek}
         onviewchange={rememberPosition}
       />
