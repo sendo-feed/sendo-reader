@@ -10,6 +10,9 @@ import {
 } from "@sendo-reader/core";
 import { ProtocolMismatchError, type ReaderClient } from "@sendo-reader/core/web";
 import { takeLoginError } from "./login";
+import { loadWorkspaceSelection, saveWorkspaceSelection } from "./workspace-selection";
+
+const emptyUnread = (): UnreadCounts => ({ total: 0, feeds: new Map(), folders: new Map() });
 
 /**
  * 画面の状態。手元の DB を読み、変わったら読み直す（ネットワークは待たない）。
@@ -25,11 +28,50 @@ export class ReaderState {
   /** sendo がログインに失敗して戻した理由（画面に出す文） */
   loginError = $state<string | null>(null);
   status = $state<SyncStatus | null>(null);
-  folders = $state<Folder[]>([]);
-  feeds = $state<Feed[]>([]);
-  workspaces = $state<Workspace[]>([]);
+  #folders = $state.raw<Folder[]>([]);
+  allFeeds = $state.raw<Feed[]>([]);
+  workspaces = $state.raw<Workspace[]>([]);
   workspacesAvailable = $state(false);
-  unread = $state<UnreadCounts>({ total: 0, feeds: new Map(), folders: new Map() });
+  workspaceIds = $state.raw<readonly string[] | undefined>([]);
+  workspaceDataReady = $state(false);
+  workspaceScopeComplete = $state(false);
+  #selectedWorkspaces = $derived(
+    this.workspaceIds?.filter((id) => this.workspaces.some((workspace) => workspace.id === id)),
+  );
+  visibleWorkspaceIds = $derived(
+    this.workspaceIds === undefined
+      ? undefined
+      : this.workspaceDataReady
+        ? this.#selectedWorkspaces
+        : [],
+  );
+  scopeFeeds = $derived.by(() => {
+    const ids = this.#selectedWorkspaces;
+    if (ids === undefined) return this.allFeeds;
+    const selected = new Set(ids);
+    return this.allFeeds.filter(
+      (feed) =>
+        feed.subscriptionId !== undefined &&
+        feed.workspaceId != null &&
+        selected.has(feed.workspaceId),
+    );
+  });
+  feeds = $derived(
+    this.workspaceDataReady || this.workspaceIds === undefined ? this.scopeFeeds : [],
+  );
+  folders = $derived.by(() => {
+    if (this.workspaceIds === undefined) return this.#folders;
+    const visible = new Set(this.feeds.map((feed) => feed.folderId));
+    return this.#folders.filter((folder) => visible.has(folder.id));
+  });
+  #createdFolderIds = $state.raw<readonly string[]>([]);
+  folderDestinations = $derived.by(() => {
+    const visible = new Set(this.folders.map((folder) => folder.id));
+    return this.#folders.filter(
+      (folder) => visible.has(folder.id) || this.#createdFolderIds.includes(folder.id),
+    );
+  });
+  unread = $state<UnreadCounts>(emptyUnread());
   /** 今日（この端末の日付で）既読にした記事の数。進み具合の内訳に出す */
   readToday = $state(0);
   /** 記事が変わるたびに増える。一覧や記事の画面は、これを見て読み直す */
@@ -54,6 +96,7 @@ export class ReaderState {
   /** 起動の途中で、版の違うタブのために止まった。番号の合う代表に替わったら、起動し直す */
   #startBlocked = false;
   #workspaceRead = 0;
+  #unreadRead = 0;
 
   constructor(client: ReaderClient, leave: (url: string) => Promise<void>) {
     this.leave = leave;
@@ -61,10 +104,15 @@ export class ReaderState {
       this.versionMismatch = error;
     });
     client.onChange((tables) => {
-      if (tables.has("workspaces")) void this.#loadWorkspaces();
-      if (tables.has("folders")) void this.#loadFolders();
-      if (tables.has("feeds") || tables.has("folders")) void this.#loadFeeds();
-      if (tables.has("articles") || tables.has("feeds")) {
+      if (tables.has("workspaces") || tables.has("feeds") || tables.has("folders")) {
+        void this.#loadWorkspaceData();
+      }
+      if (
+        tables.has("articles") ||
+        tables.has("feeds") ||
+        tables.has("workspaces") ||
+        tables.has("folders")
+      ) {
         void this.#loadUnread();
         this.articlesVersion += 1;
       }
@@ -72,6 +120,7 @@ export class ReaderState {
     client.onStatus((status) => {
       // 同期の様子は、番号の合う代表（か自分）からしか届かない
       this.versionMismatch = null;
+      const syncFinished = this.status?.syncing === true && !status.syncing;
       this.status = status;
       const accountChanged = this.#setUser(status.user);
       if (this.#startBlocked) {
@@ -84,6 +133,13 @@ export class ReaderState {
       if (accountChanged || this.signedIn !== status.signedIn) {
         this.signedIn = status.signedIn;
         if (status.signedIn) void this.#loadAll();
+      } else if (
+        syncFinished &&
+        status.error === null &&
+        this.workspaceIds !== undefined &&
+        !this.workspaceScopeComplete
+      ) {
+        void this.#loadWorkspaceData();
       }
     });
   }
@@ -147,50 +203,72 @@ export class ReaderState {
   }
 
   #setUser(user: User | null): boolean {
-    const changed = this.user?.id !== user?.id;
+    const changed = user?.id !== this.user?.id;
     if (changed) {
       ++this.#workspaceRead;
-      this.workspaces = [];
+      ++this.#unreadRead;
+      this.workspaceIds = user === null ? [] : loadWorkspaceSelection(user.id);
+      this.workspaceDataReady = false;
+      this.workspaceScopeComplete = false;
       this.workspacesAvailable = false;
+      this.workspaces = [];
+      this.#folders = [];
+      this.#createdFolderIds = [];
+      this.allFeeds = [];
+      this.unread = emptyUnread();
+      this.readToday = 0;
     }
     this.user = user;
     return changed;
   }
 
+  selectWorkspaces(ids: readonly string[] | undefined): void {
+    if (this.user === null) return;
+    this.#createdFolderIds = [];
+    this.workspaceIds = ids === undefined ? undefined : [...new Set(ids)].sort();
+    saveWorkspaceSelection(this.user.id, this.workspaceIds);
+    this.unread = emptyUnread();
+    this.readToday = 0;
+    void this.#loadUnread();
+  }
+
+  offerNewFolder(id: string): void {
+    if (this.workspaceIds !== undefined) this.#createdFolderIds = [...this.#createdFolderIds, id];
+  }
+
   async #loadAll(): Promise<void> {
-    await Promise.all([
-      this.#loadFolders(),
-      this.#loadFeeds(),
-      this.#loadUnread(),
-      this.#loadWorkspaces(),
-    ]);
+    await Promise.all([this.#loadWorkspaceData(), this.#loadUnread()]);
   }
 
-  async #loadFolders(): Promise<void> {
-    this.folders = await this.client.listFolders();
-  }
-
-  async #loadFeeds(): Promise<void> {
-    this.feeds = await this.client.listFeeds();
-  }
-
-  async #loadWorkspaces(): Promise<void> {
-    const userId = this.user?.id;
+  async #loadWorkspaceData(): Promise<void> {
+    if (this.user === null) return;
     const read = ++this.#workspaceRead;
-    const [workspaces, available] = await Promise.all([
-      this.client.listWorkspaces(),
-      this.client.workspacesAvailable(),
-    ]);
-    if (userId !== this.user?.id || read !== this.#workspaceRead) return;
+    this.workspaceDataReady = false;
+    if (this.workspaceIds !== undefined) {
+      this.unread = emptyUnread();
+      this.readToday = 0;
+    }
+    const { workspaces, available, feeds, folders, complete } = await this.client.workspaceData();
+    if (read !== this.#workspaceRead) return;
     this.workspaces = workspaces;
     this.workspacesAvailable = available;
+    this.allFeeds = feeds;
+    this.#folders = folders;
+    this.workspaceScopeComplete = complete;
+    this.workspaceDataReady = true;
+    if (this.workspaceIds !== undefined) await this.#loadUnread();
   }
 
   async #loadUnread(): Promise<void> {
+    if (this.user === null) return;
+    const read = ++this.#unreadRead;
+    if (this.workspaceIds !== undefined && !this.workspaceDataReady) return;
+    const ids = this.visibleWorkspaceIds;
     const [unread, readToday] = await Promise.all([
-      this.client.countUnread(),
-      this.client.countReadSince(new Date().setHours(0, 0, 0, 0)),
+      this.client.countUnread(ids),
+      this.client.countReadSince(new Date().setHours(0, 0, 0, 0), ids),
     ]);
+    if (read !== this.#unreadRead) return;
     this.unread = unread;
     this.readToday = readToday;
   }

@@ -151,7 +151,7 @@
     try {
       await reader.client.moveFeed(feed.id, value === "" ? null : value);
       collapsed = collapsed.filter((id) => id !== value);
-      notice = `${feedName(feed)} を ${reader.folders.find((folder) => folder.id === value)?.name ?? "No folder"} に移動しました。`;
+      notice = "フォルダを変更しました。";
       menuOpen = false;
     } catch (error) {
       message = describeError(error);
@@ -192,7 +192,7 @@
 
 {#snippet folderOptions()}
   <option value="">No folder</option>
-  {#each reader.folders as folder (folder.id)}
+  {#each reader.folderDestinations as folder (folder.id)}
     <option value={folder.id}>{folder.name}</option>
   {/each}
 {/snippet}

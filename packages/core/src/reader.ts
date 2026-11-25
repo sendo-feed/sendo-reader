@@ -38,6 +38,7 @@ import {
 import { clearSavedPages, countSavedPages, getSavedPage, listSavedPages } from "./db/saved-pages";
 import { migrate } from "./db/schema";
 import { deleteSetting, getSetting, setSetting } from "./db/settings";
+import { CURSOR_KEY } from "./db/synced";
 import {
   getSettingsSeed,
   hasSyncedSetting,
@@ -1166,6 +1167,26 @@ export class ReaderCore {
     return listFolders(this.#db);
   }
 
+  workspaceData() {
+    return this.#db.transaction(async (tx) => {
+      const [workspaces, available, feeds, folders, cursor, completeCursor] = await Promise.all([
+        listWorkspaces(tx),
+        workspacesAvailable(tx),
+        listFeeds(tx),
+        listFolders(tx),
+        getSetting(tx, CURSOR_KEY),
+        getCompleteCursor(tx),
+      ]);
+      return {
+        workspaces,
+        available,
+        feeds,
+        folders,
+        complete: cursor !== null && cursor === completeCursor,
+      };
+    });
+  }
+
   listWorkspaces(): Promise<Workspace[]> {
     return listWorkspaces(this.#db);
   }
@@ -1206,14 +1227,16 @@ export class ReaderCore {
     return (await listArticles(this.#db, query)).map((a) => this.#translationRequests.overlay(a));
   }
 
-  async getArticle(id: string): Promise<Article | null> {
-    const article = await getArticle(this.#db, id);
+  async getArticle(id: string, workspaceIds?: readonly string[]): Promise<Article | null> {
+    const article = await getArticle(this.#db, id, workspaceIds);
     return article === null ? null : this.#translationRequests.overlay(article);
   }
 
   /** 記事をまとめて読む（見つからない ID は飛ばす） */
-  async getArticles(ids: readonly string[]): Promise<Article[]> {
-    return (await getArticles(this.#db, ids)).map((a) => this.#translationRequests.overlay(a));
+  async getArticles(ids: readonly string[], workspaceIds?: readonly string[]): Promise<Article[]> {
+    return (await getArticles(this.#db, ids, workspaceIds)).map((a) =>
+      this.#translationRequests.overlay(a),
+    );
   }
 
   // --- 記事の翻訳を頼む（sendo に届かないとできない） ---
@@ -1264,12 +1287,12 @@ export class ReaderCore {
   }
 
   /** since（ミリ秒）からあとに既読にした記事の数 */
-  countReadSince(since: number): Promise<number> {
-    return countReadSince(this.#db, since);
+  countReadSince(since: number, workspaceIds?: readonly string[]): Promise<number> {
+    return countReadSince(this.#db, since, workspaceIds);
   }
 
-  countUnread(): Promise<UnreadCounts> {
-    return countUnread(this.#db);
+  countUnread(workspaceIds?: readonly string[]): Promise<UnreadCounts> {
+    return countUnread(this.#db, workspaceIds);
   }
 
   // --- 記事の本文（sendo の docs/decisions/content.md の 6。差分同期には載らず、記事ごとに取る） ---
@@ -1722,12 +1745,18 @@ function normalizeOpenList(scope: ArticleScope | null): ArticleScope | null {
     !optionalString(scope.feedId) ||
     !optionalString(scope.folderId) ||
     !optionalString(scope.search) ||
-    !(scope.starred === undefined || typeof scope.starred === "boolean")
+    !(scope.starred === undefined || typeof scope.starred === "boolean") ||
+    !(
+      scope.workspaceIds === undefined ||
+      (Array.isArray(scope.workspaceIds) &&
+        scope.workspaceIds.every((id) => typeof id === "string"))
+    )
   ) {
     throw new TypeError("開いている一覧の形が違う");
   }
   if (scope.search !== undefined && searchTerms(scope.search).length === 0) return null;
   const normalized: ArticleScope = {};
+  if (scope.workspaceIds !== undefined) normalized.workspaceIds = [...new Set(scope.workspaceIds)];
   if (scope.feedId !== undefined) normalized.feedId = scope.feedId;
   if (scope.folderId !== undefined) normalized.folderId = scope.folderId;
   if (scope.starred === true) normalized.starred = true;

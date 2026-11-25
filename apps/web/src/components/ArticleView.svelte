@@ -25,15 +25,18 @@
   import Dialog from "./Dialog.svelte";
   import Icon from "./Icon.svelte";
   import TranslationLabel from "./TranslationLabel.svelte";
+  import WorkspaceSelector from "./WorkspaceSelector.svelte";
 
   let {
     articleId,
+    scopeChecking = false,
     list,
     onstep,
     onpeek = () => {},
     onviewchange = () => {},
   }: {
     articleId: string | null;
+    scopeChecking?: boolean;
     list: ArticleListState;
     /** 一覧の前（-1）・次（1）の記事に移る */
     onstep: (delta: 1 | -1) => Promise<void> | void;
@@ -107,7 +110,7 @@
   });
 
   async function load(id: string) {
-    const found = await reader.client.getArticle(id);
+    const found = await reader.client.getArticle(id, reader.workspaceIds);
     if (id !== articleId) return;
     article = found;
     missing = found === null;
@@ -260,7 +263,7 @@
    * （m）、そのままにする（記事が替わるまで、もう呼ばない）
    */
   async function markOnOpen(id: string) {
-    const found = list.find(id) ?? (await reader.client.getArticle(id));
+    const found = list.find(id) ?? (await reader.client.getArticle(id, reader.workspaceIds));
     if (found === null || found.readAt !== null) return;
     const readAt = Date.now();
     list.patch(id, { readAt });
@@ -350,7 +353,8 @@
   // 実際に表示された記事だけを一度記録する。先読み、一覧の既読操作、本文の再取得では記録しない。
   $effect(() => {
     const id = articleId;
-    if (!visible || id === null || article?.id !== id || recordedOpen === id) return;
+    if (!visible || scopeChecking || id === null || article?.id !== id || recordedOpen === id)
+      return;
     recordedOpen = id;
     void reader.client.recordArticleOpen(id).catch(() => {});
   });
@@ -1156,6 +1160,8 @@
 
 <article
   class="article-view"
+  class:scope-checking={scopeChecking && articleId !== null}
+  inert={scopeChecking && articleId !== null}
   aria-live="polite"
   bind:this={scroller}
   ontouchstart={onTouchStart}
@@ -1165,6 +1171,11 @@
   style:--drag={`${dragX}px`}
 >
   {#if article !== null}
+    {#if reader.workspacesAvailable || reader.workspaceIds !== undefined}
+      <div class="detail-workspaces">
+        <WorkspaceSelector />
+      </div>
+    {/if}
     {#if swipeHint !== null}
       <div
         class="swipe-hint"
@@ -1462,6 +1473,21 @@
 </Dialog>
 
 <style>
+  .detail-workspaces {
+    display: none;
+  }
+
+  @media (max-width: 56rem) {
+    .detail-workspaces {
+      display: block;
+      padding: 0.75rem 1rem 0;
+    }
+  }
+
+  .scope-checking {
+    visibility: hidden;
+  }
+
   .confirm {
     margin: 0 0 1.25rem;
   }
