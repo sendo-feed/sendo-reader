@@ -1004,7 +1004,23 @@ export class FakeSendo {
     if (!cursor.done) {
       return error(400, "sync_incomplete", "sync until hasMore is false, then pass that cursor");
     }
+    const subscriptionIds = body.subscriptionIds;
+    if (
+      subscriptionIds !== undefined &&
+      (!this.workspacesSupported ||
+        !Array.isArray(subscriptionIds) ||
+        subscriptionIds.length === 0 ||
+        subscriptionIds.length > 90 ||
+        ["all", "folderId", "feedId", "until"].some((key) => key in body))
+    ) {
+      return error(400, "invalid_request", "invalid subscription scope");
+    }
+    const selected = new Set(Array.isArray(subscriptionIds) ? subscriptionIds : []);
     const inScope = (row: InboxRow): boolean => {
+      if (selected.size > 0) {
+        const feed = this.feeds.get(row.feedId);
+        return feed?.deletedAt === null && selected.has(feed.subscriptionId);
+      }
       if (body.all === true) return true;
       if (typeof body.feedId === "string") return row.feedId === body.feedId;
       if (typeof body.folderId === "string") {

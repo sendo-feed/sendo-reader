@@ -1,5 +1,6 @@
 <script lang="ts">
   import {
+    ApiError,
     type ArticleQuery,
     feedName,
     type MarkReadScope,
@@ -44,6 +45,7 @@
   let verifiedArticleFeed = $state<string | null>(null);
   const workspaceIds = $derived(reader.visibleWorkspaceIds);
   const requestedWorkspaceIds = $derived(reader.workspaceIds);
+  const workspaceKey = $derived(JSON.stringify([reader.user?.id, requestedWorkspaceIds ?? null]));
   const articleRoute = $derived(JSON.stringify([router.articleId, reader.user?.id]));
   const articleKey = $derived(JSON.stringify([articleRoute, requestedWorkspaceIds ?? null]));
   const detailArticleId = $derived(
@@ -476,8 +478,7 @@
   }
 
   function askMarkAll() {
-    if (workspaceIds === undefined && listing?.scope != null && (listing.unread ?? 0) > 0)
-      confirmOpen = true;
+    if (listing?.scope != null && (listing.unread ?? 0) > 0) confirmOpen = true;
   }
 
   /** 取り消せる数の上限。sendo には記事ごとに送るので、多すぎるときは取り消しを出さない */
@@ -492,6 +493,13 @@
     reloadKey: string | null;
   } | null>(null);
   let toastTimer: ReturnType<typeof setTimeout> | undefined;
+
+  $effect(() => {
+    void workspaceKey;
+    confirmOpen = false;
+    clearTimeout(toastTimer);
+    toast = null;
+  });
 
   /** 知らせを消している最中（薄くしてから消す） */
   let toastLeaving = $state(false);
@@ -524,11 +532,30 @@
   /** 開いている一覧の範囲を、まとめて既読にする。range を渡すと、その一部だけ */
   async function markAll(range: Range = {}, reload = false) {
     confirmOpen = false;
-    if (workspaceIds !== undefined || listing?.scope == null) return;
+    if (listing?.scope == null) return;
     const key = queryKey;
+    const scopeKey = workspaceKey;
     const generation = list.generation;
+    const scope = listing.scope;
+    const selectedWorkspaces = requestedWorkspaceIds;
+    const subscriptionIds =
+      selectedWorkspaces === undefined
+        ? undefined
+        : reader.feeds.flatMap((feed) =>
+            feed.subscriptionId !== undefined &&
+            (!("feedId" in scope) || feed.id === scope.feedId) &&
+            (!("folderId" in scope) || feed.folderId === scope.folderId)
+              ? [feed.subscriptionId]
+              : [],
+          );
     try {
-      const ids = await reader.client.markAllRead(listing.scope, range);
+      const ids = await reader.client.markAllRead(scope, {
+        ...range,
+        workspaceIds: selectedWorkspaces,
+        subscriptionIds,
+        expectedCursor: selectedWorkspaces === undefined ? undefined : reader.workspaceReadCursor,
+      });
+      if (scopeKey !== workspaceKey) return;
       if (ids.length === 0) showToast("既読にする記事はありませんでした。");
       else {
         showToast(
@@ -539,8 +566,14 @@
       }
       // 手元への書き込みが済んだら読み直す。待っている間に移った一覧は動かさない
       if (reload && key === queryKey && generation === list.generation) await listView?.reload();
-    } catch {
-      showToast("既読にできませんでした。");
+    } catch (error) {
+      if (scopeKey !== workspaceKey) return;
+      showToast(
+        error instanceof ApiError &&
+          (error.code === "sync_incomplete" || error.code === "workspace_sync_changed")
+          ? "同期が完了してから既読にしてください。"
+          : "既読にできませんでした。",
+      );
     }
   }
 
@@ -570,7 +603,7 @@
   /** 一覧の終わりに出す、次へ進むボタン。未読が残っていれば既読にしてから、次のフィードへ移る */
   const next = $derived.by(() => {
     if (listing === null || listing.scope === null) return null;
-    const unread = requestedWorkspaceIds === undefined ? (listing.unread ?? 0) : 0;
+    const unread = listing.unread ?? 0;
     const feed = listing.kind === "feed" ? besideFeed(1) : null;
     if (feed === null) {
       return unread === 0 ? null : { label: "Mark all as read", go: () => void markAll({}, true) };
@@ -728,7 +761,7 @@
       {list}
       title={listing.title}
       kind={listing.kind}
-      unread={workspaceIds !== undefined || listing.scope === null ? null : listing.unread}
+      unread={listing.scope === null ? null : listing.unread}
       onmarkall={askMarkAll}
       search={listing.kind === "search" ? router.searchQuery : null}
       onsearch={(query) => router.setSearchQuery(query)}

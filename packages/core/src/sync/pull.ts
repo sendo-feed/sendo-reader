@@ -14,7 +14,7 @@ import { clearSyncedSettings, putSyncedSetting, removeSyncedSetting } from "../d
 import { putWorkspace, setWorkspacesAvailable } from "../db/workspaces";
 import { type Article, TABLES, type Table } from "../models";
 import type { SyncPage } from "./page";
-import { reapplyPending, widenPendingMarkRead } from "./queue";
+import { reapplyPending, reconcilePendingMarkRead } from "./queue";
 
 /** 1 回の同期で取るページの上限。サーバーが続きを返し続けても止まるようにする */
 const MAX_PAGES = 1000;
@@ -82,7 +82,9 @@ export async function pull(db: Database, api: SendoApi, options: PullOptions): P
       // ので、ここで確かめれば、ログアウトの消去のあとに書き戻すことはない）
       options.signal?.throwIfAborted();
       const changed = await applyPage(tx, page);
-      await widenPendingMarkRead(tx, deliveredIds(page));
+      if (await reconcilePendingMarkRead(tx, page.articles, !page.hasMore)) {
+        changed.add("articles");
+      }
       if (await reapplyPending(tx)) changed.add("workspaces");
       await setSetting(tx, CURSOR_KEY, page.cursor);
       if (!page.hasMore) {
@@ -133,6 +135,7 @@ async function resync(
          select json_extract(payload, '$.articleId') from pending_ops
          union
          select value from pending_ops, json_each(json_extract(payload, '$.articleIds'))
+         where kind <> 'markWorkspaceRead' or json_extract(payload, '$.acknowledged') is not 1
        )`,
     );
     await clearSyncedRows(tx);
@@ -142,7 +145,7 @@ async function resync(
     if (pages.some((page) => page.savedPages !== null)) await clearSavedPages(tx);
     for (const page of pages) {
       await applyPage(tx, page);
-      await widenPendingMarkRead(tx, deliveredIds(page));
+      await reconcilePendingMarkRead(tx, page.articles);
     }
     for (const row of kept) {
       const columns = Object.keys(row);
@@ -152,6 +155,7 @@ async function resync(
         columns.map((column) => row[column] ?? null),
       );
     }
+    if (cursor !== null) await reconcilePendingMarkRead(tx, [], true);
     await reapplyPending(tx);
     if (cursor !== null) {
       await setSetting(tx, CURSOR_KEY, cursor);
@@ -165,11 +169,6 @@ async function resync(
   const all = new Set<Table>(TABLES);
   for (const table of all) result.changed.add(table);
   options.onPage?.(all);
-}
-
-/** ページで届いた（受信箱にある）記事の ID */
-function deliveredIds(page: SyncPage): string[] {
-  return page.articles.filter((article) => !article.deleted).map((article) => article.id);
 }
 
 /** 同期で届いた 1 ページを書き込む。変わった表を返す */

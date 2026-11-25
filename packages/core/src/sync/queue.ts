@@ -4,6 +4,7 @@ import { putSavedPage, removeSavedPage } from "../db/saved-pages";
 import type { Table } from "../models";
 import {
   applyLocally,
+  dropWorkspaceReadOverlay,
   isRetryable,
   isWorkspaceOperation,
   keyOf,
@@ -13,6 +14,7 @@ import {
   send,
   undo,
 } from "./ops";
+import type { SyncPage } from "./page";
 
 /**
  * 操作キュー（docs/decisions/local-first.md、sendo の sync.md の 5）。
@@ -119,14 +121,55 @@ export async function reapplyPending(tx: Executor): Promise<boolean> {
  * 押したあとに届いた記事は、sendo で既読・未読が変わっていて（ほかの端末で未読に戻した、など）、
  * 押したときのカーソルでは既読にならないことがある。ID でも頼めば、あとから送ったまとめて既読が
  * 採られ、手元（重ね直して既読）と sendo が揃う。
+ * 選択中のワークスペースに対する操作は、送信済みでも差分の完了前までは手元の表示を保つ。
  */
-export async function widenPendingMarkRead(
+export async function reconcilePendingMarkRead(
   tx: Executor,
-  deliveredIds: readonly string[],
-): Promise<void> {
-  if (deliveredIds.length === 0) return;
-  const delivered = new Set(deliveredIds);
+  changes: SyncPage["articles"],
+  done = false,
+): Promise<boolean> {
+  if (changes.length === 0 && !done) return false;
+  let changed = false;
+  const delivered = new Map(
+    changes.flatMap<[string, boolean]>((article) =>
+      article.deleted ? [] : [[article.id, article.readAt !== null]],
+    ),
+  );
   for (const { id, op } of await listPending(tx)) {
+    if (op.kind === "markWorkspaceRead" && op.acknowledged === true) {
+      // 新しい状態を受け取った行は、古いカーソルの楽観更新で上書きしない。
+      const articleIds = op.articleIds.filter((articleId) => !delivered.has(articleId));
+      if (op.acknowledged === true && done) {
+        // 差分に出なかった記事は Sendo が既読にしなかったので、手元の印を外す。
+        if (articleIds.length > 0 && (await dropWorkspaceReadOverlay(tx, { ...op, articleIds }))) {
+          changed = true;
+        }
+        await tx.run("delete from pending_ops where id = ?", [id]);
+      } else if (articleIds.length < op.articleIds.length) {
+        await tx.run("update pending_ops set payload = ? where id = ?", [
+          JSON.stringify({ ...op, articleIds }),
+          id,
+        ]);
+      }
+      continue;
+    }
+    if (op.kind === "markWorkspaceRead") {
+      // スター変更などの差分が届いても、未送信の既読を重ねられるよう対象は保つ。
+      const previous = new Set(op.serverReadArticleIds);
+      const serverReadArticleIds = op.articleIds.filter((articleId) => {
+        return delivered.get(articleId) ?? previous.has(articleId);
+      });
+      if (
+        previous.size !== serverReadArticleIds.length ||
+        serverReadArticleIds.some((articleId) => !previous.has(articleId))
+      ) {
+        await tx.run("update pending_ops set payload = ? where id = ?", [
+          JSON.stringify({ ...op, serverReadArticleIds }),
+          id,
+        ]);
+      }
+      continue;
+    }
     if (op.kind !== "markRead") continue;
     const extra = new Set(op.extraIds);
     const added = op.articleIds.filter(
@@ -138,6 +181,7 @@ export async function widenPendingMarkRead(
       id,
     ]);
   }
+  return changed;
 }
 
 export interface RejectedOperation {
@@ -185,7 +229,9 @@ export async function push(
   while (true) {
     signal.throwIfAborted();
     const [next] = await db.all<PendingRow>(
-      "select id, kind, key, payload, rev from pending_ops order by id limit 1",
+      `select id, kind, key, payload, rev from pending_ops
+       where kind <> 'markWorkspaceRead' or json_extract(payload, '$.acknowledged') is not 1
+       order by id limit 1`,
     );
     if (next === undefined) return result;
     if (options.allow !== undefined && !options.allow(next.id)) return result;
@@ -209,25 +255,36 @@ export async function push(
             [op.workspaceId, op.feedId, op.subscriptionId],
           );
         }
-        await complete(tx, next.id, next.rev);
-        if (sent.remap !== undefined) {
-          await remapFolderId(tx, sent.remap.from, sent.remap.to);
-          // 同じ名前のフォルダに付け替えると手元で作ったフォルダの行が消え、そこに重ねていた操作（名前の
-          // 変更など）も消える。付け替えた ID で残りの操作を重ね直す
-          return reapplyPending(tx);
+        if (op.kind === "markWorkspaceRead") {
+          const serverRead = new Set(op.serverReadArticleIds);
+          await tx.run("update pending_ops set payload = ? where id = ? and rev = ?", [
+            JSON.stringify({
+              ...op,
+              articleIds: op.articleIds.filter((articleId) => !serverRead.has(articleId)),
+              acknowledged: true,
+            }),
+            next.id,
+            next.rev,
+          ]);
+        } else {
+          await complete(tx, next.id, next.rev);
         }
-        return false;
+        if (sent.remap === undefined) return false;
+        await remapFolderId(tx, sent.remap.from, sent.remap.to);
+        return reapplyPending(tx);
       });
       result.sent += 1;
-      if (op.kind === "setSavedPage") options.onChange?.(new Set<Table>(["savedPages"]));
+      const changed = new Set<Table>();
+      if (op.kind === "setSavedPage") changed.add("savedPages");
+      if (workspacesChanged) changed.add("workspaces");
       if (sent.remap !== undefined) {
         result.remapped.push(sent.remap);
         options.onRemap?.(sent.remap);
         // フォルダと、そこに入れたフィードが変わる
-        const changed = new Set<Table>(["folders", "feeds"]);
-        if (workspacesChanged) changed.add("workspaces");
-        options.onChange?.(changed);
+        changed.add("folders");
+        changed.add("feeds");
       }
+      if (changed.size > 0) options.onChange?.(changed);
     } catch (error) {
       if (!(error instanceof ApiError)) throw error;
       if (isRetryable(error)) {
