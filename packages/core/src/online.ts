@@ -79,7 +79,7 @@ export async function discoverFeeds(
  *
  * 応答を書き込むトランザクションの中で、afterWrite を呼び、まだ送っていない操作を重ね直す
  * （応答を待っている間にした操作の、手元の表示を保つ）。返すのは重ね直したあとの手元の状態で、
- * 待っている間に購読をやめていれば null。
+ * 待っている間に購読をやめていれば feed は null。
  */
 export async function subscribe(
   db: Database,
@@ -87,7 +87,7 @@ export async function subscribe(
   input: { url: string; folderId: string | null; workspaceId: string | null },
   signal: AbortSignal,
   afterWrite: (tx: Executor, feed: Feed) => Promise<void> = async () => {},
-): Promise<Feed | null> {
+): Promise<{ feed: Feed | null; workspacesChanged: boolean }> {
   const { data, error, response } = await api.client(signal).POST("/feeds", {
     body: {
       url: input.url,
@@ -116,8 +116,9 @@ export async function subscribe(
     signal.throwIfAborted();
     await putFeed(tx, received);
     await afterWrite(tx, received);
-    await reapplyPending(tx);
-    return (await listFeeds(tx)).find((local) => local.id === received.id) ?? null;
+    const workspacesChanged = await reapplyPending(tx);
+    const feed = (await listFeeds(tx)).find((local) => local.id === received.id) ?? null;
+    return { feed, workspacesChanged };
   });
 }
 

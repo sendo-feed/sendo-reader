@@ -253,3 +253,37 @@ test("先に呼んだ購読追加を送ってから、同じワークスペー�
   expect((await core.sync()).push.rejected).toHaveLength(1);
   expect(await core.listWorkspaces()).toMatchObject([{ id: DEFAULT, name: "default" }]);
 });
+
+test("差分で購読が届いて削除予定のワークスペースが戻ったら購読と一緒に通知する", async () => {
+  const { core, legacy } = await setup();
+  legacy.workspacesSupported = true;
+  legacy.createWorkspace("default", DEFAULT);
+  await core.sync();
+
+  const pulling = Promise.withResolvers<void>();
+  const release = Promise.withResolvers<void>();
+  legacy.onRequest = async (path) => {
+    if (path.startsWith("GET /sync")) {
+      pulling.resolve();
+      await release.promise;
+    }
+  };
+  const pending = core.sync();
+  await pulling.promise;
+  try {
+    await core.deleteWorkspace(DEFAULT);
+    expect(await core.listWorkspaces()).toEqual([]);
+    legacy.subscribe({ url: FEED.url, workspaceId: DEFAULT });
+  } finally {
+    release.resolve();
+  }
+  const changes: string[][] = [];
+  const off = core.onChange((tables) => changes.push([...tables].sort()));
+  try {
+    await pending;
+    expect(changes).toContainEqual(["feeds", "workspaces"]);
+    expect(await core.listWorkspaces()).toMatchObject([{ id: DEFAULT }]);
+  } finally {
+    off();
+  }
+});

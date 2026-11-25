@@ -101,10 +101,17 @@ export async function countPending(db: Executor): Promise<number> {
 }
 
 /** 同期で届いた行の上に、まだ送り終えていない操作を重ねる（楽観的な更新を保つ） */
-export async function reapplyPending(tx: Executor): Promise<void> {
+export async function reapplyPending(tx: Executor): Promise<boolean> {
   // 削除を先に表示したあとで購読が戻ったら、そのワークスペースも見えるようにする。
-  await tx.run("update workspaces set deleted_locally = 0 where deleted_locally = 1");
-  for (const { op } of await listPending(tx)) await applyLocally(tx, op);
+  const hidden = await tx.all<{ id: string }>(
+    "update workspaces set deleted_locally = 0 where deleted_locally = 1 returning id",
+  );
+  const pending = await listPending(tx);
+  for (const { op } of pending) await applyLocally(tx, op);
+  if (hidden.length === 0 && !pending.some(({ op }) => op.kind === "deleteWorkspace")) return false;
+  const after = await tx.all<{ id: string }>("select id from workspaces where deleted_locally = 1");
+  const beforeIds = new Set(hidden.map(({ id }) => id));
+  return after.length !== hidden.length || after.some(({ id }) => !beforeIds.has(id));
 }
 
 /**
@@ -186,7 +193,7 @@ export async function push(
 
     try {
       const sent = await send(api, op, signal);
-      await db.transaction(async (tx) => {
+      const workspacesChanged = await db.transaction(async (tx) => {
         // 送っている間にログアウトしていたら、手元には書かない
         signal.throwIfAborted();
         if (op.kind === "setSavedPage") {
@@ -207,8 +214,9 @@ export async function push(
           await remapFolderId(tx, sent.remap.from, sent.remap.to);
           // 同じ名前のフォルダに付け替えると手元で作ったフォルダの行が消え、そこに重ねていた操作（名前の
           // 変更など）も消える。付け替えた ID で残りの操作を重ね直す
-          await reapplyPending(tx);
+          return reapplyPending(tx);
         }
+        return false;
       });
       result.sent += 1;
       if (op.kind === "setSavedPage") options.onChange?.(new Set<Table>(["savedPages"]));
@@ -216,7 +224,9 @@ export async function push(
         result.remapped.push(sent.remap);
         options.onRemap?.(sent.remap);
         // フォルダと、そこに入れたフィードが変わる
-        options.onChange?.(new Set<Table>(["folders", "feeds"]));
+        const changed = new Set<Table>(["folders", "feeds"]);
+        if (workspacesChanged) changed.add("workspaces");
+        options.onChange?.(changed);
       }
     } catch (error) {
       if (!(error instanceof ApiError)) throw error;
@@ -244,26 +254,26 @@ export async function push(
           }),
         signal,
       );
-      await db.transaction(async (tx) => {
+      const workspacesChanged = await db.transaction(async (tx) => {
         signal.throwIfAborted();
         // 戻している間にまとめられたら残す（次の同期で、重ね直してから送る）
         await complete(tx, next.id, next.rev);
         // 戻したところに、残りの操作を重ね直す（このあと届かなくても、手元は最新の操作のまま）
-        await reapplyPending(tx);
+        return reapplyPending(tx);
       });
-      if (op.kind !== "recordArticleOpens") {
-        options.onChange?.(
-          new Set<Table>(
-            op.kind === "setSavedPage"
-              ? ["savedPages"]
-              : op.kind === "setSettings"
-                ? ["settings"]
-                : isWorkspaceOperation(op)
-                  ? ["workspaces", "feeds"]
-                  : ["folders", "feeds", "articles"],
-          ),
-        );
-      }
+      const changed = new Set<Table>(
+        op.kind === "recordArticleOpens"
+          ? []
+          : op.kind === "setSavedPage"
+            ? ["savedPages"]
+            : op.kind === "setSettings"
+              ? ["settings"]
+              : isWorkspaceOperation(op)
+                ? ["workspaces", "feeds"]
+                : ["folders", "feeds", "articles"],
+      );
+      if (workspacesChanged) changed.add("workspaces");
+      if (changed.size > 0) options.onChange?.(changed);
       const rejection = { op, error };
       result.rejected.push(rejection);
       options.onReject?.(rejection);

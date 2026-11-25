@@ -1014,7 +1014,7 @@ export class ReaderCore {
     workspaceId: string | null = null,
   ): Promise<Feed | null> {
     this.#requireSignedIn();
-    const feed = await this.#online(
+    const { feed, workspacesChanged } = await this.#online(
       async (signal) => {
         const wanted = folderId === null ? null : (this.#folderIds.get(folderId) ?? folderId);
         // 呼ぶ前に積んだフォルダの作成は、ここまでに送ってある。sendo にあるフォルダにだけ、
@@ -1054,7 +1054,7 @@ export class ReaderCore {
         await requireLocalWorkspace(tx, workspaceId);
       },
     );
-    this.#emit(new Set<Table>(["feeds"]));
+    this.#emit(new Set<Table>(workspacesChanged ? ["feeds", "workspaces"] : ["feeds"]));
     return feed;
   }
 

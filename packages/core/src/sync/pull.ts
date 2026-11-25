@@ -83,7 +83,7 @@ export async function pull(db: Database, api: SendoApi, options: PullOptions): P
       options.signal?.throwIfAborted();
       const changed = await applyPage(tx, page);
       await widenPendingMarkRead(tx, deliveredIds(page));
-      await reapplyPending(tx);
+      if (await reapplyPending(tx)) changed.add("workspaces");
       await setSetting(tx, CURSOR_KEY, page.cursor);
       if (!page.hasMore) {
         await markSyncComplete(tx, page.cursor);
