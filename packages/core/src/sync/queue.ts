@@ -120,18 +120,27 @@ export async function reapplyPending(tx: Executor): Promise<boolean> {
  * 押したあとに届いた記事は、sendo で既読・未読が変わっていて（ほかの端末で未読に戻した、など）、
  * 押したときのカーソルでは既読にならないことがある。ID でも頼めば、あとから送ったまとめて既読が
  * 採られ、手元（重ね直して既読）と sendo が揃う。
+ * 選択中のワークスペースに対する操作は、送信済みでも差分の完了前までは手元の表示を保つ。
  */
 export async function reconcilePendingMarkRead(
   tx: Executor,
   deliveredIds: readonly string[],
-): Promise<void> {
-  if (deliveredIds.length === 0) return;
+  done = false,
+): Promise<boolean> {
+  if (deliveredIds.length === 0 && !done) return false;
+  let changed = false;
   const delivered = new Set(deliveredIds);
   for (const { id, op } of await listPending(tx)) {
-    if (op.kind === "markWorkspaceRead" && op.cursor !== null) {
+    if (op.kind === "markWorkspaceRead" && (op.cursor !== null || op.acknowledged === true)) {
       // 新しい状態を受け取った行は、古いカーソルの楽観更新で上書きしない。
       const articleIds = op.articleIds.filter((articleId) => !delivered.has(articleId));
-      if (articleIds.length < op.articleIds.length) {
+      if (op.acknowledged === true && done) {
+        // 差分に出なかった記事は Sendo が既読にしなかったので、手元の印を外す。
+        if (articleIds.length > 0 && (await dropWorkspaceReadOverlay(tx, { ...op, articleIds }))) {
+          changed = true;
+        }
+        await tx.run("delete from pending_ops where id = ?", [id]);
+      } else if (articleIds.length < op.articleIds.length) {
         await tx.run("update pending_ops set payload = ? where id = ?", [
           JSON.stringify({ ...op, articleIds }),
           id,
@@ -149,6 +158,7 @@ export async function reconcilePendingMarkRead(
       id,
     ]);
   }
+  return changed;
 }
 
 export interface RejectedOperation {
@@ -196,7 +206,9 @@ export async function push(
   while (true) {
     signal.throwIfAborted();
     const [next] = await db.all<PendingRow>(
-      "select id, kind, key, payload, rev from pending_ops order by id limit 1",
+      `select id, kind, key, payload, rev from pending_ops
+       where kind <> 'markWorkspaceRead' or json_extract(payload, '$.acknowledged') is not 1
+       order by id limit 1`,
     );
     if (next === undefined) return result;
     if (options.allow !== undefined && !options.allow(next.id)) return result;
@@ -204,7 +216,7 @@ export async function push(
 
     try {
       const sent = await send(api, op, signal);
-      const tables = await db.transaction(async (tx) => {
+      const workspacesChanged = await db.transaction(async (tx) => {
         // 送っている間にログアウトしていたら、手元には書かない
         signal.throwIfAborted();
         if (op.kind === "setSavedPage") {
@@ -220,20 +232,23 @@ export async function push(
             [op.workspaceId, op.feedId, op.subscriptionId],
           );
         }
-        const articlesChanged =
-          op.kind === "markWorkspaceRead" && (await dropWorkspaceReadOverlay(tx, op));
-        await complete(tx, next.id, next.rev);
-        const remapped = sent.remap;
-        if (remapped !== undefined) await remapFolderId(tx, remapped.from, remapped.to);
-        const workspacesChanged =
-          (articlesChanged || remapped !== undefined) && (await reapplyPending(tx));
-        return { articlesChanged, workspacesChanged };
+        if (op.kind === "markWorkspaceRead") {
+          await tx.run("update pending_ops set payload = ? where id = ? and rev = ?", [
+            JSON.stringify({ ...op, acknowledged: true }),
+            next.id,
+            next.rev,
+          ]);
+        } else {
+          await complete(tx, next.id, next.rev);
+        }
+        if (sent.remap === undefined) return false;
+        await remapFolderId(tx, sent.remap.from, sent.remap.to);
+        return reapplyPending(tx);
       });
       result.sent += 1;
       const changed = new Set<Table>();
       if (op.kind === "setSavedPage") changed.add("savedPages");
-      if (tables.articlesChanged) changed.add("articles");
-      if (tables.workspacesChanged) changed.add("workspaces");
+      if (workspacesChanged) changed.add("workspaces");
       if (sent.remap !== undefined) {
         result.remapped.push(sent.remap);
         options.onRemap?.(sent.remap);

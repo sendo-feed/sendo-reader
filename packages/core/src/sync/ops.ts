@@ -43,6 +43,8 @@ export type Operation =
       articleIds: string[];
       /** さらに日時で絞った場合は null。選んだ記事 ID だけを送る。 */
       cursor: string | null;
+      /** 送信済みで、同期の確定状態を待っている。 */
+      acknowledged?: true;
       at: number;
     }
   | { kind: "createFolder"; folderId: string; name: string; at: number }

@@ -1,4 +1,5 @@
 import { expect, test } from "vitest";
+import { ReaderCore } from "../src";
 import { getCompleteCursor } from "../src/sync/pull";
 import { setup } from "./helpers";
 
@@ -212,4 +213,29 @@ test("画面の未読数を取得してから同期が進んだときは、そ�
   ).rejects.toMatchObject({ code: "workspace_sync_changed" });
   expect(await core.countPending()).toBe(0);
   expect(await core.getArticle(recent.id)).toMatchObject({ readAt: null });
+});
+
+test("送信後の同期が失敗しても、再起動後に既読表示を保ち、送信を繰り返さない", async () => {
+  const { db, core, server, publicSpace, publicArticle } = await seed();
+  await core.markAllRead({ all: true }, { workspaceIds: [publicSpace.id] });
+  server.onRequest = async (path) => {
+    if (path.startsWith("GET /sync")) server.failNext("network");
+  };
+  await expect(core.sync()).rejects.toMatchObject({ kind: "network" });
+  expect(publicArticle.readAt).not.toBeNull();
+  expect(server.markReadRequests).toHaveLength(1);
+
+  const reopened = await ReaderCore.open({
+    db,
+    baseUrl: "https://sendo.test/api/v1",
+    fetch: server.fetch,
+  });
+  expect(await reopened.getArticle(publicArticle.id)).toMatchObject({ readAt: expect.any(Number) });
+  server.onRequest = null;
+  await reopened.sync();
+  expect(await reopened.getArticle(publicArticle.id)).toMatchObject({
+    readAt: publicArticle.readAt,
+  });
+  expect(server.markReadRequests).toHaveLength(1);
+  expect(await reopened.countPending()).toBe(0);
 });

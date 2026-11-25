@@ -82,7 +82,9 @@ export async function pull(db: Database, api: SendoApi, options: PullOptions): P
       // ので、ここで確かめれば、ログアウトの消去のあとに書き戻すことはない）
       options.signal?.throwIfAborted();
       const changed = await applyPage(tx, page);
-      await reconcilePendingMarkRead(tx, deliveredIds(page));
+      if (await reconcilePendingMarkRead(tx, deliveredIds(page), !page.hasMore)) {
+        changed.add("articles");
+      }
       if (await reapplyPending(tx)) changed.add("workspaces");
       await setSetting(tx, CURSOR_KEY, page.cursor);
       if (!page.hasMore) {
@@ -133,6 +135,7 @@ async function resync(
          select json_extract(payload, '$.articleId') from pending_ops
          union
          select value from pending_ops, json_each(json_extract(payload, '$.articleIds'))
+         where kind <> 'markWorkspaceRead' or json_extract(payload, '$.acknowledged') is not 1
        )`,
     );
     await clearSyncedRows(tx);
@@ -152,6 +155,7 @@ async function resync(
         columns.map((column) => row[column] ?? null),
       );
     }
+    if (cursor !== null) await reconcilePendingMarkRead(tx, [], true);
     await reapplyPending(tx);
     if (cursor !== null) {
       await setSetting(tx, CURSOR_KEY, cursor);
