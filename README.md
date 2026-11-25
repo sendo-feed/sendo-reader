@@ -65,8 +65,8 @@ pnpm dev
 
 Sendo と並べて、コンテナで動かします（[決定](docs/decisions/container.md)）。上流の CI が作ったイメージ（`ghcr.io/sendo-feed/sendo-reader`）を、Sendo の [`compose.yaml`](https://github.com/sendo-feed/sendo/blob/main/compose.yaml) で Sendo のイメージと並べて動かすので、fork もビルドも要りません。手順は [Sendo の README](https://github.com/sendo-feed/sendo#動かす) にあります。
 
-- 外に出すのは reader のコンテナのポート（`127.0.0.1:8080`）だけです。reader のコンテナが画面を返し、Sendo のパス（`/api`、`/mcp`、OAuth、Google Reader API、`/healthz`）を、compose の中の Sendo（`http://sendo:8787`）に中継します。Sendo の通知（WebSocket の `/api/v1/sync/updates`）も中継します。外からは reader のオリジン 1 つに見えます
-- Sendo の `PUBLIC_URL` と `READER_URL` には、どちらも reader のオリジン（例：`https://reader.example.com`）を入れます。Google のリダイレクト URI、リーダーアプリのサーバー、MCP の URL も、このオリジンにします
+- 外に出すのは reader のコンテナのポート（`127.0.0.1:8080`）だけです。reader のコンテナが画面を返し、Sendo のパス（`/api`、`/mcp`、OAuth、`/healthz`）を、compose の中の Sendo（`http://sendo:8787`）に中継します。Sendo の通知（WebSocket の `/api/v1/sync/updates`）も中継します。外からは reader のオリジン 1 つに見えます
+- Sendo の `PUBLIC_URL` と `READER_URL` には、どちらも reader のオリジン（例：`https://reader.example.com`）を入れます。Google のリダイレクト URI、REST API と MCP の URL も、このオリジンにします
 - TLS は、手前に置くリバースプロキシ（Caddy など）や Cloudflare Tunnel で終えます。コンテナは HTTP（既定はポート 8080）だけを受けます
 - 手前のプロキシは、WebSocket の Upgrade を通すようにします（Caddy と Cloudflare Tunnel は何も足さずに通します。nginx などの設定は [Sendo の README](https://github.com/sendo-feed/sendo#動かす) にあります）。通さなくても、画面は定期同期だけで動きます
 - reader は、Sendo のヘルスチェックが通ってから始まります。更新は `docker compose pull && docker compose up -d` で、Sendo と一緒に新しくなります

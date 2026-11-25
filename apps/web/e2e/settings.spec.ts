@@ -306,6 +306,8 @@ test("Connections を離れたら発行したトークンの中身を捨てる",
   await signIn(page);
   await page.getByRole("tab", { name: "Connections", exact: true }).click();
   await page.getByRole("button", { name: "+ New token", exact: true }).click();
+  await expect(page.getByLabel("Use with")).toHaveValue("reader");
+  await expect(page.getByLabel("Use with").locator("option:checked")).toHaveText("REST API");
   await page.getByLabel("Name", { exact: true }).fill("One-time token");
   await page.getByRole("button", { name: "Create token", exact: true }).click();
   const secret = page.locator(".secret");
@@ -320,7 +322,8 @@ test("Connections を離れたら発行したトークンの中身を捨てる",
     page
       .getByRole("table", { name: "Access tokens", exact: true })
       .locator("tbody tr", { hasText: "One-time token" }),
-  ).toBeVisible();
+  ).toContainText("REST API");
+  expect([...server.tokens.values()][0]?.purpose).toBe("reader");
   await expect(page.getByText(value, { exact: true })).toHaveCount(0);
   await expect(page.getByRole("dialog")).toHaveCount(0);
   await page.getByRole("button", { name: "+ New token", exact: true }).click();

@@ -2248,7 +2248,7 @@ export interface paths {
         put?: never;
         /**
          * アクセストークンを発行する
-         * @description リーダーアプリ（Reeder、NetNewsWire など）のパスワード欄や、エージェント・スクリプトの Authorization: Bearer に使う。
+         * @description REST API または MCP のクライアントで Authorization: Bearer に使う。
          */
         post: {
             parameters: {
@@ -3074,7 +3074,7 @@ export interface components {
         };
         AccessToken: {
             id: string;
-            /** @example Reeder */
+            /** @example CLI */
             name: string;
             /** Format: date-time */
             createdAt: string;
@@ -3084,7 +3084,7 @@ export interface components {
              */
             lastUsedAt: string | null;
             /**
-             * @description 用途。reader はリーダーアプリ（Google Reader API）と REST API 用、mcp は /mcp（MCP サーバー）用。用途の違う入口では使えない
+             * @description 用途。reader は REST API 用、mcp は /mcp（MCP サーバー）用。用途の違う入口では使えない
              * @enum {string}
              */
             purpose: "reader" | "mcp";
@@ -3094,11 +3094,11 @@ export interface components {
         AccessTokenRequest: {
             /**
              * @description 用途の名前（前後の空白を除いて 1〜100 文字）
-             * @example Reeder
+             * @example CLI
              */
             name: string;
             /**
-             * @description 用途。既定は reader（リーダーアプリと REST API 用）。mcp なら /mcp でだけ使える
+             * @description 用途。既定は reader（REST API 用）。mcp なら /mcp でだけ使える
              * @enum {string}
              */
             purpose?: "reader" | "mcp";

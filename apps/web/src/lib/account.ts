@@ -9,8 +9,8 @@ export const account = createAccountApi({ baseUrl: "/api/v1" });
 
 /** 用途の名前 */
 export const PURPOSE_LABELS = {
-  reader: "リーダーアプリ用",
-  mcp: "MCP 用",
+  reader: "REST API",
+  mcp: "MCP client",
 } as const;
 
 /** 範囲の説明 */
