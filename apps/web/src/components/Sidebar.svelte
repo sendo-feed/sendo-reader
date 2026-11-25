@@ -23,8 +23,11 @@
   const reader = useReader();
   let nav = $state<HTMLElement>();
 
-  export function focus() {
-    nav?.focus({ preventScroll: true });
+  export async function focusAfterOpening(isOpen: () => boolean) {
+    const element = nav;
+    if (element === undefined) return;
+    await Promise.allSettled(element.getAnimations().map((animation) => animation.finished));
+    if (isOpen()) element.focus({ preventScroll: true });
   }
 
   const currentHref = $derived(viewHref(router.view));

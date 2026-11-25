@@ -40,7 +40,7 @@
   async function openSidebarFromArticle() {
     menuOpen = true;
     await tick();
-    if (menuOpen) sidebar?.focus();
+    await sidebar?.focusAfterOpening(() => menuOpen);
   }
   let helpOpen = $state(false);
   let confirmOpen = $state(false);
@@ -1124,7 +1124,6 @@
     .reader.menu-open > :global(.sidebar) {
       visibility: visible;
       transform: none;
-      transition: transform 0.18s ease-out;
     }
 
     /* メニューの後ろを暗くする。メニューと同じ速さで、暗くして・明るくする */
