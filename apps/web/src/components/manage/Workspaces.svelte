@@ -16,7 +16,7 @@
       : reader.workspaces.find((workspace) => workspace.id === editing?.id),
   );
   const hasFeeds = $derived(
-    current !== undefined && reader.feeds.some((feed) => feed.workspaceId === current.id),
+    current !== undefined && reader.allFeeds.some((feed) => feed.workspaceId === current.id),
   );
 
   function edit(workspace: Workspace | null) {

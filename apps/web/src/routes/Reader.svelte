@@ -12,6 +12,7 @@
   import Icon, { type IconName } from "../components/Icon.svelte";
   import ShortcutHelp from "../components/ShortcutHelp.svelte";
   import Sidebar from "../components/Sidebar.svelte";
+  import WorkspaceSelector from "../components/WorkspaceSelector.svelte";
   import { useReader } from "../lib/context";
   import { layout, reducedMotion } from "../lib/layout.svelte";
   import { ArticleListState, type ListProgress } from "../lib/list.svelte";
@@ -38,6 +39,65 @@
   let confirmOpen = $state(false);
   let progressOpen = $state(false);
   let articleView = $state<ArticleView>();
+  let lastArticleRoute = $state<string | null>(null);
+  let verifiedArticleKey = $state<string | null>(null);
+  let verifiedArticleFeed = $state<string | null>(null);
+  const workspaceIds = $derived(reader.visibleWorkspaceIds);
+  const requestedWorkspaceIds = $derived(reader.workspaceIds);
+  const articleRoute = $derived(JSON.stringify([router.articleId, reader.user?.id]));
+  const articleKey = $derived(JSON.stringify([articleRoute, requestedWorkspaceIds ?? null]));
+  const detailArticleId = $derived(
+    requestedWorkspaceIds === undefined || lastArticleRoute === articleRoute
+      ? router.articleId
+      : null,
+  );
+  const detailChecking = $derived(
+    requestedWorkspaceIds !== undefined &&
+      (!reader.workspaceDataReady ||
+        verifiedArticleKey !== articleKey ||
+        !reader.feeds.some((feed) => feed.id === verifiedArticleFeed)),
+  );
+
+  $effect(() => {
+    const id = router.articleId;
+    const route = articleRoute;
+    const key = articleKey;
+    const ids = requestedWorkspaceIds;
+    const complete = reader.workspaceScopeComplete;
+    void reader.articlesVersion;
+    if (ids === undefined) {
+      lastArticleRoute = route;
+      return;
+    }
+    if (!reader.workspaceDataReady) return;
+    const view = router.view;
+    if (
+      (view.kind === "feed" && !reader.feeds.some((feed) => feed.id === view.id)) ||
+      (view.kind === "folder" && !reader.folders.some((folder) => folder.id === view.id))
+    ) {
+      if (complete) untrack(() => router.replace("/"));
+      return;
+    }
+    if (id === null) return;
+    let active = true;
+    void reader.client
+      .getArticle(id, ids)
+      .then((article) => {
+        if (!active || key !== articleKey || !reader.workspaceDataReady) return;
+        if (article === null) {
+          verifiedArticleKey = null;
+          if (complete) router.replace("/");
+        } else {
+          lastArticleRoute = route;
+          verifiedArticleFeed = article.feedId;
+          verifiedArticleKey = key;
+        }
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  });
 
   // 別の画面に移ったら、メニューを閉じる
   $effect(() => {
@@ -99,7 +159,7 @@
     const reading = router.articleId !== null;
     untrack(() => {
       if (!reading && wasReading && layout.pageScroll) {
-        const anchor = queryKey === null ? null : router.takeList(queryKey);
+        const anchor = positionKey === null ? null : router.takeList(positionKey);
         window.scrollTo({ top: listScrollY ?? 0 });
         if (listScrollY === null && anchor !== null) void listView?.restore(anchor);
       }
@@ -182,7 +242,10 @@
         return {
           kind: "feed",
           query: { feedId: view.id, ...state },
-          title: reader.feedTitle(view.id),
+          title:
+            workspaceIds !== undefined && !reader.feeds.some((feed) => feed.id === view.id)
+              ? "All"
+              : reader.feedTitle(view.id),
           scope: { feedId: view.id },
           unread: reader.unread.feeds.get(view.id) ?? 0,
         };
@@ -190,7 +253,9 @@
         return {
           kind: "folder",
           query: { folderId: view.id, ...state },
-          title: reader.folders.find((f) => f.id === view.id)?.name ?? "Folder",
+          title:
+            reader.folders.find((f) => f.id === view.id)?.name ??
+            (workspaceIds === undefined ? "Folder" : "All"),
           scope: { folderId: view.id },
           unread: reader.unread.folders.get(view.id) ?? 0,
         };
@@ -241,7 +306,10 @@
   // 前に出たときに知らせる。裏に
   // あるタブは知らせない（タブが 2 つあれば、最後に開いた・前に出たタブの一覧に従う）。一覧を開く
   // たびに回の番号を替え、core はタブごとに開いた時刻を覚える（前に出ただけなら、開いた時刻を変えない）
-  const openListKey = $derived(JSON.stringify(openListScope(router.view, router.searchQuery)));
+  const openListKey = $derived.by(() => {
+    const scope = openListScope(router.view, router.searchQuery);
+    return JSON.stringify(scope === null ? null : { ...scope, workspaceIds });
+  });
   const tab = crypto.randomUUID();
   let openSeq = 0;
   $effect(() => {
@@ -265,11 +333,17 @@
   // 条件が変わったときだけ読み直す（記事を開いたり閉じたりしただけでは読み直さない。
   // query は URL が変わるたびに作り直されるので、中身を文字列にして比べる）
   // 探す言葉が空の検索では、何も読まない（"null" を鍵にして、何も出さない一覧にする）
-  const queryKey = $derived.by(() => {
+  const positionKey = $derived.by(() => {
     if (listing === null) return null;
     const blank = listing.kind === "search" && router.searchQuery.trim() === "";
     return JSON.stringify(blank ? null : listing.query);
   });
+  const queryKey = $derived(
+    positionKey === null
+      ? null
+      : JSON.stringify([reader.user?.id, requestedWorkspaceIds ?? null, positionKey]),
+  );
+  let previousListUser: string | undefined;
   // 別の一覧に替えたら、前の一覧の位置は使わない
   $effect.pre(() => {
     void queryKey;
@@ -278,15 +352,22 @@
 
   // 読み込み直したときや、戻る・進むで来たときは、読んだあとに、前に見ていた一覧の位置に戻す。
   // 狭い画面で記事を開いているときは、一覧が出ていないので、記事から戻るときに戻す
-  $effect(() => {
+  $effect.pre(() => {
     const key = queryKey;
     untrack(() => {
-      if (key === null) return;
-      void list.show(JSON.parse(key) as ArticleQuery | null).then(() => {
-        if (key !== queryKey || (layout.pageScroll && router.articleId !== null)) return;
-        const anchor = router.takeList(key);
-        if (anchor !== null) void listView?.restore(anchor);
-      });
+      const position = positionKey;
+      if (key === null || position === null) return;
+      const userId = reader.user?.id;
+      const query = JSON.parse(position) as ArticleQuery | null;
+      const ids = requestedWorkspaceIds;
+      void list
+        .show(query === null ? null : { ...query, workspaceIds: ids }, previousListUser !== userId)
+        .then(() => {
+          if (key !== queryKey || (layout.pageScroll && router.articleId !== null)) return;
+          const anchor = router.takeList(position);
+          if (anchor !== null) void listView?.restore(anchor);
+        });
+      previousListUser = userId;
     });
   });
 
@@ -305,9 +386,13 @@
     clearTimeout(rememberTimer);
     const articleId = router.articleId;
     const position: Position = {};
-    if (queryKey !== null && listView !== undefined && !(layout.pageScroll && articleId !== null)) {
+    if (
+      positionKey !== null &&
+      listView !== undefined &&
+      !(layout.pageScroll && articleId !== null)
+    ) {
       const anchor = listView.anchor();
-      position.list = anchor === null ? undefined : { key: queryKey, anchor };
+      position.list = anchor === null ? undefined : { key: positionKey, anchor };
     }
     if (articleId !== null && articleView !== undefined) {
       const xPosts = articleView.xPostSizes();
@@ -391,7 +476,8 @@
   }
 
   function askMarkAll() {
-    if (listing?.scope != null && (listing.unread ?? 0) > 0) confirmOpen = true;
+    if (workspaceIds === undefined && listing?.scope != null && (listing.unread ?? 0) > 0)
+      confirmOpen = true;
   }
 
   /** 取り消せる数の上限。sendo には記事ごとに送るので、多すぎるときは取り消しを出さない */
@@ -438,7 +524,7 @@
   /** 開いている一覧の範囲を、まとめて既読にする。range を渡すと、その一部だけ */
   async function markAll(range: Range = {}, reload = false) {
     confirmOpen = false;
-    if (listing?.scope == null) return;
+    if (workspaceIds !== undefined || listing?.scope == null) return;
     const key = queryKey;
     const generation = list.generation;
     try {
@@ -484,7 +570,7 @@
   /** 一覧の終わりに出す、次へ進むボタン。未読が残っていれば既読にしてから、次のフィードへ移る */
   const next = $derived.by(() => {
     if (listing === null || listing.scope === null) return null;
-    const unread = listing.unread ?? 0;
+    const unread = requestedWorkspaceIds === undefined ? (listing.unread ?? 0) : 0;
     const feed = listing.kind === "feed" ? besideFeed(1) : null;
     if (feed === null) {
       return unread === 0 ? null : { label: "Mark all as read", go: () => void markAll({}, true) };
@@ -526,6 +612,11 @@
 
   /** キーボードの操作（一覧は components/ShortcutHelp.svelte）。文字を打っているときは何もしない */
   function onKeydown(event: KeyboardEvent) {
+    if (
+      requestedWorkspaceIds !== undefined &&
+      (!reader.workspaceDataReady || (router.articleId !== null && detailChecking))
+    )
+      return;
     if (event.defaultPrevented || event.isComposing) return;
     if (event.ctrlKey || event.metaKey || event.altKey) return;
     const target = event.target;
@@ -597,7 +688,7 @@
 <div
   class="reader"
   class:managing={listing === null}
-  class:reading={router.articleId !== null}
+  class:reading={detailArticleId !== null}
   class:menu-open={menuOpen}
   class:sidebar-collapsed={prefs.value.sidebarCollapsed}
   class:peeking
@@ -614,6 +705,11 @@
   {#if listing === null}
     <div class="page">
       <div class="bar">{pageTitle}</div>
+      {#if reader.workspacesAvailable || reader.workspaceIds !== undefined}
+        <div class="page-workspaces">
+          <WorkspaceSelector />
+        </div>
+      {/if}
       {#if router.view.kind === "manage"}
         <Manage />
       {:else if router.view.kind === "add"}
@@ -628,7 +724,7 @@
       {list}
       title={listing.title}
       kind={listing.kind}
-      unread={listing.scope === null ? null : listing.unread}
+      unread={workspaceIds !== undefined || listing.scope === null ? null : listing.unread}
       onmarkall={askMarkAll}
       search={listing.kind === "search" ? router.searchQuery : null}
       onsearch={(query) => router.setSearchQuery(query)}
@@ -640,7 +736,8 @@
     />
     <ArticleView
       bind:this={articleView}
-      articleId={router.articleId}
+      articleId={detailArticleId}
+      scopeChecking={detailChecking}
       {list}
       onstep={step}
       onpeek={peek}
@@ -736,6 +833,10 @@
 {/if}
 
 <style>
+  .page-workspaces {
+    padding: 0.75rem 1rem 0;
+  }
+
   .reader {
     display: grid;
     grid-template-columns: var(--sidebar-width, 17rem) clamp(20rem, 30vw, 27rem) minmax(0, 1fr);

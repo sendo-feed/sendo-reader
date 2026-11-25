@@ -21,7 +21,7 @@ import type { SyncStatus } from "../sync/scheduler";
  * 上げると、番号の違うタブどうしは、読み込み直すまでやり取りしない（「版が合わない」失敗を返す）。
  * ふつうの配備では上げない（版の混ざったタブも、そのまま使える）。
  */
-export const PROTOCOL_VERSION = 5;
+export const PROTOCOL_VERSION = 6;
 
 /** DB の名前、代表を決めるロックの名前、タブの間のチャンネルの名前の元の既定 */
 export const DEFAULT_NAMESPACE = "sendo-reader";
@@ -67,6 +67,7 @@ export const READER_METHODS = [
   "listFolders",
   "listWorkspaces",
   "workspacesAvailable",
+  "workspaceData",
   "listFeeds",
   "listLatestArticleDates",
   "getFeedFetchTimes",

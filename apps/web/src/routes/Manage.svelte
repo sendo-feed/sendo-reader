@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { type Folder, feedName } from "@sendo-reader/core";
+  import type { Folder } from "@sendo-reader/core";
   import Dialog from "../components/Dialog.svelte";
   import Icon from "../components/Icon.svelte";
   import AddFeed from "../components/manage/AddFeed.svelte";
@@ -29,10 +29,24 @@
   );
   let feedsView = $state<Feeds>();
 
+  $effect(() => {
+    void reader.workspaceIds;
+    notice = "";
+  });
+
   const accountId = $derived(reader.user?.id);
   $effect(() => {
     void accountId;
     workspacesOpen = false;
+  });
+
+  const folderVisible = $derived(
+    editing === null ||
+      reader.workspaceIds === undefined ||
+      (reader.workspaceDataReady && reader.folders.some((folder) => folder.id === editing?.id)),
+  );
+  $effect(() => {
+    if (reader.workspaceDataReady && !folderVisible) folderOpen = false;
   });
 
   function editFolder(folder: Folder | null) {
@@ -107,7 +121,7 @@
         addOpen = false;
         query = "";
         feedsView?.reveal(feed.folderId);
-        notice = `${feedName(feed)} を購読しました。`;
+        notice = "購読しました。";
       }}
     />
   {/if}
@@ -128,13 +142,16 @@
   </div>
 </Dialog>
 
-<Dialog bind:open={folderOpen} title={editing === null ? "New folder" : editing.name}>
-  {#if folderOpen}
+<Dialog
+  bind:open={folderOpen}
+  title={editing === null ? "New folder" : folderVisible ? editing.name : "Folder"}
+>
+  {#if folderOpen && folderVisible}
     <Folders
       folder={editing}
       oncomplete={(message) => {
         folderOpen = false;
-        notice = message;
+        notice = reader.workspaceIds === undefined ? message : "フォルダを更新しました。";
       }}
       oncancel={() => (folderOpen = false)}
     />

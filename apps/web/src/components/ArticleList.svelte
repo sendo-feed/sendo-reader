@@ -17,6 +17,7 @@
   import Icon from "./Icon.svelte";
   import ReadCelebration from "./ReadCelebration.svelte";
   import SavedPages from "./SavedPages.svelte";
+  import WorkspaceSelector from "./WorkspaceSelector.svelte";
 
   let {
     list,
@@ -64,15 +65,19 @@
   const rows = $derived.by(() => {
     const now = Date.now();
     let previous = "";
-    return list.articles.map((article) => {
-      const label = dayLabel(
-        kind === "recentlyRead" ? (article.readAt ?? article.publishedAt) : article.publishedAt,
-        now,
-      );
-      const heading = label === previous ? null : label;
-      previous = label;
-      return { article, heading };
-    });
+    const ids =
+      reader.workspaceIds === undefined ? null : new Set(reader.scopeFeeds.map((feed) => feed.id));
+    return list.articles
+      .filter((article) => ids === null || ids.has(article.feedId))
+      .map((article) => {
+        const label = dayLabel(
+          kind === "recentlyRead" ? (article.readAt ?? article.publishedAt) : article.publishedAt,
+          now,
+        );
+        const heading = label === previous ? null : label;
+        previous = label;
+        return { article, heading };
+      });
   });
 
   function articleHref(id: string): string {
@@ -760,7 +765,13 @@
   }
 </script>
 
-<section class="article-list" aria-label={title} bind:this={scroller} use:pullToRefresh>
+<section
+  class="article-list"
+  class:scope-checking={reader.workspaceIds !== undefined && !reader.workspaceDataReady}
+  aria-label={title}
+  bind:this={scroller}
+  use:pullToRefresh
+>
   <header>
     {#if progress !== null}
       <button
@@ -833,6 +844,9 @@
         <Icon name="checkAll" />
       </button>
     {/if}
+    {#if reader.workspacesAvailable || reader.workspaceIds !== undefined}
+      <WorkspaceSelector />
+    {/if}
   </header>
 
   <!--
@@ -866,7 +880,9 @@
   {/if}
 
   {#if kind === "starred"}
-    <SavedPages />
+    {#if reader.workspaceIds === undefined}
+      <SavedPages />
+    {/if}
   {/if}
 
   {#if search !== null && search.trim() === ""}
@@ -980,7 +996,11 @@
         class:completed={endCompleted}
         style:padding-top={endScrollSpace > 0 ? `calc(1.5rem + ${endScrollSpace}px)` : undefined}
         use:endSpace={{
-          enabled: prefs.value.markReadOnScroll && kind !== "search" && kind !== "recentlyRead",
+          enabled:
+            prefs.value.markReadOnScroll &&
+            (reader.workspaceIds === undefined || reader.workspaceDataReady) &&
+            kind !== "search" &&
+            kind !== "recentlyRead",
           pageScroll: layout.pageScroll,
           extra: endScrollSpace,
         }}
@@ -1010,6 +1030,10 @@
 {/if}
 
 <style>
+  .scope-checking {
+    visibility: hidden;
+  }
+
   .article-list {
     display: flex;
     flex-direction: column;
@@ -1451,5 +1475,8 @@
     .row:global([data-settling]) > :global(.item) {
       transition: none;
     }
+  }
+  .scope-checking header {
+    visibility: visible;
   }
 </style>

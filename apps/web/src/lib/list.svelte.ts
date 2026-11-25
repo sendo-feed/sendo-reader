@@ -108,7 +108,13 @@ export class ArticleListState {
    * 条件を替えて、最初から読む。null なら、何も出さない一覧にする（探す言葉が空の検索）。
    * 画面に出していない記事を、キーボードの操作の相手にしない
    */
-  show(query: ArticleQuery | null): Promise<void> {
+  show(query: ArticleQuery | null, clear = false): Promise<void> {
+    if (clear || this.#query.workspaceIds !== query?.workspaceIds) {
+      this.fresh = 0;
+      this.#articles = [];
+      this.hasMore = false;
+      this.#after = undefined;
+    }
     this.#empty = query === null;
     this.#query = query ?? {};
     this.opened += 1;
@@ -125,13 +131,13 @@ export class ArticleListState {
    * 読み直した、など）、その読み直しが終わるまで待つ。解けたときには、いちばん新しい読み出しの
    * 結果が入っている（show のあとに、一覧の位置を戻すため。docs/decisions/ui.md の 1）
    */
-  load(): Promise<void> {
-    const loading = this.#load();
+  load(count = PAGE): Promise<void> {
+    const loading = this.#load(count);
     this.#loading = loading;
     return loading;
   }
 
-  async #load(): Promise<void> {
+  async #load(count: number): Promise<void> {
     const current = ++this.#generation;
     if (this.#empty) {
       this.#after = undefined;
@@ -145,13 +151,21 @@ export class ArticleListState {
     this.loading = true;
     try {
       const page = await this.#client.listArticles({ ...query, limit: PAGE });
+      let more = page.length === PAGE;
+      while (more && page.length < count && current === this.#generation) {
+        const after = cursorOf(page.at(-1));
+        if (after === undefined) break;
+        const next = await this.#client.listArticles({ ...query, limit: PAGE, after });
+        page.push(...next);
+        more = next.length === PAGE;
+      }
       // あとから始めた読み出しがある。結果は当てず、そちらが終わるのを待つ（そちらの失敗は、
       // そちらを呼んだ側に返す）
       if (current !== this.#generation) return this.#loading.catch(() => {});
       this.#removed.clear();
       this.#after = cursorOf(page.at(-1));
       this.#articles = page;
-      this.hasMore = page.length === PAGE;
+      this.hasMore = more;
       this.fresh = 0;
       this.#loadedQuery = query;
     } finally {
@@ -202,8 +216,11 @@ export class ArticleListState {
    */
   async refresh(): Promise<void> {
     if (this.#empty) return;
-    if (this.articles.length === 0) {
-      await this.load();
+    if (
+      this.articles.length === 0 ||
+      (this.#query.state === "starred" && this.#query.workspaceIds !== undefined)
+    ) {
+      await this.load(this.articles.length);
       return;
     }
     const current = this.#generation;
@@ -213,6 +230,7 @@ export class ArticleListState {
     const [latest, top] = await Promise.all([
       this.#client.getArticles(
         boundaryId !== undefined && !shown.has(boundaryId) ? [...requested, boundaryId] : requested,
+        this.#query.workspaceIds,
       ),
       // 先頭のページ。出している記事の間や前に、条件に合う記事が加わっていないかを見る
       this.#client.listArticles({ ...this.#query, limit: PAGE }),

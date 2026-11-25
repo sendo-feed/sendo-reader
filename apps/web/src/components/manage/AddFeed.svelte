@@ -21,17 +21,30 @@
   let candidates = $state<FeedCandidate[] | null>(null);
   let chosen = $state<string | null>(null);
   let folderId = $state<string>("");
-  let workspaceId = $state<string>("");
-  const missingWorkspace = $derived(
-    workspaceId !== "" &&
+  const mustChooseWorkspace = $derived(
+    reader.workspaceIds !== undefined && reader.visibleWorkspaceIds?.length !== 1,
+  );
+  const choose = "choose";
+  let chosenWorkspace = $state<string | undefined>(undefined);
+  const workspaceId = $derived(
+    chosenWorkspace !== undefined &&
+      chosenWorkspace !== "" &&
       (!reader.workspacesAvailable ||
-        !reader.workspaces.some((workspace) => workspace.id === workspaceId)),
+        !reader.workspaces.some((workspace) => workspace.id === chosenWorkspace))
+      ? choose
+      : (chosenWorkspace ??
+          (mustChooseWorkspace ? choose : (reader.visibleWorkspaceIds?.[0] ?? ""))),
+  );
+  const choosingWorkspace = $derived(
+    reader.workspacesAvailable || (chosenWorkspace !== undefined && chosenWorkspace !== ""),
   );
   const workspaceLabel = $derived(
-    missingWorkspace
+    workspaceId === choose
       ? "Choose workspace"
-      : (reader.workspaces.find((workspace) => workspace.id === workspaceId)?.name ??
-          "No workspace"),
+      : workspaceId === ""
+        ? "No workspace"
+        : (reader.workspaces.find((workspace) => workspace.id === workspaceId)?.name ??
+          "Choose workspace"),
   );
   let busy = $state(false);
   let message = $state<string | null>(null);
@@ -53,7 +66,7 @@
   }
 
   async function subscribe() {
-    if (chosen === null || missingWorkspace) return;
+    if (chosen === null || (choosingWorkspace && workspaceId === choose)) return;
     busy = true;
     message = null;
     try {
@@ -64,6 +77,7 @@
       );
       url = "";
       candidates = null;
+      chosenWorkspace = undefined;
       if (active && feed !== null) onsubscribed(feed);
     } catch (error) {
       message = describeError(error);
@@ -113,17 +127,17 @@
           <option value={folder.id}>{folder.name}</option>
         {/each}
       </select>
-      {#if reader.workspacesAvailable || missingWorkspace}
+      {#if choosingWorkspace}
         <details>
           <summary>{workspaceLabel}</summary>
           <label for="feed-workspace">Workspace</label>
           <select
             id="feed-workspace"
-            value={missingWorkspace ? "missing" : workspaceId}
-            onchange={(event) => (workspaceId = event.currentTarget.value)}
+            value={workspaceId}
+            onchange={(event) => (chosenWorkspace = event.currentTarget.value)}
           >
-            {#if missingWorkspace}
-              <option value="missing" disabled>Choose workspace</option>
+            {#if mustChooseWorkspace || workspaceId === choose}
+              <option value={choose} disabled>Choose workspace</option>
             {/if}
             <option value="">No workspace</option>
             {#each reader.workspacesAvailable ? reader.workspaces : [] as workspace (workspace.id)}
@@ -136,7 +150,7 @@
         type="button"
         class="primary"
         onclick={subscribe}
-        disabled={chosen === null || missingWorkspace}
+        disabled={chosen === null || (choosingWorkspace && workspaceId === choose)}
       >
         Subscribe
       </button>

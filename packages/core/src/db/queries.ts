@@ -11,6 +11,8 @@ import type { Executor, SqlValue } from "./database";
 /** 画面のための読み出し。手元の DB だけを読み、ネットワークは待たない */
 
 export interface ArticleQuery {
+  /** 表示対象のワークスペース。省略はすべて、空配列は表示対象なし */
+  workspaceIds?: readonly string[] | undefined;
   /** このフィードの記事だけ */
   feedId?: string;
   /** このフォルダのフィードの記事だけ */
@@ -86,6 +88,7 @@ const ARTICLE_COLUMNS =
  * すべての記事
  */
 export interface ArticleScope {
+  workspaceIds?: readonly string[] | undefined;
   /** このフィードの記事だけ */
   feedId?: string | undefined;
   /** このフォルダのフィードの記事だけ */
@@ -98,6 +101,7 @@ export interface ArticleScope {
 
 /** 範囲の条件を where と params に足す（記事の表の別名は a） */
 export function addScopeConditions(scope: ArticleScope, where: string[], params: SqlValue[]): void {
+  addWorkspaceCondition(scope.workspaceIds, where, params);
   if (scope.feedId !== undefined) {
     where.push("a.feed_id = ?");
     params.push(scope.feedId);
@@ -117,12 +121,32 @@ export function addScopeConditions(scope: ArticleScope, where: string[], params:
   }
 }
 
+/** 所属先・購読の両方が届いた記事だけを選ぶ。 */
+function addWorkspaceCondition(
+  workspaceIds: readonly string[] | undefined,
+  where: string[],
+  params: SqlValue[],
+): void {
+  if (workspaceIds === undefined) return;
+  if (workspaceIds.length === 0) {
+    where.push("0");
+    return;
+  }
+  where.push(`exists (
+    select 1 from feeds visible_feed join workspaces w on w.id = visible_feed.workspace_id
+    where visible_feed.id = a.feed_id and visible_feed.subscription_id is not null
+      and w.id in (select value from json_each(?)) and w.deleted_locally = 0
+  )`);
+  params.push(JSON.stringify(workspaceIds));
+}
+
 /** 公開日時の新しい順・古い順、または既読にした日時の新しい順に読む。同時刻なら id で決める */
 export async function listArticles(db: Executor, query: ArticleQuery = {}): Promise<Article[]> {
   const where: string[] = [];
   const params: SqlValue[] = [];
   addScopeConditions(
     {
+      workspaceIds: query.workspaceIds,
       feedId: query.feedId,
       folderId: query.folderId,
       starred: query.state === "starred",
@@ -135,6 +159,10 @@ export async function listArticles(db: Executor, query: ArticleQuery = {}): Prom
   const recentlyRead = query.order === "recentlyRead";
   if (query.state === "read" || recentlyRead) where.push("a.read_at is not null");
   const column = recentlyRead ? "a.read_at" : "a.published_at";
+  const deduplicate = query.state === "starred" && query.workspaceIds !== undefined;
+  const base = `select ${ARTICLE_COLUMNS} from articles a
+     ${where.length > 0 ? `where ${where.join(" and ")}` : ""}`;
+  if (deduplicate) where.length = 0;
   if (query.after !== undefined) {
     const time = recentlyRead ? query.after.readAt : query.after.publishedAt;
     if (time === undefined || time === null) throw new RangeError("既読順の続きには readAt が必要");
@@ -145,10 +173,16 @@ export async function listArticles(db: Executor, query: ArticleQuery = {}): Prom
   params.push(limit);
 
   const rows = await db.all<ArticleRow>(
-    `select ${ARTICLE_COLUMNS} from articles a
-     ${where.length > 0 ? `where ${where.join(" and ")}` : ""}
-     order by ${column} desc, a.id desc
-     limit ?`,
+    `select ${ARTICLE_COLUMNS} from ${
+      deduplicate
+        ? `(select scoped.*, row_number() over (
+             partition by case when url is null then 'id:' || id else 'url:' || url end
+             order by ${recentlyRead ? "read_at" : "published_at"} desc, id desc
+           ) as url_rank from (${base}) scoped) a`
+        : "articles a"
+    }
+     ${deduplicate ? `where a.url_rank = 1${where.length > 0 ? ` and ${where.join(" and ")}` : ""}` : where.length > 0 ? `where ${where.join(" and ")}` : ""}
+     order by ${column} desc, a.id desc limit ?`,
     params,
   );
   return rows.map(toArticle);
@@ -168,19 +202,33 @@ export function searchTerms(search: string | undefined): string[] {
 }
 
 /** 記事をまとめて読む（見つからない ID は飛ばす）。画面が出している記事の状態を読み直すのに使う */
-export async function getArticles(db: Executor, ids: readonly string[]): Promise<Article[]> {
+export async function getArticles(
+  db: Executor,
+  ids: readonly string[],
+  workspaceIds?: readonly string[],
+): Promise<Article[]> {
   if (ids.length === 0) return [];
+  const where = ["a.id in (select value from json_each(?))"];
+  const params: SqlValue[] = [JSON.stringify(ids)];
+  addWorkspaceCondition(workspaceIds, where, params);
   const rows = await db.all<ArticleRow>(
-    `select ${ARTICLE_COLUMNS} from articles a where a.id in (select value from json_each(?))`,
-    [JSON.stringify(ids)],
+    `select ${ARTICLE_COLUMNS} from articles a where ${where.join(" and ")}`,
+    params,
   );
   return rows.map(toArticle);
 }
 
-export async function getArticle(db: Executor, id: string): Promise<Article | null> {
+export async function getArticle(
+  db: Executor,
+  id: string,
+  workspaceIds?: readonly string[],
+): Promise<Article | null> {
+  const where = ["a.id = ?"];
+  const params: SqlValue[] = [id];
+  addWorkspaceCondition(workspaceIds, where, params);
   const [row] = await db.all<ArticleRow>(
-    `select ${ARTICLE_COLUMNS} from articles a where a.id = ?`,
-    [id],
+    `select ${ARTICLE_COLUMNS} from articles a where ${where.join(" and ")}`,
+    params,
   );
   return row === undefined ? null : toArticle(row);
 }
@@ -243,12 +291,19 @@ export async function listLatestArticleDates(db: Executor): Promise<Map<string, 
 }
 
 /** 未読の数。全体、フィードごと、フォルダごと（未読のないものは含まない） */
-export async function countUnread(db: Executor): Promise<UnreadCounts> {
+export async function countUnread(
+  db: Executor,
+  workspaceIds?: readonly string[],
+): Promise<UnreadCounts> {
+  const where = ["a.read_at is null"];
+  const params: SqlValue[] = [];
+  addWorkspaceCondition(workspaceIds, where, params);
   const rows = await db.all<{ feed_id: string; folder_id: string | null; unread: number }>(
     `select a.feed_id, f.folder_id, count(*) as unread
      from articles a left join feeds f on f.id = a.feed_id
-     where a.read_at is null
+     where ${where.join(" and ")}
      group by a.feed_id`,
+    params,
   );
   const counts: UnreadCounts = { total: 0, feeds: new Map(), folders: new Map() };
   for (const row of rows) {
@@ -262,10 +317,17 @@ export async function countUnread(db: Executor): Promise<UnreadCounts> {
 }
 
 /** since（ミリ秒）からあとに既読にした記事の数。今日読んだ数を出すのに使う */
-export async function countReadSince(db: Executor, since: number): Promise<number> {
+export async function countReadSince(
+  db: Executor,
+  since: number,
+  workspaceIds?: readonly string[],
+): Promise<number> {
+  const where = ["a.read_at >= ?"];
+  const params: SqlValue[] = [since];
+  addWorkspaceCondition(workspaceIds, where, params);
   const [row] = await db.all<{ n: number }>(
-    "select count(*) as n from articles where read_at >= ?",
-    [since],
+    `select count(*) as n from articles a where ${where.join(" and ")}`,
+    params,
   );
   return row?.n ?? 0;
 }
