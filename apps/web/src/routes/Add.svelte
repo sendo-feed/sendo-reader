@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { type Feed, feedName } from "@sendo-reader/core";
   import AddFeed from "../components/manage/AddFeed.svelte";
   import { capturedPageUrl, clearCapturedPage } from "../lib/bookmarklet";
   import { useReader } from "../lib/context";
@@ -10,7 +11,17 @@
   let showFeed = $state(false);
   let saving = $state(false);
   let error = $state<string | null>(null);
-  let subscribed = $state(false);
+  let subscribed = $state<Feed | null>(null);
+  const visibleSubscription = $derived(
+    subscribed === null
+      ? undefined
+      : reader.workspaceIds === undefined
+        ? subscribed
+        : reader.feeds.find(
+            (feed) =>
+              feed.id === subscribed?.id && feed.subscriptionId === subscribed.subscriptionId,
+          ),
+  );
 
   async function savePage() {
     if (url === null) return;
@@ -30,8 +41,12 @@
 
 <main class="add">
   <h1>Add to Sendo</h1>
-  {#if subscribed}
-    <p role="status">購読しました。</p>
+  {#if subscribed !== null}
+    <p role="status">
+      {visibleSubscription === undefined
+        ? "購読しました。"
+        : `${feedName(visibleSubscription)} を購読しました。`}
+    </p>
     <a href="/manage" onclick={(event) => handleLink(event, "/manage")}>Manage feeds</a>
   {:else}
     {#if url === null}
@@ -50,8 +65,8 @@
         {#key url}
           <AddFeed
             initialUrl={url}
-            onsubscribed={() => {
-              subscribed = true;
+            onsubscribed={(feed) => {
+              subscribed = feed;
               clearCapturedPage();
             }}
           />

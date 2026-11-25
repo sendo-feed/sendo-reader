@@ -711,9 +711,13 @@
         </div>
       {/if}
       {#if router.view.kind === "manage"}
-        <Manage />
+        {#key reader.user?.id}
+          <Manage />
+        {/key}
       {:else if router.view.kind === "add"}
-        <Add />
+        {#key reader.user?.id}
+          <Add />
+        {/key}
       {:else}
         <Settings />
       {/if}
@@ -734,15 +738,17 @@
       {progress}
       onprogress={() => (progressOpen = true)}
     />
-    <ArticleView
-      bind:this={articleView}
-      articleId={detailArticleId}
-      scopeChecking={detailChecking}
-      {list}
-      onstep={step}
-      onpeek={peek}
-      onviewchange={rememberPosition}
-    />
+    {#key reader.user?.id}
+      <ArticleView
+        bind:this={articleView}
+        articleId={detailArticleId}
+        scopeChecking={detailChecking}
+        {list}
+        onstep={step}
+        onpeek={peek}
+        onviewchange={rememberPosition}
+      />
+    {/key}
   {/if}
 
   <!--
