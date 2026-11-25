@@ -35,6 +35,13 @@
 
   /** 狭い画面で、左のメニューを開いている */
   let menuOpen = $state(false);
+  let sidebar = $state<Sidebar>();
+
+  async function openSidebarFromArticle() {
+    menuOpen = true;
+    await tick();
+    if (menuOpen) sidebar?.focus();
+  }
   let helpOpen = $state(false);
   let confirmOpen = $state(false);
   let progressOpen = $state(false);
@@ -726,7 +733,12 @@
   class:peeking
   class:returning
 >
-  <Sidebar onhelp={() => (helpOpen = true)} {progress} onprogress={() => (progressOpen = true)} />
+  <Sidebar
+    bind:this={sidebar}
+    onhelp={() => (helpOpen = true)}
+    {progress}
+    onprogress={() => (progressOpen = true)}
+  />
   <button
     type="button"
     class="scrim"
@@ -772,7 +784,7 @@
         scopeChecking={detailChecking}
         {list}
         onstep={step}
-        onmenu={() => (menuOpen = true)}
+        onmenu={openSidebarFromArticle}
         onpeek={peek}
         onviewchange={rememberPosition}
       />
@@ -1112,6 +1124,7 @@
     .reader.menu-open > :global(.sidebar) {
       visibility: visible;
       transform: none;
+      transition: transform 0.18s ease-out;
     }
 
     /* メニューの後ろを暗くする。メニューと同じ速さで、暗くして・明るくする */

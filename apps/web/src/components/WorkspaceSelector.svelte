@@ -88,11 +88,21 @@
   }
 
   .workspace-switch {
+    width: 100%;
     min-height: 2.5rem;
-    margin: 0 0.5rem 0.25rem;
+    margin-bottom: 0.25rem;
     padding: 0.3rem 0.5rem;
     background: var(--surface);
     text-align: left;
+  }
+
+  /* 高さの低い画面では、切り替えもスクロールしてフィードを見るための場所を空ける。 */
+  @media (height >= 30rem) {
+    .workspace-switch {
+      position: sticky;
+      top: 0;
+      z-index: 1;
+    }
   }
 
   .selection {

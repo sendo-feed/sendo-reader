@@ -139,6 +139,7 @@ test("ワークスペースを All の上から切り替えられ、サイドバ
     .getByRole("dialog", { name: "Article actions", exact: true })
     .getByRole("button", { name: "Open sidebar", exact: true })
     .click();
+  await expect(nav).toBeFocused();
   await choice.click();
   await dialog.getByRole("button", { name: "Only Public", exact: true }).click();
   await expect(page).toHaveURL("/");

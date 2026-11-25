@@ -21,6 +21,11 @@
   } = $props();
 
   const reader = useReader();
+  let nav = $state<HTMLElement>();
+
+  export function focus() {
+    nav?.focus({ preventScroll: true });
+  }
 
   const currentHref = $derived(viewHref(router.view));
 
@@ -121,7 +126,13 @@
   </li>
 {/snippet}
 
-<nav class="sidebar" class:compact={prefs.value.sidebarCollapsed} aria-label="Feeds">
+<nav
+  class="sidebar"
+  class:compact={prefs.value.sidebarCollapsed}
+  aria-label="Feeds"
+  bind:this={nav}
+  tabindex="-1"
+>
   <div class="brand">
     <span class="logo">Sendo</span>
     <button
@@ -185,11 +196,10 @@
     </span>
   </button>
 
-  {#if reader.workspacesAvailable || reader.workspaceIds !== undefined}
-    <WorkspaceSelector compact={prefs.value.sidebarCollapsed} />
-  {/if}
-
   <div class="scroll">
+    {#if reader.workspacesAvailable || reader.workspaceIds !== undefined}
+      <WorkspaceSelector compact={prefs.value.sidebarCollapsed} />
+    {/if}
     <div class="views">
       {@render item({ kind: "all" }, "All", reader.unread.total, "inbox")}
       {@render item({ kind: "recentlyRead" }, "Recently Read", 0, "history")}
