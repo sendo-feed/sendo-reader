@@ -25,13 +25,13 @@
   import Dialog from "./Dialog.svelte";
   import Icon from "./Icon.svelte";
   import TranslationLabel from "./TranslationLabel.svelte";
-  import WorkspaceSelector from "./WorkspaceSelector.svelte";
 
   let {
     articleId,
     scopeChecking = false,
     list,
     onstep,
+    onmenu,
     onpeek = () => {},
     onviewchange = () => {},
   }: {
@@ -40,6 +40,7 @@
     list: ArticleListState;
     /** 一覧の前（-1）・次（1）の記事に移る */
     onstep: (delta: 1 | -1) => Promise<void> | void;
+    onmenu: () => void;
     /** スワイプで戻る間、記事の後ろに一覧を見せる（true）・見せるのをやめる（false） */
     onpeek?: (on: boolean) => void;
     /** 訳文と原文を切り替えた（履歴の項目に書いてもらう） */
@@ -47,6 +48,9 @@
   } = $props();
 
   const reader = useReader();
+  const workspaceMenuAvailable = $derived(
+    layout.pageScroll && (reader.workspacesAvailable || reader.workspaceIds !== undefined),
+  );
   let article = $state<Article | null>(null);
   let missing = $state(false);
   let scroller = $state<HTMLElement>();
@@ -1171,11 +1175,6 @@
   style:--drag={`${dragX}px`}
 >
   {#if article !== null}
-    {#if reader.workspacesAvailable || reader.workspaceIds !== undefined}
-      <div class="detail-workspaces">
-        <WorkspaceSelector />
-      </div>
-    {/if}
     {#if swipeHint !== null}
       <div
         class="swipe-hint"
@@ -1254,8 +1253,8 @@
           <Icon name="share" />
         </button>
       {/if}
-      <!-- 訳文と原文の切り替えは More actions に置くので、リンクも全文もない記事でも出す -->
-      {#if link !== null || hasPageContent || openedTranslation !== null}
+      <!-- リンクや全文がなくても、翻訳の切り替えやサイドバーを開く操作があれば出す -->
+      {#if link !== null || hasPageContent || openedTranslation !== null || workspaceMenuAvailable}
         <button
           type="button"
           class="icon-button"
@@ -1446,6 +1445,17 @@
     {#if canDownload && !choosingFormat}
       <button type="button" onclick={() => (choosingFormat = true)}>Download</button>
     {/if}
+    {#if workspaceMenuAvailable && !choosingFormat}
+      <button
+        type="button"
+        onclick={() => {
+          actionsOpen = false;
+          onmenu();
+        }}
+      >
+        Open sidebar
+      </button>
+    {/if}
     {#if exportError !== null}
       <p class="error" role="alert">{exportError}</p>
     {/if}
@@ -1473,17 +1483,6 @@
 </Dialog>
 
 <style>
-  .detail-workspaces {
-    display: none;
-  }
-
-  @media (max-width: 56rem) {
-    .detail-workspaces {
-      display: block;
-      padding: 0.75rem 1rem 0;
-    }
-  }
-
   .scope-checking {
     visibility: hidden;
   }

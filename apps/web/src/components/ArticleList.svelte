@@ -17,7 +17,6 @@
   import Icon from "./Icon.svelte";
   import ReadCelebration from "./ReadCelebration.svelte";
   import SavedPages from "./SavedPages.svelte";
-  import WorkspaceSelector from "./WorkspaceSelector.svelte";
 
   let {
     list,
@@ -843,9 +842,6 @@
       >
         <Icon name="checkAll" />
       </button>
-    {/if}
-    {#if reader.workspacesAvailable || reader.workspaceIds !== undefined}
-      <WorkspaceSelector />
     {/if}
   </header>
 

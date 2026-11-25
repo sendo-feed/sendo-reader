@@ -3,6 +3,7 @@
   import Dialog from "./Dialog.svelte";
   import Icon from "./Icon.svelte";
 
+  let { compact }: { compact: boolean } = $props();
   const reader = useReader();
   let open = $state(false);
   const names = $derived(
@@ -24,16 +25,20 @@
   }
 </script>
 
+<svelte:window onpopstate={() => (open = false)} />
+
 <button
   type="button"
   class="workspace-switch"
+  class:compact
   aria-label="Workspaces: {label}"
+  aria-haspopup="dialog"
   title={label}
   onclick={() => (open = true)}
 >
   <Icon name="folder" />
-  <span>{label}</span>
-  <Icon name="chevronDown" />
+  <span class="selection">{label}</span>
+  <span class="chevron"><Icon name="chevronDown" /></span>
 </button>
 
 <Dialog bind:open title="Workspaces">
@@ -83,18 +88,52 @@
   }
 
   .workspace-switch {
-    max-width: 100%;
+    width: 100%;
+    min-height: 2.5rem;
+    margin-bottom: 0.25rem;
+    padding: 0.3rem 0.5rem;
     background: var(--surface);
+    text-align: left;
+  }
+
+  /* 高さの低い画面では、切り替えもスクロールしてフィードを見るための場所を空ける。 */
+  @media (height >= 30rem) {
+    .workspace-switch {
+      position: sticky;
+      top: 0;
+      z-index: 1;
+    }
+  }
+
+  .selection {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .chevron {
+    display: flex;
+  }
+
+  /* 範囲の変更で All に戻り、狭い画面のサイドバーが閉じても、開いている窓は表示する。 */
+  .workspace-switch + :global(dialog[open]) {
+    visibility: visible;
+  }
+
+  @media (width > 56rem) {
+    .workspace-switch.compact {
+      justify-content: center;
+    }
+
+    .compact .selection,
+    .compact .chevron {
+      display: none;
+    }
   }
 
   label span {
     overflow-wrap: anywhere;
-  }
-
-  .workspace-switch > span {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
   }
 
   ul {

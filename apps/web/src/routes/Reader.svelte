@@ -13,7 +13,6 @@
   import Icon, { type IconName } from "../components/Icon.svelte";
   import ShortcutHelp from "../components/ShortcutHelp.svelte";
   import Sidebar from "../components/Sidebar.svelte";
-  import WorkspaceSelector from "../components/WorkspaceSelector.svelte";
   import { useReader } from "../lib/context";
   import { layout, reducedMotion } from "../lib/layout.svelte";
   import { ArticleListState, type ListProgress } from "../lib/list.svelte";
@@ -36,6 +35,13 @@
 
   /** 狭い画面で、左のメニューを開いている */
   let menuOpen = $state(false);
+  let sidebar = $state<Sidebar>();
+
+  async function openSidebarFromArticle() {
+    menuOpen = true;
+    await tick();
+    await sidebar?.focusAfterOpening(() => menuOpen);
+  }
   let helpOpen = $state(false);
   let confirmOpen = $state(false);
   let progressOpen = $state(false);
@@ -727,7 +733,12 @@
   class:peeking
   class:returning
 >
-  <Sidebar onhelp={() => (helpOpen = true)} {progress} onprogress={() => (progressOpen = true)} />
+  <Sidebar
+    bind:this={sidebar}
+    onhelp={() => (helpOpen = true)}
+    {progress}
+    onprogress={() => (progressOpen = true)}
+  />
   <button
     type="button"
     class="scrim"
@@ -738,11 +749,6 @@
   {#if listing === null}
     <div class="page">
       <div class="bar">{pageTitle}</div>
-      {#if reader.workspacesAvailable || reader.workspaceIds !== undefined}
-        <div class="page-workspaces">
-          <WorkspaceSelector />
-        </div>
-      {/if}
       {#if router.view.kind === "manage"}
         {#key reader.user?.id}
           <Manage />
@@ -778,6 +784,7 @@
         scopeChecking={detailChecking}
         {list}
         onstep={step}
+        onmenu={openSidebarFromArticle}
         onpeek={peek}
         onviewchange={rememberPosition}
       />
@@ -872,10 +879,6 @@
 {/if}
 
 <style>
-  .page-workspaces {
-    padding: 0.75rem 1rem 0;
-  }
-
   .reader {
     display: grid;
     grid-template-columns: var(--sidebar-width, 17rem) clamp(20rem, 30vw, 27rem) minmax(0, 1fr);

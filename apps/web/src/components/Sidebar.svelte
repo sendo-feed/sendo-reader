@@ -7,6 +7,7 @@
   import Icon, { type IconName } from "./Icon.svelte";
   import RemoteImage from "./RemoteImage.svelte";
   import SyncStatus from "./SyncStatus.svelte";
+  import WorkspaceSelector from "./WorkspaceSelector.svelte";
 
   let {
     onhelp,
@@ -20,6 +21,14 @@
   } = $props();
 
   const reader = useReader();
+  let nav = $state<HTMLElement>();
+
+  export async function focusAfterOpening(isOpen: () => boolean) {
+    const element = nav;
+    if (element === undefined) return;
+    await Promise.allSettled(element.getAnimations().map((animation) => animation.finished));
+    if (isOpen()) element.focus({ preventScroll: true });
+  }
 
   const currentHref = $derived(viewHref(router.view));
 
@@ -120,7 +129,13 @@
   </li>
 {/snippet}
 
-<nav class="sidebar" class:compact={prefs.value.sidebarCollapsed} aria-label="Feeds">
+<nav
+  class="sidebar"
+  class:compact={prefs.value.sidebarCollapsed}
+  aria-label="Feeds"
+  bind:this={nav}
+  tabindex="-1"
+>
   <div class="brand">
     <span class="logo">Sendo</span>
     <button
@@ -185,6 +200,9 @@
   </button>
 
   <div class="scroll">
+    {#if reader.workspacesAvailable || reader.workspaceIds !== undefined}
+      <WorkspaceSelector compact={prefs.value.sidebarCollapsed} />
+    {/if}
     <div class="views">
       {@render item({ kind: "all" }, "All", reader.unread.total, "inbox")}
       {@render item({ kind: "recentlyRead" }, "Recently Read", 0, "history")}
