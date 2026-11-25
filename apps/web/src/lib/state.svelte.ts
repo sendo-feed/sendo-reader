@@ -35,6 +35,7 @@ export class ReaderState {
   workspaceIds = $state.raw<readonly string[] | undefined>([]);
   workspaceDataReady = $state(false);
   workspaceScopeComplete = $state(false);
+  workspaceReadCursor = $state<string | null>(null);
   #selectedWorkspaces = $derived(
     this.workspaceIds?.filter((id) => this.workspaces.some((workspace) => workspace.id === id)),
   );
@@ -140,6 +141,8 @@ export class ReaderState {
         !this.workspaceScopeComplete
       ) {
         void this.#loadWorkspaceData();
+      } else if (syncFinished && this.workspaceIds !== undefined) {
+        void this.#loadUnread();
       }
     });
   }
@@ -210,6 +213,7 @@ export class ReaderState {
       this.workspaceIds = user === null ? [] : loadWorkspaceSelection(user.id);
       this.workspaceDataReady = false;
       this.workspaceScopeComplete = false;
+      this.workspaceReadCursor = null;
       this.workspacesAvailable = false;
       this.workspaces = [];
       this.#folders = [];
@@ -224,6 +228,7 @@ export class ReaderState {
 
   selectWorkspaces(ids: readonly string[] | undefined): void {
     if (this.user === null) return;
+    this.workspaceReadCursor = null;
     this.#createdFolderIds = [];
     this.workspaceIds = ids === undefined ? undefined : [...new Set(ids)].sort();
     saveWorkspaceSelection(this.user.id, this.workspaceIds);
@@ -264,13 +269,22 @@ export class ReaderState {
     const read = ++this.#unreadRead;
     if (this.workspaceIds !== undefined && !this.workspaceDataReady) return;
     const ids = this.visibleWorkspaceIds;
-    const [unread, readToday] = await Promise.all([
-      this.client.countUnread(ids),
-      this.client.countReadSince(new Date().setHours(0, 0, 0, 0), ids),
-    ]);
-    if (read !== this.#unreadRead) return;
-    this.unread = unread;
-    this.readToday = readToday;
+    const since = new Date().setHours(0, 0, 0, 0);
+    if (ids !== undefined) {
+      const { unread, readToday, cursor } = await this.client.workspaceReadCounts(ids, since);
+      if (read !== this.#unreadRead) return;
+      this.unread = unread;
+      this.readToday = readToday;
+      this.workspaceReadCursor = cursor;
+    } else {
+      const [unread, readToday] = await Promise.all([
+        this.client.countUnread(),
+        this.client.countReadSince(since),
+      ]);
+      if (read !== this.#unreadRead) return;
+      this.unread = unread;
+      this.readToday = readToday;
+    }
   }
 }
 

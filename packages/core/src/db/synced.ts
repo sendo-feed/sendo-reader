@@ -49,7 +49,7 @@ export async function markSyncComplete(tx: Executor, cursor: string): Promise<vo
        where kind = 'setArticleState' and json_extract(payload, '$.read') is not null
        union
        select value from pending_ops, json_each(json_extract(payload, '$.articleIds'))
-       where kind = 'markRead'
+       where kind in ('markRead', 'markWorkspaceRead')
      )`,
   );
 }

@@ -50,7 +50,7 @@ import {
   putStoredTranslatedContent,
   type StoredTranslatedContent,
 } from "./db/translated-content";
-import { listWorkspaces, workspacesAvailable } from "./db/workspaces";
+import { listWorkspaces, workspaceSubscriptions, workspacesAvailable } from "./db/workspaces";
 import {
   type Article,
   type ArticleContent,
@@ -200,6 +200,12 @@ export const MAX_FEED_DISPLAY_NAME_LENGTH = 200;
 
 /** まとめて既読にする記事を、範囲の一部に絞る（どれも渡さなければ、範囲のすべて） */
 export interface MarkAllReadOptions {
+  /** 省略はすべて、空配列は表示対象なし。 */
+  workspaceIds?: readonly string[] | undefined;
+  /** 画面の表示中の購読を、ワーカーへ頼んだ瞬間に固定する場合に渡す。 */
+  subscriptionIds?: readonly string[] | undefined;
+  /** 最後に画面へ出した未読数と同じ時点のカーソル。 */
+  expectedCursor?: string | null | undefined;
   /** この時刻（ミリ秒）より前に公開された記事だけ */
   publishedBefore?: number;
 }
@@ -708,6 +714,8 @@ export class ReaderCore {
    */
   async markAllRead(scope: MarkReadScope, options: MarkAllReadOptions = {}): Promise<string[]> {
     this.#requireSignedIn();
+    if (options.workspaceIds !== undefined || options.subscriptionIds !== undefined)
+      return this.#markWorkspaceRead(scope, options);
     const session = this.#session.signal;
     const narrowed: string[] = [];
     const bounds: (number | string)[] = [];
@@ -744,6 +752,67 @@ export class ReaderCore {
     if (op === null) return [];
     this.#emit(new Set<Table>(["articles"]));
     return op.articleIds;
+  }
+
+  async #markWorkspaceRead(
+    scope: MarkReadScope,
+    { workspaceIds = [], subscriptionIds, publishedBefore, expectedCursor }: MarkAllReadOptions,
+  ): Promise<string[]> {
+    if (workspaceIds.length === 0 || subscriptionIds?.length === 0) return [];
+    const session = this.#session.signal;
+    const ids = await this.#db.transaction(async (tx) => {
+      throwIfSessionEnded(session);
+      await requireWorkspacesAvailable(tx);
+      const subscriptions =
+        subscriptionIds === undefined
+          ? await workspaceSubscriptions(tx, workspaceIds, "all" in scope ? {} : scope)
+          : await tx.all<{ id: string; subscription_id: string }>(
+              `select id, subscription_id from feeds
+             where subscription_id in (select value from json_each(?)) order by subscription_id`,
+              [JSON.stringify(subscriptionIds)],
+            );
+      if (subscriptions.length === 0) return [];
+      // 一斉操作は完了したカーソルまで。時間で絞るときは選んだ記事 ID を直接使う。
+      const completeCursor = await getCompleteCursor(tx);
+      if (
+        expectedCursor !== undefined &&
+        (expectedCursor !== completeCursor || completeCursor !== (await getSetting(tx, CURSOR_KEY)))
+      ) {
+        throw new ApiError(
+          "invalid",
+          "同期が進みました。表示の更新後にやり直してください",
+          400,
+          "workspace_sync_changed",
+        );
+      }
+      const cursor = publishedBefore === undefined ? completeCursor : null;
+      if (publishedBefore === undefined && cursor === null) {
+        throw new ApiError(
+          "invalid",
+          "同期が完了してから既読にしてください",
+          400,
+          "sync_incomplete",
+        );
+      }
+      const unread = await tx.all<{ id: string }>(
+        `select id from articles where read_at is null
+           and feed_id in (select value from json_each(?1))
+           and ((?2 is null and read_synced = 1) or published_at < ?2)`,
+        [JSON.stringify(subscriptions.map(({ id }) => id)), publishedBefore ?? null],
+      );
+      if (unread.length === 0) return [];
+      const articleIds = unread.map(({ id }) => id);
+      await this.#enqueue(tx, {
+        kind: "markWorkspaceRead",
+        subscriptionIds: subscriptions.map(({ subscription_id }) => subscription_id),
+        articleIds,
+        cursor,
+        at: this.#now(),
+      });
+      return articleIds;
+    });
+    if (ids.length > 0) this.#emit(new Set<Table>(["articles"]));
+    return ids;
   }
 
   /**
@@ -1289,6 +1358,17 @@ export class ReaderCore {
   /** since（ミリ秒）からあとに既読にした記事の数 */
   countReadSince(since: number, workspaceIds?: readonly string[]): Promise<number> {
     return countReadSince(this.#db, since, workspaceIds);
+  }
+
+  workspaceReadCounts(workspaceIds: readonly string[], since: number) {
+    return this.#db.transaction(async (tx) => {
+      const [unread, readToday, cursor] = await Promise.all([
+        countUnread(tx, workspaceIds),
+        countReadSince(tx, since, workspaceIds),
+        getCompleteCursor(tx),
+      ]);
+      return { unread, readToday, cursor };
+    });
   }
 
   countUnread(workspaceIds?: readonly string[]): Promise<UnreadCounts> {

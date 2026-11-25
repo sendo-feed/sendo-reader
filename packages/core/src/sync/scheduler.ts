@@ -13,7 +13,7 @@ export interface SyncStatus {
   lastSyncedAt: number | null;
   /** 最後の同期の失敗の種類（成功したら null） */
   error: ApiErrorKind | null;
-  /** まだ sendo に送り終えていない操作の数 */
+  /** 同期で確定していない操作の数 */
   pending: number;
   /** ログアウトを sendo に送れていない（送り直している） */
   logoutPending: boolean;
