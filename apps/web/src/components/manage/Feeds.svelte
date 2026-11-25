@@ -23,6 +23,9 @@
   const reader = useReader();
   let collapsed = $state<string[]>([]);
   let message = $state<string | null>(null);
+  let movingWorkspace = $state(false);
+  let workspaceDestination = $state("");
+  let moving = $state(false);
   let notice = $state("");
   let selectedId = $state<string | null>(null);
   let menuOpen = $state(false);
@@ -136,6 +139,8 @@
   function openMenu(feed: Feed) {
     selectedId = feed.id;
     confirming = false;
+    movingWorkspace = false;
+    workspaceDestination = feed.workspaceId ?? "";
     message = null;
     menuOpen = true;
   }
@@ -150,6 +155,25 @@
       menuOpen = false;
     } catch (error) {
       message = describeError(error);
+    }
+  }
+
+  async function moveWorkspace(feed: Feed) {
+    moving = true;
+    message = null;
+    try {
+      if (feed.subscriptionId === undefined) return;
+      await reader.client.moveFeedToWorkspace(
+        feed.id,
+        feed.subscriptionId,
+        workspaceDestination || null,
+      );
+      menuOpen = false;
+      notice = "購読のワークスペースを変更しました。";
+    } catch (error) {
+      message = describeError(error);
+    } finally {
+      moving = false;
     }
   }
 
@@ -294,7 +318,11 @@
   <p class="error" role="alert">{message}</p>
 {/if}
 
-<Dialog bind:open={menuOpen} title={selected === undefined ? "Feed options" : feedName(selected)}>
+<Dialog
+  bind:open={menuOpen}
+  dismissible={!moving}
+  title={selected === undefined ? "Feed options" : feedName(selected)}
+>
   {#if selected !== undefined}
     {#if confirming}
       {#if selected.url === selected.siteUrl &&
@@ -329,8 +357,38 @@
         {/if}
       {/if}
       <p class="url">{selected.url}</p>
+      {#if reader.workspacesAvailable && selected.subscriptionId !== undefined}
+        {#if movingWorkspace}
+          <label for="workspace-destination">Workspace</label>
+          <select id="workspace-destination" bind:value={workspaceDestination} disabled={moving}>
+            <option value="">No workspace</option>
+            {#each reader.workspaces as workspace (workspace.id)}
+              <option value={workspace.id}>{workspace.name}</option>
+            {/each}
+          </select>
+          <div class="actions">
+            <button type="button" disabled={moving} onclick={() => (movingWorkspace = false)}>
+              Cancel
+            </button>
+            <button
+              type="button"
+              disabled={moving || workspaceDestination === (selected.workspaceId ?? "")}
+              onclick={() => selected && moveWorkspace(selected)}
+            >
+              Move feed
+            </button>
+          </div>
+        {:else}
+          <button type="button" onclick={() => (movingWorkspace = true)}>Move to workspace…</button>
+        {/if}
+      {/if}
       <div class="unsubscribe">
-        <button type="button" class="link danger" onclick={() => (confirming = true)}>
+        <button
+          type="button"
+          class="link danger"
+          disabled={moving}
+          onclick={() => (confirming = true)}
+        >
           Unsubscribe…
         </button>
       </div>

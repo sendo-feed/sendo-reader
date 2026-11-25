@@ -6,6 +6,7 @@ import {
   type SyncStatus,
   type UnreadCounts,
   type User,
+  type Workspace,
 } from "@sendo-reader/core";
 import { ProtocolMismatchError, type ReaderClient } from "@sendo-reader/core/web";
 import { takeLoginError } from "./login";
@@ -26,6 +27,8 @@ export class ReaderState {
   status = $state<SyncStatus | null>(null);
   folders = $state<Folder[]>([]);
   feeds = $state<Feed[]>([]);
+  workspaces = $state<Workspace[]>([]);
+  workspacesAvailable = $state(false);
   unread = $state<UnreadCounts>({ total: 0, feeds: new Map(), folders: new Map() });
   /** 今日（この端末の日付で）既読にした記事の数。進み具合の内訳に出す */
   readToday = $state(0);
@@ -50,6 +53,7 @@ export class ReaderState {
   leaveStalled = $state(false);
   /** 起動の途中で、版の違うタブのために止まった。番号の合う代表に替わったら、起動し直す */
   #startBlocked = false;
+  #workspaceRead = 0;
 
   constructor(client: ReaderClient, leave: (url: string) => Promise<void>) {
     this.leave = leave;
@@ -57,6 +61,7 @@ export class ReaderState {
       this.versionMismatch = error;
     });
     client.onChange((tables) => {
+      if (tables.has("workspaces")) void this.#loadWorkspaces();
       if (tables.has("folders")) void this.#loadFolders();
       if (tables.has("feeds") || tables.has("folders")) void this.#loadFeeds();
       if (tables.has("articles") || tables.has("feeds")) {
@@ -68,7 +73,7 @@ export class ReaderState {
       // 同期の様子は、番号の合う代表（か自分）からしか届かない
       this.versionMismatch = null;
       this.status = status;
-      this.user = status.user;
+      const accountChanged = this.#setUser(status.user);
       if (this.#startBlocked) {
         // ログインしているかは、起動の続きで確かめる（Google のログインから戻ってきたときは、
         // sendo のセッションを見る）
@@ -76,7 +81,7 @@ export class ReaderState {
         void this.#start();
         return;
       }
-      if (this.signedIn !== status.signedIn) {
+      if (accountChanged || this.signedIn !== status.signedIn) {
         this.signedIn = status.signedIn;
         if (status.signedIn) void this.#loadAll();
       }
@@ -118,7 +123,7 @@ export class ReaderState {
       signedIn = await this.client.isSignedIn();
     }
     // 画面は、どのユーザーかが分かってから出す（設定の画面は、手元のユーザーと照らして sendo に聞く）
-    if (signedIn) this.user = await this.client.currentUser();
+    this.#setUser(signedIn ? await this.client.currentUser() : null);
     this.signedIn = signedIn;
     if (signedIn) await this.#loadAll();
   }
@@ -127,7 +132,7 @@ export class ReaderState {
   async signOut(): Promise<void> {
     await this.client.signOut();
     this.signedIn = false;
-    this.user = null;
+    this.#setUser(null);
     this.loginError = null;
   }
 
@@ -141,8 +146,24 @@ export class ReaderState {
     return this.feeds.find((f) => f.id === feedId)?.iconUrl ?? null;
   }
 
+  #setUser(user: User | null): boolean {
+    const changed = this.user?.id !== user?.id;
+    if (changed) {
+      ++this.#workspaceRead;
+      this.workspaces = [];
+      this.workspacesAvailable = false;
+    }
+    this.user = user;
+    return changed;
+  }
+
   async #loadAll(): Promise<void> {
-    await Promise.all([this.#loadFolders(), this.#loadFeeds(), this.#loadUnread()]);
+    await Promise.all([
+      this.#loadFolders(),
+      this.#loadFeeds(),
+      this.#loadUnread(),
+      this.#loadWorkspaces(),
+    ]);
   }
 
   async #loadFolders(): Promise<void> {
@@ -151,6 +172,18 @@ export class ReaderState {
 
   async #loadFeeds(): Promise<void> {
     this.feeds = await this.client.listFeeds();
+  }
+
+  async #loadWorkspaces(): Promise<void> {
+    const userId = this.user?.id;
+    const read = ++this.#workspaceRead;
+    const [workspaces, available] = await Promise.all([
+      this.client.listWorkspaces(),
+      this.client.workspacesAvailable(),
+    ]);
+    if (userId !== this.user?.id || read !== this.#workspaceRead) return;
+    this.workspaces = workspaces;
+    this.workspacesAvailable = available;
   }
 
   async #loadUnread(): Promise<void> {

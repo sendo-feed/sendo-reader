@@ -56,6 +56,14 @@ export function describeError(error: unknown): string {
         return "OPML として読めませんでした。";
       case "too_large":
         return "ファイルが大きすぎます。";
+      case "workspace_not_empty":
+        return "ワークスペースを削除するには、中の購読をすべて移動するか、解除してください。";
+      case "workspace_exists":
+        return "同じ名前のワークスペースがあります。";
+      case "workspace_not_found":
+        return "そのワークスペースはもうありません。";
+      case "workspaces_unavailable":
+        return "接続先の Sendo はワークスペースに対応していません。";
       case "folder_not_found":
         return "そのフォルダはもうありません。";
     }
