@@ -36,6 +36,15 @@ export type Operation =
       extraIds: string[];
       at: number;
     }
+  | {
+      kind: "markWorkspaceRead";
+      /** 操作時に有効だった購読。所属や選択が変わっても入れ替えない。 */
+      subscriptionIds: string[];
+      articleIds: string[];
+      /** さらに日時で絞った場合は null。選んだ記事 ID だけを送る。 */
+      cursor: string | null;
+      at: number;
+    }
   | { kind: "createFolder"; folderId: string; name: string; at: number }
   | { kind: "renameFolder"; folderId: string; name: string }
   | { kind: "deleteFolder"; folderId: string }
@@ -94,6 +103,20 @@ export const FOLDER_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{
 
 const FOLDER_ID_REMAPS_KEY = "local.folderIdRemaps";
 
+/** 同期が Sendo の確定状態を受け取れるよう、送信を終えた操作の分だけ楽観表示を外す。 */
+export async function dropWorkspaceReadOverlay(
+  tx: Executor,
+  op: Extract<Operation, { kind: "markWorkspaceRead" }>,
+): Promise<boolean> {
+  const rows = await tx.all<{ id: string }>(
+    `update articles set read_at = null, read_synced = 1
+     where read_at = ? and read_synced = 0 and id in (select value from json_each(?))
+     returning id`,
+    [op.at, JSON.stringify(op.articleIds)],
+  );
+  return rows.length > 0;
+}
+
 /**
  * 手元で作ったフォルダの ID から、まとめた先（sendo にあった、同じ名前のフォルダ）の ID への対応
  */
@@ -109,6 +132,8 @@ export function keyOf(op: Operation): string {
       return op.articleId;
     case "markRead":
       return "all" in op.scope ? "all" : "feedId" in op.scope ? op.scope.feedId : op.scope.folderId;
+    case "markWorkspaceRead":
+      return "workspaces";
     case "createFolder":
     case "renameFolder":
     case "deleteFolder":
@@ -208,6 +233,20 @@ export async function applyLocally(tx: Executor, op: Operation): Promise<void> {
         [op.at, JSON.stringify(op.articleIds)],
       );
       return;
+    case "markWorkspaceRead":
+      await tx.run(
+        `update articles set read_at = ?1, read_synced = 0
+           where read_at is null and id in (select value from json_each(?2))
+             and (?3 is null or feed_id in (
+               select id from feeds where subscription_id in (select value from json_each(?3))
+             ))`,
+        [
+          op.at,
+          JSON.stringify(op.articleIds),
+          op.cursor === null ? null : JSON.stringify(op.subscriptionIds),
+        ],
+      );
+      return;
     case "createFolder":
       await tx.run(
         "insert into folders (id, name, created_at) values (?, ?, ?) on conflict (id) do nothing",
@@ -279,7 +318,10 @@ export function scopeCondition(scope: MarkReadScope): [string, string[]] {
 }
 
 /** 送った結果。手元で作ったフォルダを、sendo にあった同じ名前のフォルダにまとめたら remap を返す */
-export type SendResult = { remap?: { from: string; to: string }; savedPage?: SavedPage };
+export type SendResult = {
+  remap?: { from: string; to: string };
+  savedPage?: SavedPage;
+};
 
 /** 操作を sendo に送る。失敗したら ApiError を投げる。signal で中断する（ログアウトなど） */
 export async function send(api: SendoApi, op: Operation, signal: AbortSignal): Promise<SendResult> {
@@ -316,6 +358,19 @@ export async function send(api: SendoApi, op: Operation, signal: AbortSignal): P
         check(
           await client.POST("/articles/mark-read", {
             body: { ids: ids.slice(i, i + MAX_MARK_READ_IDS) },
+          }),
+        );
+      }
+      return {};
+    }
+    case "markWorkspaceRead": {
+      const cursor = op.cursor;
+      const ids = cursor === null ? op.articleIds : op.subscriptionIds;
+      for (let i = 0; i < ids.length; i += MAX_MARK_READ_IDS) {
+        const batch = ids.slice(i, i + MAX_MARK_READ_IDS);
+        check(
+          await client.POST("/articles/mark-read", {
+            body: cursor === null ? { ids: batch } : { subscriptionIds: batch, cursor },
           }),
         );
       }
@@ -595,6 +650,11 @@ export async function undo(
     }
     case "setSavedPage":
     case "recordArticleOpens":
+      return;
+    case "markWorkspaceRead":
+      await write(async (tx) => {
+        await dropWorkspaceReadOverlay(tx, op);
+      });
       return;
     case "markRead":
     case "deleteFolder":

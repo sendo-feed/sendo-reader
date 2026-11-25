@@ -4,6 +4,7 @@ import { putSavedPage, removeSavedPage } from "../db/saved-pages";
 import type { Table } from "../models";
 import {
   applyLocally,
+  dropWorkspaceReadOverlay,
   isRetryable,
   isWorkspaceOperation,
   keyOf,
@@ -120,13 +121,23 @@ export async function reapplyPending(tx: Executor): Promise<boolean> {
  * 押したときのカーソルでは既読にならないことがある。ID でも頼めば、あとから送ったまとめて既読が
  * 採られ、手元（重ね直して既読）と sendo が揃う。
  */
-export async function widenPendingMarkRead(
+export async function reconcilePendingMarkRead(
   tx: Executor,
   deliveredIds: readonly string[],
 ): Promise<void> {
   if (deliveredIds.length === 0) return;
   const delivered = new Set(deliveredIds);
   for (const { id, op } of await listPending(tx)) {
+    if (op.kind === "markWorkspaceRead" && op.cursor !== null) {
+      // 新しい状態を受け取った行は、古いカーソルの楽観更新で上書きしない。
+      const articleIds = op.articleIds.filter((articleId) => !delivered.has(articleId));
+      if (articleIds.length < op.articleIds.length) {
+        await tx.run("update pending_ops set payload = ? where id = ?", [
+          JSON.stringify({ ...op, articleIds }),
+          id,
+        ]);
+      }
+    }
     if (op.kind !== "markRead") continue;
     const extra = new Set(op.extraIds);
     const added = op.articleIds.filter(
@@ -193,7 +204,7 @@ export async function push(
 
     try {
       const sent = await send(api, op, signal);
-      const workspacesChanged = await db.transaction(async (tx) => {
+      const tables = await db.transaction(async (tx) => {
         // 送っている間にログアウトしていたら、手元には書かない
         signal.throwIfAborted();
         if (op.kind === "setSavedPage") {
@@ -209,25 +220,28 @@ export async function push(
             [op.workspaceId, op.feedId, op.subscriptionId],
           );
         }
+        const articlesChanged =
+          op.kind === "markWorkspaceRead" && (await dropWorkspaceReadOverlay(tx, op));
         await complete(tx, next.id, next.rev);
-        if (sent.remap !== undefined) {
-          await remapFolderId(tx, sent.remap.from, sent.remap.to);
-          // 同じ名前のフォルダに付け替えると手元で作ったフォルダの行が消え、そこに重ねていた操作（名前の
-          // 変更など）も消える。付け替えた ID で残りの操作を重ね直す
-          return reapplyPending(tx);
-        }
-        return false;
+        const remapped = sent.remap;
+        if (remapped !== undefined) await remapFolderId(tx, remapped.from, remapped.to);
+        const workspacesChanged =
+          (articlesChanged || remapped !== undefined) && (await reapplyPending(tx));
+        return { articlesChanged, workspacesChanged };
       });
       result.sent += 1;
-      if (op.kind === "setSavedPage") options.onChange?.(new Set<Table>(["savedPages"]));
+      const changed = new Set<Table>();
+      if (op.kind === "setSavedPage") changed.add("savedPages");
+      if (tables.articlesChanged) changed.add("articles");
+      if (tables.workspacesChanged) changed.add("workspaces");
       if (sent.remap !== undefined) {
         result.remapped.push(sent.remap);
         options.onRemap?.(sent.remap);
         // フォルダと、そこに入れたフィードが変わる
-        const changed = new Set<Table>(["folders", "feeds"]);
-        if (workspacesChanged) changed.add("workspaces");
-        options.onChange?.(changed);
+        changed.add("folders");
+        changed.add("feeds");
       }
+      if (changed.size > 0) options.onChange?.(changed);
     } catch (error) {
       if (!(error instanceof ApiError)) throw error;
       if (isRetryable(error)) {

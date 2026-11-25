@@ -14,7 +14,7 @@ import { clearSyncedSettings, putSyncedSetting, removeSyncedSetting } from "../d
 import { putWorkspace, setWorkspacesAvailable } from "../db/workspaces";
 import { type Article, TABLES, type Table } from "../models";
 import type { SyncPage } from "./page";
-import { reapplyPending, widenPendingMarkRead } from "./queue";
+import { reapplyPending, reconcilePendingMarkRead } from "./queue";
 
 /** 1 回の同期で取るページの上限。サーバーが続きを返し続けても止まるようにする */
 const MAX_PAGES = 1000;
@@ -82,7 +82,7 @@ export async function pull(db: Database, api: SendoApi, options: PullOptions): P
       // ので、ここで確かめれば、ログアウトの消去のあとに書き戻すことはない）
       options.signal?.throwIfAborted();
       const changed = await applyPage(tx, page);
-      await widenPendingMarkRead(tx, deliveredIds(page));
+      await reconcilePendingMarkRead(tx, deliveredIds(page));
       if (await reapplyPending(tx)) changed.add("workspaces");
       await setSetting(tx, CURSOR_KEY, page.cursor);
       if (!page.hasMore) {
@@ -142,7 +142,7 @@ async function resync(
     if (pages.some((page) => page.savedPages !== null)) await clearSavedPages(tx);
     for (const page of pages) {
       await applyPage(tx, page);
-      await widenPendingMarkRead(tx, deliveredIds(page));
+      await reconcilePendingMarkRead(tx, deliveredIds(page));
     }
     for (const row of kept) {
       const columns = Object.keys(row);
