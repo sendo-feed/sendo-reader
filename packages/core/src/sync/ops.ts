@@ -45,6 +45,8 @@ export type Operation =
       cursor: string | null;
       /** 送信済みで、同期の確定状態を待っている。 */
       acknowledged?: true;
+      /** 送る前の差分で Sendo 側でも既読を確認した記事。 */
+      serverReadArticleIds?: string[];
       at: number;
     }
   | { kind: "createFolder"; folderId: string; name: string; at: number }

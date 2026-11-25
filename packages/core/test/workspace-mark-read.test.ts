@@ -239,3 +239,35 @@ test("送信後の同期が失敗しても、再起動後に既読表示を保�
   expect(server.markReadRequests).toHaveLength(1);
   expect(await reopened.countPending()).toBe(0);
 });
+
+test.each([
+  { read: false, title: "スターの差分が来ても未送信の既読を保つ" },
+  { read: true, title: "Sendo で既読と分かった同じ時刻の記事は元に戻さない" },
+])("$title", async ({ read }) => {
+  const { core, server, publicSpace, publicArticle } = await seed();
+  const pulling = Promise.withResolvers<void>();
+  const release = Promise.withResolvers<void>();
+  server.onRequest = async (path) => {
+    if (path.startsWith("GET /sync")) {
+      pulling.resolve();
+      await release.promise;
+    }
+  };
+
+  const syncing = core.sync();
+  await pulling.promise;
+  try {
+    await core.markAllRead({ all: true }, { workspaceIds: [publicSpace.id] });
+    server.setArticleState(publicArticle.id, read ? { read: true } : { starred: true });
+  } finally {
+    release.resolve();
+  }
+
+  await syncing;
+  expect(await core.getArticle(publicArticle.id)).toMatchObject({ readAt: server.now });
+  expect(server.markReadRequests).toHaveLength(0);
+  await core.sync();
+  expect(server.markReadRequests).toHaveLength(1);
+  expect(await core.getArticle(publicArticle.id)).toMatchObject({ readAt: publicArticle.readAt });
+  expect(publicArticle.readAt).not.toBeNull();
+});

@@ -14,6 +14,7 @@ import {
   send,
   undo,
 } from "./ops";
+import type { SyncPage } from "./page";
 
 /**
  * 操作キュー（docs/decisions/local-first.md、sendo の sync.md の 5）。
@@ -124,14 +125,18 @@ export async function reapplyPending(tx: Executor): Promise<boolean> {
  */
 export async function reconcilePendingMarkRead(
   tx: Executor,
-  deliveredIds: readonly string[],
+  changes: SyncPage["articles"],
   done = false,
 ): Promise<boolean> {
-  if (deliveredIds.length === 0 && !done) return false;
+  if (changes.length === 0 && !done) return false;
   let changed = false;
-  const delivered = new Set(deliveredIds);
+  const delivered = new Map(
+    changes.flatMap<[string, boolean]>((article) =>
+      article.deleted ? [] : [[article.id, article.readAt !== null]],
+    ),
+  );
   for (const { id, op } of await listPending(tx)) {
-    if (op.kind === "markWorkspaceRead" && (op.cursor !== null || op.acknowledged === true)) {
+    if (op.kind === "markWorkspaceRead" && op.acknowledged === true) {
       // 新しい状態を受け取った行は、古いカーソルの楽観更新で上書きしない。
       const articleIds = op.articleIds.filter((articleId) => !delivered.has(articleId));
       if (op.acknowledged === true && done) {
@@ -146,6 +151,24 @@ export async function reconcilePendingMarkRead(
           id,
         ]);
       }
+      continue;
+    }
+    if (op.kind === "markWorkspaceRead") {
+      // スター変更などの差分が届いても、未送信の既読を重ねられるよう対象は保つ。
+      const previous = new Set(op.serverReadArticleIds);
+      const serverReadArticleIds = op.articleIds.filter((articleId) => {
+        return delivered.get(articleId) ?? previous.has(articleId);
+      });
+      if (
+        previous.size !== serverReadArticleIds.length ||
+        serverReadArticleIds.some((articleId) => !previous.has(articleId))
+      ) {
+        await tx.run("update pending_ops set payload = ? where id = ?", [
+          JSON.stringify({ ...op, serverReadArticleIds }),
+          id,
+        ]);
+      }
+      continue;
     }
     if (op.kind !== "markRead") continue;
     const extra = new Set(op.extraIds);
@@ -233,8 +256,13 @@ export async function push(
           );
         }
         if (op.kind === "markWorkspaceRead") {
+          const serverRead = new Set(op.serverReadArticleIds);
           await tx.run("update pending_ops set payload = ? where id = ? and rev = ?", [
-            JSON.stringify({ ...op, acknowledged: true }),
+            JSON.stringify({
+              ...op,
+              articleIds: op.articleIds.filter((articleId) => !serverRead.has(articleId)),
+              acknowledged: true,
+            }),
             next.id,
             next.rev,
           ]);

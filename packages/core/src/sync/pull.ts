@@ -82,7 +82,7 @@ export async function pull(db: Database, api: SendoApi, options: PullOptions): P
       // ので、ここで確かめれば、ログアウトの消去のあとに書き戻すことはない）
       options.signal?.throwIfAborted();
       const changed = await applyPage(tx, page);
-      if (await reconcilePendingMarkRead(tx, deliveredIds(page), !page.hasMore)) {
+      if (await reconcilePendingMarkRead(tx, page.articles, !page.hasMore)) {
         changed.add("articles");
       }
       if (await reapplyPending(tx)) changed.add("workspaces");
@@ -145,7 +145,7 @@ async function resync(
     if (pages.some((page) => page.savedPages !== null)) await clearSavedPages(tx);
     for (const page of pages) {
       await applyPage(tx, page);
-      await reconcilePendingMarkRead(tx, deliveredIds(page));
+      await reconcilePendingMarkRead(tx, page.articles);
     }
     for (const row of kept) {
       const columns = Object.keys(row);
@@ -169,11 +169,6 @@ async function resync(
   const all = new Set<Table>(TABLES);
   for (const table of all) result.changed.add(table);
   options.onPage?.(all);
-}
-
-/** ページで届いた（受信箱にある）記事の ID */
-function deliveredIds(page: SyncPage): string[] {
-  return page.articles.filter((article) => !article.deleted).map((article) => article.id);
 }
 
 /** 同期で届いた 1 ページを書き込む。変わった表を返す */
