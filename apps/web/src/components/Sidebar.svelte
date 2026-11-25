@@ -7,6 +7,7 @@
   import Icon, { type IconName } from "./Icon.svelte";
   import RemoteImage from "./RemoteImage.svelte";
   import SyncStatus from "./SyncStatus.svelte";
+  import WorkspaceSelector from "./WorkspaceSelector.svelte";
 
   let {
     onhelp,
@@ -186,6 +187,9 @@
 
   <div class="scroll">
     <div class="views">
+      {#if reader.workspacesAvailable || reader.workspaceIds !== undefined}
+        <WorkspaceSelector compact={prefs.value.sidebarCollapsed} />
+      {/if}
       {@render item({ kind: "all" }, "All", reader.unread.total, "inbox")}
       {@render item({ kind: "recentlyRead" }, "Recently Read", 0, "history")}
       {@render item({ kind: "starred" }, "Saved", 0, "bookmark")}

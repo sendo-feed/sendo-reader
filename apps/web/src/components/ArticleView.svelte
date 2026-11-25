@@ -25,7 +25,6 @@
   import Dialog from "./Dialog.svelte";
   import Icon from "./Icon.svelte";
   import TranslationLabel from "./TranslationLabel.svelte";
-  import WorkspaceSelector from "./WorkspaceSelector.svelte";
 
   let {
     articleId,
@@ -1171,11 +1170,6 @@
   style:--drag={`${dragX}px`}
 >
   {#if article !== null}
-    {#if reader.workspacesAvailable || reader.workspaceIds !== undefined}
-      <div class="detail-workspaces">
-        <WorkspaceSelector />
-      </div>
-    {/if}
     {#if swipeHint !== null}
       <div
         class="swipe-hint"
@@ -1473,17 +1467,6 @@
 </Dialog>
 
 <style>
-  .detail-workspaces {
-    display: none;
-  }
-
-  @media (max-width: 56rem) {
-    .detail-workspaces {
-      display: block;
-      padding: 0.75rem 1rem 0;
-    }
-  }
-
   .scope-checking {
     visibility: hidden;
   }

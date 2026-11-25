@@ -31,7 +31,8 @@ test("選択中の購読だけを表示し、記事を直接開いても再読�
   await signIn(page);
 
   const list = page.locator(".article-list");
-  const choice = page.getByRole("button", { name: /^Workspaces:/ });
+  const nav = page.getByRole("navigation", { name: "Feeds", exact: true });
+  const choice = nav.getByRole("button", { name: /^Workspaces:/ });
   const dialog = page.getByRole("dialog", { name: "Workspaces", exact: true });
   const hidePersonal = async () => {
     await choice.click();
@@ -41,6 +42,7 @@ test("選択中の購読だけを表示し、記事を直接開いても再読�
 
   await expect(list.getByText("Public article")).toBeVisible();
   await expect(list.getByText("Hidden article")).toBeVisible();
+  await expect(page.getByRole("button", { name: /^Workspaces:/ })).toHaveCount(1);
   await list.getByText("Hidden article").click();
   await expect(page.getByRole("heading", { name: "Hidden article", exact: true })).toBeVisible();
   await hidePersonal();
@@ -62,6 +64,7 @@ test("選択中の購読だけを表示し、記事を直接開いても再読�
   await page.goto("/manage");
   await expect(page.getByRole("main")).toContainText("Public feed");
   await expect(page.getByRole("main")).not.toContainText(/Hidden feed|Hidden folder/);
+  await expect(page.getByRole("button", { name: /^Workspaces:/ })).toHaveCount(1);
 
   await context.route("**/api/v1/**", (route) => route.abort("internetdisconnected"));
   await page.reload();
@@ -73,6 +76,63 @@ test("選択中の購読だけを表示し、記事を直接開いても再読�
   await dialog.getByRole("checkbox", { name: "Personal", exact: true }).check();
   await dialog.getByRole("button", { name: "Close", exact: true }).click();
   await expect(page.getByRole("main")).toContainText("Hidden feed");
+});
+
+test("ワークスペースを All の上から切り替えられ、サイドバーを畳んでも使える", async ({
+  context,
+  page,
+}) => {
+  const server = new FakeSendo();
+  server.workspacesSupported = true;
+  for (const name of ["Public", "Personal"]) {
+    const workspace = server.createWorkspace(name);
+    const feed = server.subscribe({
+      url: `https://${name.toLowerCase()}.example/feed`,
+      title: `${name} feed`,
+      workspaceId: workspace.id,
+    });
+    server.deliver(feed.id, { title: `${name} article` });
+  }
+  await routeFakeSendo(context, server);
+  await page.goto("/");
+  await signIn(page);
+
+  const nav = page.getByRole("navigation", { name: "Feeds", exact: true });
+  const choice = nav.getByRole("button", { name: /^Workspaces:/ });
+  const all = nav.getByRole("link", { name: /^All( \d+)?$/ });
+  const dialog = page.getByRole("dialog", { name: "Workspaces", exact: true });
+  const list = page.locator(".article-list");
+  await expect(choice.getByText("All workspaces", { exact: true })).toBeVisible();
+  expect((await choice.boundingBox())?.y).toBeLessThan((await all.boundingBox())?.y ?? 0);
+  await nav.getByRole("button", { name: "Collapse sidebar" }).click();
+  await expect(choice.getByText("All workspaces", { exact: true })).toBeHidden();
+  await choice.click();
+  await dialog.getByRole("button", { name: "Only Public", exact: true }).click();
+  await dialog.getByRole("button", { name: "Close", exact: true }).click();
+  await expect(choice).toHaveAccessibleName("Workspaces: Public");
+  await expect(list.getByText("Public article")).toBeVisible();
+  await expect(list.getByText("Personal article")).toHaveCount(0);
+  await choice.click();
+  await dialog.getByRole("button", { name: "All workspaces", exact: true }).click();
+  await dialog.getByRole("button", { name: "Close", exact: true }).click();
+  await expect(list.getByText("Personal article")).toBeVisible();
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(page.getByRole("button", { name: /^Workspaces:/ })).toBeHidden();
+  const menu = page.getByRole("button", { name: "Menu", exact: true });
+  await menu.click();
+  await nav.getByRole("link", { name: /^Personal feed/ }).click();
+  await expect(menu).toHaveAttribute("aria-expanded", "false");
+  await expect(list.getByText("Personal article")).toBeVisible();
+  await menu.click();
+  await expect(choice.getByText("All workspaces", { exact: true })).toBeVisible();
+  await choice.click();
+  await dialog.getByRole("button", { name: "Only Public", exact: true }).click();
+  await expect(page).toHaveURL("/");
+  await expect(page.locator("nav.sidebar")).toHaveCSS("visibility", "hidden");
+  await dialog.getByRole("button", { name: "Close", exact: true }).click();
+  await expect(list.getByText("Public article")).toBeVisible();
+  await expect(list.getByText("Personal article")).toHaveCount(0);
 });
 
 test("選択を保ったまま新しい空のフォルダへ最初の購読を移せる", async ({ context, page }) => {

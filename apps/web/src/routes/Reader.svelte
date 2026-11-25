@@ -13,7 +13,6 @@
   import Icon, { type IconName } from "../components/Icon.svelte";
   import ShortcutHelp from "../components/ShortcutHelp.svelte";
   import Sidebar from "../components/Sidebar.svelte";
-  import WorkspaceSelector from "../components/WorkspaceSelector.svelte";
   import { useReader } from "../lib/context";
   import { layout, reducedMotion } from "../lib/layout.svelte";
   import { ArticleListState, type ListProgress } from "../lib/list.svelte";
@@ -738,11 +737,6 @@
   {#if listing === null}
     <div class="page">
       <div class="bar">{pageTitle}</div>
-      {#if reader.workspacesAvailable || reader.workspaceIds !== undefined}
-        <div class="page-workspaces">
-          <WorkspaceSelector />
-        </div>
-      {/if}
       {#if router.view.kind === "manage"}
         {#key reader.user?.id}
           <Manage />
@@ -872,10 +866,6 @@
 {/if}
 
 <style>
-  .page-workspaces {
-    padding: 0.75rem 1rem 0;
-  }
-
   .reader {
     display: grid;
     grid-template-columns: var(--sidebar-width, 17rem) clamp(20rem, 30vw, 27rem) minmax(0, 1fr);
