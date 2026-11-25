@@ -4,6 +4,7 @@ import type { Executor } from "../db/database";
 import { getSetting, setSetting } from "../db/settings";
 import { requestResync } from "../db/synced";
 import { putSyncedSetting, removeSyncedSetting } from "../db/synced-settings";
+import { putWorkspace, setWorkspacesAvailable } from "../db/workspaces";
 import type { DeviceType, JsonValue, SavedPage, SettingItem } from "../models";
 import { MAX_SETTINGS_PER_REQUEST } from "../settings";
 
@@ -40,6 +41,7 @@ export type Operation =
   | { kind: "deleteFolder"; folderId: string }
   | { kind: "moveFeed"; feedId: string; folderId: string | null }
   | { kind: "renameFeed"; feedId: string; displayName: string | null }
+  | WorkspaceOperation
   | { kind: "unsubscribe"; feedId: string }
   | { kind: "setSavedPage"; id: string; page: SavedPage | null }
   | { kind: "recordArticleOpens"; events: ArticleOpenEvent[] }
@@ -48,6 +50,26 @@ export type Operation =
    * 1 度だけ入れる
    */
   | { kind: "setSettings"; deviceType: DeviceType; put: SettingItem[]; remove: string[] };
+
+export type WorkspaceOperation =
+  | { kind: "createWorkspace"; workspaceId: string; name: string; at: number }
+  | { kind: "renameWorkspace"; workspaceId: string; name: string }
+  | { kind: "deleteWorkspace"; workspaceId: string }
+  | {
+      kind: "moveFeedToWorkspace";
+      feedId: string;
+      subscriptionId: string;
+      workspaceId: string | null;
+    };
+
+export function isWorkspaceOperation(op: Operation): op is WorkspaceOperation {
+  return (
+    op.kind === "createWorkspace" ||
+    op.kind === "renameWorkspace" ||
+    op.kind === "deleteWorkspace" ||
+    op.kind === "moveFeedToWorkspace"
+  );
+}
 
 interface ArticleOpenEvent {
   id: string;
@@ -91,7 +113,12 @@ export function keyOf(op: Operation): string {
     case "renameFolder":
     case "deleteFolder":
       return op.folderId;
+    case "createWorkspace":
+    case "renameWorkspace":
+    case "deleteWorkspace":
+      return op.workspaceId;
     case "moveFeed":
+    case "moveFeedToWorkspace":
     case "renameFeed":
     case "unsubscribe":
       return op.feedId;
@@ -124,6 +151,12 @@ export function merge(previous: Operation, next: Operation): Operation | null {
     (previous.kind === "renameFeed" && next.kind === "renameFeed")
   ) {
     return previous.feedId === next.feedId ? next : null;
+  }
+  if (previous.kind === "renameWorkspace" && next.kind === "renameWorkspace") {
+    return previous.workspaceId === next.workspaceId ? next : null;
+  }
+  if (previous.kind === "moveFeedToWorkspace" && next.kind === "moveFeedToWorkspace") {
+    return previous.subscriptionId === next.subscriptionId ? next : null;
   }
   if (previous.kind === "recordArticleOpens" && next.kind === "recordArticleOpens") {
     const events = [...previous.events];
@@ -193,6 +226,29 @@ export async function applyLocally(tx: Executor, op: Operation): Promise<void> {
       return;
     case "renameFeed":
       await tx.run("update feeds set display_name = ? where id = ?", [op.displayName, op.feedId]);
+      return;
+    case "createWorkspace":
+      await tx.run(
+        "insert into workspaces (id, name, created_at) values (?, ?, ?) on conflict (id) do nothing",
+        [op.workspaceId, op.name, op.at],
+      );
+      return;
+    case "renameWorkspace":
+      await tx.run("update workspaces set name = ? where id = ?", [op.name, op.workspaceId]);
+      return;
+    case "deleteWorkspace":
+      await tx.run(
+        `update workspaces set deleted_locally = 1 where id = ?1
+           and not exists (select 1 from feeds where workspace_id = ?1)`,
+        [op.workspaceId],
+      );
+      return;
+    case "moveFeedToWorkspace":
+      await tx.run(
+        `update feeds set workspace_id = ?1 where id = ?2 and subscription_id = ?3
+           and (?1 is null or exists (select 1 from workspaces where id = ?1 and deleted_locally = 0))`,
+        [op.workspaceId, op.feedId, op.subscriptionId],
+      );
       return;
     case "unsubscribe":
       await tx.run("delete from feeds where id = ?", [op.feedId]);
@@ -315,6 +371,28 @@ export async function send(api: SendoApi, op: Operation, signal: AbortSignal): P
         }),
       );
       return {};
+    case "createWorkspace":
+      check(await client.POST("/workspaces", { body: { id: op.workspaceId, name: op.name } }));
+      return {};
+    case "renameWorkspace":
+      check(
+        await client.PATCH("/workspaces/{id}", {
+          params: { path: { id: op.workspaceId } },
+          body: { name: op.name },
+        }),
+      );
+      return {};
+    case "deleteWorkspace":
+      check(await client.DELETE("/workspaces/{id}", { params: { path: { id: op.workspaceId } } }));
+      return {};
+    case "moveFeedToWorkspace":
+      check(
+        await client.PATCH("/feeds/{id}", {
+          params: { path: { id: op.feedId } },
+          body: { workspaceId: op.workspaceId, subscriptionId: op.subscriptionId },
+        }),
+      );
+      return {};
     case "unsubscribe":
       try {
         check(await client.DELETE("/feeds/{id}", { params: { path: { id: op.feedId } } }));
@@ -425,6 +503,59 @@ export async function undo(
             feed.displayName ?? null,
             feed.id,
           ]);
+        }
+      });
+      return;
+    }
+    case "createWorkspace":
+    case "renameWorkspace":
+    case "deleteWorkspace": {
+      try {
+        const current = check(await api.client(signal).GET("/workspaces")).items.find(
+          (workspace) => workspace.id === op.workspaceId,
+        );
+        await write(async (tx) => {
+          if (current === undefined) {
+            await tx.run("delete from workspaces where id = ?", [op.workspaceId]);
+            // 失効した移動を取り除き、その後で有効な未送信操作を重ね直す。
+            await tx.run(
+              "update feeds set workspace_id = synced_workspace_id where workspace_id = ?",
+              [op.workspaceId],
+            );
+          } else {
+            await putWorkspace(tx, { ...current, createdAt: Date.parse(current.createdAt) });
+          }
+        });
+      } catch (failure) {
+        if (!(failure instanceof ApiError && failure.kind === "not_found")) throw failure;
+        // 対応前の Sendo に戻った場合、表示範囲を広げずに再同期する。
+        await write(async (tx) => {
+          await setWorkspacesAvailable(tx, false);
+          await requestResync(tx);
+        });
+      }
+      return;
+    }
+    case "moveFeedToWorkspace": {
+      const current = check(await api.client(signal).GET("/feeds")).items.find(
+        (feed) => feed.id === op.feedId,
+      );
+      await write(async (tx) => {
+        if (current === undefined) {
+          await tx.run("delete from feeds where id = ? and subscription_id = ?", [
+            op.feedId,
+            op.subscriptionId,
+          ]);
+        } else {
+          await tx.run(
+            "update feeds set workspace_id = ?1, synced_workspace_id = ?1, subscription_id = ?2 where id = ?3 and subscription_id = ?4",
+            [
+              current.workspaceId ?? null,
+              current.subscriptionId ?? null,
+              op.feedId,
+              op.subscriptionId,
+            ],
+          );
         }
       });
       return;

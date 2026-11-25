@@ -50,6 +50,7 @@ export type {
   TranslationStatus,
   UnreadCounts,
   User,
+  Workspace,
 } from "./models";
 export { feedName } from "./models";
 export type { FeedCandidate, OpmlImportResult } from "./online";

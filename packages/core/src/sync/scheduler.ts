@@ -1,6 +1,7 @@
 import { ApiError, type ApiErrorKind } from "../api/errors";
 import type { User } from "../models";
 import type { ReaderCore } from "../reader";
+import { isWorkspaceOperation } from "./ops";
 
 /** 同期の様子。画面の「オフライン」「未送信 N 件」などの表示に使う */
 export interface SyncStatus {
@@ -18,6 +19,7 @@ export interface SyncStatus {
   logoutPending: boolean;
   /** Sendo が受け付けなかった保存操作の理由 */
   savedPageError: "limit" | "unsupported" | "rejected" | null;
+  workspaceError?: "not_empty" | "exists" | "rejected" | null;
 }
 
 export interface SchedulerOptions {
@@ -86,6 +88,16 @@ export class SyncScheduler {
       savedPageError: null,
     };
     this.#offReject = core.onReject(({ op, error }) => {
+      if (isWorkspaceOperation(op)) {
+        const workspaceError =
+          error.code === "workspace_not_empty"
+            ? "not_empty"
+            : error.code === "workspace_exists"
+              ? "exists"
+              : "rejected";
+        this.#update({ user: core.currentUser(), workspaceError });
+        return;
+      }
       if (op.kind !== "setSavedPage") return;
       const savedPageError =
         error.code === "saved_limit_reached"
@@ -108,8 +120,10 @@ export class SyncScheduler {
   }
 
   /** 少し待ってから同期する（書き込んだあと） */
-  requestSoon(savedPageChanged = false): void {
+  requestSoon(savedPageChanged = false, workspaceChanged = false): void {
     if (savedPageChanged) this.#update({ savedPageError: null });
+    if (workspaceChanged && this.#status.workspaceError != null)
+      this.#update({ workspaceError: null });
     this.#schedule(WRITE_DEBOUNCE_MS);
     void this.#refreshPending();
   }
@@ -242,11 +256,13 @@ export class SyncScheduler {
 
   #update(patch: Partial<SyncStatus>): void {
     const next = { ...this.#status, ...patch };
-    if (next.user?.id !== this.#status.user?.id && patch.savedPageError === undefined) {
-      next.savedPageError = null;
+    if (next.user?.id !== this.#status.user?.id) {
+      if (patch.savedPageError === undefined) next.savedPageError = null;
+      if (patch.workspaceError === undefined) delete next.workspaceError;
     }
-    const changed = (Object.keys(next) as (keyof SyncStatus)[]).some((key) =>
-      key === "user" ? !sameUser(next.user, this.#status.user) : next[key] !== this.#status[key],
+    const changed = (Object.keys({ ...this.#status, ...next }) as (keyof SyncStatus)[]).some(
+      (key) =>
+        key === "user" ? !sameUser(next.user, this.#status.user) : next[key] !== this.#status[key],
     );
     this.#status = next;
     if (changed) this.#onStatus({ ...next });

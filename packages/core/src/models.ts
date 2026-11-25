@@ -17,6 +17,12 @@ export interface Folder {
   createdAt: number;
 }
 
+export interface Workspace {
+  id: string;
+  name: string;
+  createdAt: number;
+}
+
 export interface Feed {
   id: string;
   url: string;
@@ -24,6 +30,10 @@ export interface Feed {
   displayName: string | null;
   siteUrl: string | null;
   folderId: string | null;
+  /** 購読の所属。null は未割り当て。未対応の応答から取り込んだ購読では省く。 */
+  workspaceId?: string | null;
+  /** 購読をやめて、購読し直すと変わる ID。 */
+  subscriptionId?: string;
   /**
    * アイコンの画像の URL。sendo が中継する、同じオリジンの URL（docs/decisions/images.md）。
    * 受け取ったものをそのまま <img src> に入れる（組み立てない、書き換えない、中身を読まない）
@@ -214,7 +224,14 @@ export interface UnreadCounts {
 }
 
 /** 手元の DB の表。変わったことを画面に知らせるときに使う */
-export const TABLES = ["folders", "feeds", "articles", "settings", "savedPages"] as const;
+export const TABLES = [
+  "folders",
+  "feeds",
+  "articles",
+  "settings",
+  "savedPages",
+  "workspaces",
+] as const;
 
 export type Table = (typeof TABLES)[number];
 

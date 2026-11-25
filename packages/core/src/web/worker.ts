@@ -361,7 +361,13 @@ async function dispatch(
     } else {
       value = await callCore(leader.core, method, args);
       if (WRITE_METHODS.has(method)) {
-        leader.scheduler.requestSoon(method === "savePage" || method === "unsavePage");
+        leader.scheduler.requestSoon(
+          method === "savePage" || method === "unsavePage",
+          method === "createWorkspace" ||
+            method === "renameWorkspace" ||
+            method === "deleteWorkspace" ||
+            method === "moveFeedToWorkspace",
+        );
       }
       if (SYNC_NOW_METHODS.has(method)) leader.scheduler.requestNow();
     }

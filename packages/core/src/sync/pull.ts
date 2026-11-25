@@ -1,5 +1,6 @@
 import { ApiError, type SendoApi } from "../api/client";
 import type { Database, Executor, SqlValue } from "../db/database";
+import { putFeed } from "../db/feeds";
 import { clearSavedPages, putSavedPage, removeSavedPage } from "../db/saved-pages";
 import { deleteSetting, getSetting, setSetting } from "../db/settings";
 import {
@@ -10,7 +11,8 @@ import {
   RESYNC_KEY,
 } from "../db/synced";
 import { clearSyncedSettings, putSyncedSetting, removeSyncedSetting } from "../db/synced-settings";
-import type { Article, Table } from "../models";
+import { putWorkspace, setWorkspacesAvailable } from "../db/workspaces";
+import { type Article, TABLES, type Table } from "../models";
 import type { SyncPage } from "./page";
 import { reapplyPending, widenPendingMarkRead } from "./queue";
 
@@ -81,7 +83,7 @@ export async function pull(db: Database, api: SendoApi, options: PullOptions): P
       options.signal?.throwIfAborted();
       const changed = await applyPage(tx, page);
       await widenPendingMarkRead(tx, deliveredIds(page));
-      await reapplyPending(tx);
+      if (await reapplyPending(tx)) changed.add("workspaces");
       await setSetting(tx, CURSOR_KEY, page.cursor);
       if (!page.hasMore) {
         await markSyncComplete(tx, page.cursor);
@@ -160,7 +162,7 @@ async function resync(
   });
   result.pages += pages.length;
   result.reset = true;
-  const all = new Set<Table>(["folders", "feeds", "articles", "settings", "savedPages"]);
+  const all = new Set<Table>(TABLES);
   for (const table of all) result.changed.add(table);
   options.onPage?.(all);
 }
@@ -180,6 +182,12 @@ async function applyPage(tx: Executor, page: SyncPage): Promise<Set<Table>> {
     if (await applyFolder(tx, folder)) changed.add("feeds");
   }
   if (page.folders.length > 0) changed.add("folders");
+  for (const workspace of page.workspaces ?? []) {
+    if (workspace.deleted) await tx.run("delete from workspaces where id = ?", [workspace.id]);
+    else await putWorkspace(tx, workspace);
+  }
+  const availabilityChanged = await setWorkspacesAvailable(tx, page.workspaces !== null);
+  if (availabilityChanged || (page.workspaces?.length ?? 0) > 0) changed.add("workspaces");
   for (const feed of page.feeds) await applyFeed(tx, feed);
   if (page.feeds.length > 0) changed.add("feeds");
   for (const article of page.articles) await applyArticle(tx, article);
@@ -224,25 +232,7 @@ async function applyFeed(tx: Executor, feed: SyncPage["feeds"][number]): Promise
     await tx.run("delete from feeds where id = ?", [feed.id]);
     return;
   }
-  await tx.run(
-    `insert into feeds (id, url, title, display_name, site_url, folder_id, icon_url, created_at)
-     values (?, ?, ?, ?, ?, ?, ?, ?)
-     on conflict (id) do update set
-       url = excluded.url, title = excluded.title, display_name = excluded.display_name,
-       site_url = excluded.site_url,
-       folder_id = excluded.folder_id, icon_url = excluded.icon_url,
-       created_at = excluded.created_at`,
-    [
-      feed.id,
-      feed.url,
-      feed.title,
-      feed.displayName,
-      feed.siteUrl,
-      feed.folderId,
-      feed.iconUrl,
-      feed.createdAt,
-    ],
-  );
+  await putFeed(tx, feed);
 }
 
 /** 記事を書き込むか、受信箱から消えた記録なら手元から消す */

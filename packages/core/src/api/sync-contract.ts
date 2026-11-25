@@ -63,6 +63,10 @@ export function toSyncPage(body: unknown): SyncPage {
       changes.savedPages?.map((page) =>
         page.deleted ? page : { ...page, savedAt: Date.parse(page.savedAt) },
       ) ?? null,
+    workspaces:
+      changes.workspaces?.map((row) =>
+        row.deleted ? row : { ...row, createdAt: Date.parse(row.createdAt) },
+      ) ?? null,
     cursor: changes.cursor,
     hasMore: changes.hasMore,
     folders: changes.folders.map((folder) => ({
@@ -78,6 +82,10 @@ export function toSyncPage(body: unknown): SyncPage {
       displayName: feed.displayName,
       siteUrl: feed.siteUrl,
       folderId: feed.folderId,
+      ...(feed.subscriptionId !== undefined && {
+        workspaceId: feed.workspaceId ?? null,
+        subscriptionId: feed.subscriptionId,
+      }),
       iconUrl: toSameOriginUrl(feed.iconUrl),
       createdAt: Date.parse(feed.createdAt),
       deleted: feed.deleted,
@@ -122,12 +130,13 @@ export function toSyncPage(body: unknown): SyncPage {
  */
 function parseSyncChanges(body: unknown): Omit<
   SyncChanges,
-  "feeds" | "settings" | "savedPages" | "articles"
+  "feeds" | "settings" | "savedPages" | "articles" | "workspaces"
 > & {
   feeds: ParsedSyncFeed[];
   articles: ParsedSyncArticle[];
   settings: SyncChanges["settings"] | undefined;
   savedPages: SyncChanges["savedPages"];
+  workspaces: SyncChanges["workspaces"];
 } {
   const root = record(body, "(root)");
   return {
@@ -155,6 +164,21 @@ function parseSyncChanges(body: unknown): Omit<
             }
             return { ...parseSavedPage(row, field), deleted: false };
           }),
+    workspaces:
+      root.workspaces === undefined
+        ? undefined
+        : array(root.workspaces, "workspaces").map((value, i): Schemas["SyncWorkspace"] => {
+            const field = `workspaces[${i}]`;
+            const row = record(value, field);
+            const id = string(row.id, `${field}.id`);
+            if (boolean(row.deleted, `${field}.deleted`)) return { id, deleted: true };
+            return {
+              id,
+              name: string(row.name, `${field}.name`),
+              createdAt: time(row.createdAt, `${field}.createdAt`),
+              deleted: false,
+            };
+          }),
     cursor: string(root.cursor, "cursor"),
     hasMore: boolean(root.hasMore, "hasMore"),
     folders: array(root.folders, "folders").map((value, i): Schemas["SyncFolder"] => {
@@ -170,6 +194,7 @@ function parseSyncChanges(body: unknown): Omit<
     feeds: array(root.feeds, "feeds").map((value, i): ParsedSyncFeed => {
       const row = record(value, `feeds[${i}]`);
       const at = (field: string) => `feeds[${i}].${field}`;
+      const deleted = boolean(row.deleted, at("deleted"));
       return {
         id: string(row.id, at("id")),
         url: string(row.url, at("url")),
@@ -177,9 +202,14 @@ function parseSyncChanges(body: unknown): Omit<
         displayName: optionalString(row.displayName, at("displayName")),
         siteUrl: nullableString(row.siteUrl, at("siteUrl")),
         folderId: nullableString(row.folderId, at("folderId")),
+        ...(!deleted &&
+          root.workspaces !== undefined && {
+            workspaceId: nullableString(row.workspaceId, at("workspaceId")),
+            subscriptionId: string(row.subscriptionId, at("subscriptionId")),
+          }),
         iconUrl: optionalString(row.iconUrl, at("iconUrl")),
         createdAt: time(row.createdAt, at("createdAt")),
-        deleted: boolean(row.deleted, at("deleted")),
+        deleted,
       };
     }),
     articles: array(root.articles, "articles").map((value, i): ParsedSyncArticle => {

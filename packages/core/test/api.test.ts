@@ -76,7 +76,7 @@ describe("リクエストの組み立て", () => {
     });
     await api.sync("c1+/=");
     expect(seen[0]?.url).toBe(
-      "https://sendo.test/api/v1/sync?cursor=c1%2B%2F%3D&includeSaved=true",
+      "https://sendo.test/api/v1/sync?cursor=c1%2B%2F%3D&includeSaved=true&includeWorkspaces=true",
     );
     expect(seen[0]?.headers.has("authorization")).toBe(false);
   });

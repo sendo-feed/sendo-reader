@@ -185,6 +185,17 @@
               "null"
             ]
           },
+          "workspaceId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "購読の所属。未割り当てなら null"
+          },
+          "subscriptionId": {
+            "type": "string",
+            "description": "購読の ID。購読し直すと変わる"
+          },
           "lastFetchedAt": {
             "type": [
               "string",
@@ -290,6 +301,8 @@
           "siteUrl",
           "iconUrl",
           "folderId",
+          "workspaceId",
+          "subscriptionId",
           "lastFetchedAt",
           "lastSuccessfulFetchAt",
           "nextFetchAt",
@@ -317,6 +330,14 @@
             ],
             "minLength": 1,
             "maxLength": 64
+          },
+          "workspaceId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "minLength": 1,
+            "maxLength": 64
           }
         },
         "required": [
@@ -335,6 +356,21 @@
             "maxLength": 64,
             "description": "null ならフォルダなしにする"
           },
+          "workspaceId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "minLength": 1,
+            "maxLength": 64,
+            "description": "null ならワークスペースから外す"
+          },
+          "subscriptionId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64,
+            "description": "所属を変更するときは、変更対象の購読 ID を指定する"
+          },
           "displayName": {
             "type": [
               "string",
@@ -345,7 +381,33 @@
             "description": "前後の空白を除いた購読の表示名。null なら配信元の名前に戻す"
           }
         },
-        "minProperties": 1
+        "anyOf": [
+          {
+            "required": [
+              "workspaceId",
+              "subscriptionId"
+            ]
+          },
+          {
+            "not": {
+              "required": [
+                "workspaceId"
+              ]
+            },
+            "anyOf": [
+              {
+                "required": [
+                  "folderId"
+                ]
+              },
+              {
+                "required": [
+                  "displayName"
+                ]
+              }
+            ]
+          }
+        ]
       },
       "ArticleContent": {
         "type": "object",
@@ -496,6 +558,17 @@
             "enum": [
               true
             ]
+          },
+          "subscriptionIds": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            "minItems": 1,
+            "maxItems": 90,
+            "description": "操作時の有効な購読の ID。cursor と組み合わせ、他の範囲指定とは併用しない"
           },
           "until": {
             "type": "string",
@@ -700,6 +773,56 @@
           "name"
         ]
       },
+      "Workspace": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "createdAt"
+        ]
+      },
+      "CreateWorkspaceRequest": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/RenameWorkspaceRequest"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+                "description": "クライアントが決めた小文字の UUID。省略時は Sendo が決める"
+              }
+            }
+          }
+        ]
+      },
+      "RenameWorkspaceRequest": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          }
+        },
+        "required": [
+          "name"
+        ]
+      },
       "OpmlImportResult": {
         "type": "object",
         "properties": {
@@ -863,6 +986,12 @@
             "items": {
               "$ref": "#/components/schemas/SyncSavedPage"
             }
+          },
+          "workspaces": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SyncWorkspace"
+            }
           }
         },
         "required": [
@@ -1001,6 +1130,17 @@
               "string",
               "null"
             ]
+          },
+          "workspaceId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "includeWorkspaces=true の有効な購読に付く。未割り当てなら null"
+          },
+          "subscriptionId": {
+            "type": "string",
+            "description": "includeWorkspaces=true の有効な購読に付く。購読し直すと変わる"
           },
           "createdAt": {
             "type": "string",
@@ -1308,6 +1448,49 @@
         "required": [
           "id",
           "deleted"
+        ]
+      },
+      "SyncWorkspace": {
+        "oneOf": [
+          {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Workspace"
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "deleted": {
+                    "type": "boolean",
+                    "enum": [
+                      false
+                    ]
+                  }
+                },
+                "required": [
+                  "deleted"
+                ]
+              }
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "deleted": {
+                "type": "boolean",
+                "enum": [
+                  true
+                ]
+              }
+            },
+            "required": [
+              "id",
+              "deleted"
+            ]
+          }
         ]
       },
       "AccessToken": {
@@ -2143,7 +2326,7 @@
             }
           },
           "400": {
-            "description": "URL が正しくない、取得が許されていない、またはフォルダがない",
+            "description": "URL が正しくない、取得が許されていない、フォルダかワークスペースがない",
             "content": {
               "application/json": {
                 "schema": {
@@ -2268,7 +2451,7 @@
     },
     "/feeds/{id}": {
       "patch": {
-        "summary": "購読を変える（フォルダと表示名）",
+        "summary": "購読を変える（フォルダ、表示名、ワークスペース）",
         "parameters": [
           {
             "schema": {
@@ -2311,7 +2494,7 @@
             }
           },
           "400": {
-            "description": "フォルダがない",
+            "description": "フォルダかワークスペースがない",
             "content": {
               "application/json": {
                 "schema": {
@@ -2490,7 +2673,7 @@
     "/articles/mark-read": {
       "post": {
         "summary": "まとめて既読にする",
-        "description": "ID を並べるか、フィード ／ フォルダ ／ すべてを指定する。",
+        "description": "記事 ID、操作時の購読 ID、フィード、フォルダ、またはすべてを指定する。",
         "requestBody": {
           "required": true,
           "content": {
@@ -3103,6 +3286,222 @@
         }
       }
     },
+    "/workspaces": {
+      "get": {
+        "summary": "アカウントのワークスペースを名前順で返す",
+        "responses": {
+          "200": {
+            "description": "有効なワークスペースの一覧",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Workspace"
+                      }
+                    }
+                  },
+                  "required": [
+                    "items"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "ワークスペースを作る",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateWorkspaceRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "同じ ID のワークスペースがある。現在の名前を返す",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "workspace": {
+                      "$ref": "#/components/schemas/Workspace"
+                    }
+                  },
+                  "required": [
+                    "workspace"
+                  ]
+                }
+              }
+            }
+          },
+          "201": {
+            "description": "作った",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "workspace": {
+                      "$ref": "#/components/schemas/Workspace"
+                    }
+                  },
+                  "required": [
+                    "workspace"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "名前か ID が正しくない",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "名前が使用済み（workspace_exists）か、指定した ID は使えない（workspace_id_taken）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/workspaces/{id}": {
+      "patch": {
+        "summary": "ワークスペースの名前を変える",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RenameWorkspaceRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "名前を変えた",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "workspace": {
+                      "$ref": "#/components/schemas/Workspace"
+                    }
+                  },
+                  "required": [
+                    "workspace"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "名前か ID が正しくない",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "ワークスペースがない",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "名前が使用済み（workspace_exists）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "summary": "有効な購読が0件のワークスペースを削除する",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "削除した、または削除済み"
+          },
+          "404": {
+            "description": "ワークスペースがない",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "有効な購読がある（workspace_not_empty）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/images": {
       "get": {
         "summary": "画像を中継する",
@@ -3512,7 +3911,7 @@
     "/sync": {
       "get": {
         "summary": "前回の同期からの差分を取る",
-        "description": "カーソルなしで呼ぶと、最初の同期を始める（消した印の付いていないフォルダ・購読・設定、未読・スター・直近 30 日の記事）。\n応答の cursor を次に渡すと、そのあとに変わったものだけを返す。hasMore が true なら、すぐにもう一度呼ぶ。\n配列は変更番号の順に並んでいる。同じ id が続けて来たら、後のものを採る。\ndeleted が true のものは手元から消す。手元の行を消すのは、その行の deleted が届いたときだけにする。購読をやめた（feeds の deleted）からといって、そのフィードの記事を消さない（配列ごとにページを送るので、配列をまたいだ順序は保証されない）。\nsettings には、どの端末の種類の項目も届く。クライアントは、自分の種類の分だけを使えばよい。\nincludeSaved=true なら、あとで読むページの新規保存と解除も savedPages に載せる。\ncursor の中身には意味を持たせていないので、クライアントはそのまま送り返すだけにする。",
+        "description": "カーソルなしで呼ぶと、最初の同期を始める（消した印の付いていないフォルダ・購読・設定、未読・スター・直近 30 日の記事）。\n応答の cursor を次に渡すと、そのあとに変わったものだけを返す。hasMore が true なら、すぐにもう一度呼ぶ。\n配列は変更番号の順に並んでいる。同じ id が続けて来たら、後のものを採る。\ndeleted が true のものは手元から消す。手元の行を消すのは、その行の deleted が届いたときだけにする。購読をやめた（feeds の deleted）からといって、そのフィードの記事を消さない（配列ごとにページを送るので、配列をまたいだ順序は保証されない）。\nsettings には、どの端末の種類の項目も届く。クライアントは、自分の種類の分だけを使えばよい。\nincludeSaved=true なら、あとで読むページの新規保存と解除も savedPages に載せる。\nincludeWorkspaces=true なら、workspaces と、有効な feeds の workspaceId・subscriptionId を返す。対応する位置がない既存のカーソルでは、購読とワークスペースだけを番号0から返す。\ncursor の中身には意味を持たせていないので、クライアントはそのまま送り返すだけにする。",
         "parameters": [
           {
             "schema": {
@@ -3524,6 +3923,18 @@
             },
             "required": false,
             "name": "includeSaved",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "true",
+                "false"
+              ]
+            },
+            "required": false,
+            "name": "includeWorkspaces",
             "in": "query"
           },
           {

@@ -690,7 +690,7 @@ export interface paths {
                         };
                     };
                 };
-                /** @description URL が正しくない、取得が許されていない、またはフォルダがない */
+                /** @description URL が正しくない、取得が許されていない、フォルダかワークスペースがない */
                 400: {
                     headers: {
                         [name: string]: unknown;
@@ -825,7 +825,7 @@ export interface paths {
         };
         options?: never;
         head?: never;
-        /** 購読を変える（フォルダと表示名） */
+        /** 購読を変える（フォルダ、表示名、ワークスペース） */
         patch: {
             parameters: {
                 query?: never;
@@ -852,7 +852,7 @@ export interface paths {
                         };
                     };
                 };
-                /** @description フォルダがない */
+                /** @description フォルダかワークスペースがない */
                 400: {
                     headers: {
                         [name: string]: unknown;
@@ -1009,7 +1009,7 @@ export interface paths {
         put?: never;
         /**
          * まとめて既読にする
-         * @description ID を並べるか、フィード ／ フォルダ ／ すべてを指定する。
+         * @description 記事 ID、操作時の購読 ID、フィード、フォルダ、またはすべてを指定する。
          */
         post: {
             parameters: {
@@ -1546,6 +1546,208 @@ export interface paths {
         };
         trace?: never;
     };
+    "/workspaces": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** アカウントのワークスペースを名前順で返す */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description 有効なワークスペースの一覧 */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            items: components["schemas"]["Workspace"][];
+                        };
+                    };
+                };
+            };
+        };
+        put?: never;
+        /** ワークスペースを作る */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["CreateWorkspaceRequest"];
+                };
+            };
+            responses: {
+                /** @description 同じ ID のワークスペースがある。現在の名前を返す */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            workspace: components["schemas"]["Workspace"];
+                        };
+                    };
+                };
+                /** @description 作った */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            workspace: components["schemas"]["Workspace"];
+                        };
+                    };
+                };
+                /** @description 名前か ID が正しくない */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description 名前が使用済み（workspace_exists）か、指定した ID は使えない（workspace_id_taken） */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/workspaces/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** 有効な購読が0件のワークスペースを削除する */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description 削除した、または削除済み */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description ワークスペースがない */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description 有効な購読がある（workspace_not_empty） */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        options?: never;
+        head?: never;
+        /** ワークスペースの名前を変える */
+        patch: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["RenameWorkspaceRequest"];
+                };
+            };
+            responses: {
+                /** @description 名前を変えた */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            workspace: components["schemas"]["Workspace"];
+                        };
+                    };
+                };
+                /** @description 名前か ID が正しくない */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description ワークスペースがない */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description 名前が使用済み（workspace_exists） */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        trace?: never;
+    };
     "/images": {
         parameters: {
             query?: never;
@@ -1956,12 +2158,14 @@ export interface paths {
          *     deleted が true のものは手元から消す。手元の行を消すのは、その行の deleted が届いたときだけにする。購読をやめた（feeds の deleted）からといって、そのフィードの記事を消さない（配列ごとにページを送るので、配列をまたいだ順序は保証されない）。
          *     settings には、どの端末の種類の項目も届く。クライアントは、自分の種類の分だけを使えばよい。
          *     includeSaved=true なら、あとで読むページの新規保存と解除も savedPages に載せる。
+         *     includeWorkspaces=true なら、workspaces と、有効な feeds の workspaceId・subscriptionId を返す。対応する位置がない既存のカーソルでは、購読とワークスペースだけを番号0から返す。
          *     cursor の中身には意味を持たせていないので、クライアントはそのまま送り返すだけにする。
          */
         get: {
             parameters: {
                 query?: {
                     includeSaved?: "true" | "false";
+                    includeWorkspaces?: "true" | "false";
                     /** @description 前回の応答の cursor */
                     cursor?: string;
                 };
@@ -2461,6 +2665,10 @@ export interface components {
              */
             iconUrl: string | null;
             folderId: string | null;
+            /** @description 購読の所属。未割り当てなら null */
+            workspaceId: string | null;
+            /** @description 購読の ID。購読し直すと変わる */
+            subscriptionId: string;
             /**
              * Format: date-time
              * @description 最後に取得を試した時刻
@@ -2507,13 +2715,18 @@ export interface components {
              */
             url: string;
             folderId?: string | null;
+            workspaceId?: string | null;
         };
         UpdateFeedRequest: {
             /** @description null ならフォルダなしにする */
             folderId?: string | null;
+            /** @description null ならワークスペースから外す */
+            workspaceId?: string | null;
+            /** @description 所属を変更するときは、変更対象の購読 ID を指定する */
+            subscriptionId?: string;
             /** @description 前後の空白を除いた購読の表示名。null なら配信元の名前に戻す */
             displayName?: string | null;
-        };
+        } | unknown | (unknown | unknown);
         ArticleContent: {
             /** @description サニタイズした HTML */
             html: string;
@@ -2568,6 +2781,8 @@ export interface components {
             folderId?: string;
             /** @enum {boolean} */
             all?: true;
+            /** @description 操作時の有効な購読の ID。cursor と組み合わせ、他の範囲指定とは併用しない */
+            subscriptionIds?: string[];
             /**
              * Format: date-time
              * @description この時刻より前に受信箱に入った記事だけを既読にする。記事の一覧の最初のページの asOf を渡す。クライアントの時計の時刻は使わない（サーバーとずれていると、一覧に出ていなかった記事まで既読になる）
@@ -2639,6 +2854,19 @@ export interface components {
             /** @description 前後の空白を除き、200 文字までに切り詰める */
             name: string;
         };
+        Workspace: {
+            id: string;
+            name: string;
+            /** Format: date-time */
+            createdAt: string;
+        };
+        CreateWorkspaceRequest: components["schemas"]["RenameWorkspaceRequest"] & {
+            /** @description クライアントが決めた小文字の UUID。省略時は Sendo が決める */
+            id?: string;
+        };
+        RenameWorkspaceRequest: {
+            name: string;
+        };
         OpmlImportResult: {
             /** @description 登録をキューに積んだフィードの数 */
             accepted: number;
@@ -2684,6 +2912,7 @@ export interface components {
             articles: components["schemas"]["SyncArticle"][];
             settings: components["schemas"]["SyncSetting"][];
             savedPages?: components["schemas"]["SyncSavedPage"][];
+            workspaces?: components["schemas"]["SyncWorkspace"][];
         };
         SyncFolder: {
             id: string;
@@ -2725,6 +2954,10 @@ export interface components {
              */
             iconUrl: string | null;
             folderId: string | null;
+            /** @description includeWorkspaces=true の有効な購読に付く。未割り当てなら null */
+            workspaceId?: string | null;
+            /** @description includeWorkspaces=true の有効な購読に付く。購読し直すと変わる */
+            subscriptionId?: string;
             /**
              * Format: date-time
              * @description 購読した時刻
@@ -2827,6 +3060,14 @@ export interface components {
             deleted: false;
         };
         SyncRemovedSavedPage: {
+            id: string;
+            /** @enum {boolean} */
+            deleted: true;
+        };
+        SyncWorkspace: (components["schemas"]["Workspace"] & {
+            /** @enum {boolean} */
+            deleted: false;
+        }) | {
             id: string;
             /** @enum {boolean} */
             deleted: true;

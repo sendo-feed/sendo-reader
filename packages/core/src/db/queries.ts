@@ -202,10 +202,13 @@ export async function listFeeds(db: Executor): Promise<Feed[]> {
     display_name: string | null;
     site_url: string | null;
     folder_id: string | null;
+    workspace_id: string | null;
+    subscription_id: string | null;
     icon_url: string | null;
     created_at: number;
   }>(
-    `select id, url, title, display_name, site_url, folder_id, icon_url, created_at from feeds
+    `select id, url, title, display_name, site_url, folder_id, workspace_id, subscription_id,
+      icon_url, created_at from feeds
      order by coalesce(display_name, title, url) collate nocase, id`,
   );
   return rows.map((row) => ({
@@ -215,6 +218,10 @@ export async function listFeeds(db: Executor): Promise<Feed[]> {
     displayName: row.display_name,
     siteUrl: row.site_url,
     folderId: row.folder_id,
+    ...(row.subscription_id !== null && {
+      workspaceId: row.workspace_id,
+      subscriptionId: row.subscription_id,
+    }),
     iconUrl: row.icon_url,
     createdAt: row.created_at,
   }));

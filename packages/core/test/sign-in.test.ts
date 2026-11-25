@@ -62,7 +62,9 @@ describe("ログイン（sendo のセッション）", () => {
     expect(await core.listArticles()).toEqual([]);
     expect(await core.listFeeds()).toEqual([]);
     expect(await db.all("select key from settings")).toEqual([{ key: "auth.logoutPending" }]);
-    expect(changes).toEqual([["articles", "feeds", "folders", "savedPages", "settings"]]);
+    expect(changes).toEqual([
+      ["articles", "feeds", "folders", "savedPages", "settings", "workspaces"],
+    ]);
 
     expect(await core.sendPendingSignOut()).toBe(true);
     expect(server.requests).toEqual(["POST /auth/logout"]);
@@ -182,11 +184,21 @@ describe("送る前に、セッションのユーザーを確かめる", () => {
     server.requests.length = 0;
     await core.sync();
     expect(core.currentUser()).toEqual(USER_B);
-    expect(server.requests).toEqual(["GET /me", "GET /sync?includeSaved=true"]);
+    expect(server.requests).toEqual([
+      "GET /me",
+      "GET /sync?includeSaved=true&includeWorkspaces=true",
+    ]);
     expect(await core.listArticles()).toEqual([]);
     expect(await core.listFeeds()).toMatchObject([{ id: feed.id }]);
     expect(await core.countPending()).toBe(0);
-    expect(changes[0]).toEqual(["articles", "feeds", "folders", "savedPages", "settings"]);
+    expect(changes[0]).toEqual([
+      "articles",
+      "feeds",
+      "folders",
+      "savedPages",
+      "settings",
+      "workspaces",
+    ]);
   });
 
   test("別のユーザーでログインしていたら、前のユーザーのために頼まれた購読は送らない", async () => {
@@ -224,7 +236,9 @@ describe("ログアウトと中断", () => {
     // /me は通り、差分の取り込みで止まる
     server.failNext(null, "hang");
     const syncing = core.sync();
-    await vi.waitFor(() => expect(server.requests.at(-1)).toBe("GET /sync?includeSaved=true"));
+    await vi.waitFor(() =>
+      expect(server.requests.at(-1)).toBe("GET /sync?includeSaved=true&includeWorkspaces=true"),
+    );
 
     await core.signOut();
     const error = await syncing.catch((e: unknown) => e);
@@ -294,7 +308,9 @@ describe("ログアウトと中断", () => {
     const { server, core } = await setup();
     server.failNext(null, "hang-body");
     const syncing = core.sync();
-    await vi.waitFor(() => expect(server.requests).toContain("GET /sync?includeSaved=true"));
+    await vi.waitFor(() =>
+      expect(server.requests).toContain("GET /sync?includeSaved=true&includeWorkspaces=true"),
+    );
 
     await core.signOut();
     const error = await syncing.catch((e: unknown) => e);

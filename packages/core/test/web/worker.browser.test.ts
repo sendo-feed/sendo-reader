@@ -295,6 +295,33 @@ describe("代表が名乗り直したときと、代表が替わったとき", (
     expect(await first.client.isSignedIn()).toBe(true);
   });
 
+  test("ワークスペースを作った代表が応答前に閉じても、同じ ID でやり直す", async () => {
+    const { server, open, signIn } = world();
+    server.workspacesSupported = true;
+    const first = open();
+    await signIn(first);
+    await first.client.syncNow();
+    const second = open();
+    await second.client.listWorkspaces();
+    const dropping = Promise.withResolvers<void>();
+    const dropped = Promise.withResolvers<string>();
+    first.worker.addEventListener("message", (event: MessageEvent) => {
+      if (event.data.type === "droppingWorkspaceResult") dropping.resolve();
+      if (event.data.type === "droppedWorkspaceResult") dropped.resolve(event.data.id);
+    });
+    first.worker.postMessage({ type: "dropWorkspaceResult" });
+    await dropping.promise;
+    const created = second.client.createWorkspace("Public");
+    const originalId = await dropped.promise;
+    first.worker.terminate();
+    expect(await created).toBe(originalId);
+    expect((await second.client.listWorkspaces()).map((workspace) => workspace.id)).toEqual([
+      originalId,
+    ]);
+    await second.client.syncNow();
+    expect([...server.workspaces.keys()]).toEqual([originalId]);
+  });
+
   test("同じ名前のフォルダにまとめたあと代表が替わっても、画面が持っている前の ID で操作できる", async () => {
     const { server, open, signIn } = world();
     const first = open();

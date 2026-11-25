@@ -1,4 +1,4 @@
-import type { Article, DeviceType, Feed, Folder, JsonValue, SavedPage } from "../models";
+import type { Article, DeviceType, Feed, Folder, JsonValue, SavedPage, Workspace } from "../models";
 
 /**
  * 差分同期の 1 ページ（core の中の形）。sendo の応答の形からの変換は API の境界
@@ -22,6 +22,8 @@ export interface SyncPage {
   settings: SyncSetting[] | null;
   /** 保存したページ。未対応の sendo からは null */
   savedPages: SyncSavedPage[] | null;
+  /** ワークスペース。未対応の Sendo からは null。 */
+  workspaces: SyncWorkspace[] | null;
 }
 
 export type SyncSetting =
@@ -31,3 +33,5 @@ export type SyncSetting =
 export type SyncArticle = (Article & { deleted: false }) | { id: string; deleted: true };
 
 export type SyncSavedPage = (SavedPage & { deleted: false }) | { id: string; deleted: true };
+
+export type SyncWorkspace = (Workspace & { deleted: false }) | { id: string; deleted: true };

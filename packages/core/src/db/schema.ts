@@ -314,6 +314,20 @@ const migrations: readonly (readonly string[])[] = [
     "alter table articles add column translation_model text",
     "alter table articles add column translation_effort text",
   ],
+  [
+    `create table workspaces (
+      id text primary key,
+      name text not null,
+      created_at integer not null,
+      deleted_locally integer not null default 0
+    ) strict`,
+    // 購読とワークスペースは別のページで届く。所属先の行より先に購読が届くこともある。
+    "alter table feeds add column workspace_id text",
+    // 楽観的に移した先を作れなかったときに、最後に同期した所属へ戻す。
+    "alter table feeds add column synced_workspace_id text",
+    "alter table feeds add column subscription_id text",
+    "create index feeds_workspace_idx on feeds (workspace_id)",
+  ],
 ];
 
 export const SCHEMA_VERSION = migrations.length;
