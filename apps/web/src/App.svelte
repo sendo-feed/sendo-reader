@@ -32,9 +32,7 @@
 {#if state.signedIn === null}
   <p class="starting" aria-live="polite">Loading…</p>
 {:else if state.signedIn}
-  {#key state.user?.id}
-    <Reader />
-  {/key}
+  <Reader />
 {:else}
   <Login />
 {/if}
