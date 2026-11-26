@@ -13,10 +13,13 @@ export interface AppBadge {
  *
  * 数の正は手元の DB で、ここには最後に出した数だけを覚え、変わったときだけ書く。書けなければ
  * （iOS では、通知を許可していないと失敗する）、画面には何も出さず、次に数え直したときに書き直す。
+ * 前に出たときは、覚えた数を捨てて書き直す。裏にある間や閉じている間に、push の app_badge で
+ * ブラウザーが書いた数を残さない（docs/decisions/notifications.md の 11）。
  */
 export function showUnreadBadge(
   client: Pick<ReaderClient, "countUnread" | "onChange">,
   badge: AppBadge,
+  page: Pick<Document, "visibilityState" | "addEventListener">,
 ): void {
   /** 最後に出した数。分からない（起動したばかり、書けなかった）ときは undefined */
   let shown: number | undefined;
@@ -37,12 +40,17 @@ export function showUnreadBadge(
     try {
       await (total === 0 ? badge.clearAppBadge() : badge.setAppBadge(total));
     } catch {
-      if (shown === total) shown = undefined;
+      shown = undefined;
     }
   };
 
   client.onChange((tables) => {
     if (tables.has("articles")) void update();
+  });
+  page.addEventListener("visibilitychange", () => {
+    if (page.visibilityState !== "visible") return;
+    shown = undefined;
+    void update();
   });
   void update();
 }

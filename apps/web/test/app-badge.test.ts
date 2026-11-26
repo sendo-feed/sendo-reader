@@ -3,7 +3,7 @@ import { expect, test } from "vitest";
 import { showUnreadBadge } from "../src/lib/app-badge";
 
 /**
- * にせものの窓口とバッジ。手元の DB の読み出し（countUnread）は、テストが答えるまで待たせる。
+ * にせものの窓口とバッジとページ。手元の DB の読み出し（countUnread）は、テストが答えるまで待たせる。
  * バッジに書いた数を calls に覚え、fail のときは書くのに失敗する
  */
 function setup() {
@@ -15,6 +15,9 @@ function setup() {
     calls.push(value);
     return badge.fail ? Promise.reject(new Error("通知を許可していない")) : Promise.resolve();
   };
+  const page = Object.assign(new EventTarget(), {
+    visibilityState: "visible" as DocumentVisibilityState,
+  });
   showUnreadBadge(
     {
       countUnread: () =>
@@ -30,7 +33,12 @@ function setup() {
       },
     },
     { setAppBadge: write, clearAppBadge: () => write("clear") },
+    page,
   );
+  const setVisibility = (visibility: DocumentVisibilityState) => {
+    page.visibilityState = visibility;
+    page.dispatchEvent(new Event("visibilitychange"));
+  };
   const changeArticles = () => {
     for (const listener of listeners) listener(new Set<Table>(["articles"]));
   };
@@ -38,7 +46,7 @@ function setup() {
     reads[index]?.answer(total);
     await new Promise((resolve) => setTimeout(resolve));
   };
-  return { reads, calls, badge, changeArticles, read };
+  return { reads, calls, badge, changeArticles, setVisibility, read };
 }
 
 test("読んでいる間にまた変わったら、あとの読み出しの数を出し、先の答えが遅れて届いても書き戻さない", async () => {
@@ -69,4 +77,15 @@ test("数えられなければ書かず、次に記事の表が変わったと�
   changeArticles();
   await read(1, 0);
   expect(calls).toEqual(["clear"]);
+});
+
+test("前に出たら、同じ数でも数え直して書く。裏に回っただけでは数え直さない", async () => {
+  const { reads, calls, setVisibility, read } = setup();
+  await read(0, 12);
+  // 裏にある間に、push の app_badge でブラウザーが別の数を書いたかもしれない
+  setVisibility("hidden");
+  expect(reads).toHaveLength(1);
+  setVisibility("visible");
+  await read(1, 12);
+  expect(calls).toEqual([12, 12]);
 });

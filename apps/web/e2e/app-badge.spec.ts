@@ -37,6 +37,13 @@ const badgeCalls = (page: Page) =>
   page.evaluate(() => (window as unknown as { badgeCalls: unknown[] }).badgeCalls);
 const lastBadge = async (page: Page) => (await badgeCalls(page)).at(-1);
 
+function changeVisibility(page: Page, visibility: DocumentVisibilityState): Promise<void> {
+  return page.evaluate((value) => {
+    Object.defineProperty(document, "visibilityState", { configurable: true, get: () => value });
+    document.dispatchEvent(new Event("visibilitychange"));
+  }, visibility);
+}
+
 function seed(unread: number) {
   const server = new FakeSendo();
   // 一覧を動かしただけでは既読にしない（数が変わる時を、操作で決める）
@@ -83,6 +90,24 @@ test("起動したとき、既読にしたとき、同期で届いたときに�
   await page.keyboard.press("Shift+A");
   await page.getByRole("dialog").getByRole("button", { name: "Mark all as read" }).click();
   await expect.poll(() => badgeCalls(page)).toEqual([12, 11, 14, "clear"]);
+});
+
+test("前に出たら、同じ数でも書き直す（裏にある間に push の app_badge が書いた数を残さない）", async ({
+  page,
+  context,
+}) => {
+  const { server } = seed(3);
+  await routeFakeSendo(context, server);
+  await stubBadge(context, "working");
+  await page.goto("/");
+  await signIn(page);
+  await expect(page.locator(".article-list .row.unread")).toHaveCount(3);
+  await expect.poll(() => lastBadge(page)).toBe(3);
+  const before = await badgeCalls(page);
+
+  await changeVisibility(page, "hidden");
+  await changeVisibility(page, "visible");
+  await expect.poll(() => badgeCalls(page)).toEqual([...before, 3]);
 });
 
 test("タブが 2 つでも同じ数を出し、代表でないタブの操作でも書き換える。ログアウトで消す", async ({
@@ -148,7 +173,7 @@ test("ワークスペースで絞っていても、すべての未読の数を�
 });
 
 for (const mode of ["missing", "failing"] as const) {
-  test(`Badging API が${mode === "missing" ? "ない" : "失敗する"}ときは、何も起きず、画面にエラーを出さない`, async ({
+  test(`Badging API が${mode === "missing" ? "ない" : "失敗する"}ときも、画面にエラーを出さない`, async ({
     page,
     context,
   }) => {

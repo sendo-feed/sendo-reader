@@ -49,7 +49,7 @@ if (location.pathname === AUTHORIZE_PATH) {
   mount(App, { target, context: readerContext(state) });
   void state.init();
   // インストールしたアプリのアイコンに、未読の数を出す。Badging API のないブラウザーでは何もしない
-  if ("setAppBadge" in navigator) showUnreadBadge(state.client, navigator);
+  if ("setAppBadge" in navigator) showUnreadBadge(state.client, navigator, document);
 
   // 画像のキャッシュが上限（100MB）を超えていたら、古いものから捨てる（docs/decisions/images.md
   // の 3）。起動してしばらくしてからと、そのあとは一定の間隔で見る（画面の表示は待たせない）
