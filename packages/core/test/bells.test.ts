@@ -238,6 +238,27 @@ describe("購読のベル", () => {
     expect(await core.listBells()).toEqual([]);
   });
 
+  test("ワークスペースに対応した sendo でも、付けて同期したベルは見え、上限に数える", async () => {
+    const { server, core } = await setup();
+    // 手元の購読に ID が入るので、ベルの購読の ID と突き合わせて見せる
+    server.workspacesSupported = true;
+    const feed = server.subscribe({ url: "https://blog.example/feed.xml", title: "Blog" });
+    const second = server.subscribe({ url: "https://news.example/rss", title: "News" });
+    for (let i = 1; i < MAX_BELLS; i++) server.addBell({ words: `word${i}` });
+    await core.sync();
+    expect(feed.subscriptionId).not.toBeNull();
+
+    await core.setFeedBell(feed.id, true);
+    await core.sync();
+    expect(await core.countPending()).toBe(0);
+    const bells = await core.listBells();
+    expect(bells.filter((bell) => bell.feedId !== null)).toMatchObject([
+      { feedId: feed.id, subscriptionId: feed.subscriptionId, words: null },
+    ]);
+    expect(bells).toHaveLength(MAX_BELLS);
+    await expect(core.setFeedBell(second.id, true)).rejects.toMatchObject({ kind: "invalid" });
+  });
+
   test(`有効なベルは ${MAX_BELLS} 個まで。ちょうどまでは付けられ、超える分は断る`, async () => {
     const { server, core, feed } = await subscribed();
     const second = server.subscribe({ url: "https://news.example/rss", title: "News" });
