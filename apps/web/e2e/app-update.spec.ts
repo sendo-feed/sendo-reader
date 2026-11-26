@@ -78,10 +78,10 @@ async function copyDist(
   const revision = Buffer.from(version.padEnd(16, "0")).toString("hex").slice(0, 32);
   // コンテナは存在しない静的パスに index.html を返すので、integrity の不一致で取り込みを失敗させる
   const missing =
-    ',{url:"missing.js",revision:"1",integrity:"sha256-47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU="}';
+    ',{"integrity":"sha256-47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU=","revision":"1","url":"missing.js"}';
   let manifest = source.replace(
-    /\{url:"index\.html",revision:"[0-9a-f]+"\}/,
-    `{url:"index.html",revision:"${revision}"}${brokenPrecache ? missing : ""}`,
+    /\{"revision":"[0-9a-f]+","url":"index\.html"\}/,
+    `{"revision":"${revision}","url":"index.html"}${brokenPrecache ? missing : ""}`,
   );
   if (manifest === source) throw new Error("sw.js の中に、index.html の revision が見つからない");
 

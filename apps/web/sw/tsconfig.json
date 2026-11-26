@@ -1,0 +1,11 @@
+{
+  "extends": "../../../tsconfig.base.json",
+  "compilerOptions": {
+    // Service Worker の中で動く（画面の dom の型とは混ぜられない）
+    "lib": ["es2024", "webworker"],
+    // Workbox のプラグインの型（CacheableResponsePlugin など）は、省ける項目に undefined を入れて
+    // いるので、WorkboxPlugin に渡せない
+    "exactOptionalPropertyTypes": false
+  },
+  "include": ["."]
+}

@@ -25,11 +25,12 @@ const X_EMBED_DIR = fileURLToPath(new URL("../../x-embed", import.meta.url));
 const X_EMBED_HTML = await readFile(`${X_EMBED_DIR}/index.html`, "utf8");
 const X_EMBED_JS = await readFile(`${X_EMBED_DIR}/embed.js`, "utf8");
 const INDEX = "<!doctype html><html><head><title>Sendo</title></head><body></body></html>";
-/** Workbox の generateSW が出力する precache の一覧の形 */
+/** injectManifest（workbox-build）が差し込む precache の一覧の形 */
 const SW =
-  'self.x=[{url:"manifest.webmanifest",revision:"b5e4d4f396d67e7a1e14a25c33a5efa9"},' +
-  '{url:"index.html",revision:"0c2a02240a51df2b98c6e69fb36d965c"},' +
-  '{url:"assets/index-abc.js",revision:null}];';
+  'self.x=[{"revision":"b5e4d4f396d67e7a1e14a25c33a5efa9","url":"manifest.webmanifest"},' +
+  '{"revision":"0c2a02240a51df2b98c6e69fb36d965c","url":"index.html"},' +
+  '{"revision":null,"url":"assets/index-abc.js"}];';
+const INDEX_ENTRY = /\{"revision":"([0-9a-f]+)","url":"index\.html"\}/;
 
 let built: Assets;
 beforeAll(async () => {
@@ -319,13 +320,11 @@ describe("reader の画面", () => {
     expect((await send(reader.origin, "/feeds/abc", "reader.example")).body).toBe(page.body);
 
     const sw = (await send(reader.origin, "/sw.js", "reader.example")).body;
-    const revision = /\{url:"index\.html",revision:"([0-9a-f]+)"\}/.exec(sw)?.[1];
+    const revision = INDEX_ENTRY.exec(sw)?.[1];
     expect(revision).toMatch(/^[0-9a-f]{32}$/);
     expect(revision).not.toBe("0c2a02240a51df2b98c6e69fb36d965c");
     // ほかのファイルの revision は変えない
-    expect(sw.replace(/\{url:"index\.html",revision:"[0-9a-f]+"\}/, "")).toBe(
-      SW.replace(/\{url:"index\.html",revision:"[0-9a-f]+"\}/, ""),
-    );
+    expect(sw.replace(INDEX_ENTRY, "")).toBe(SW.replace(INDEX_ENTRY, ""));
   });
 
   test("index.html と sw.js の ETag も、書き換えたあとの中身で変わる（304 を返さない）", async () => {
@@ -343,7 +342,7 @@ describe("reader の画面", () => {
     const revision = async (value: string) => {
       const { reader } = await start(value);
       const sw = (await send(reader.origin, "/sw.js", "reader.example")).body;
-      return /\{url:"index\.html",revision:"([0-9a-f]+)"\}/.exec(sw)?.[1];
+      return INDEX_ENTRY.exec(sw)?.[1];
     };
     const first = await revision(ORIGIN);
     expect(await revision(ORIGIN)).toBe(first);
@@ -382,12 +381,12 @@ describe("書き換える場所が見つからないとき", () => {
       "sw.js に index.html の項目が 2 つある",
       {
         "index.html": INDEX,
-        "sw.js": '[{url:"index.html",revision:"aa"},{url:"index.html",revision:"bb"}]',
+        "sw.js": '[{"revision":"aa","url":"index.html"},{"revision":"bb","url":"index.html"}]',
       },
     ],
     [
-      "Workbox の出力の形が変わった",
-      { "index.html": INDEX, "sw.js": '[{"url":"index.html","revision":"aa"}]' },
+      "generateSW の出力の形（探さない）",
+      { "index.html": INDEX, "sw.js": '[{url:"index.html",revision:"aa"}]' },
     ],
     ["sw.js がない", { "index.html": INDEX }],
     [

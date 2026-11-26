@@ -100,7 +100,7 @@ test("preview も、X_EMBED_ORIGIN を、コンテナと同じ処理に通す", 
     expect((await send(`localhost:${PORT}`, "/feeds/abc")).body).toBe(page.body);
     const sw = (await send(`localhost:${PORT}`, "/sw.js")).body;
     const revision = (source: string) =>
-      /\{url:"index\.html",revision:"([0-9a-f]+)"\}/.exec(source)?.[1];
+      /\{"revision":"([0-9a-f]+)","url":"index\.html"\}/.exec(source)?.[1];
     expect(revision(sw)).toMatch(/^[0-9a-f]{32}$/);
     expect(revision(sw)).not.toBe(revision(BUILT_SW));
     // sendo のパスは、今までどおり中継する
