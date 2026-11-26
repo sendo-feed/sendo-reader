@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { Feed, FeedCandidate } from "@sendo-reader/core";
+  import { ApiError, type Feed, type FeedCandidate } from "@sendo-reader/core";
   import { onDestroy, untrack } from "svelte";
   import { useReader } from "../../lib/context";
   import { describeError } from "../../lib/errors";
@@ -21,31 +21,18 @@
   let candidates = $state<FeedCandidate[] | null>(null);
   let chosen = $state<string | null>(null);
   let folderId = $state<string>("");
-  const mustChooseWorkspace = $derived(
-    reader.workspaceIds !== undefined && reader.visibleWorkspaceIds?.length !== 1,
+  let chosenWorkspaceId = $state<string | undefined>(undefined);
+  let rejectedWorkspaceIds = $state.raw<string[]>([]);
+  const preferredWorkspaceId = $derived(
+    chosenWorkspaceId ??
+      (reader.visibleWorkspaceIds?.length === 1 ? reader.visibleWorkspaceIds[0] : undefined),
   );
-  const choose = "choose";
-  let chosenWorkspace = $state<string | undefined>(undefined);
-  const workspaceId = $derived(
-    chosenWorkspace !== undefined &&
-      chosenWorkspace !== "" &&
-      (!reader.workspacesAvailable ||
-        !reader.workspaces.some((workspace) => workspace.id === chosenWorkspace))
-      ? choose
-      : (chosenWorkspace ??
-          (mustChooseWorkspace ? choose : (reader.visibleWorkspaceIds?.[0] ?? ""))),
+  const destinations = $derived(
+    reader.workspacesAvailable
+      ? reader.workspaces.filter((item) => !rejectedWorkspaceIds.includes(item.id))
+      : [],
   );
-  const choosingWorkspace = $derived(
-    reader.workspacesAvailable || (chosenWorkspace !== undefined && chosenWorkspace !== ""),
-  );
-  const workspaceLabel = $derived(
-    workspaceId === choose
-      ? "Choose workspace"
-      : workspaceId === ""
-        ? "No workspace"
-        : (reader.workspaces.find((workspace) => workspace.id === workspaceId)?.name ??
-          "Choose workspace"),
-  );
+  const workspace = $derived(destinations.find((item) => item.id === preferredWorkspaceId));
   let busy = $state(false);
   let message = $state<string | null>(null);
 
@@ -66,20 +53,26 @@
   }
 
   async function subscribe() {
-    if (chosen === null || (choosingWorkspace && workspaceId === choose)) return;
+    const workspaceId = workspace?.id;
+    if (chosen === null || workspaceId === undefined) return;
     busy = true;
     message = null;
     try {
       const feed = await reader.client.subscribe(
         chosen,
         folderId === "" ? null : folderId,
-        reader.workspacesAvailable && workspaceId ? workspaceId : undefined,
+        workspaceId,
       );
       url = "";
       candidates = null;
-      chosenWorkspace = undefined;
+      chosenWorkspaceId = undefined;
+      rejectedWorkspaceIds = [];
       if (active && feed !== null) onsubscribed(feed);
     } catch (error) {
+      if (error instanceof ApiError && error.code === "workspace_not_found") {
+        rejectedWorkspaceIds = [...rejectedWorkspaceIds, workspaceId];
+        void reader.client.syncNow().catch(() => {});
+      }
       message = describeError(error);
     } finally {
       busy = false;
@@ -127,21 +120,22 @@
           <option value={folder.id}>{folder.name}</option>
         {/each}
       </select>
-      {#if choosingWorkspace}
+      {#if !reader.workspacesAvailable}
+        <p>購読するには、ワークスペースに対応した Sendo と同期してください。</p>
+      {:else if destinations.length === 0}
+        <p>購読するには、Manage feeds の Workspaces で先にワークスペースを作成してください。</p>
+      {:else}
         <details>
-          <summary>{workspaceLabel}</summary>
+          <summary>{workspace?.name ?? "Choose workspace"}</summary>
           <label for="feed-workspace">Workspace</label>
           <select
             id="feed-workspace"
-            value={workspaceId}
-            onchange={(event) => (chosenWorkspace = event.currentTarget.value)}
+            value={workspace?.id ?? ""}
+            onchange={(event) => (chosenWorkspaceId = event.currentTarget.value)}
           >
-            {#if mustChooseWorkspace || workspaceId === choose}
-              <option value={choose} disabled>Choose workspace</option>
-            {/if}
-            <option value="">No workspace</option>
-            {#each reader.workspacesAvailable ? reader.workspaces : [] as workspace (workspace.id)}
-              <option value={workspace.id}>{workspace.name}</option>
+            <option value="" disabled>Choose workspace</option>
+            {#each destinations as item (item.id)}
+              <option value={item.id}>{item.name}</option>
             {/each}
           </select>
         </details>
@@ -150,7 +144,7 @@
         type="button"
         class="primary"
         onclick={subscribe}
-        disabled={chosen === null || (choosingWorkspace && workspaceId === choose)}
+        disabled={chosen === null || workspace === undefined}
       >
         Subscribe
       </button>
