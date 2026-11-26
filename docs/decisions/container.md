@@ -22,7 +22,7 @@ sendo-reader は、[sendo のコンテナ版](https://github.com/sendo-feed/send
    - Google Reader 互換 API の廃止後の一覧：`/api`、`/api/`（の下すべて）、`/mcp`、`/.well-known/oauth-protected-resource/mcp`、`/.well-known/oauth-authorization-server`、`/oauth/token`、`/oauth/register`、`/healthz`
    - [Sendo の Google Reader 互換 API の廃止](https://github.com/sendo-feed/sendo/blob/main/docs/decisions/greader.md)に合わせて、Sendo で入口が削除されたら `/accounts/ClientLogin` と `/reader/api/0/` 以下を同じ一覧から外す。
    - 一覧にないパスには、静的なファイルか、なければ `index.html` を返す（SPA）
-   - 一覧は 1 か所に置き、コンテナのサーバー、Service Worker のページの移動の横取り（`navigateFallbackDenylist`）、手元の Vite の dev サーバーの中継（[UI とツール](ui.md)の 4）が同じものを使う。ブラウザでこれらのパスを開いたときに、Service Worker が `index.html` を返さないようにする
+   - 一覧は 1 か所に置き、コンテナのサーバー、Service Worker のページの移動の横取り（`index.html` を返す道から除く一覧）、手元の Vite の dev サーバーの中継（[UI とツール](ui.md)の 4）が同じものを使う。ブラウザでこれらのパスを開いたときに、Service Worker が `index.html` を返さないようにする
    - 画面のルートは、一覧と重ねない。`/oauth/authorize` は画面（許可の画面）で、`/oauth/token` と `/oauth/register` は sendo。`/oauth/` で始まるパスをまとめて回さない
    - sendo が外に出すパスを足したら、この一覧にも足す。CI で、sendo の `main` の実際のルートと一覧を突き合わせる
    - `/healthz` は sendo の生死を答える。外から `https://reader.example.com/healthz` を見ると、reader と sendo をつないだ全体を確かめられる

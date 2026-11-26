@@ -1,7 +1,7 @@
 # ローカルファースト
 
 - 状態：提案中
-- 関連：[UI とツール](ui.md)、[記事の翻訳](translation.md)、[コンテナ版](container.md)、[アカウントの画面](account.md)、[画像](images.md)、[記事の中の X の投稿](embeds.md)、sendo の[差分同期](https://github.com/sendo-feed/sendo/blob/main/docs/decisions/sync.md)・[ユーザーと認証](https://github.com/sendo-feed/sendo/blob/main/docs/decisions/accounts.md)・[古い記事の片付け](https://github.com/sendo-feed/sendo/blob/main/docs/decisions/retention.md)、[技術構成](https://github.com/sendo-feed/sendo/blob/main/docs/tech-deck.md)（方針 03・06）
+- 関連：[UI とツール](ui.md)、[記事の翻訳](translation.md)、[コンテナ版](container.md)、[アカウントの画面](account.md)、[画像](images.md)、[記事の中の X の投稿](embeds.md)、[通知](notifications.md)、sendo の[差分同期](https://github.com/sendo-feed/sendo/blob/main/docs/decisions/sync.md)・[ユーザーと認証](https://github.com/sendo-feed/sendo/blob/main/docs/decisions/accounts.md)・[古い記事の片付け](https://github.com/sendo-feed/sendo/blob/main/docs/decisions/retention.md)、[技術構成](https://github.com/sendo-feed/sendo/blob/main/docs/tech-deck.md)（方針 03・06）
 
 ## 決定
 
@@ -87,7 +87,7 @@
 - **Trusted Types を強制する**（`require-trusted-types-for 'script'`）。許すポリシーは、Svelte が作るもの（`svelte-trusted-html`）と、ワーカーの URL を自分のオリジンに限るものだけにする。対応していないブラウザでは効かないので、ほかの対策と重ねる。
 - **記事のデータを HTML として出さない。** `{@html}` を使わず、URL は http ／ https を確かめてから `href` に入れる（[UI とツール](ui.md)の守る規約）。
 - **秘密を外に出さない。** sendo が返す秘密（発行したアクセストークンなど）は、画面に一度出すだけにし、手元の DB、ログ、エラーの表示、URL、Service Worker のキャッシュに入れない。画像の URL に付く署名は、sendo が配信用に署名した URL であることを示す。画像の取得にはセッションが要る。
-- **ログアウトで消す。** ログアウトしたら、手元の DB と、画像のキャッシュ（[画像](images.md)の 4）をまとめて消す（決定の 6）。ユーザーが替わって手元の DB を消すときも、同じく消す。
+- **ログアウトで消す。** ログアウトしたら、手元の DB と、画像のキャッシュ（[画像](images.md)の 4）をまとめて消す（決定の 6）。ユーザーが替わって手元の DB を消すときも、同じく消す。この端末の通知の登録、覚えた通知の `tag`、出ている通知、アプリのバッジも、同じときに外して消す（[通知](notifications.md)の 4）。
 
 ## 理由
 
