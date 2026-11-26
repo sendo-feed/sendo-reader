@@ -62,6 +62,8 @@ test("Google でログインし、記事を読んで、スターを付ける", a
 
 test("フィードを探して購読し、フォルダに入れる", async ({ page, context }) => {
   const server = new FakeSendo();
+  server.workspacesSupported = true;
+  const workspace = server.createWorkspace("default");
   server.discoverable.set("https://blog.example/", [
     { url: "https://blog.example/feed.xml", title: "記事" },
   ]);
@@ -78,6 +80,12 @@ test("フィードを探して購読し、フォルダに入れる", async ({ pa
   await page.getByLabel("Website or feed URL").fill("https://blog.example/");
   await page.getByRole("button", { name: "Find", exact: true }).click();
   await page.getByLabel("Folder", { exact: true }).selectOption({ label: "Tech" });
+  await page
+    .getByRole("dialog", { name: "Add feed", exact: true })
+    .getByRole("group", { name: "Feeds" })
+    .locator("summary")
+    .click();
+  await page.getByLabel("Workspace", { exact: true }).selectOption(workspace.id);
   await page.getByRole("button", { name: "Subscribe", exact: true }).click();
 
   await expect(page.getByRole("dialog", { name: "Add feed", exact: true })).not.toBeVisible();

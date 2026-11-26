@@ -329,6 +329,8 @@ test("追加の候補は URL を変えたら消し、購読したフィードを
   context,
 }) => {
   const { server } = seed();
+  server.workspacesSupported = true;
+  const workspace = server.createWorkspace("default");
   server.discoverable.set("https://new.example/", [
     { url: "https://new.example/feed", title: "New feed" },
   ]);
@@ -353,6 +355,8 @@ test("追加の候補は URL を変えたら消し、購読したフィードを
   await dialog.getByLabel("Website or feed URL").fill("https://new.example/");
   await dialog.getByRole("button", { name: "Find", exact: true }).click();
   await dialog.getByLabel("Folder", { exact: true }).selectOption({ label: "Tech" });
+  await dialog.getByRole("group", { name: "Feeds" }).locator("summary").click();
+  await dialog.getByLabel("Workspace", { exact: true }).selectOption(workspace.id);
   await dialog.getByRole("button", { name: "Subscribe", exact: true }).click();
   await expect(dialog).not.toBeVisible();
   await expect(page).toHaveURL(/\/manage$/);

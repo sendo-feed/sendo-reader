@@ -6,6 +6,8 @@ test("Chrome のブックマークレットから候補を見つけてフィー�
   context,
 }) => {
   const server = new FakeSendo();
+  server.workspacesSupported = true;
+  const workspace = server.createWorkspace("default");
   const site = "https://blog.example/article?lang=ja#part";
   const feed = "https://blog.example/feed.xml";
   server.discoverable.set(site, [{ url: feed, title: "Blog" }]);
@@ -44,9 +46,14 @@ test("Chrome のブックマークレットから候補を見つけてフィー�
   await expect(page.getByLabel("Website or feed URL")).toHaveValue(site);
   await page.getByRole("button", { name: "Find", exact: true }).click();
   await expect(page.getByRole("radio", { name: /Blog/ })).toBeChecked();
-  await page.getByRole("button", { name: "Subscribe", exact: true }).click();
+  const subscribe = page.getByRole("button", { name: "Subscribe", exact: true });
+  await expect(subscribe).toBeDisabled();
+  await page.locator("main summary").click();
+  await page.getByLabel("Workspace", { exact: true }).selectOption(workspace.id);
+  await subscribe.click();
   await expect(page.getByText("Blog を購読しました。")).toBeVisible();
   expect(server.requests).toContain("POST /feeds");
+  expect([...server.feeds.values()].map((row) => row.workspaceId)).toEqual([workspace.id]);
 });
 
 test("未ログインでも長い投稿 URL を引き継ぎ、確認して Saved に登録できる", async ({
