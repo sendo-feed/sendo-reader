@@ -264,7 +264,7 @@ describe("変更の通知", () => {
     const feed = server.subscribe({ url: "https://example.com/feed.xml" });
     server.deliver(feed.id);
     await core.sync();
-    expect(changes).toEqual([["articles", "feeds"]]);
+    expect(changes).toEqual([["articles", "bells", "feeds"]]);
   });
 
   test("やめたら知らせない。知らせる先が投げても、ほかには届く", async () => {

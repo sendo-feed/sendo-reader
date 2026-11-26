@@ -622,7 +622,7 @@ test("差分で購読が届いて削除予定のワークスペースが戻っ�
   const off = core.onChange((tables) => changes.push([...tables].sort()));
   try {
     await pending;
-    expect(changes).toContainEqual(["feeds", "workspaces"]);
+    expect(changes).toContainEqual(["bells", "feeds", "workspaces"]);
     expect(await core.listWorkspaces()).toMatchObject([{ id: DEFAULT }]);
   } finally {
     off();
