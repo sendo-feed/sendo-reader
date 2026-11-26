@@ -57,7 +57,7 @@ test("読んでいる間にまた変わったら、あとの読み出しの数�
   expect(calls).toEqual([11]);
 });
 
-test("書けなかったら、次に数え直したときに同じ数でも書き直す。書けたあとは同じ数を書かない", async () => {
+test("数え直すたびに、前と同じ数でも書く。書けなかったら、次に数え直したときにまた書く", async () => {
   const { calls, badge, changeArticles, read } = setup();
   badge.fail = true;
   await read(0, 12);
@@ -66,7 +66,7 @@ test("書けなかったら、次に数え直したときに同じ数でも書�
   await read(1, 12);
   changeArticles();
   await read(2, 12);
-  expect(calls).toEqual([12, 12]);
+  expect(calls).toEqual([12, 12, 12]);
 });
 
 test("数えられなければ書かず、次に記事の表が変わったときに数え直す", async () => {

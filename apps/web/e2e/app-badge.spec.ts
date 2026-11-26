@@ -63,7 +63,7 @@ async function markFirstRead(page: Page) {
   await row.getByRole("button", { name: "Mark as read", exact: true }).click();
 }
 
-test("起動したとき、既読にしたとき、同期で届いたときに未読の数を出し、0 件で消す", async ({
+test("起動したとき、記事が変わったとき、同期で届いたときに未読の数を出し、0 件で消す", async ({
   page,
   context,
 }) => {
@@ -83,13 +83,20 @@ test("起動したとき、既読にしたとき、同期で届いたときに�
   await markFirstRead(page);
   await expect.poll(() => badgeCalls(page)).toEqual([12, 11]);
 
+  // 未読の数が変わらない記事の変化でも、数え直して同じ数を書く（書いた数を覚えない）
+  const row = page.locator(".article-list .row.unread").first();
+  await row.hover();
+  await row.getByRole("button", { name: "Save", exact: true }).click();
+  await expect(row.getByRole("button", { name: "Unsave", exact: true })).toBeVisible();
+  await expect.poll(() => badgeCalls(page)).toEqual([12, 11, 11]);
+
   for (let i = 0; i < 3; i++) server.deliver(feed.id, { title: `新着 ${i}` });
   await page.getByRole("button", { name: "Sync now" }).click();
-  await expect.poll(() => badgeCalls(page)).toEqual([12, 11, 14]);
+  await expect.poll(() => badgeCalls(page)).toEqual([12, 11, 11, 14]);
 
   await page.keyboard.press("Shift+A");
   await page.getByRole("dialog").getByRole("button", { name: "Mark all as read" }).click();
-  await expect.poll(() => badgeCalls(page)).toEqual([12, 11, 14, "clear"]);
+  await expect.poll(() => badgeCalls(page)).toEqual([12, 11, 11, 14, "clear"]);
 });
 
 test("前に出たら、同じ数でも書き直す（裏にある間に push の app_badge が書いた数を残さない）", async ({
