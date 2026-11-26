@@ -37,6 +37,29 @@ const badgeCalls = (page: Page) =>
   page.evaluate(() => (window as unknown as { badgeCalls: unknown[] }).badgeCalls);
 const lastBadge = async (page: Page) => (await badgeCalls(page)).at(-1);
 
+/**
+ * 呼び出しの数は core が記事の変化を知らせた回数で決まるので、列をまるごとは比べない。
+ * before より呼び出しが増えて、最後に書いたのが expected になるのを待つ
+ */
+async function expectBadgeWritten(page: Page, before: unknown[], expected: unknown) {
+  await expect
+    .poll(async () => {
+      const calls = await badgeCalls(page);
+      return calls.length > before.length ? calls.at(-1) : undefined;
+    })
+    .toBe(expected);
+}
+
+/** 書いたのが expected だけ（ほかの数を一度も書いていない）になるのを待つ */
+async function expectOnlyBadge(page: Page, expected: unknown) {
+  await expect
+    .poll(async () => {
+      const calls = await badgeCalls(page);
+      return calls.length > 0 && calls.every((value) => value === expected);
+    })
+    .toBe(true);
+}
+
 function changeVisibility(page: Page, visibility: DocumentVisibilityState): Promise<void> {
   return page.evaluate((value) => {
     Object.defineProperty(document, "visibilityState", { configurable: true, get: () => value });
@@ -63,7 +86,7 @@ async function markFirstRead(page: Page) {
   await row.getByRole("button", { name: "Mark as read", exact: true }).click();
 }
 
-test("起動したとき、既読にしたとき、同期で届いたときに未読の数を出し、0 件で消す", async ({
+test("起動したとき、記事が変わったとき、同期で届いたときに未読の数を出し、0 件で消す", async ({
   page,
   context,
 }) => {
@@ -78,18 +101,29 @@ test("起動したとき、既読にしたとき、同期で届いたときに�
   // 手元に未読が 12 件ある状態で起動する
   await page.reload();
   await expect(unread).toHaveCount(12);
-  await expect.poll(() => badgeCalls(page)).toEqual([12]);
+  await expectOnlyBadge(page, 12);
 
+  let before = await badgeCalls(page);
   await markFirstRead(page);
-  await expect.poll(() => badgeCalls(page)).toEqual([12, 11]);
+  await expectBadgeWritten(page, before, 11);
 
+  // 未読の数が変わらない記事の変化でも、数え直して同じ数を書く（書いた数を覚えない）
+  before = await badgeCalls(page);
+  const row = page.locator(".article-list .row.unread").first();
+  await row.hover();
+  await row.getByRole("button", { name: "Save", exact: true }).click();
+  await expect(row.getByRole("button", { name: "Unsave", exact: true })).toBeVisible();
+  await expectBadgeWritten(page, before, 11);
+
+  before = await badgeCalls(page);
   for (let i = 0; i < 3; i++) server.deliver(feed.id, { title: `新着 ${i}` });
   await page.getByRole("button", { name: "Sync now" }).click();
-  await expect.poll(() => badgeCalls(page)).toEqual([12, 11, 14]);
+  await expectBadgeWritten(page, before, 14);
 
+  before = await badgeCalls(page);
   await page.keyboard.press("Shift+A");
   await page.getByRole("dialog").getByRole("button", { name: "Mark all as read" }).click();
-  await expect.poll(() => badgeCalls(page)).toEqual([12, 11, 14, "clear"]);
+  await expectBadgeWritten(page, before, "clear");
 });
 
 test("前に出たら、同じ数でも書き直す（裏にある間に push の app_badge が書いた数を残さない）", async ({
@@ -107,7 +141,7 @@ test("前に出たら、同じ数でも書き直す（裏にある間に push �
 
   await changeVisibility(page, "hidden");
   await changeVisibility(page, "visible");
-  await expect.poll(() => badgeCalls(page)).toEqual([...before, 3]);
+  await expectBadgeWritten(page, before, 3);
 });
 
 test("タブが 2 つでも同じ数を出し、代表でないタブの操作でも書き換える。ログアウトで消す", async ({
@@ -126,16 +160,20 @@ test("タブが 2 つでも同じ数を出し、代表でないタブの操作�
   const second = await context.newPage();
   await second.goto("/");
   await expect(second.locator(".article-list .row.unread")).toHaveCount(5);
-  await expect.poll(() => badgeCalls(second)).toEqual([5]);
+  await expectOnlyBadge(second, 5);
 
+  let beforeFirst = await badgeCalls(page);
+  let beforeSecond = await badgeCalls(second);
   await markFirstRead(second);
-  await expect.poll(() => lastBadge(second)).toBe(4);
-  await expect.poll(() => lastBadge(page)).toBe(4);
+  await expectBadgeWritten(second, beforeSecond, 4);
+  await expectBadgeWritten(page, beforeFirst, 4);
 
+  beforeFirst = await badgeCalls(page);
+  beforeSecond = await badgeCalls(second);
   await second.locator("nav.sidebar").getByRole("button", { name: "Sign out" }).click();
   await expect(second.getByRole("button", { name: "Google でログイン" })).toBeVisible();
-  await expect.poll(() => lastBadge(second)).toBe("clear");
-  await expect.poll(() => lastBadge(page)).toBe("clear");
+  await expectBadgeWritten(second, beforeSecond, "clear");
+  await expectBadgeWritten(page, beforeFirst, "clear");
 });
 
 test("ワークスペースで絞っていても、すべての未読の数を出す", async ({ page, context }) => {
@@ -169,7 +207,7 @@ test("ワークスペースで絞っていても、すべての未読の数を�
   await expect(page).toHaveTitle("(1) All - Sendo");
   await page.reload();
   await expect(page).toHaveTitle("(1) All - Sendo");
-  await expect.poll(() => badgeCalls(page)).toEqual([3]);
+  await expectOnlyBadge(page, 3);
 });
 
 for (const mode of ["missing", "failing"] as const) {

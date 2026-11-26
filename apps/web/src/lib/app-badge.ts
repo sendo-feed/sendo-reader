@@ -11,18 +11,16 @@ export interface AppBadge {
  * 起動したときと、記事の表が変わるたびに数え直す。表の変化はどのタブで変えても、同期で届いても、
  * すべてのタブに届くので、タブが 2 つでも同じ数になる。ログアウトで手元を消すと 0 になり、消す。
  *
- * 数の正は手元の DB で、ここには最後に出した数だけを覚え、変わったときだけ書く。書けなければ
- * （iOS では、通知を許可していないと失敗する）、画面には何も出さず、次に数え直したときに書き直す。
- * 前に出たときは、覚えた数を捨てて書き直す。裏にある間や閉じている間に、push の app_badge で
- * ブラウザーが書いた数を残さない（docs/decisions/notifications.md の 11）。
+ * 数の正は手元の DB で、数え直すたびに、前と同じ数でも書く（書いた数は覚えない）。前に出たときも
+ * 数え直し、裏にある間や閉じている間に push の app_badge でブラウザーが書いた数を残さない。
+ * 書けなければ（iOS では、通知を許可していないと失敗する）、画面には何も出さず、次に数え直したときに
+ * また書く（docs/decisions/notifications.md の 11）。
  */
 export function showUnreadBadge(
   client: Pick<ReaderClient, "countUnread" | "onChange">,
   badge: AppBadge,
   page: Pick<Document, "visibilityState" | "addEventListener">,
 ): void {
-  /** 最後に出した数。分からない（起動したばかり、書けなかった）ときは undefined */
-  let shown: number | undefined;
   let reads = 0;
 
   const update = async () => {
@@ -35,12 +33,11 @@ export function showUnreadBadge(
       return;
     }
     // 読んでいる間に、また変わった（あとの読み出しが書く）
-    if (read !== reads || total === shown) return;
-    shown = total;
+    if (read !== reads) return;
     try {
       await (total === 0 ? badge.clearAppBadge() : badge.setAppBadge(total));
     } catch {
-      shown = undefined;
+      // 次に数え直したときにまた書く
     }
   };
 
@@ -48,9 +45,7 @@ export function showUnreadBadge(
     if (tables.has("articles")) void update();
   });
   page.addEventListener("visibilitychange", () => {
-    if (page.visibilityState !== "visible") return;
-    shown = undefined;
-    void update();
+    if (page.visibilityState === "visible") void update();
   });
   void update();
 }
