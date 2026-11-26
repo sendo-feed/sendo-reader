@@ -3,6 +3,7 @@ import type { Executor } from "./database";
 import { deleteSetting, getSetting, setSetting } from "./settings";
 
 const WORKSPACES_AVAILABLE_KEY = "sync.workspacesAvailable";
+const DEFAULT_WORKSPACE_ON_SUBSCRIBE_KEY = "sync.defaultWorkspaceOnSubscribe";
 // 空文字はデフォルトに未対応、設定なしは対応をまだ確認していない。
 export const CONFIRMED_WORKSPACE_DEFAULT_KEY = "sync.confirmedWorkspaceDefault";
 
@@ -14,6 +15,20 @@ export async function setWorkspacesAvailable(db: Executor, available: boolean): 
   if (available === (await workspacesAvailable(db))) return false;
   if (available) await setSetting(db, WORKSPACES_AVAILABLE_KEY, "1");
   else await deleteSetting(db, WORKSPACES_AVAILABLE_KEY);
+  return true;
+}
+
+export async function defaultWorkspaceOnSubscribe(db: Executor): Promise<boolean> {
+  return (await getSetting(db, DEFAULT_WORKSPACE_ON_SUBSCRIBE_KEY)) === "1";
+}
+
+export async function setDefaultWorkspaceOnSubscribe(
+  db: Executor,
+  available: boolean,
+): Promise<boolean> {
+  if (available === (await defaultWorkspaceOnSubscribe(db))) return false;
+  if (available) await setSetting(db, DEFAULT_WORKSPACE_ON_SUBSCRIBE_KEY, "1");
+  else await deleteSetting(db, DEFAULT_WORKSPACE_ON_SUBSCRIBE_KEY);
   return true;
 }
 

@@ -89,7 +89,96 @@ test("ワークスペースを作成・改名し、購読のフォルダを保�
   expect(server.workspaces.get(feed.workspaceId ?? "")?.name).toBe("Personal");
 });
 
-test("フィード購読は All・複数・0 件の表示で所属先を選び、単独表示ではその先を初期値にする", async ({
+test("対応 Sendo では表示範囲によらずデフォルトで購読し、明示先で上書きできる", async ({
+  context,
+  page,
+}) => {
+  const server = new FakeSendo();
+  server.workspacesSupported = true;
+  server.defaultWorkspaceOnSubscribe = true;
+  const initial = server.createWorkspace("default");
+  const personal = server.createWorkspace("personal");
+  server.setDefaultWorkspace(personal.id);
+  const urls = [
+    "https://www.apple.com/newsroom/rss-feed.rss",
+    "https://github.blog/feed/",
+    "https://www.w3.org/blog/feed/",
+    "https://blog.cloudflare.com/rss/",
+    "https://hnrss.org/newest?q=Claude",
+  ] as const;
+  for (const url of urls) {
+    server.discoverable.set(url, [{ url, title: url }]);
+    server.fetchable.set(url, url);
+  }
+  await routeFakeSendo(context, server);
+  await page.goto("/manage");
+  await signIn(page);
+
+  const scope = page.getByRole("button", { name: /^Workspaces:/ });
+  const switcher = page.getByRole("dialog", { name: "Workspaces", exact: true });
+  const dialog = page.getByRole("dialog", { name: "Add feed", exact: true });
+  const summary = dialog.getByRole("group", { name: "Feeds" }).locator("summary");
+  const subscribe = dialog.getByRole("button", { name: "Subscribe", exact: true });
+  const openFeed = async (url: string) => {
+    await page.getByRole("button", { name: "Add feed", exact: true }).click();
+    await dialog.getByLabel("Website or feed URL").fill(url);
+    await dialog.getByRole("button", { name: "Find", exact: true }).click();
+    await expect(summary).toHaveText("Use default");
+    await expect(subscribe).toBeEnabled();
+  };
+  const finish = async () => {
+    await subscribe.click();
+    await expect(dialog).not.toBeVisible();
+  };
+
+  await openFeed(urls[0]);
+  await finish();
+  await scope.click();
+  await switcher.getByRole("button", { name: "Only default", exact: true }).click();
+  await switcher.getByRole("button", { name: "Close", exact: true }).click();
+  await openFeed(urls[1]);
+  await expect(dialog.getByText("閲覧範囲外のデフォルトに追加します。")).toBeVisible();
+  await summary.click();
+  await expect(
+    dialog.getByRole("option", { name: "Use default (personal)", exact: true }),
+  ).toHaveCount(1);
+  await finish();
+  await expect(page.getByText("購読しました。追加先は現在の閲覧範囲外です。")).toBeVisible();
+  await expect(scope).toHaveAccessibleName("Workspaces: default");
+
+  await openFeed(urls[2]);
+  await summary.click();
+  await dialog.getByLabel("Workspace", { exact: true }).selectOption(initial.id);
+  await finish();
+  await expect(page.getByText("購読しました。", { exact: true })).toBeVisible();
+  await scope.click();
+  await switcher.getByRole("checkbox", { name: "personal", exact: true }).check();
+  await switcher.getByRole("button", { name: "Close", exact: true }).click();
+  await openFeed(urls[3]);
+  await finish();
+
+  await scope.click();
+  await switcher.getByRole("button", { name: "Clear selection", exact: true }).click();
+  await switcher.getByRole("button", { name: "Close", exact: true }).click();
+  await openFeed(urls[4]);
+  await finish();
+  expect(server.subscribeRequests).toEqual(
+    urls.map((url, index) => ({
+      url,
+      folderId: null,
+      ...(index === 2 && { workspaceId: initial.id }),
+    })),
+  );
+  expect([...server.feeds.values()].map((row) => row.workspaceId)).toEqual([
+    personal.id,
+    personal.id,
+    initial.id,
+    personal.id,
+    personal.id,
+  ]);
+});
+
+test("購読先の省略に未対応の Sendo では、デフォルトが同期されても明示先を選ぶ", async ({
   context,
   page,
 }) => {
@@ -97,6 +186,7 @@ test("フィード購読は All・複数・0 件の表示で所属先を選び�
   server.workspacesSupported = true;
   const initial = server.createWorkspace("default");
   const personal = server.createWorkspace("personal");
+  server.setDefaultWorkspace(personal.id);
   const [first, second, single, multiple, empty] = [
     "https://first.example/feed",
     "https://second.example/feed",
@@ -202,7 +292,7 @@ for (const { supported, guidance } of [
   });
 }
 
-test("選んだワークスペースが別の操作で削除されたら、候補から選び直して購読できる", async ({
+test("明示したワークスペースが削除されたら、デフォルトを選び直して購読できる", async ({
   context,
   page,
 }) => {
@@ -210,6 +300,8 @@ test("選んだワークスペースが別の操作で削除されたら、候�
   server.workspacesSupported = true;
   const original = server.createWorkspace("default");
   const personal = server.createWorkspace("personal");
+  server.setDefaultWorkspace(original.id);
+  server.defaultWorkspaceOnSubscribe = true;
   const url = "https://blog.example/feed";
   server.discoverable.set(url, [{ url, title: "Blog" }]);
   server.fetchable.set(url, "Blog");
@@ -241,7 +333,9 @@ test("選んだワークスペースが別の操作で削除されたら、候�
   await expect(subscribe).toBeDisabled();
   await expect.poll(syncRequests).toBeGreaterThan(beforeSync);
   await expect(workspace.getByRole("option", { name: "personal", exact: true })).toHaveCount(0);
-  await workspace.selectOption(original.id);
+  await expect(workspace).toHaveValue("");
+  await workspace.selectOption({ label: "Use default (default)" });
+  await expect(subscribe).toBeEnabled();
   await subscribe.click();
   await expect(dialog).not.toBeVisible();
   expect([...server.feeds.values()].map((feed) => feed.workspaceId)).toEqual([original.id]);

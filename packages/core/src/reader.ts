@@ -51,8 +51,11 @@ import {
   type StoredTranslatedContent,
 } from "./db/translated-content";
 import {
+  defaultWorkspaceOnSubscribe,
   effectiveWorkspaceDefault,
   listWorkspaces,
+  setDefaultWorkspaceOnSubscribe,
+  setWorkspacesAvailable,
   workspaceSubscriptions,
   workspacesAvailable,
 } from "./db/workspaces";
@@ -1114,11 +1117,36 @@ export class ReaderCore {
   async subscribe(
     url: string,
     folderId: string | null = null,
-    workspaceId: string | null = null,
+    workspace: string | null | { useDefault: true } = null,
   ): Promise<Feed | null> {
     this.#requireSignedIn();
+    const workspaceId = typeof workspace === "string" ? workspace : null;
     const { feed, workspacesChanged } = await this.#online(
       async (signal) => {
+        if (typeof workspace === "object" && workspace?.useDefault === true) {
+          // 同期後に接続先が旧版へ切り替わっていても、意図しない未割り当ての購読を作らない。
+          const cursor = await getSetting(this.#db, CURSOR_KEY);
+          const page = await this.#api.sync(cursor, signal);
+          const changed = await this.#db.transaction(async (tx) => {
+            throwIfSessionEnded(signal);
+            const availabilityChanged = await setWorkspacesAvailable(tx, page.workspaces !== null);
+            const defaultChanged = await setDefaultWorkspaceOnSubscribe(
+              tx,
+              page.defaultWorkspaceOnSubscribe,
+            );
+            return availabilityChanged || defaultChanged;
+          });
+          if (changed) this.#emit(new Set<Table>(["workspaces"]));
+          if (page.workspaces === null) await requireWorkspacesAvailable(this.#db);
+          if (!page.defaultWorkspaceOnSubscribe) {
+            throw new ApiError(
+              "invalid",
+              "接続先の Sendo は購読先の省略に対応していません",
+              400,
+              "workspace_default_on_subscribe_unavailable",
+            );
+          }
+        }
         const wanted = folderId === null ? null : (this.#folderIds.get(folderId) ?? folderId);
         // 呼ぶ前に積んだフォルダの作成は、ここまでに送ってある。sendo にあるフォルダにだけ、
         // そのまま購読する（あとから作った、断られて消えたフォルダには、購読してから移す）
@@ -1272,17 +1300,20 @@ export class ReaderCore {
   workspaceData() {
     return this.#db.transaction(async (tx) => {
       const defaultWorkspaceId = await effectiveWorkspaceDefault(tx);
-      const [workspaces, available, feeds, folders, cursor, completeCursor] = await Promise.all([
-        listWorkspaces(tx, defaultWorkspaceId),
-        workspacesAvailable(tx),
-        listFeeds(tx),
-        listFolders(tx),
-        getSetting(tx, CURSOR_KEY),
-        getCompleteCursor(tx),
-      ]);
+      const [workspaces, available, useDefaultOnSubscribe, feeds, folders, cursor, completeCursor] =
+        await Promise.all([
+          listWorkspaces(tx, defaultWorkspaceId),
+          workspacesAvailable(tx),
+          defaultWorkspaceOnSubscribe(tx),
+          listFeeds(tx),
+          listFolders(tx),
+          getSetting(tx, CURSOR_KEY),
+          getCompleteCursor(tx),
+        ]);
       return {
         workspaces,
         defaultWorkspaceId,
+        defaultWorkspaceOnSubscribe: useDefaultOnSubscribe,
         available,
         feeds,
         folders,

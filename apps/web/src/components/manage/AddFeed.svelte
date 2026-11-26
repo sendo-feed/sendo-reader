@@ -8,11 +8,12 @@
     onsubscribed,
     initialUrl = "",
   }: {
-    onsubscribed: (feed: Feed) => void;
+    onsubscribed: (feed: Feed, outside: boolean) => void;
     initialUrl?: string;
   } = $props();
 
   const reader = useReader();
+  const DEFAULT_WORKSPACE_OPTION = ":default";
   let active = true;
   onDestroy(() => {
     active = false;
@@ -23,9 +24,15 @@
   let folderId = $state<string>("");
   let chosenWorkspaceId = $state<string | undefined>(undefined);
   let rejectedWorkspaceIds = $state.raw<string[]>([]);
+  const supportsDefault = $derived(
+    reader.workspacesAvailable && reader.defaultWorkspaceOnSubscribe,
+  );
+  const useDefault = $derived(supportsDefault && chosenWorkspaceId === undefined);
   const preferredWorkspaceId = $derived(
     chosenWorkspaceId ??
-      (reader.visibleWorkspaceIds?.length === 1 ? reader.visibleWorkspaceIds[0] : undefined),
+      (!supportsDefault && reader.visibleWorkspaceIds?.length === 1
+        ? reader.visibleWorkspaceIds[0]
+        : undefined),
   );
   const destinations = $derived(
     reader.workspacesAvailable
@@ -33,6 +40,14 @@
       : [],
   );
   const workspace = $derived(destinations.find((item) => item.id === preferredWorkspaceId));
+  const defaultWorkspace = $derived(
+    destinations.find((item) => item.id === reader.defaultWorkspaceId),
+  );
+  const defaultOutside = $derived(
+    useDefault &&
+      defaultWorkspace !== undefined &&
+      reader.workspaceIds?.includes(defaultWorkspace.id) === false,
+  );
   let busy = $state(false);
   let message = $state<string | null>(null);
 
@@ -54,23 +69,40 @@
 
   async function subscribe() {
     const workspaceId = workspace?.id;
-    if (chosen === null || workspaceId === undefined) return;
+    if (chosen === null || (!useDefault && workspaceId === undefined)) return;
     busy = true;
     message = null;
     try {
       const feed = await reader.client.subscribe(
         chosen,
         folderId === "" ? null : folderId,
-        workspaceId,
+        useDefault ? { useDefault: true } : (workspaceId ?? null),
       );
       url = "";
       candidates = null;
       chosenWorkspaceId = undefined;
       rejectedWorkspaceIds = [];
-      if (active && feed !== null) onsubscribed(feed);
+      if (active && feed !== null) {
+        // 購読による読み直しの間も、利用者が選んだ範囲から判定する。
+        const scope = reader.workspaceIds;
+        const actual = feed.workspaceId;
+        onsubscribed(
+          feed,
+          scope !== undefined &&
+            actual !== undefined &&
+            (actual === null || !scope.includes(actual)),
+        );
+      }
     } catch (error) {
-      if (error instanceof ApiError && error.code === "workspace_not_found") {
+      if (
+        error instanceof ApiError &&
+        error.code === "workspace_not_found" &&
+        workspaceId !== undefined
+      ) {
         rejectedWorkspaceIds = [...rejectedWorkspaceIds, workspaceId];
+        void reader.client.syncNow().catch(() => {});
+      }
+      if (error instanceof ApiError && error.kind === "cursor_invalid") {
         void reader.client.syncNow().catch(() => {});
       }
       message = describeError(error);
@@ -122,29 +154,40 @@
       </select>
       {#if !reader.workspacesAvailable}
         <p>購読するには、ワークスペースに対応した Sendo と同期してください。</p>
-      {:else if destinations.length === 0}
+      {:else if destinations.length === 0 && !supportsDefault}
         <p>購読するには、Manage feeds の Workspaces で先にワークスペースを作成してください。</p>
       {:else}
         <details>
-          <summary>{workspace?.name ?? "Choose workspace"}</summary>
+          <summary>{useDefault ? "Use default" : (workspace?.name ?? "Choose workspace")}</summary>
           <label for="feed-workspace">Workspace</label>
           <select
             id="feed-workspace"
-            value={workspace?.id ?? ""}
-            onchange={(event) => (chosenWorkspaceId = event.currentTarget.value)}
+            value={useDefault ? DEFAULT_WORKSPACE_OPTION : (workspace?.id ?? "")}
+            onchange={(event) => {
+              const value = event.currentTarget.value;
+              chosenWorkspaceId = value === DEFAULT_WORKSPACE_OPTION ? undefined : value;
+            }}
           >
             <option value="" disabled>Choose workspace</option>
+            {#if supportsDefault}
+              <option value={DEFAULT_WORKSPACE_OPTION}>
+                Use default{defaultWorkspace ? ` (${defaultWorkspace.name})` : ""}
+              </option>
+            {/if}
             {#each destinations as item (item.id)}
               <option value={item.id}>{item.name}</option>
             {/each}
           </select>
         </details>
+        {#if defaultOutside}
+          <p>閲覧範囲外のデフォルトに追加します。</p>
+        {/if}
       {/if}
       <button
         type="button"
         class="primary"
         onclick={subscribe}
-        disabled={chosen === null || workspace === undefined}
+        disabled={chosen === null || (!useDefault && workspace === undefined)}
       >
         Subscribe
       </button>

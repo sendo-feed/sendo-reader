@@ -32,6 +32,7 @@ export class ReaderState {
   allFeeds = $state.raw<Feed[]>([]);
   workspaces = $state.raw<Workspace[]>([]);
   defaultWorkspaceId = $state<string | null>(null);
+  defaultWorkspaceOnSubscribe = $state(false);
   workspacesAvailable = $state(false);
   workspaceIds = $state.raw<readonly string[] | undefined>([]);
   workspaceDataReady = $state(false);
@@ -218,6 +219,7 @@ export class ReaderState {
       this.workspacesAvailable = false;
       this.workspaces = [];
       this.defaultWorkspaceId = null;
+      this.defaultWorkspaceOnSubscribe = false;
       this.#folders = [];
       this.#createdFolderIds = [];
       this.allFeeds = [];
@@ -255,11 +257,19 @@ export class ReaderState {
       this.unread = emptyUnread();
       this.readToday = 0;
     }
-    const { workspaces, available, defaultWorkspaceId, feeds, folders, complete } =
-      await this.client.workspaceData();
+    const {
+      workspaces,
+      available,
+      defaultWorkspaceId,
+      defaultWorkspaceOnSubscribe,
+      feeds,
+      folders,
+      complete,
+    } = await this.client.workspaceData();
     if (read !== this.#workspaceRead) return;
     this.workspaces = workspaces;
     this.defaultWorkspaceId = defaultWorkspaceId;
+    this.defaultWorkspaceOnSubscribe = defaultWorkspaceOnSubscribe;
     this.workspacesAvailable = available;
     this.allFeeds = feeds;
     this.#folders = folders;

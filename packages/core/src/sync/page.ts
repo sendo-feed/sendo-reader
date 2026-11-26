@@ -24,6 +24,8 @@ export interface SyncPage {
   savedPages: SyncSavedPage[] | null;
   /** ワークスペース。未対応の Sendo からは null。 */
   workspaces: SyncWorkspace[] | null;
+  /** 所属先を省いた書き込みを、サーバーがデフォルトに入れる。 */
+  defaultWorkspaceOnSubscribe: boolean;
 }
 
 export type SyncSetting =

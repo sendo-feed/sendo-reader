@@ -7,7 +7,10 @@ test("Chrome のブックマークレットから候補を見つけてフィー�
 }) => {
   const server = new FakeSendo();
   server.workspacesSupported = true;
-  const workspace = server.createWorkspace("default");
+  server.defaultWorkspaceOnSubscribe = true;
+  server.createWorkspace("default");
+  const workspace = server.createWorkspace("personal");
+  server.setDefaultWorkspace(workspace.id);
   const site = "https://blog.example/article?lang=ja#part";
   const feed = "https://blog.example/feed.xml";
   server.discoverable.set(site, [{ url: feed, title: "Blog" }]);
@@ -47,13 +50,24 @@ test("Chrome のブックマークレットから候補を見つけてフィー�
   await page.getByRole("button", { name: "Find", exact: true }).click();
   await expect(page.getByRole("radio", { name: /Blog/ })).toBeChecked();
   const subscribe = page.getByRole("button", { name: "Subscribe", exact: true });
-  await expect(subscribe).toBeDisabled();
-  await page.locator("main summary").click();
-  await page.getByLabel("Workspace", { exact: true }).selectOption(workspace.id);
+  await expect(page.locator("main summary")).toHaveText("Use default");
+  await expect(subscribe).toBeEnabled();
   await subscribe.click();
   await expect(page.getByText("Blog を購読しました。")).toBeVisible();
   expect(server.requests).toContain("POST /feeds");
+  expect(server.subscribeRequests).toEqual([{ url: feed, folderId: null }]);
   expect([...server.feeds.values()].map((row) => row.workspaceId)).toEqual([workspace.id]);
+
+  const scope = page.getByRole("button", { name: /^Workspaces:/ });
+  const switcher = page.getByRole("dialog", { name: "Workspaces", exact: true });
+  await scope.click();
+  await switcher.getByRole("button", { name: "Only default", exact: true }).click();
+  await switcher.getByRole("button", { name: "Close", exact: true }).click();
+  await expect(page.getByText("購読しました。追加先は現在の閲覧範囲外です。")).toBeVisible();
+  await scope.click();
+  await switcher.getByRole("button", { name: "All workspaces", exact: true }).click();
+  await switcher.getByRole("button", { name: "Close", exact: true }).click();
+  await expect(page.getByText("Blog を購読しました。")).toBeVisible();
 });
 
 test("未ログインでも長い投稿 URL を引き継ぎ、確認して Saved に登録できる", async ({

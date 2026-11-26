@@ -188,6 +188,7 @@ export class FakeSendo {
   oauthEnabled = true;
 
   workspacesSupported = false;
+  defaultWorkspaceOnSubscribe = false;
   workspaceDefaultId: string | null = null;
   readonly workspaces = new Map<string, FolderRow>();
   readonly folders = new Map<string, FolderRow>();
@@ -201,6 +202,7 @@ export class FakeSendo {
   readonly removals = new Map<string, number>();
   /** 受けたリクエスト（"GET /sync?cursor=…" の形） */
   readonly requests: string[] = [];
+  readonly subscribeRequests: Record<string, unknown>[] = [];
   /** 受けた「まとめて既読」の本文 */
   readonly markReadRequests: Record<string, unknown>[] = [];
   readonly activityRequests: ActivityEvent[][] = [];
@@ -771,6 +773,7 @@ export class FakeSendo {
       return this.#workspaceRequest(request.method, path, body);
     }
     if (request.method === "POST" && path === "/feeds") {
+      this.subscribeRequests.push(body);
       const workspaceId = this.workspacesSupported
         ? (body.workspaceId as string | null | undefined)
         : undefined;
@@ -791,7 +794,8 @@ export class FakeSendo {
       const created = this.subscribe({
         url: feedUrl,
         folderId,
-        workspaceId: workspaceId ?? null,
+        workspaceId:
+          workspaceId ?? (this.defaultWorkspaceOnSubscribe ? this.workspaceDefaultId : null),
         ...(title ? { title } : {}),
       });
       return json(201, { feed: this.#feedJson(created) });
@@ -1447,6 +1451,7 @@ export class FakeSendo {
           }
         : {}),
       ...(includeWorkspaces && {
+        ...(this.defaultWorkspaceOnSubscribe && { defaultWorkspaceOnSubscribe: true }),
         workspaces: page.workspaces.map((row) =>
           row.deletedAt === null
             ? { ...this.#workspaceJson(row), deleted: false }

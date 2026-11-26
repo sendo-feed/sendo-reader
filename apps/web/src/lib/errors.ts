@@ -62,6 +62,8 @@ export function describeError(error: unknown): string {
         return "ワークスペースを削除するには、先に別のワークスペースをデフォルトにしてください。";
       case "workspace_default_unavailable":
         return "デフォルトに対応した Sendo と同期してください。";
+      case "workspace_default_on_subscribe_unavailable":
+        return "接続先の Sendo では、購読先のワークスペースを選んでください。";
       case "workspace_exists":
         return "同じ名前のワークスペースがあります。";
       case "workspace_not_found":
