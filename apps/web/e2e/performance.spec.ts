@@ -179,7 +179,7 @@ test.describe("速さの予算", () => {
     const cdp = await context.newCDPSession(page);
     await cdp.send("Emulation.setCPUThrottlingRate", { rate: CPU_SLOWDOWN });
 
-    // 押したら、手元の DB への書き込みを待たずに、付いた表示にする
+    // 押してから、付いた表示になるまで 100ms 以内
     const elapsed = await page.evaluate(
       () =>
         new Promise<number>((resolve) => {
