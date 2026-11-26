@@ -1,6 +1,43 @@
 import { expect, test } from "@playwright/test";
 import { FakeSendo, routeFakeSendo, signIn } from "./fake-sendo";
 
+test("購読管理で空のデフォルトの削除を防ぎ、切り替え後に旧デフォルトを削除できる", async ({
+  context,
+  page,
+}) => {
+  const server = new FakeSendo();
+  server.workspacesSupported = true;
+  const original = server.createWorkspace("default");
+  const personal = server.createWorkspace("Personal");
+  server.setDefaultWorkspace(original.id);
+  await routeFakeSendo(context, server);
+  await page.goto("/manage");
+  await signIn(page);
+  await page.getByRole("main").getByRole("button", { name: "Workspaces", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "Workspaces", exact: true });
+  const row = (name: string) =>
+    dialog
+      .getByRole("listitem")
+      .filter({ has: page.getByRole("button", { name: `Edit ${name}` }) });
+  await expect(row("default").getByText("Default", { exact: true })).toBeVisible();
+  await dialog.getByRole("button", { name: "Edit default" }).click();
+  await expect(
+    dialog.getByText("削除するには、先に別のワークスペースをデフォルトにしてください。"),
+  ).toBeVisible();
+  await expect(dialog.getByRole("button", { name: "Delete workspace…" })).toHaveCount(0);
+  await dialog.getByRole("button", { name: "Cancel" }).click();
+  await dialog.getByRole("button", { name: "Edit Personal" }).click();
+  await dialog.getByRole("button", { name: "Make default" }).click();
+  await expect(dialog.getByRole("button", { name: "Make default" })).toHaveCount(0);
+  await dialog.getByRole("button", { name: "Cancel" }).click();
+  await expect(row("Personal").getByText("Default", { exact: true })).toBeVisible();
+  await dialog.getByRole("button", { name: "Edit default" }).click();
+  await dialog.getByRole("button", { name: "Delete workspace…" }).click();
+  await dialog.getByRole("button", { name: "Delete workspace", exact: true }).click();
+  await expect.poll(() => server.workspaceDefaultId).toBe(personal.id);
+  await expect.poll(() => original.deletedAt).not.toBeNull();
+});
+
 test("ワークスペースを作成・改名し、購読のフォルダを保ったまま移してから空の default を削除する", async ({
   context,
   page,

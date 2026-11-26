@@ -1649,7 +1649,7 @@ export interface paths {
         get?: never;
         put?: never;
         post?: never;
-        /** 有効な購読が0件のワークスペースを削除する */
+        /** デフォルト以外で有効な購読が0件のワークスペースを削除する */
         delete: {
             parameters: {
                 query?: never;
@@ -1677,7 +1677,7 @@ export interface paths {
                         "application/json": components["schemas"]["Error"];
                     };
                 };
-                /** @description 有効な購読がある（workspace_not_empty） */
+                /** @description デフォルト（workspace_is_default）か有効な購読がある（workspace_not_empty） */
                 409: {
                     headers: {
                         [name: string]: unknown;
@@ -1690,7 +1690,7 @@ export interface paths {
         };
         options?: never;
         head?: never;
-        /** ワークスペースの名前を変える */
+        /** ワークスペースを改名するか、デフォルトにする */
         patch: {
             parameters: {
                 query?: never;
@@ -1702,11 +1702,11 @@ export interface paths {
             };
             requestBody: {
                 content: {
-                    "application/json": components["schemas"]["RenameWorkspaceRequest"];
+                    "application/json": components["schemas"]["UpdateWorkspaceRequest"];
                 };
             };
             responses: {
-                /** @description 名前を変えた */
+                /** @description 指定された項目を更新した */
                 200: {
                     headers: {
                         [name: string]: unknown;
@@ -1717,7 +1717,7 @@ export interface paths {
                         };
                     };
                 };
-                /** @description 名前か ID が正しくない */
+                /** @description 入力が正しくない。名前かデフォルトの指定のどちらかが必要 */
                 400: {
                     headers: {
                         [name: string]: unknown;
@@ -2248,7 +2248,7 @@ export interface paths {
         put?: never;
         /**
          * アクセストークンを発行する
-         * @description リーダーアプリ（Reeder、NetNewsWire など）のパスワード欄や、エージェント・スクリプトの Authorization: Bearer に使う。
+         * @description REST API または MCP のクライアントで Authorization: Bearer に使う。
          */
         post: {
             parameters: {
@@ -2859,13 +2859,19 @@ export interface components {
             name: string;
             /** Format: date-time */
             createdAt: string;
+            /** @description アカウントのデフォルトか */
+            isDefault: boolean;
         };
-        CreateWorkspaceRequest: components["schemas"]["RenameWorkspaceRequest"] & {
+        CreateWorkspaceRequest: {
+            name: string;
             /** @description クライアントが決めた小文字の UUID。省略時は Sendo が決める */
             id?: string;
         };
-        RenameWorkspaceRequest: {
+        UpdateWorkspaceRequest: {
             name: string;
+        } | {
+            /** @enum {boolean} */
+            isDefault: true;
         };
         OpmlImportResult: {
             /** @description 登録をキューに積んだフィードの数 */
@@ -3074,7 +3080,7 @@ export interface components {
         };
         AccessToken: {
             id: string;
-            /** @example Reeder */
+            /** @example CLI */
             name: string;
             /** Format: date-time */
             createdAt: string;
@@ -3084,7 +3090,7 @@ export interface components {
              */
             lastUsedAt: string | null;
             /**
-             * @description 用途。reader はリーダーアプリ（Google Reader API）と REST API 用、mcp は /mcp（MCP サーバー）用。用途の違う入口では使えない
+             * @description 用途。reader は REST API 用、mcp は /mcp（MCP サーバー）用。用途の違う入口では使えない
              * @enum {string}
              */
             purpose: "reader" | "mcp";
@@ -3094,11 +3100,11 @@ export interface components {
         AccessTokenRequest: {
             /**
              * @description 用途の名前（前後の空白を除いて 1〜100 文字）
-             * @example Reeder
+             * @example CLI
              */
             name: string;
             /**
-             * @description 用途。既定は reader（リーダーアプリと REST API 用）。mcp なら /mcp でだけ使える
+             * @description 用途。既定は reader（REST API 用）。mcp なら /mcp でだけ使える
              * @enum {string}
              */
             purpose?: "reader" | "mcp";

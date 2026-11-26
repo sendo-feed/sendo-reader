@@ -11,8 +11,15 @@ import {
   RESYNC_KEY,
 } from "../db/synced";
 import { clearSyncedSettings, putSyncedSetting, removeSyncedSetting } from "../db/synced-settings";
-import { putWorkspace, setWorkspacesAvailable } from "../db/workspaces";
+import {
+  CONFIRMED_WORKSPACE_DEFAULT_KEY,
+  finishWorkspaceDefaults,
+  putWorkspace,
+  setWorkspacesAvailable,
+  workspacesAvailable,
+} from "../db/workspaces";
 import { type Article, TABLES, type Table } from "../models";
+import { readWorkspaceDefault } from "./ops";
 import type { SyncPage } from "./page";
 import { reapplyPending, reconcilePendingMarkRead } from "./queue";
 
@@ -61,6 +68,12 @@ export async function pull(db: Database, api: SendoApi, options: PullOptions): P
   }
 
   let cursor = await getSetting(db, CURSOR_KEY);
+  const bootstrap =
+    cursor !== null &&
+    (await workspacesAvailable(db)) &&
+    (await getSetting(db, CONFIRMED_WORKSPACE_DEFAULT_KEY)) === null
+      ? await readWorkspaceDefault(api, options.signal)
+      : undefined;
   while (true) {
     if (result.pages >= MAX_PAGES) {
       throw new Error(`同期が ${MAX_PAGES} ページで終わらなかった`);
@@ -84,6 +97,12 @@ export async function pull(db: Database, api: SendoApi, options: PullOptions): P
       const changed = await applyPage(tx, page);
       if (await reconcilePendingMarkRead(tx, page.articles, !page.hasMore)) {
         changed.add("articles");
+      }
+      if (
+        !page.hasMore &&
+        (await finishWorkspaceDefaults(tx, page.workspaces !== null, bootstrap))
+      ) {
+        changed.add("workspaces");
       }
       if (await reapplyPending(tx)) changed.add("workspaces");
       await setSetting(tx, CURSOR_KEY, page.cursor);
@@ -156,6 +175,7 @@ async function resync(
       );
     }
     if (cursor !== null) await reconcilePendingMarkRead(tx, [], true);
+    await finishWorkspaceDefaults(tx, pages.at(-1)?.workspaces != null);
     await reapplyPending(tx);
     if (cursor !== null) {
       await setSetting(tx, CURSOR_KEY, cursor);

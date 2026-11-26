@@ -19,7 +19,14 @@ export interface SyncStatus {
   logoutPending: boolean;
   /** Sendo が受け付けなかった保存操作の理由 */
   savedPageError: "limit" | "unsupported" | "rejected" | null;
-  workspaceError?: "not_empty" | "exists" | "rejected" | null;
+  workspaceError?:
+    | "not_empty"
+    | "exists"
+    | "is_default"
+    | "default_target_missing"
+    | "default_unavailable"
+    | "rejected"
+    | null;
 }
 
 export interface SchedulerOptions {
@@ -89,12 +96,14 @@ export class SyncScheduler {
     };
     this.#offReject = core.onReject(({ op, error }) => {
       if (isWorkspaceOperation(op)) {
-        const workspaceError =
-          error.code === "workspace_not_empty"
-            ? "not_empty"
-            : error.code === "workspace_exists"
-              ? "exists"
-              : "rejected";
+        let workspaceError: SyncStatus["workspaceError"] = "rejected";
+        if (error.code === "workspace_not_empty") workspaceError = "not_empty";
+        if (error.code === "workspace_exists") workspaceError = "exists";
+        if (error.code === "workspace_is_default") workspaceError = "is_default";
+        if (error.code === "workspace_default_unavailable") workspaceError = "default_unavailable";
+        if (op.kind === "setDefaultWorkspace" && error.kind === "not_found") {
+          workspaceError = "default_target_missing";
+        }
         this.#update({ user: core.currentUser(), workspaceError });
         return;
       }

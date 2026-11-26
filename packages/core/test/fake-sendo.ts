@@ -188,6 +188,7 @@ export class FakeSendo {
   oauthEnabled = true;
 
   workspacesSupported = false;
+  workspaceDefaultId: string | null = null;
   readonly workspaces = new Map<string, FolderRow>();
   readonly folders = new Map<string, FolderRow>();
   /** ほかの人のフォルダが使っている ID（POST /folders で、その ID では作れない） */
@@ -303,6 +304,24 @@ export class FakeSendo {
     const row = { id, name, createdAt: this.now, deletedAt: null, seq: this.#bump("workspaces") };
     this.workspaces.set(id, row);
     return row;
+  }
+
+  setDefaultWorkspace(id: string): void {
+    if (this.workspaceDefaultId === id) return;
+    const previous = this.workspaces.get(this.workspaceDefaultId ?? "");
+    if (previous) previous.seq = this.#bump("workspaces");
+    const next = this.#mustGet(this.workspaces, id);
+    next.seq = this.#bump("workspaces");
+    this.workspaceDefaultId = id;
+  }
+
+  #workspaceJson(row: FolderRow) {
+    return {
+      ...folderJson(row),
+      ...(this.workspaceDefaultId === null
+        ? {}
+        : { isDefault: this.workspaceDefaultId === row.id }),
+    };
   }
 
   deleteFolder(id: string): void {
@@ -1240,7 +1259,8 @@ export class FakeSendo {
     const active = [...this.workspaces.values()].filter(
       (workspace) => workspace.deletedAt === null,
     );
-    if (method === "GET") return json(200, { items: active.map(folderJson) });
+    if (method === "GET")
+      return json(200, { items: active.map((row) => this.#workspaceJson(row)) });
     const name = String(body.name ?? "").trim();
     const id =
       method === "POST"
@@ -1248,6 +1268,9 @@ export class FakeSendo {
         : decodeURIComponent(path.slice("/workspaces/".length));
     const current = active.find((workspace) => workspace.id === id);
     if (method === "DELETE") {
+      if (id === this.workspaceDefaultId) {
+        return error(409, "workspace_is_default", "workspace is the default");
+      }
       if (current !== undefined) {
         if (
           [...this.feeds.values()].some(
@@ -1261,21 +1284,26 @@ export class FakeSendo {
       }
       return new Response(null, { status: 204 });
     }
+    if (method === "PATCH" && body.isDefault === true && this.workspaceDefaultId !== null) {
+      if (current === undefined) return error(404, "not_found", "workspace does not exist");
+      this.setDefaultWorkspace(id);
+      return json(200, { workspace: this.#workspaceJson(current) });
+    }
     if (name === "" || name.length > 200 || !UUID.test(id))
       return error(400, "invalid_request", "invalid workspace");
     if (method === "POST" && current !== undefined)
-      return json(200, { workspace: folderJson(current) });
+      return json(200, { workspace: this.#workspaceJson(current) });
     if (active.some((workspace) => workspace.name === name && workspace.id !== id)) {
       return error(409, "workspace_exists", "duplicate workspace");
     }
     if (method === "POST") {
       if (this.workspaces.has(id)) return error(409, "workspace_id_taken", "id taken");
-      return json(201, { workspace: folderJson(this.createWorkspace(name, id)) });
+      return json(201, { workspace: this.#workspaceJson(this.createWorkspace(name, id)) });
     }
     if (current === undefined) return error(404, "not_found", "workspace does not exist");
     current.name = name;
     current.seq = this.#bump("workspaces");
-    return json(200, { workspace: folderJson(current) });
+    return json(200, { workspace: this.#workspaceJson(current) });
   }
 
   #sync(
@@ -1421,7 +1449,7 @@ export class FakeSendo {
       ...(includeWorkspaces && {
         workspaces: page.workspaces.map((row) =>
           row.deletedAt === null
-            ? { ...folderJson(row), deleted: false }
+            ? { ...this.#workspaceJson(row), deleted: false }
             : { id: row.id, deleted: true },
         ),
       }),

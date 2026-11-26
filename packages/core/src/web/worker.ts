@@ -365,6 +365,7 @@ async function dispatch(
           method === "savePage" || method === "unsavePage",
           method === "createWorkspace" ||
             method === "renameWorkspace" ||
+            method === "setDefaultWorkspace" ||
             method === "deleteWorkspace" ||
             method === "moveFeedToWorkspace",
         );

@@ -50,7 +50,12 @@ import {
   putStoredTranslatedContent,
   type StoredTranslatedContent,
 } from "./db/translated-content";
-import { listWorkspaces, workspaceSubscriptions, workspacesAvailable } from "./db/workspaces";
+import {
+  effectiveWorkspaceDefault,
+  listWorkspaces,
+  workspaceSubscriptions,
+  workspacesAvailable,
+} from "./db/workspaces";
 import {
   type Article,
   type ArticleContent,
@@ -874,8 +879,32 @@ export class ReaderCore {
     }));
   }
 
+  setDefaultWorkspace(id: string): Promise<void> {
+    return this.#writeWorkspace(async (tx) => {
+      if ((await effectiveWorkspaceDefault(tx)) === null) {
+        throw new ApiError(
+          "invalid",
+          "デフォルトに対応した Sendo と同期してください",
+          400,
+          "workspace_default_unavailable",
+        );
+      }
+      await requireLocalWorkspace(tx, id);
+      return { kind: "setDefaultWorkspace", workspaceId: id };
+    });
+  }
+
   deleteWorkspace(id: string): Promise<void> {
     return this.#writeWorkspace(async (tx) => {
+      const defaultId = await effectiveWorkspaceDefault(tx);
+      if (id === defaultId) {
+        throw new ApiError(
+          "invalid",
+          "先に別のワークスペースをデフォルトにしてください",
+          409,
+          "workspace_is_default",
+        );
+      }
       const [member] = await tx.all("select 1 from feeds where workspace_id = ? limit 1", [id]);
       if (member !== undefined) {
         throw new ApiError(
@@ -885,7 +914,11 @@ export class ReaderCore {
           "workspace_not_empty",
         );
       }
-      return { kind: "deleteWorkspace", workspaceId: id };
+      return {
+        kind: "deleteWorkspace",
+        workspaceId: id,
+        ...(defaultId !== null && { requireDefaultSupport: true }),
+      };
     });
   }
 
@@ -1238,8 +1271,9 @@ export class ReaderCore {
 
   workspaceData() {
     return this.#db.transaction(async (tx) => {
+      const defaultWorkspaceId = await effectiveWorkspaceDefault(tx);
       const [workspaces, available, feeds, folders, cursor, completeCursor] = await Promise.all([
-        listWorkspaces(tx),
+        listWorkspaces(tx, defaultWorkspaceId),
         workspacesAvailable(tx),
         listFeeds(tx),
         listFolders(tx),
@@ -1248,6 +1282,7 @@ export class ReaderCore {
       ]);
       return {
         workspaces,
+        defaultWorkspaceId,
         available,
         feeds,
         folders,

@@ -328,6 +328,10 @@ const migrations: readonly (readonly string[])[] = [
     "alter table feeds add column subscription_id text",
     "create index feeds_workspace_idx on feeds (workspace_id)",
   ],
+  [
+    // 差分の全ページが届くまで、最後に確定したデフォルトの印を画面に使う。
+    "alter table workspaces add column synced_is_default integer not null default 0",
+  ],
 ];
 
 export const SCHEMA_VERSION = migrations.length;

@@ -4,7 +4,12 @@ import type { Executor } from "../db/database";
 import { getSetting, setSetting } from "../db/settings";
 import { requestResync } from "../db/synced";
 import { putSyncedSetting, removeSyncedSetting } from "../db/synced-settings";
-import { putWorkspace, setWorkspacesAvailable } from "../db/workspaces";
+import {
+  effectiveWorkspaceDefault,
+  putWorkspace,
+  putWorkspaceDefault,
+  setWorkspacesAvailable,
+} from "../db/workspaces";
 import type { DeviceType, JsonValue, SavedPage, SettingItem } from "../models";
 import { MAX_SETTINGS_PER_REQUEST } from "../settings";
 
@@ -67,7 +72,8 @@ export type Operation =
 export type WorkspaceOperation =
   | { kind: "createWorkspace"; workspaceId: string; name: string; at: number }
   | { kind: "renameWorkspace"; workspaceId: string; name: string }
-  | { kind: "deleteWorkspace"; workspaceId: string }
+  | { kind: "setDefaultWorkspace"; workspaceId: string }
+  | { kind: "deleteWorkspace"; workspaceId: string; requireDefaultSupport?: true }
   | {
       kind: "moveFeedToWorkspace";
       feedId: string;
@@ -79,6 +85,7 @@ export function isWorkspaceOperation(op: Operation): op is WorkspaceOperation {
   return (
     op.kind === "createWorkspace" ||
     op.kind === "renameWorkspace" ||
+    op.kind === "setDefaultWorkspace" ||
     op.kind === "deleteWorkspace" ||
     op.kind === "moveFeedToWorkspace"
   );
@@ -144,6 +151,7 @@ export function keyOf(op: Operation): string {
       return op.folderId;
     case "createWorkspace":
     case "renameWorkspace":
+    case "setDefaultWorkspace":
     case "deleteWorkspace":
       return op.workspaceId;
     case "moveFeed":
@@ -213,7 +221,7 @@ export function merge(previous: Operation, next: Operation): Operation | null {
 }
 
 /** 操作を手元の DB に当てる。同期で届いた行の上に、まだ送り終えていない操作を重ねるときにも使う */
-export async function applyLocally(tx: Executor, op: Operation): Promise<void> {
+export async function applyLocally(tx: Executor, op: Operation, pendingId?: number): Promise<void> {
   switch (op.kind) {
     case "setArticleState": {
       // sendo と同じく、すでにその状態なら時刻は変えない
@@ -279,7 +287,11 @@ export async function applyLocally(tx: Executor, op: Operation): Promise<void> {
     case "renameWorkspace":
       await tx.run("update workspaces set name = ? where id = ?", [op.name, op.workspaceId]);
       return;
+    case "setDefaultWorkspace":
+      // 表示では確定した印の上に、キューに残っている最後の切り替えを重ねる。
+      return;
     case "deleteWorkspace":
+      if (op.workspaceId === (await effectiveWorkspaceDefault(tx, pendingId))) return;
       await tx.run(
         `update workspaces set deleted_locally = 1 where id = ?1
            and not exists (select 1 from feeds where workspace_id = ?1)`,
@@ -326,6 +338,31 @@ export type SendResult = {
   remap?: { from: string; to: string };
   savedPage?: SavedPage;
 };
+
+export async function readWorkspaceDefault(
+  api: SendoApi,
+  signal?: AbortSignal,
+): Promise<string | null> {
+  try {
+    const { items } = check(await api.client(signal).GET("/workspaces"));
+    return items.find((workspace) => workspace.isDefault === true)?.id ?? null;
+  } catch (error) {
+    if (error instanceof ApiError && error.kind === "not_found") return null;
+    throw error;
+  }
+}
+
+// キューに積んだあとで旧 Sendo に戻った場合も、デフォルトを前提にした書き込みは送らない。
+async function requireWorkspaceDefault(api: SendoApi, signal: AbortSignal): Promise<void> {
+  if ((await readWorkspaceDefault(api, signal)) === null) {
+    throw new ApiError(
+      "invalid",
+      "デフォルトに対応した Sendo と同期してください",
+      400,
+      "workspace_default_unavailable",
+    );
+  }
+}
 
 /** 操作を sendo に送る。失敗したら ApiError を投げる。signal で中断する（ログアウトなど） */
 export async function send(api: SendoApi, op: Operation, signal: AbortSignal): Promise<SendResult> {
@@ -441,7 +478,17 @@ export async function send(api: SendoApi, op: Operation, signal: AbortSignal): P
         }),
       );
       return {};
+    case "setDefaultWorkspace":
+      await requireWorkspaceDefault(api, signal);
+      check(
+        await client.PATCH("/workspaces/{id}", {
+          params: { path: { id: op.workspaceId } },
+          body: { isDefault: true },
+        }),
+      );
+      return {};
     case "deleteWorkspace":
+      if (op.requireDefaultSupport) await requireWorkspaceDefault(api, signal);
       check(await client.DELETE("/workspaces/{id}", { params: { path: { id: op.workspaceId } } }));
       return {};
     case "moveFeedToWorkspace":
@@ -570,9 +617,8 @@ export async function undo(
     case "renameWorkspace":
     case "deleteWorkspace": {
       try {
-        const current = check(await api.client(signal).GET("/workspaces")).items.find(
-          (workspace) => workspace.id === op.workspaceId,
-        );
+        const { items } = check(await api.client(signal).GET("/workspaces"));
+        const current = items.find((workspace) => workspace.id === op.workspaceId);
         await write(async (tx) => {
           if (current === undefined) {
             await tx.run("delete from workspaces where id = ?", [op.workspaceId]);
@@ -584,17 +630,21 @@ export async function undo(
           } else {
             await putWorkspace(tx, { ...current, createdAt: Date.parse(current.createdAt) });
           }
+          await putWorkspaceDefault(tx, items.find((workspace) => workspace.isDefault)?.id ?? null);
         });
       } catch (failure) {
         if (!(failure instanceof ApiError && failure.kind === "not_found")) throw failure;
         // 対応前の Sendo に戻った場合、表示範囲を広げずに再同期する。
         await write(async (tx) => {
           await setWorkspacesAvailable(tx, false);
+          await putWorkspaceDefault(tx, null);
           await requestResync(tx);
         });
       }
       return;
     }
+    case "setDefaultWorkspace":
+      return;
     case "moveFeedToWorkspace": {
       const current = check(await api.client(signal).GET("/feeds")).items.find(
         (feed) => feed.id === op.feedId,
