@@ -15,6 +15,7 @@ import {
   CONFIRMED_WORKSPACE_DEFAULT_KEY,
   finishWorkspaceDefaults,
   putWorkspace,
+  setDefaultWorkspaceOnSubscribe,
   setWorkspacesAvailable,
   workspacesAvailable,
 } from "../db/workspaces";
@@ -206,7 +207,13 @@ async function applyPage(tx: Executor, page: SyncPage): Promise<Set<Table>> {
     else await putWorkspace(tx, workspace);
   }
   const availabilityChanged = await setWorkspacesAvailable(tx, page.workspaces !== null);
-  if (availabilityChanged || (page.workspaces?.length ?? 0) > 0) changed.add("workspaces");
+  const subscriptionDefaultChanged = await setDefaultWorkspaceOnSubscribe(
+    tx,
+    page.defaultWorkspaceOnSubscribe,
+  );
+  if (availabilityChanged || subscriptionDefaultChanged || (page.workspaces?.length ?? 0) > 0) {
+    changed.add("workspaces");
+  }
   for (const feed of page.feeds) await applyFeed(tx, feed);
   if (page.feeds.length > 0) changed.add("feeds");
   for (const article of page.articles) await applyArticle(tx, article);

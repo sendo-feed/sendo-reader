@@ -40,6 +40,62 @@ async function setup() {
   return { core, db, legacy, server };
 }
 
+test("差分が空でも購読先の省略への対応を検出し、サーバーが書き込んだ所属を受け取る", async () => {
+  const { core, legacy } = await setup();
+  legacy.workspacesSupported = true;
+  legacy.createWorkspace("default", DEFAULT);
+  legacy.createWorkspace("Personal", PRIVATE);
+  legacy.setDefaultWorkspace(DEFAULT);
+  await core.sync();
+  expect((await core.workspaceData()).defaultWorkspaceOnSubscribe).toBe(false);
+  legacy.defaultWorkspaceOnSubscribe = true;
+  await core.sync();
+  expect((await core.workspaceData()).defaultWorkspaceOnSubscribe).toBe(true);
+
+  legacy.fetchable.set(FEED.url, "Blog");
+  legacy.setDefaultWorkspace(PRIVATE);
+  const feed = await core.subscribe(FEED.url, null, { useDefault: true });
+  expect(legacy.subscribeRequests).toEqual([{ url: FEED.url, folderId: null }]);
+  expect(feed?.workspaceId).toBe(PRIVATE);
+});
+
+test.each([true, false])(
+  "旧 Sendo に戻ったら購読先の省略を送らない（ワークスペース対応: %s）",
+  async (withWorkspaces) => {
+    const { core, legacy } = await setup();
+    legacy.workspacesSupported = true;
+    legacy.defaultWorkspaceOnSubscribe = true;
+    legacy.createWorkspace("default", DEFAULT);
+    legacy.createWorkspace("Personal", PRIVATE);
+    legacy.setDefaultWorkspace(DEFAULT);
+    legacy.fetchable.set(FEED.url, "Blog");
+    await core.sync();
+    expect((await core.workspaceData()).defaultWorkspaceOnSubscribe).toBe(true);
+
+    legacy.defaultWorkspaceOnSubscribe = false;
+    legacy.workspacesSupported = withWorkspaces;
+    await expect(core.subscribe(FEED.url, null, { useDefault: true })).rejects.toMatchObject({
+      code: withWorkspaces
+        ? "workspace_default_on_subscribe_unavailable"
+        : "workspaces_unavailable",
+    });
+    expect(legacy.subscribeRequests).toEqual([]);
+    expect((await core.workspaceData()).defaultWorkspaceOnSubscribe).toBe(false);
+    if (!withWorkspaces) {
+      await expect(core.subscribe(FEED.url, null, PRIVATE)).rejects.toMatchObject({
+        code: "workspaces_unavailable",
+      });
+      expect(legacy.subscribeRequests).toEqual([]);
+      return;
+    }
+    const feed = await core.subscribe(FEED.url, null, PRIVATE);
+    expect(legacy.subscribeRequests).toEqual([
+      { url: FEED.url, folderId: null, workspaceId: PRIVATE },
+    ]);
+    expect(feed?.workspaceId).toBe(PRIVATE);
+  },
+);
+
 test("デフォルト対応前の Reader のカーソルと一覧を引き継いでも、現在の印を補える", async () => {
   const { core, db, legacy } = await setup();
   legacy.workspacesSupported = true;

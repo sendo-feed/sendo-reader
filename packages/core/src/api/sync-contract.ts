@@ -72,6 +72,8 @@ export function toSyncPage(body: unknown): SyncPage {
       changes.workspaces?.map((row) =>
         row.deleted ? row : { ...row, createdAt: Date.parse(row.createdAt) },
       ) ?? null,
+    defaultWorkspaceOnSubscribe:
+      changes.workspaces !== undefined && changes.defaultWorkspaceOnSubscribe === true,
     cursor: changes.cursor,
     hasMore: changes.hasMore,
     folders: changes.folders.map((folder) => ({
@@ -145,6 +147,7 @@ function parseSyncChanges(body: unknown): Omit<
 } {
   const root = record(body, "(root)");
   return {
+    ...(root.defaultWorkspaceOnSubscribe === true && { defaultWorkspaceOnSubscribe: true }),
     // あとから足された項目。設定を配る前の版の sendo が相手でも、同期を止めない
     settings:
       root.settings === undefined

@@ -120,11 +120,11 @@
 <Dialog bind:open={addOpen} title="Add feed">
   {#if addOpen}
     <AddFeed
-      onsubscribed={(feed) => {
+      onsubscribed={(feed, outside) => {
         addOpen = false;
         query = "";
-        feedsView?.reveal(feed.folderId);
-        notice = "購読しました。";
+        if (!outside) feedsView?.reveal(feed.folderId);
+        notice = outside ? "購読しました。追加先は現在の閲覧範囲外です。" : "購読しました。";
       }}
     />
   {/if}

@@ -12,6 +12,15 @@
   let saving = $state(false);
   let error = $state<string | null>(null);
   let subscribed = $state<Feed | null>(null);
+  const subscribedOutside = $derived.by(() => {
+    const scope = reader.workspaceIds;
+    const workspaceId = subscribed?.workspaceId;
+    return (
+      scope !== undefined &&
+      workspaceId !== undefined &&
+      (workspaceId === null || !scope.includes(workspaceId))
+    );
+  });
   const visibleSubscription = $derived(
     subscribed === null
       ? undefined
@@ -43,9 +52,11 @@
   <h1>Add to Sendo</h1>
   {#if subscribed !== null}
     <p role="status">
-      {visibleSubscription === undefined
-        ? "購読しました。"
-        : `${feedName(visibleSubscription)} を購読しました。`}
+      {subscribedOutside
+        ? "購読しました。追加先は現在の閲覧範囲外です。"
+        : visibleSubscription === undefined
+          ? "購読しました。"
+          : `${feedName(visibleSubscription)} を購読しました。`}
     </p>
     <a href="/manage" onclick={(event) => handleLink(event, "/manage")}>Manage feeds</a>
   {:else}
