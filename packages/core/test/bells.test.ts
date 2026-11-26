@@ -197,6 +197,47 @@ describe("購読のベル", () => {
     expect(await core.listBells()).toMatchObject([{ id: words.id }]);
   });
 
+  test("送る前のベルを付けてすぐ購読をやめると、見えず、上限にも数えない", async () => {
+    const { server, core, feed } = await subscribed();
+    const second = server.subscribe({ url: "https://news.example/rss", title: "News" });
+    for (let i = 1; i < MAX_BELLS; i++) server.addBell({ words: `word${i}` });
+    await core.sync();
+
+    await core.setFeedBell(feed.id, true);
+    await core.unsubscribe(feed.id);
+    expect(await belledFeeds(core)).toEqual([]);
+    expect(await core.listBells()).toHaveLength(MAX_BELLS - 1);
+    await core.setFeedBell(second.id, true);
+    expect(await belledFeeds(core)).toEqual([second.id]);
+
+    await core.sync();
+    const serverFeedBells = server.activeBells().filter((bell) => bell.feedId !== null);
+    expect(serverFeedBells.map((bell) => bell.feedId)).toEqual([second.id]);
+    expect(await belledFeeds(core)).toEqual([second.id]);
+  });
+
+  test("ベルを付けて購読をやめ、同期が届く前に購読し直しても、古いベルは見えない", async () => {
+    const { server, core } = await setup();
+    // 購読し直したことは、購読の ID で分かる（ワークスペースに対応した sendo が返す）
+    server.workspacesSupported = true;
+    const feed = server.subscribe({ url: "https://blog.example/feed.xml", title: "Blog" });
+    server.fetchable.set(feed.url, "Blog");
+    await core.sync();
+    await core.setFeedBell(feed.id, true);
+    await core.unsubscribe(feed.id);
+
+    // 購読する前に、付ける操作と購読をやめる操作を送る（受け付けたベルは手元の表に残る）
+    const again = await core.subscribe(feed.url);
+    expect(again?.id).toBe(feed.id);
+    expect(again?.subscriptionId).not.toBe(feed.subscriptionId);
+    expect(server.requests).toContain("POST /bells");
+    expect(await core.listBells()).toEqual([]);
+
+    await core.sync();
+    expect(server.activeBells()).toEqual([]);
+    expect(await core.listBells()).toEqual([]);
+  });
+
   test(`有効なベルは ${MAX_BELLS} 個まで。ちょうどまでは付けられ、超える分は断る`, async () => {
     const { server, core, feed } = await subscribed();
     const second = server.subscribe({ url: "https://news.example/rss", title: "News" });

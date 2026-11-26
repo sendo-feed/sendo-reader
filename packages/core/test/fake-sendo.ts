@@ -868,12 +868,15 @@ export class FakeSendo {
       if (existing !== undefined) return json(200, { feed: this.#feedJson(existing) });
       if (!this.fetchable.has(feedUrl)) return error(422, "feed_not_found", "no feed");
       const title = this.fetchable.get(feedUrl) ?? undefined;
+      // sendo のフィードは共有なので、やめたフィードを購読し直すと、同じフィードに新しい購読ができる
+      const previous = [...this.feeds.values()].find((row) => row.url === feedUrl);
       const created = this.subscribe({
         url: feedUrl,
         folderId,
         workspaceId:
           workspaceId ?? (this.defaultWorkspaceOnSubscribe ? this.workspaceDefaultId : null),
         ...(title ? { title } : {}),
+        ...(previous !== undefined && { id: previous.id }),
       });
       return json(201, { feed: this.#feedJson(created) });
     }
