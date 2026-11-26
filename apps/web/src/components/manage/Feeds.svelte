@@ -39,7 +39,8 @@
    * 押してから、手元の DB を読み直すまでの間に出す状態（楽観的な更新。docs/decisions/performance.md の
    * 操作の反応 100ms）
    */
-  let pressedBells = $state.raw<ReadonlyMap<string, boolean>>(new Map());
+  let pressedBells = $state.raw<ReadonlyMap<string, { on: boolean; press: number }>>(new Map());
+  let lastBellPress = 0;
   let lastBellRead = 0;
   const userId = $derived(reader.user?.id);
   const selected = $derived(reader.feeds.find((feed) => feed.id === selectedId));
@@ -120,7 +121,7 @@
   }
 
   function hasBell(feed: Feed): boolean {
-    return pressedBells.get(feed.id) ?? belledFeeds.has(feed.id);
+    return pressedBells.get(feed.id)?.on ?? belledFeeds.has(feed.id);
   }
 
   /**
@@ -129,7 +130,8 @@
    */
   async function toggleBell(feed: Feed) {
     const on = !hasBell(feed);
-    pressedBells = new Map(pressedBells).set(feed.id, on);
+    const press = ++lastBellPress;
+    pressedBells = new Map(pressedBells).set(feed.id, { on, press });
     message = null;
     try {
       await reader.client.setFeedBell(feed.id, on);
@@ -138,7 +140,7 @@
     }
     await readBells().catch(() => {});
     // 待っている間にもう一度押していたら、そちらの書き込みのあとに任せる
-    if (pressedBells.get(feed.id) === on) {
+    if (pressedBells.get(feed.id)?.press === press) {
       const next = new Map(pressedBells);
       next.delete(feed.id);
       pressedBells = next;
