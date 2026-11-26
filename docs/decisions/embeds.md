@@ -1,7 +1,7 @@
 # 記事の中の X の投稿
 
 - 状態：提案中
-- 関連：[ローカルファースト](local-first.md)（「ページの守り」）、[コンテナ版](container.md)（2・4・5）、[UI とツール](ui.md)（1・5・8）、[設定の同期](settings.md)、[画像](images.md)、sendo の[記事の本文](https://github.com/sendo-feed/sendo/blob/main/docs/decisions/content.md)
+- 関連：[ローカルファースト](local-first.md)（「ページの守り」）、[コンテナ版](container.md)（2・4・5）、[UI とツール](ui.md)（1・5・8）、[設定の同期](settings.md)、[画像](images.md)、[通知](notifications.md)（5 の Service Worker）、sendo の[記事の本文](https://github.com/sendo-feed/sendo/blob/main/docs/decisions/content.md)
 
 記事の本文にある X の投稿の引用（公式の埋め込みコード）を、X の公式ウィジェットで読めるようにする。X のスクリプトは、reader のオリジンでは動かさず、別のホスト名で配る隔離フレーム（iframe）の中で動かす。投稿の見分け方（`blockquote` に付ける `data-x-post` の印）は、sendo の[記事の本文](https://github.com/sendo-feed/sendo/blob/main/docs/decisions/content.md)が正で、ここには書き写さない。
 
@@ -83,14 +83,13 @@
 - **設定のファイル（`/config.json`）を返す**：`index.html` を書き換えずに済むが、CSP は古いのに設定は新しい、という食い違いが起き、reader のためのパスも増える。
 - **効くのは次の版から、と決める**：`sw.js` を書き換えずに済むが、使う人が設定しても、上流が次の版を出すまで効かない。
 - **`index.html` を precache から外す**：設定がすぐ効くが、オフラインで起動できなくなる。
-- **Service Worker を自前で書く**：届き方を細かく決められるが、作りが大きく変わる。
 - **`frame-ancestors` を付ける**：ほかのサイトに使われなくなるが、設定が 2 つになる。困ったら、あとから足せる。
 - **上流が隔離フレームを 1 か所で配る**：使う人の設定が要らないが、すべての読者の IP と開いた時刻が上流にも集まり、上流が止まると全員の X の投稿が出なくなる。
 
 ## 見直す条件
 
 - X がウィジェットの作り、置き場、通信先を変えたとき（隔離フレームの CSP と、成功・失敗の決め方を確かめ直す）。
-- Workbox の出力の形が変わり、`sw.js` を書き換えられなくなったとき。
+- injectManifest が差し込む precache の一覧の形が変わり、`sw.js` の版の印を書き換えられなくなったとき（[通知](notifications.md)の 5）。
 - Service Worker が返した `index.html` の CSP が、取り直した応答のヘッダーのものにならないと分かったとき。
 - iOS の Safari や Firefox で、位置がずれる、出ない、Tab キーでウィジェットの中に入る、と分かったとき（確かめたのは Chromium と、デスクトップの WebKit。Tab キーの順は Chromium だけ）。
 - 通信の量や、X に伝わることが困ると分かったとき。

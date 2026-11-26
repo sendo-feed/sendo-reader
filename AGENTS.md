@@ -99,7 +99,7 @@ Conventional Commits を土台にする。全文は https://github.com/sendo-fee
 
 - 同期とローカル DB のロジックはすべて `packages/core` に入れる。`packages/core` は UI のフレームワーク（`svelte`）と `apps/` に依存しない（Biome の `noRestrictedImports` で検査している）
 - `packages/core`、`apps/web/src` では `node:*` を使わない（ブラウザで動くため。Biome で検査している）。コンテナのサーバー（`apps/web/server`）は Node で動くので使ってよい
-- 画面はネットワークを待たない。読み書きはローカル DB に対して行い、サーバーとは同期で揃える。例外は、sendo にしかないものを扱うアカウントの画面（設定、OAuth の許可の画面。`docs/decisions/account.md`）で、手元の DB に置かず、core の API の窓口（`createAccountApi`）で sendo に聞く。記事の翻訳を頼む操作も、sendo に届かないとできない（`docs/decisions/translation.md` の 6）
+- 画面はネットワークを待たない。読み書きはローカル DB に対して行い、サーバーとは同期で揃える。例外は、sendo にしかないものを扱うアカウントの画面（設定、OAuth の許可の画面。`docs/decisions/account.md`）で、手元の DB に置かず、core の API の窓口（`createAccountApi`）で sendo に聞く。記事の翻訳を頼む操作も、sendo に届かないとできない（`docs/decisions/translation.md` の 6）。この端末で通知を受ける操作（Settings と、ベルを付けたときの勧め）も、sendo とプッシュサービスに届かないとできない（`docs/decisions/notifications.md` の 1・3）
 - OpenAPI から生成したファイルは手で直さない。sendo の OpenAPI を直して生成し直す
 - 記事のデータ（タイトル、要約、本文）は信頼できないデータとして扱う
   - `{@html}` を使わない（Biome の `noSvelteAtHtmlTags` で検査している）。本文の HTML は、sendo がサニタイズしてあっても信頼しない。core で、通すタグと属性だけの木にしてから（`src/content/parse.ts`）、専用の部品（`ArticleBody.svelte`）で出す。HTML の文字列を、画面に渡さない（`innerHTML` や `DOMParser` に入れない）
@@ -157,7 +157,7 @@ PR の説明に `Closes #番号` があるときは、その Issue を読む。�
 レビューは日本語で書く。いまは2人で試作を繰り返している段階なので、捨てる前提の試作の完成度や、書き方の好みは指摘しなくてよい（整形と lint は Biome に任せる）。次の観点を優先する。
 
 1. **core と画面の境界**：`packages/core` が UI のフレームワークや `apps/` に依存していないか。同期やデータのロジックが `apps/` に漏れていないか
-2. **ローカルファースト**：画面の操作がネットワークの応答を待っていないか（アカウントの画面と、翻訳を頼む操作を除く）。オフラインで操作したときに、操作キューと楽観的更新で正しく戻せるか
+2. **ローカルファースト**：画面の操作がネットワークの応答を待っていないか（アカウントの画面と、翻訳を頼む操作、この端末で通知を受ける操作を除く）。オフラインで操作したときに、操作キューと楽観的更新で正しく戻せるか
 3. **速さの予算**：JS が gzip 後 100KB を超えそうな依存の追加や、操作の反応が 100ms を超えそうな処理がないか
 4. **セキュリティ**：記事のデータの HTML の出し方（XSS）、URL のスキームの確かめ漏れ、CSP や Trusted Types を緩める変更、秘密（発行したトークンなど）の置き場所、ログへの秘密情報の出力、状態を変えるリクエストを同じオリジンから送っているか
 5. **生成物**：OpenAPI から生成したファイルを手で直していないか
