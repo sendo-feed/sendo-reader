@@ -2,6 +2,7 @@ import { leaderLockName } from "@sendo-reader/core/web";
 import { trimImageCache } from "@sendo-reader/core/web/image-cache";
 import { mount } from "svelte";
 import App from "./App.svelte";
+import { showUnreadBadge } from "./lib/app-badge";
 import { canReloadPage, watchAppUpdate } from "./lib/app-update";
 import { AUTHORIZE_PATH } from "./lib/authorize";
 import { watchBackForwardCache } from "./lib/back-forward-cache";
@@ -47,6 +48,8 @@ if (location.pathname === AUTHORIZE_PATH) {
   prefs.connect(state.client);
   mount(App, { target, context: readerContext(state) });
   void state.init();
+  // インストールしたアプリのアイコンに、未読の数を出す。Badging API のないブラウザーでは何もしない
+  if ("setAppBadge" in navigator) showUnreadBadge(state.client, navigator);
 
   // 画像のキャッシュが上限（100MB）を超えていたら、古いものから捨てる（docs/decisions/images.md
   // の 3）。起動してしばらくしてからと、そのあとは一定の間隔で見る（画面の表示は待たせない）
