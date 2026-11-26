@@ -33,6 +33,7 @@ export type {
   Article,
   ArticleContent,
   ArticleTranslation,
+  Bell,
   ContentElement,
   ContentNode,
   DeviceType,
@@ -56,6 +57,7 @@ export { feedName } from "./models";
 export type { FeedCandidate, OpmlImportResult } from "./online";
 export {
   type ChangeListener,
+  MAX_BELLS,
   MAX_FEED_DISPLAY_NAME_LENGTH,
   MAX_FOLDER_NAME_LENGTH,
   type OpenedList,

@@ -332,6 +332,20 @@ const migrations: readonly (readonly string[])[] = [
     // 差分の全ページが届くまで、最後に確定したデフォルトの印を画面に使う。
     "alter table workspaces add column synced_is_default integer not null default 0",
   ],
+  [
+    // 通知のベル（sendo の docs/decisions/notifications.md の 1・4）。同期で届いた行と、送って受け付け
+    // られた行だけを置く。まだ送っていない付け外しは、操作キューの行を重ねて読む（db/bells.ts）。
+    // 断られた操作を消すだけで、sendo の状態に戻る。言葉のベルも、届いたまま置く
+    `create table bells (
+      id text primary key,
+      subscription_id text,
+      feed_id text,
+      words text,
+      created_at integer not null
+    ) strict, without rowid`,
+    `create index pending_feed_bells_idx on pending_ops (key, id)
+       where kind = 'setFeedBell'`,
+  ],
 ];
 
 export const SCHEMA_VERSION = migrations.length;

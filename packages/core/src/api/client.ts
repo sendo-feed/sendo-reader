@@ -102,6 +102,8 @@ export function createSendoApi(options: SendoApiOptions) {
       if (cursor !== null) url.searchParams.set("cursor", cursor);
       url.searchParams.set("includeSaved", "true");
       url.searchParams.set("includeWorkspaces", "true");
+      // ベルを手元に置いたまま外すと、外した印が届かなくなる（sendo の notifications.md の 4）
+      url.searchParams.set("includeBells", "true");
       const response = await send(new Request(url), signal);
       if (!response.ok) throw await toApiError(response);
       let body: unknown;

@@ -1,4 +1,5 @@
 import { ApiError, type SendoApi } from "../api/client";
+import { clearBells, putBell, removeBell } from "../db/bells";
 import type { Database, Executor, SqlValue } from "../db/database";
 import { putFeed } from "../db/feeds";
 import { clearSavedPages, putSavedPage, removeSavedPage } from "../db/saved-pages";
@@ -163,6 +164,7 @@ async function resync(
     const settings = pages.some((page) => page.settings !== null);
     if (settings) await clearSyncedSettings(tx);
     if (pages.some((page) => page.savedPages !== null)) await clearSavedPages(tx);
+    if (pages.some((page) => page.bells !== null)) await clearBells(tx);
     for (const page of pages) {
       await applyPage(tx, page);
       await reconcilePendingMarkRead(tx, page.articles);
@@ -229,6 +231,11 @@ async function applyPage(tx: Executor, page: SyncPage): Promise<Set<Table>> {
     else await putSavedPage(tx, saved);
   }
   if ((page.savedPages?.length ?? 0) > 0) changed.add("savedPages");
+  for (const bell of page.bells ?? []) {
+    if (bell.deleted) await removeBell(tx, bell.id);
+    else await putBell(tx, bell);
+  }
+  if ((page.bells?.length ?? 0) > 0) changed.add("bells");
   return changed;
 }
 

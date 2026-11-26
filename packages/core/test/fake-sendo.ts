@@ -22,12 +22,33 @@
  *   same-origin のものだけを受ける
  * - 行はユーザーごとに分けない（どのユーザーでも同じ行を返す。手元を消すかの確かめに使う）
  *
+ * 通知のベル（sendo の docs/decisions/notifications.md の 1〜5）は、付ける・外す・一覧と、同期の
+ * includeBells に答える。購読をやめると、その購読のベルに外した印を付ける（sendo のトリガーと同じ）。
+ * 言葉は空白で区切ってつなぎ直すだけにする（NFKC と小文字の照合は見ない）
+ *
  * アカウントの画面のための、アクセストークン（発行・一覧・取り消し）と OAuth の許可（一覧・
  * 取り消し、許可の画面の確かめと決定）にも、sendo と同じ形で答える。認可のリクエストは、
  * client_id、redirect_uri、response_type、scope、state だけを見る（PKCE などは見ない）。
  */
 
-type TableName = "folders" | "feeds" | "articles" | "settings" | "savedPages" | "workspaces";
+type TableName =
+  | "folders"
+  | "feeds"
+  | "articles"
+  | "settings"
+  | "savedPages"
+  | "workspaces"
+  | "bells";
+
+export interface BellRow {
+  id: string;
+  subscriptionId: string | null;
+  feedId: string | null;
+  words: string | null;
+  createdAt: number;
+  deleted: boolean;
+  seq: number;
+}
 
 interface SavedPageRow {
   id: string;
@@ -107,6 +128,8 @@ interface Cursor {
   settings?: number;
   savedPages?: number;
   workspaces?: number;
+  /** ベルの位置。ベルを配る前のカーソルと、includeBells のないカーソルには、ない */
+  bells?: number;
   /** 最初の同期の途中なら、その範囲の起点（直近 30 日の始まり） */
   initialSince?: number;
   /** 最後まで送り終えた（この応答の hasMore が false だった） */
@@ -227,6 +250,14 @@ export class FakeSendo {
   savedPagesSupported = true;
   maxSavedPages = 2000;
   readonly #savedPages = new Map<string, Map<string, SavedPageRow>>();
+  /** ベルに対応する前の版の sendo のふりをする（/sync に bells がなく、/bells は 404） */
+  bellsSupported = true;
+  /** 有効なベルの数の上限（超えると 409 の bell_limit_reached） */
+  maxBells = 100;
+  /** ベル（外したものも、外した印を付けて残す） */
+  readonly bells = new Map<string, BellRow>();
+  /** 受けた POST /bells の本文 */
+  readonly bellRequests: Record<string, unknown>[] = [];
 
   readonly #maxSeq: Record<TableName, number> = {
     folders: 0,
@@ -235,6 +266,7 @@ export class FakeSendo {
     settings: 0,
     savedPages: 0,
     workspaces: 0,
+    bells: 0,
   };
   /** 消した印を回収した範囲。これより古いカーソルでは差分を出せない */
   readonly #purgedUpTo: Record<TableName, number> = {
@@ -244,6 +276,7 @@ export class FakeSendo {
     settings: 0,
     savedPages: 0,
     workspaces: 0,
+    bells: 0,
   };
   readonly #failures: Failure[] = [];
   /** "hang-body" で止めた本文のうち、読み手に取り消されたものの数 */
@@ -378,7 +411,10 @@ export class FakeSendo {
     feed.seq = this.#bump("feeds");
   }
 
-  /** 購読をやめる。受信箱からは、スターを付けたもの以外を消し、消した記録を残す（sendo と同じ） */
+  /**
+   * 購読をやめる。受信箱からは、スターを付けたもの以外を消し、消した記録を残す。その購読のベルに
+   * 外した印を付ける（sendo と同じ）
+   */
   unsubscribe(feedId: string): void {
     const feed = this.#mustGet(this.feeds, feedId);
     feed.deletedAt = this.now;
@@ -386,6 +422,38 @@ export class FakeSendo {
     for (const row of [...this.inbox.values()]) {
       if (row.feedId === feedId && row.starredAt === null) this.removeFromInbox(row.id);
     }
+    for (const bell of this.bells.values()) {
+      if (bell.subscriptionId === feed.subscriptionId) this.removeBell(bell.id);
+    }
+  }
+
+  /** ほかの端末でベルを付けたことにする（購読は、そのフィードの今の購読） */
+  addBell(input: { feedId?: string; words?: string; id?: string }): BellRow {
+    const feed = input.feedId === undefined ? undefined : this.#mustGet(this.feeds, input.feedId);
+    const row: BellRow = {
+      id: input.id ?? crypto.randomUUID(),
+      subscriptionId: feed?.subscriptionId ?? null,
+      feedId: feed?.id ?? null,
+      words: input.words ?? null,
+      createdAt: this.now,
+      deleted: false,
+      seq: this.#bump("bells"),
+    };
+    this.bells.set(row.id, row);
+    return row;
+  }
+
+  /** ほかの端末でベルを外したことにする。もう外してあれば、何も変えない */
+  removeBell(id: string): void {
+    const row = this.#mustGet(this.bells, id);
+    if (row.deleted) return;
+    row.deleted = true;
+    row.seq = this.#bump("bells");
+  }
+
+  /** 有効なベル */
+  activeBells(): BellRow[] {
+    return [...this.bells.values()].filter((row) => !row.deleted).sort(bySeq);
   }
 
   /** 記事を受信箱から消し、消した記録を残す */
@@ -572,6 +640,11 @@ export class FakeSendo {
       this.settings.delete(key);
       this.#purgedUpTo.settings = Math.max(this.#purgedUpTo.settings, row.seq);
     }
+    for (const [id, row] of this.bells) {
+      if (!row.deleted) continue;
+      this.bells.delete(id);
+      this.#purgedUpTo.bells = Math.max(this.#purgedUpTo.bells, row.seq);
+    }
   }
 
   advance(ms: number): void {
@@ -694,6 +767,7 @@ export class FakeSendo {
         this.savedPagesSupported && url.searchParams.get("includeSaved") === "true",
         this.workspacesSupported && url.searchParams.get("includeWorkspaces") === "true",
         user.id,
+        this.bellsSupported && url.searchParams.get("includeBells") === "true",
       );
     }
     if (request.method === "POST" && path === "/activity") {
@@ -742,6 +816,9 @@ export class FakeSendo {
         }
         return new Response(null, { status: 204 });
       }
+    }
+    if (this.bellsSupported && (path === "/bells" || path.startsWith("/bells/"))) {
+      return this.#bellRequest(request, path);
     }
     if (request.method === "GET" && path === "/folders") {
       const items = [...this.folders.values()].filter((row) => row.deletedAt === null);
@@ -931,6 +1008,57 @@ export class FakeSendo {
     }
     return error(404, "not_found", "Not Found");
   };
+
+  /** ベルの一覧・付ける・外す（sendo の docs/decisions/notifications.md の 5） */
+  async #bellRequest(request: Request, path: string): Promise<Response> {
+    if (request.method === "GET" && path === "/bells") {
+      return json(200, { items: this.activeBells().map(bellJson) });
+    }
+    if (request.method === "POST" && path === "/bells") {
+      const body = (await request.json()) as Record<string, unknown>;
+      this.bellRequests.push(body);
+      const { id, feedId } = body;
+      const words =
+        typeof body.words === "string" ? body.words.trim().split(/\s+/).join(" ") : undefined;
+      if (
+        (feedId === undefined && words === undefined) ||
+        (id !== undefined && (typeof id !== "string" || !UUID.test(id))) ||
+        (feedId !== undefined && typeof feedId !== "string") ||
+        words === ""
+      ) {
+        return error(400, "invalid_request", "invalid bell");
+      }
+      const feed = feedId === undefined ? undefined : this.feeds.get(feedId);
+      if (feedId !== undefined && (feed === undefined || feed.deletedAt !== null)) {
+        return error(404, "not_found", "subscription does not exist");
+      }
+      const subscriptionId = feed?.subscriptionId ?? null;
+      const same = this.activeBells().find(
+        (row) => row.subscriptionId === subscriptionId && row.words === (words ?? null),
+      );
+      if (same !== undefined) return json(200, { bell: bellJson(same) });
+      if (this.activeBells().length >= this.maxBells) {
+        return error(409, "bell_limit_reached", "bell limit reached");
+      }
+      if (id !== undefined && this.bells.has(id)) {
+        return error(409, "bell_id_taken", "this bell id is taken");
+      }
+      const created = this.addBell({
+        ...(feed === undefined ? {} : { feedId: feed.id }),
+        ...(words === undefined ? {} : { words }),
+        ...(id === undefined ? {} : { id }),
+      });
+      return json(201, { bell: bellJson(created) });
+    }
+    const match = /^\/bells\/([^/]+)$/.exec(path);
+    if (request.method === "DELETE" && match !== null) {
+      const row = this.bells.get(decodeURIComponent(match[1] ?? ""));
+      if (row === undefined) return error(404, "not_found", "bell does not exist");
+      this.removeBell(row.id);
+      return new Response(null, { status: 204 });
+    }
+    return error(404, "not_found", "Not Found");
+  }
 
   /**
    * 訳文を返す（sendo の GET /articles/{id}/translation）。訳した時刻のない記事は 404
@@ -1315,6 +1443,7 @@ export class FakeSendo {
     includeSaved: boolean,
     includeWorkspaces: boolean,
     userId: string,
+    includeBells: boolean,
   ): Response {
     const cursor = rawCursor === null ? null : decodeCursor(rawCursor);
     if (
@@ -1326,7 +1455,8 @@ export class FakeSendo {
           (cursor.settings !== undefined && cursor.settings < this.#purgedUpTo.settings) ||
           (includeSaved &&
             cursor.savedPages !== undefined &&
-            cursor.savedPages < this.#purgedUpTo.savedPages)))
+            cursor.savedPages < this.#purgedUpTo.savedPages) ||
+          (includeBells && cursor.bells !== undefined && cursor.bells < this.#purgedUpTo.bells)))
     ) {
       return error(400, "invalid_cursor", "cursor is invalid; start over without it");
     }
@@ -1336,12 +1466,15 @@ export class FakeSendo {
       settings: 0,
       savedPages: 0,
       workspaces: 0,
+      bells: 0,
       ...(cursor ?? { folders: 0, feeds: 0, articles: 0, done: false }),
     };
     const settingsInitial = cursor === null || cursor.settings === undefined;
     if (includeWorkspaces && cursor?.workspaces === undefined) since.feeds = 0;
     const workspacesInitial = cursor?.workspaces === undefined;
     const savedInitial = cursor === null || cursor.savedPages === undefined;
+    // ベルの位置のないカーソルには、有効なベルだけを最初から送る
+    const bellsInitial = cursor === null || cursor.bells === undefined;
     const initialSince = cursor === null ? this.now - 30 * DAY : cursor.initialSince;
     const initial = initialSince !== undefined;
 
@@ -1387,6 +1520,11 @@ export class FakeSendo {
             .filter((row) => row.seq > since.settings && !(settingsInitial && row.deleted))
             .sort(bySeq)
         : [],
+      bells: includeBells
+        ? [...this.bells.values()]
+            .filter((row) => row.seq > since.bells && !(bellsInitial && row.deleted))
+            .sort(bySeq)
+        : [],
     };
 
     let room = this.pageSize;
@@ -1399,6 +1537,7 @@ export class FakeSendo {
       settings: [] as SettingRow[],
       savedPages: [] as SavedPageRow[],
       workspaces: [] as FolderRow[],
+      bells: [] as BellRow[],
     };
     for (const table of [
       "folders",
@@ -1407,6 +1546,7 @@ export class FakeSendo {
       "settings",
       "savedPages",
       "workspaces",
+      "bells",
     ] as const) {
       const rows = pending[table];
       const taken = rows.slice(0, room);
@@ -1428,6 +1568,7 @@ export class FakeSendo {
     if (!this.settingsSupported) delete next.settings;
     if (!includeSaved) delete next.savedPages;
     if (!includeWorkspaces) delete next.workspaces;
+    if (!includeBells) delete next.bells;
 
     return json(200, {
       cursor: encodeCursor(next),
@@ -1450,6 +1591,11 @@ export class FakeSendo {
             ),
           }
         : {}),
+      ...(includeBells && {
+        bells: page.bells.map((row) =>
+          row.deleted ? { id: row.id, deleted: true } : { ...bellJson(row), deleted: false },
+        ),
+      }),
       ...(includeWorkspaces && {
         ...(this.defaultWorkspaceOnSubscribe && { defaultWorkspaceOnSubscribe: true }),
         workspaces: page.workspaces.map((row) =>
@@ -1546,6 +1692,16 @@ function feedJson(row: FeedRow) {
 
 function bySeq(a: { seq: number }, b: { seq: number }): number {
   return a.seq - b.seq;
+}
+
+function bellJson(row: BellRow) {
+  return {
+    id: row.id,
+    subscriptionId: row.subscriptionId,
+    feedId: row.feedId,
+    words: row.words,
+    createdAt: iso(row.createdAt),
+  };
 }
 
 function savedPageJson(row: SavedPageRow) {

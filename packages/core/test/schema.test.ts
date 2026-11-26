@@ -91,6 +91,7 @@ describe("手元の DB のスキーマ", () => {
       "article_page_misses",
       "article_translation_contents",
       "articles",
+      "bells",
       "feed_fetch_times",
       "feeds",
       "folders",

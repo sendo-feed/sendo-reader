@@ -1,5 +1,5 @@
 import { ApiError, errorFromBody, type SendoApi } from "../api/client";
-import { toSavedPage } from "../api/sync-contract";
+import { toBell, toSavedPage } from "../api/sync-contract";
 import type { Executor } from "../db/database";
 import { getSetting, setSetting } from "../db/settings";
 import { requestResync } from "../db/synced";
@@ -10,7 +10,7 @@ import {
   putWorkspaceDefault,
   setWorkspacesAvailable,
 } from "../db/workspaces";
-import type { DeviceType, JsonValue, SavedPage, SettingItem } from "../models";
+import type { Bell, DeviceType, JsonValue, SavedPage, SettingItem } from "../models";
 import { MAX_SETTINGS_PER_REQUEST } from "../settings";
 
 /**
@@ -62,6 +62,12 @@ export type Operation =
   | WorkspaceOperation
   | { kind: "unsubscribe"; feedId: string }
   | { kind: "setSavedPage"; id: string; page: SavedPage | null }
+  /**
+   * 購読だけのベルを付ける ／ 外す（sendo の docs/decisions/notifications.md の 1〜5）。付けるときの
+   * bellId は、この端末が決めた小文字の UUID（オフラインで付けて外しても、外す相手を指せる）。外す
+   * ときは、押したときに手元に見えていたベルの ID。at は付けた時刻（送るまで手元に見せる作った時刻）
+   */
+  | { kind: "setFeedBell"; feedId: string; bellId: string; on: boolean; at: number }
   | { kind: "recordArticleOpens"; events: ArticleOpenEvent[] }
   /**
    * 設定を置く ／ 消す（docs/decisions/settings.md）。同じ名前は、put と remove のどちらか一方に
@@ -158,6 +164,7 @@ export function keyOf(op: Operation): string {
     case "moveFeedToWorkspace":
     case "renameFeed":
     case "unsubscribe":
+    case "setFeedBell":
       return op.feedId;
     case "setSavedPage":
       return op.id;
@@ -194,6 +201,12 @@ export function merge(previous: Operation, next: Operation): Operation | null {
   }
   if (previous.kind === "moveFeedToWorkspace" && next.kind === "moveFeedToWorkspace") {
     return previous.subscriptionId === next.subscriptionId ? next : null;
+  }
+  if (previous.kind === "setFeedBell" && next.kind === "setFeedBell") {
+    // 付けてすぐ外したら、外すほうだけを送る（まだ付けていなければ、ないベルを外すだけで済む。付けて
+    // いる途中なら、rev が変わるので、付け終えてから外す）。外してから付け直すのはまとめない。付ける
+    // ほうにまとめると、そのあとにもう一度外したとき、もとのベルを外す操作が残らない
+    return previous.on && !next.on && previous.bellId === next.bellId ? next : null;
   }
   if (previous.kind === "recordArticleOpens" && next.kind === "recordArticleOpens") {
     const events = [...previous.events];
@@ -311,9 +324,14 @@ export async function applyLocally(tx: Executor, op: Operation, pendingId?: numb
       // 同じように消しておく（自分の操作の楽観的な反映。同期では、記事ごとの消した記録が届いた
       // ときにだけ消す。docs/decisions/local-first.md）
       await tx.run("delete from articles where feed_id = ? and starred_at is null", [op.feedId]);
+      // sendo は、購読をやめると、その購読のベルを外す（言葉だけのベルは残る）。手元でも先に外す
+      await tx.run("delete from bells where feed_id = ?", [op.feedId]);
       return;
     case "setSavedPage":
       // 操作キューの行を visible_saved_pages が読む。同期で届いた行は上書きしない。
+      return;
+    case "setFeedBell":
+      // 操作キューの行を、手元に見えるベル（db/bells.ts）が重ねて読む。届いた行は上書きしない
       return;
     case "recordArticleOpens":
       return;
@@ -337,6 +355,8 @@ export function scopeCondition(scope: MarkReadScope): [string, string[]] {
 export type SendResult = {
   remap?: { from: string; to: string };
   savedPage?: SavedPage;
+  /** 付けたベル（sendo に同じ購読のベルがもうあったら、その ID のベル） */
+  bell?: Bell;
 };
 
 export async function readWorkspaceDefault(
@@ -508,6 +528,22 @@ export async function send(api: SendoApi, op: Operation, signal: AbortSignal): P
       return {};
     case "recordArticleOpens":
       check(await client.POST("/activity", { body: { events: op.events } }));
+      return {};
+    case "setFeedBell":
+      if (op.on) {
+        // 201 は付けた、200 は同じ購読のベルがもうある（ほかの端末で付けた、前に送って応答だけ
+        // 失った）。どちらも応答のベルを正とする
+        const data = check(
+          await client.POST("/bells", { body: { id: op.bellId, feedId: op.feedId } }),
+        );
+        return { bell: toBell(data?.bell) };
+      }
+      try {
+        check(await client.DELETE("/bells/{id}", { params: { path: { id: op.bellId } } }));
+      } catch (error) {
+        // 付ける前に外した（sendo にない ID）。外したかった状態になっている
+        if (!(error instanceof ApiError && error.kind === "not_found")) throw error;
+      }
       return {};
     case "setSavedPage": {
       if (op.page === null) {
@@ -703,7 +739,9 @@ export async function undo(
       return;
     }
     case "setSavedPage":
+    case "setFeedBell":
     case "recordArticleOpens":
+      // 手元の行は書き換えていない。操作が消えれば、sendo の状態に戻る
       return;
     case "markWorkspaceRead":
       await write(async (tx) => {
@@ -745,6 +783,19 @@ export async function remapFolderId(tx: Executor, from: string, to: string): Pro
     `update pending_ops set payload = json_set(payload, '$.scope.folderId', ?1),
        key = case key when ?2 then ?1 else key end
      where json_extract(payload, '$.scope.folderId') = ?2`,
+    [to, from],
+  );
+}
+
+/**
+ * 付けたベルの ID が、sendo にあった同じ購読のベルの ID と違った。まだ送っていない外す操作が、
+ * sendo のベルを外すように付け替える（付けている間に外すと、外す操作は手元で決めた ID を持つ）
+ */
+export async function remapBellId(tx: Executor, from: string, to: string): Promise<void> {
+  if (from === to) return;
+  await tx.run(
+    `update pending_ops set payload = json_set(payload, '$.bellId', ?1)
+     where kind = 'setFeedBell' and json_extract(payload, '$.bellId') = ?2`,
     [to, from],
   );
 }
