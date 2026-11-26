@@ -48,11 +48,11 @@ describe("購読のベル", () => {
     expect(await core.countPending()).toBe(1);
     await core.setFeedBell(feed.id, false);
     await core.setFeedBell(feed.id, false);
-    expect(await core.countPending()).toBe(1);
+    expect(await core.countPending()).toBe(2);
     expect(await core.listBells()).toEqual([]);
   });
 
-  test("届かない間に付けて外したら、戻ったときに外れたまま（付けずに済ませる）", async () => {
+  test("届かない間に付けて外したら、戻ったときに付けてから外し、sendo でも外れたまま", async () => {
     const { server, core, feed } = await subscribed();
     await core.setFeedBell(feed.id, true);
     server.failNext("network");
@@ -61,12 +61,26 @@ describe("購読のベル", () => {
 
     await core.setFeedBell(feed.id, false);
     expect(await belledFeeds(core)).toEqual([]);
-    expect(await core.countPending()).toBe(1);
-    // 外すのは、sendo にない ID のベル（404）。断られたことにはしない
+    expect(await core.countPending()).toBe(2);
     const result = await core.sync();
-    expect(result.push).toMatchObject({ sent: 1, rejected: [] });
-    expect(server.bellRequests).toEqual([]);
+    expect(result.push).toMatchObject({ sent: 2, rejected: [] });
+    expect(server.bellRequests).toHaveLength(1);
     expect(server.activeBells()).toEqual([]);
+    expect([...server.bells.values()]).toMatchObject([{ deleted: true }]);
+    expect(await core.listBells()).toEqual([]);
+  });
+
+  test("ほかの端末で付けたベルを取り込む前に、送る前に付けて外したら、sendo のそのベルも外れる", async () => {
+    const { server, core, feed } = await subscribed();
+    const other = server.addBell({ feedId: feed.id });
+    await core.setFeedBell(feed.id, true);
+    await core.setFeedBell(feed.id, false);
+    expect(await belledFeeds(core)).toEqual([]);
+
+    await core.sync();
+    expect(server.requests).toContain(`DELETE /bells/${other.id}`);
+    expect(server.activeBells()).toEqual([]);
+    expect(await core.countPending()).toBe(0);
     expect(await core.listBells()).toEqual([]);
   });
 

@@ -202,12 +202,9 @@ export function merge(previous: Operation, next: Operation): Operation | null {
   if (previous.kind === "moveFeedToWorkspace" && next.kind === "moveFeedToWorkspace") {
     return previous.subscriptionId === next.subscriptionId ? next : null;
   }
-  if (previous.kind === "setFeedBell" && next.kind === "setFeedBell") {
-    // 付けてすぐ外したら、外すほうだけを送る（まだ付けていなければ、ないベルを外すだけで済む。付けて
-    // いる途中なら、rev が変わるので、付け終えてから外す）。外してから付け直すのはまとめない。付ける
-    // ほうにまとめると、そのあとにもう一度外したとき、もとのベルを外す操作が残らない
-    return previous.on && !next.on && previous.bellId === next.bellId ? next : null;
-  }
+  // setFeedBell はまとめない。付けてすぐ外したのを外すだけにすると、ほかの端末が同じ購読に付けた、
+  // まだ取り込んでいないベルが sendo に残る（付ければ sendo のベルの ID が返り、外す操作をそれに
+  // 付け替えられる）
   if (previous.kind === "recordArticleOpens" && next.kind === "recordArticleOpens") {
     const events = [...previous.events];
     const ids = new Set(events.map(({ id }) => id));
