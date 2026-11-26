@@ -1,5 +1,6 @@
 import { expect, test } from "vitest";
 import { ReaderCore } from "../src";
+import { CONFIRMED_WORKSPACE_DEFAULT_KEY } from "../src/db/workspaces";
 import { getCompleteCursor } from "../src/sync/pull";
 import { FakeSendo } from "./fake-sendo";
 import { openMemoryDb } from "./helpers";
@@ -38,6 +39,290 @@ async function setup() {
   await core.restoreSession();
   return { core, db, legacy, server };
 }
+
+test("デフォルト対応前の Reader のカーソルと一覧を引き継いでも、現在の印を補える", async () => {
+  const { core, db, legacy } = await setup();
+  legacy.workspacesSupported = true;
+  legacy.createWorkspace("default", DEFAULT);
+  legacy.createWorkspace("Personal", PRIVATE);
+  legacy.setDefaultWorkspace(PRIVATE);
+  await core.sync();
+  const cursor = await getCompleteCursor(db);
+  // この印を保存しなかった版の Reader が同じカーソルまで取得した状態。
+  await db.run("delete from settings where key = ?", [CONFIRMED_WORKSPACE_DEFAULT_KEY]);
+  await db.run("update workspaces set synced_is_default = 0");
+  expect((await core.listWorkspaces()).every((item) => item.isDefault === undefined)).toBe(true);
+  const result = await core.sync();
+  expect(result.pull.reset).toBe(false);
+  expect(await getCompleteCursor(db)).toBe(cursor);
+  expect(
+    (await core.listWorkspaces()).filter((item) => item.isDefault).map((item) => item.id),
+  ).toEqual([PRIVATE]);
+  expect(legacy.requests).toContain("GET /workspaces");
+});
+
+test.each([false, true])(
+  "切り替えの差分の途中で切断しても、全ページが届くまで確定した印を保つ（旧項目の削除: %s）",
+  async (deletePrevious) => {
+    const { core, db, legacy, server } = await setup();
+    legacy.workspacesSupported = true;
+    legacy.createWorkspace("default", DEFAULT);
+    legacy.createWorkspace("Personal", PRIVATE);
+    legacy.setDefaultWorkspace(DEFAULT);
+    await core.sync();
+    const cursor = await getCompleteCursor(db);
+    let online = false;
+    server.fetch = async (input, init) => {
+      const url = new URL((input as Request).url);
+      if (!url.pathname.endsWith("/sync")) return legacy.fetch(input, init);
+      const base = { folders: [], feeds: [], articles: [] };
+      if (url.searchParams.get("cursor") === cursor) {
+        return Response.json({
+          ...base,
+          cursor: "default-demoted",
+          hasMore: true,
+          workspaces: deletePrevious
+            ? [
+                { id: DEFAULT, deleted: true },
+                { ...workspace(PRIVATE, "Personal"), isDefault: true },
+              ]
+            : [{ ...workspace(DEFAULT, "default"), isDefault: false }],
+        });
+      }
+      expect(url.searchParams.get("cursor")).toBe("default-demoted");
+      if (!online) throw new TypeError("offline");
+      return Response.json({
+        ...base,
+        cursor: "default-switched",
+        hasMore: false,
+        workspaces: deletePrevious ? [] : [{ ...workspace(PRIVATE, "Personal"), isDefault: true }],
+      });
+    };
+    await expect(core.sync()).rejects.toMatchObject({ kind: "network" });
+    const resumed = await ReaderCore.open({
+      db,
+      baseUrl: "https://sendo.test/api/v1",
+      fetch: (input, init) => server.fetch(input, init),
+    });
+    await resumed.restoreSession();
+    const defaults = async () =>
+      (await resumed.listWorkspaces()).filter((item) => item.isDefault).map((item) => item.id);
+    const partial = await resumed.workspaceData();
+    expect(partial.defaultWorkspaceId).toBe(DEFAULT);
+    expect(await defaults()).toEqual(deletePrevious ? [] : [DEFAULT]);
+    if (deletePrevious) expect(partial.workspaces.map((row) => row.id)).not.toContain(DEFAULT);
+    expect(await getCompleteCursor(db)).toBe(cursor);
+    online = true;
+    await resumed.sync();
+    expect(await defaults()).toEqual([PRIVATE]);
+  },
+);
+
+test("デフォルトを手元で切り替え、接続が戻ったら空の旧デフォルトの削除より先に送る", async () => {
+  const { core, legacy } = await setup();
+  legacy.workspacesSupported = true;
+  const initial = legacy.createWorkspace("default", DEFAULT);
+  legacy.createWorkspace("Personal", PRIVATE);
+  legacy.setDefaultWorkspace(DEFAULT);
+  await core.sync();
+  await expect(core.deleteWorkspace(DEFAULT)).rejects.toMatchObject({
+    code: "workspace_is_default",
+  });
+  await core.setDefaultWorkspace(PRIVATE);
+  expect(await core.listWorkspaces()).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({ id: DEFAULT, isDefault: false }),
+      expect.objectContaining({ id: PRIVATE, isDefault: true }),
+    ]),
+  );
+  await core.deleteWorkspace(DEFAULT);
+  legacy.failNext("network");
+  await expect(core.sync()).rejects.toMatchObject({ kind: "network" });
+  expect(legacy.workspaceDefaultId).toBe(DEFAULT);
+  expect(await core.countPending()).toBe(2);
+  await core.sync();
+  expect(legacy.workspaceDefaultId).toBe(PRIVATE);
+  expect(initial.deletedAt).not.toBeNull();
+  expect(await core.countPending()).toBe(0);
+  expect(await core.listWorkspaces()).toMatchObject([{ id: PRIVATE, isDefault: true }]);
+});
+
+test("別端末でデフォルトになった項目の削除を拒否されたら、復元して印を揃える", async () => {
+  const { core, legacy } = await setup();
+  legacy.workspacesSupported = true;
+  legacy.createWorkspace("default", DEFAULT);
+  legacy.createWorkspace("Personal", PRIVATE);
+  legacy.setDefaultWorkspace(DEFAULT);
+  await core.sync();
+  legacy.setDefaultWorkspace(PRIVATE);
+  await core.deleteWorkspace(PRIVATE);
+  expect(await core.listWorkspaces()).toMatchObject([{ id: DEFAULT, isDefault: true }]);
+  const result = await core.sync();
+  expect(result.push.rejected).toMatchObject([{ error: { code: "workspace_is_default" } }]);
+  expect(
+    (await core.listWorkspaces()).filter((item) => item.isDefault).map((item) => item.id),
+  ).toEqual([PRIVATE]);
+});
+
+test.each(["workspace_is_default", "workspace_not_empty"])(
+  "削除拒否後に通信が切れても、拒否された削除を再送しない（%s）",
+  async (code) => {
+    const { core, legacy, server } = await setup();
+    legacy.workspacesSupported = true;
+    legacy.createWorkspace("default", DEFAULT);
+    const personal = legacy.createWorkspace("Personal", PRIVATE);
+    legacy.setDefaultWorkspace(DEFAULT);
+    await core.sync();
+    const member =
+      code === "workspace_not_empty"
+        ? legacy.subscribe({ url: FEED.url, workspaceId: PRIVATE })
+        : null;
+    if (member === null) legacy.setDefaultWorkspace(PRIVATE);
+    await core.deleteWorkspace(PRIVATE);
+    let rejected = false;
+    server.fetch = async (input, init) => {
+      const request = input as Request;
+      if (rejected) throw new TypeError("offline");
+      const response = await legacy.fetch(input, init);
+      if (request.method === "DELETE") {
+        expect(response.status).toBe(409);
+        expect(await response.clone().json()).toMatchObject({ error: { code } });
+        rejected = true;
+      }
+      return response;
+    };
+    await expect(core.sync()).rejects.toMatchObject({ kind: "network" });
+    expect(await core.countPending()).toBe(0);
+    expect((await core.listWorkspaces()).find((item) => item.id === PRIVATE)).toMatchObject({
+      isDefault: member === null,
+    });
+    server.fetch = legacy.fetch;
+    if (member === null) legacy.setDefaultWorkspace(DEFAULT);
+    else legacy.unsubscribe(member.id);
+    await core.sync();
+    expect(personal.deletedAt).toBeNull();
+  },
+);
+
+test("切り替えが拒否されても、後から積んだ切り替えは表示とキューに残す", async () => {
+  const { core, legacy, server } = await setup();
+  legacy.workspacesSupported = true;
+  legacy.createWorkspace("default", DEFAULT);
+  const removed = legacy.createWorkspace("Personal", PRIVATE);
+  const reading = legacy.createWorkspace("Reading");
+  legacy.setDefaultWorkspace(DEFAULT);
+  await core.sync();
+  await core.setDefaultWorkspace(PRIVATE);
+  await core.setDefaultWorkspace(reading.id);
+  removed.deletedAt = legacy.now;
+  let readingOnline = false;
+  server.fetch = async (input, init) => {
+    const request = input as Request;
+    if (request.method === "PATCH" && request.url.endsWith(reading.id) && !readingOnline) {
+      throw new TypeError("offline");
+    }
+    return legacy.fetch(input, init);
+  };
+  await expect(core.sync()).rejects.toMatchObject({ kind: "network" });
+  expect(await core.countPending()).toBe(1);
+  expect(
+    (await core.listWorkspaces()).filter((item) => item.isDefault).map((item) => item.id),
+  ).toEqual([reading.id]);
+  expect(legacy.workspaceDefaultId).toBe(DEFAULT);
+  readingOnline = true;
+  await core.sync();
+  expect(legacy.workspaceDefaultId).toBe(reading.id);
+});
+
+test("ワークスペースだけに対応した Sendo ではデフォルト設定を送らない", async () => {
+  const { core, legacy } = await setup();
+  legacy.workspacesSupported = true;
+  legacy.createWorkspace("default", DEFAULT);
+  legacy.createWorkspace("Personal", PRIVATE);
+  await core.sync();
+  await expect(core.setDefaultWorkspace(PRIVATE)).rejects.toMatchObject({
+    code: "workspace_default_unavailable",
+  });
+  expect(await core.countPending()).toBe(0);
+  await core.deleteWorkspace(PRIVATE);
+  await core.sync();
+  expect(legacy.requests).not.toContain(`PATCH /workspaces/${PRIVATE}`);
+  expect(legacy.requests).toContain(`DELETE /workspaces/${PRIVATE}`);
+});
+
+test("デフォルト非対応の Sendo に戻ったら、切り替えとそれに続く削除を送らない", async () => {
+  const { core, legacy } = await setup();
+  legacy.workspacesSupported = true;
+  legacy.createWorkspace("default", DEFAULT);
+  legacy.createWorkspace("Personal", PRIVATE);
+  legacy.setDefaultWorkspace(DEFAULT);
+  await core.sync();
+  await core.setDefaultWorkspace(PRIVATE);
+  await core.deleteWorkspace(DEFAULT);
+  legacy.workspaceDefaultId = null;
+  const result = await core.sync();
+  expect(result.push.rejected).toMatchObject([
+    { error: { code: "workspace_default_unavailable" } },
+    { error: { code: "workspace_default_unavailable" } },
+  ]);
+  expect(legacy.requests).not.toContain(`PATCH /workspaces/${PRIVATE}`);
+  expect(legacy.requests).not.toContain(`DELETE /workspaces/${DEFAULT}`);
+  expect((await core.listWorkspaces()).every((item) => item.isDefault === undefined)).toBe(true);
+  legacy.workspaceDefaultId = DEFAULT;
+  await core.sync();
+  expect((await core.listWorkspaces()).find((item) => item.id === DEFAULT)?.isDefault).toBe(true);
+});
+
+test("デフォルトの切り替えが拒否されたら、未送信の削除で現在のデフォルトを隠さない", async () => {
+  const { core, legacy, server } = await setup();
+  legacy.workspacesSupported = true;
+  legacy.createWorkspace("default", DEFAULT);
+  const removed = legacy.createWorkspace("Personal", PRIVATE);
+  legacy.setDefaultWorkspace(DEFAULT);
+  await core.sync();
+  await core.setDefaultWorkspace(PRIVATE);
+  await core.deleteWorkspace(DEFAULT);
+  expect(await core.listWorkspaces()).toMatchObject([{ id: PRIVATE, isDefault: true }]);
+  removed.deletedAt = legacy.now;
+  let deleteOnline = false;
+  server.fetch = async (input, init) => {
+    const request = input as Request;
+    if (request.method === "DELETE" && !deleteOnline) throw new TypeError("offline");
+    return legacy.fetch(input, init);
+  };
+  await expect(core.sync()).rejects.toMatchObject({ kind: "network" });
+  expect(await core.countPending()).toBe(1);
+  expect(await core.listWorkspaces()).toMatchObject([{ id: DEFAULT, isDefault: true }]);
+  deleteOnline = true;
+  const result = await core.sync();
+  expect(result.push.rejected).toMatchObject([{ error: { code: "workspace_is_default" } }]);
+  expect(await core.listWorkspaces()).toMatchObject([{ id: DEFAULT, isDefault: true }]);
+});
+
+test("切り替えの拒否後に再表示した項目の削除が成功したら、同期を待たず通知する", async () => {
+  const { core, legacy, server } = await setup();
+  legacy.workspacesSupported = true;
+  const initial = legacy.createWorkspace("default", DEFAULT);
+  const removed = legacy.createWorkspace("Personal", PRIVATE);
+  const reading = legacy.createWorkspace("Reading");
+  legacy.setDefaultWorkspace(DEFAULT);
+  await core.sync();
+  await core.setDefaultWorkspace(PRIVATE);
+  await core.deleteWorkspace(DEFAULT);
+  removed.deletedAt = legacy.now;
+  legacy.setDefaultWorkspace(reading.id);
+  const changes: string[][] = [];
+  core.onChange((tables) => changes.push([...tables].sort()));
+  server.fetch = async (input, init) => {
+    const path = new URL((input as Request).url).pathname;
+    if (path.endsWith("/sync")) throw new TypeError("offline");
+    return legacy.fetch(input, init);
+  };
+  await expect(core.sync()).rejects.toMatchObject({ kind: "network" });
+  expect(initial.deletedAt).not.toBeNull();
+  expect(changes).toContainEqual(["workspaces"]);
+  expect((await core.listWorkspaces()).map((item) => item.id)).toEqual([reading.id]);
+});
 
 test("古いカーソルを維持したまま購読の所属とワークスペースを別々のページから取り込む", async () => {
   const { core, db, legacy, server } = await setup();

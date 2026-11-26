@@ -1,6 +1,7 @@
 import { ApiError, type SendoApi } from "../api/client";
 import type { Database, Executor } from "../db/database";
 import { putSavedPage, removeSavedPage } from "../db/saved-pages";
+import { invalidateWorkspaceDefault, putWorkspaceDefault } from "../db/workspaces";
 import type { Table } from "../models";
 import {
   applyLocally,
@@ -109,7 +110,7 @@ export async function reapplyPending(tx: Executor): Promise<boolean> {
     "update workspaces set deleted_locally = 0 where deleted_locally = 1 returning id",
   );
   const pending = await listPending(tx);
-  for (const { op } of pending) await applyLocally(tx, op);
+  for (const { id, op } of pending) await applyLocally(tx, op, id);
   if (hidden.length === 0 && !pending.some(({ op }) => op.kind === "deleteWorkspace")) return false;
   const after = await tx.all<{ id: string }>("select id from workspaces where deleted_locally = 1");
   const beforeIds = new Set(hidden.map(({ id }) => id));
@@ -242,13 +243,19 @@ export async function push(
       const workspacesChanged = await db.transaction(async (tx) => {
         // 送っている間にログアウトしていたら、手元には書かない
         signal.throwIfAborted();
+        let visibleWorkspaceRemoved = false;
         if (op.kind === "setSavedPage") {
           if (sent.savedPage === undefined) await removeSavedPage(tx, op.id);
           else await putSavedPage(tx, sent.savedPage);
         }
         if (op.kind === "deleteWorkspace") {
-          await tx.run("delete from workspaces where id = ?", [op.workspaceId]);
+          const [removed] = await tx.all<{ deleted_locally: number }>(
+            "delete from workspaces where id = ? returning deleted_locally",
+            [op.workspaceId],
+          );
+          visibleWorkspaceRemoved = removed?.deleted_locally === 0;
         }
+        if (op.kind === "setDefaultWorkspace") await putWorkspaceDefault(tx, op.workspaceId);
         if (op.kind === "moveFeedToWorkspace") {
           await tx.run(
             "update feeds set synced_workspace_id = ? where id = ? and subscription_id = ?",
@@ -269,9 +276,9 @@ export async function push(
         } else {
           await complete(tx, next.id, next.rev);
         }
-        if (sent.remap === undefined) return false;
+        if (sent.remap === undefined) return visibleWorkspaceRemoved;
         await remapFolderId(tx, sent.remap.from, sent.remap.to);
-        return reapplyPending(tx);
+        return (await reapplyPending(tx)) || visibleWorkspaceRemoved;
       });
       result.sent += 1;
       const changed = new Set<Table>();
@@ -299,20 +306,35 @@ export async function push(
       // やり直しても変わらない。ただし、送っている間に同じものへの操作がまとめられていたら
       // （rev が変わっていたら）、まとめた新しい操作を送り直す（戻さない、捨てない）
       if ((await currentRev(db, next.id)) !== next.rev) continue;
-      // 手元の反映を sendo の状態に戻し、捨てる
-      await undo(
-        api,
-        op,
-        error,
-        (fn) =>
-          db.transaction(async (tx) => {
-            signal.throwIfAborted();
-            await fn(tx);
-          }),
-        signal,
-      );
+      const rejectedProtectedDeletion =
+        op.kind === "deleteWorkspace" &&
+        (error.code === "workspace_is_default" ||
+          error.code === "workspace_default_unavailable" ||
+          (op.requireDefaultSupport && error.code === "workspace_not_empty"));
+      const rejectedDefaultChange = op.kind === "setDefaultWorkspace";
+      // デフォルトの拒否は応答だけで戻せる。取り直しに失敗しても拒否済みの操作は再送しない。
+      if (!rejectedProtectedDeletion && !rejectedDefaultChange) {
+        await undo(
+          api,
+          op,
+          error,
+          (fn) =>
+            db.transaction(async (tx) => {
+              signal.throwIfAborted();
+              await fn(tx);
+            }),
+          signal,
+        );
+      }
       const workspacesChanged = await db.transaction(async (tx) => {
         signal.throwIfAborted();
+        if (rejectedProtectedDeletion && error.code === "workspace_is_default") {
+          await putWorkspaceDefault(tx, op.workspaceId);
+        }
+        if (rejectedDefaultChange && error.kind === "not_found") {
+          await tx.run("delete from workspaces where id = ?", [op.workspaceId]);
+        }
+        if (error.code === "workspace_default_unavailable") await invalidateWorkspaceDefault(tx);
         // 戻している間にまとめられたら残す（次の同期で、重ね直してから送る）
         await complete(tx, next.id, next.rev);
         // 戻したところに、残りの操作を重ね直す（このあと届かなくても、手元は最新の操作のまま）

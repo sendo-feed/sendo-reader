@@ -18,6 +18,7 @@
   const hasFeeds = $derived(
     current !== undefined && reader.allFeeds.some((feed) => feed.workspaceId === current.id),
   );
+  const canSetDefault = $derived(reader.workspaces.some((workspace) => workspace.isDefault));
 
   function edit(workspace: Workspace | null) {
     editing = workspace;
@@ -56,13 +57,34 @@
       confirming = false;
     }
   }
+
+  async function setDefault() {
+    if (current === undefined) return;
+    busy = true;
+    message = "";
+    try {
+      await reader.client.setDefaultWorkspace(current.id);
+    } catch (error) {
+      message = describeError(error);
+    } finally {
+      busy = false;
+    }
+  }
 </script>
 
 {#if editing === undefined}
+  {#if reader.defaultWorkspaceId !== null && !canSetDefault}
+    <p class="note">デフォルトの切り替えを同期しています。</p>
+  {/if}
   <ul class="workspaces">
     {#each reader.workspaces as workspace (workspace.id)}
       <li>
-        <span>{workspace.name}</span>
+        <span>
+          {workspace.name}
+          {#if workspace.isDefault}
+            <span class="note">Default</span>
+          {/if}
+        </span>
         <button type="button" onclick={() => edit(workspace)} aria-label="Edit {workspace.name}">
           Edit
         </button>
@@ -77,6 +99,8 @@
   <p>「{current?.name ?? editing?.name}」を削除しますか？</p>
   {#if current === undefined}
     <p class="note">このワークスペースはもうありません。</p>
+  {:else if current.isDefault}
+    <p class="note">先に別のワークスペースをデフォルトにしてください。</p>
   {:else if hasFeeds}
     <p class="note">削除するには、中の購読をすべて移動するか、解除してください。</p>
   {/if}
@@ -85,7 +109,7 @@
     <button
       type="button"
       class="danger"
-      disabled={busy || current === undefined || hasFeeds}
+      disabled={busy || current === undefined || current.isDefault || hasFeeds}
       onclick={remove}
     >
       Delete workspace
@@ -109,12 +133,24 @@
   {#if editing !== null}
     {#if current === undefined}
       <p class="note">このワークスペースはもうありません。</p>
-    {:else if hasFeeds}
-      <p class="note">削除するには、中の購読をすべて移動するか、解除してください。</p>
     {:else}
-      <button type="button" class="link danger" disabled={busy} onclick={() => (confirming = true)}>
-        Delete workspace…
-      </button>
+      {#if canSetDefault && !current.isDefault}
+        <button type="button" disabled={busy} onclick={setDefault}>Make default</button>
+      {/if}
+      {#if current.isDefault}
+        <p class="note">削除するには、先に別のワークスペースをデフォルトにしてください。</p>
+      {:else if hasFeeds}
+        <p class="note">削除するには、中の購読をすべて移動するか、解除してください。</p>
+      {:else}
+        <button
+          type="button"
+          class="link danger"
+          disabled={busy}
+          onclick={() => (confirming = true)}
+        >
+          Delete workspace…
+        </button>
+      {/if}
     {/if}
   {/if}
 {/if}

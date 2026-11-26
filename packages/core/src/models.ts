@@ -21,6 +21,8 @@ export interface Workspace {
   id: string;
   name: string;
   createdAt: number;
+  /** アカウントで購読先を省いたときの行き先。Sendo の対応を確認するまでは省く。 */
+  isDefault?: boolean;
 }
 
 export interface Feed {

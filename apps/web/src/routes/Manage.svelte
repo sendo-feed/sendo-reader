@@ -20,13 +20,16 @@
   let editing = $state<Folder | null>(null);
   let notice = $state("");
   const workspaceError = $derived(reader.status?.workspaceError);
-  const syncMessage = $derived(
-    workspaceError === "not_empty"
-      ? "購読が残っているため、ワークスペースを削除できませんでした。"
-      : workspaceError === "exists"
-        ? "同じ名前のワークスペースがあるため、変更できませんでした。"
-        : "ワークスペースの変更を同期できませんでした。",
-  );
+  const workspaceMessages = {
+    not_empty: "購読が残っているため、ワークスペースを削除できませんでした。",
+    exists: "同じ名前のワークスペースがあるため、変更できませんでした。",
+    is_default: "削除するには、先に別のワークスペースをデフォルトにしてください。",
+    default_target_missing:
+      "選んだワークスペースが見つからなかったため、デフォルトを変更できませんでした。",
+    default_unavailable: "接続先の Sendo はデフォルトの設定に対応していません。",
+    rejected: "ワークスペースの変更を同期できませんでした。",
+  };
+  const syncMessage = $derived(workspaceError == null ? "" : workspaceMessages[workspaceError]);
   let feedsView = $state<Feeds>();
 
   $effect(() => {

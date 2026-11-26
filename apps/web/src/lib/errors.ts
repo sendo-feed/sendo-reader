@@ -58,6 +58,10 @@ export function describeError(error: unknown): string {
         return "ファイルが大きすぎます。";
       case "workspace_not_empty":
         return "ワークスペースを削除するには、中の購読をすべて移動するか、解除してください。";
+      case "workspace_is_default":
+        return "ワークスペースを削除するには、先に別のワークスペースをデフォルトにしてください。";
+      case "workspace_default_unavailable":
+        return "デフォルトに対応した Sendo と同期してください。";
       case "workspace_exists":
         return "同じ名前のワークスペースがあります。";
       case "workspace_not_found":

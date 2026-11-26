@@ -36,6 +36,11 @@ type ParsedSyncArticle =
   | (Omit<Extract<Schemas["SyncArticle"], { deleted: false }>, "translation"> & {
       translation: ParsedTranslation | null;
     });
+type ParsedSyncWorkspace =
+  | Extract<Schemas["SyncWorkspace"], { deleted: true }>
+  | (Omit<Extract<Schemas["SyncWorkspace"], { deleted: false }>, "isDefault"> & {
+      isDefault?: boolean;
+    });
 
 /** sendo の応答を確かめて、core の中の形にする。形が違えば ApiError（server）を投げる */
 export function toSyncPage(body: unknown): SyncPage {
@@ -136,7 +141,7 @@ function parseSyncChanges(body: unknown): Omit<
   articles: ParsedSyncArticle[];
   settings: SyncChanges["settings"] | undefined;
   savedPages: SyncChanges["savedPages"];
-  workspaces: SyncChanges["workspaces"];
+  workspaces: ParsedSyncWorkspace[] | undefined;
 } {
   const root = record(body, "(root)");
   return {
@@ -167,7 +172,7 @@ function parseSyncChanges(body: unknown): Omit<
     workspaces:
       root.workspaces === undefined
         ? undefined
-        : array(root.workspaces, "workspaces").map((value, i): Schemas["SyncWorkspace"] => {
+        : array(root.workspaces, "workspaces").map((value, i): ParsedSyncWorkspace => {
             const field = `workspaces[${i}]`;
             const row = record(value, field);
             const id = string(row.id, `${field}.id`);
@@ -176,6 +181,9 @@ function parseSyncChanges(body: unknown): Omit<
               id,
               name: string(row.name, `${field}.name`),
               createdAt: time(row.createdAt, `${field}.createdAt`),
+              ...(row.isDefault !== undefined && {
+                isDefault: boolean(row.isDefault, `${field}.isDefault`),
+              }),
               deleted: false,
             };
           }),
