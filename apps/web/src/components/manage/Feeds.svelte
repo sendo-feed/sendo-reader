@@ -33,6 +33,14 @@
   let fetchTimes = $state<FeedFetchTimes | null>(null);
   let fetchTimesStatus = $state<"loading" | "ready" | "unavailable">("loading");
   let latestArticleDates = $state.raw<Map<string, number> | null>(null);
+  /** 購読だけのベルを付けたフィード（手元の DB を読んだもの） */
+  let belledFeeds = $state.raw<ReadonlySet<string>>(new Set());
+  /**
+   * 押してから、手元の DB を読み直すまでの間に出す状態（楽観的な更新。docs/decisions/performance.md の
+   * 操作の反応 100ms）
+   */
+  let pressedBells = $state.raw<ReadonlyMap<string, boolean>>(new Map());
+  let lastBellRead = 0;
   const userId = $derived(reader.user?.id);
   const selected = $derived(reader.feeds.find((feed) => feed.id === selectedId));
   const term = $derived(query.trim().toLowerCase());
@@ -87,6 +95,55 @@
       off();
     };
   });
+
+  $effect(() => {
+    belledFeeds = new Set();
+    pressedBells = new Map();
+    if (userId === undefined) return;
+    const off = reader.client.onChange((tables) => {
+      if (tables.has("bells")) void readBells().catch(() => {});
+    });
+    void readBells().catch(() => {});
+    return () => {
+      lastBellRead += 1;
+      off();
+    };
+  });
+
+  async function readBells(): Promise<void> {
+    const read = ++lastBellRead;
+    const bells = await reader.client.listBells();
+    if (read !== lastBellRead) return;
+    belledFeeds = new Set(
+      bells.flatMap((bell) => (bell.words === null && bell.feedId !== null ? [bell.feedId] : [])),
+    );
+  }
+
+  function hasBell(feed: Feed): boolean {
+    return pressedBells.get(feed.id) ?? belledFeeds.has(feed.id);
+  }
+
+  /**
+   * ベルを付け外しする。押したらすぐ出し、手元の DB への書き込みはそのあとに待つ。sendo へは同期で
+   * 送る（断られたら、同期のあとに手元の DB が戻り、読み直した表示も戻る）
+   */
+  async function toggleBell(feed: Feed) {
+    const on = !hasBell(feed);
+    pressedBells = new Map(pressedBells).set(feed.id, on);
+    message = null;
+    try {
+      await reader.client.setFeedBell(feed.id, on);
+    } catch (error) {
+      message = describeError(error);
+    }
+    await readBells().catch(() => {});
+    // 待っている間にもう一度押していたら、そちらの書き込みのあとに任せる
+    if (pressedBells.get(feed.id) === on) {
+      const next = new Map(pressedBells);
+      next.delete(feed.id);
+      pressedBells = next;
+    }
+  }
 
   $effect(() => {
     const feedId = selectedId;
@@ -268,6 +325,7 @@
           <div id={groupContentsId} hidden={closed}>
             <ul>
               {#each group.feeds as feed (feed.id)}
+                {@const belled = hasBell(feed)}
                 <li class="feed-row">
                   <span class="avatar" aria-hidden="true">
                     <RemoteImage src={feed.iconUrl}>
@@ -292,6 +350,16 @@
                   >
                     {@render folderOptions()}
                   </select>
+                  <button
+                    type="button"
+                    class="icon-button bell"
+                    aria-label="Bell: {feedName(feed)}"
+                    aria-pressed={belled}
+                    title={belled ? "Turn off bell" : "Turn on bell"}
+                    onclick={() => toggleBell(feed)}
+                  >
+                    <Icon name="bell" filled={belled} />
+                  </button>
                   <button
                     type="button"
                     class="icon-button feed-menu"
@@ -586,7 +654,7 @@
   @media (max-width: 40rem) {
     .feed-row {
       display: grid;
-      grid-template-columns: 2rem minmax(0, 1fr) auto;
+      grid-template-columns: 2rem minmax(0, 1fr) auto auto;
       gap: 0.125rem 0.625rem;
     }
 
@@ -601,8 +669,13 @@
       max-width: 100%;
     }
 
-    .feed-menu {
+    .bell {
       grid-column: 3;
+      grid-row: 1 / 3;
+    }
+
+    .feed-menu {
+      grid-column: 4;
       grid-row: 1 / 3;
     }
   }

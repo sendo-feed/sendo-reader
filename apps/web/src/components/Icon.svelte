@@ -31,6 +31,7 @@
     keyboard: "M3 6h18v12H3zM7 10h.01M11 10h.01M15 10h.01M8 14h8",
     logout: "M10 4H4v16h6M15 8l4 4-4 4M19 12H9",
     filter: "M4 5h16l-6 7v6l-4 2v-8z",
+    bell: "M6 16v-5a6 6 0 0 1 12 0v5l2 2H4zM10 20.5a2 2 0 0 0 4 0",
   } as const;
 
   export type IconName = keyof typeof PATHS;
