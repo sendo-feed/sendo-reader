@@ -922,6 +922,120 @@
           "savedAt"
         ]
       },
+      "Bell": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "subscriptionId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "鳴らす購読の ID。購読し直すと変わる。購読のないベルは null"
+          },
+          "feedId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "鳴らす購読のフィードの ID。購読のないベルは null"
+          },
+          "words": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "当てる言葉（NFKC にして区切った言葉を、半角の空白 1 つでつないだもの）。言葉のないベルは null"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "subscriptionId",
+          "feedId",
+          "words",
+          "createdAt"
+        ]
+      },
+      "AddBellRequest": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+            "description": "クライアントが決めた小文字の UUID。省略時は Sendo が決める"
+          },
+          "feedId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64,
+            "description": "鳴らす購読のフィードの ID。言葉だけのベルは省く。feedId と words の少なくとも一方が要る"
+          },
+          "words": {
+            "type": "string",
+            "description": "当てる言葉。空白で区切った言葉をすべて含む記事に当てる（AND）。NFKC にしてから区切り、重なりを除いた形で 1〜8 個、全体で 64 文字まで。購読だけのベルは省く"
+          }
+        },
+        "additionalProperties": false
+      },
+      "PushStatus": {
+        "type": "object",
+        "properties": {
+          "available": {
+            "type": "boolean",
+            "description": "Web Push を使える設定（VAPID_SUBJECT と READER_URL）がそろっているか"
+          },
+          "publicKey": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "VAPID の公開鍵（P-256 の非圧縮の点 65 バイトの base64url）。PushManager.subscribe の applicationServerKey に渡す。手元の登録の鍵と違えば、登録し直す。使えなければ null"
+          }
+        },
+        "required": [
+          "available",
+          "publicKey"
+        ]
+      },
+      "PushRegistration": {
+        "type": "object",
+        "properties": {
+          "endpoint": {
+            "type": "string",
+            "maxLength": 2048,
+            "description": "プッシュサービスの URL（https:、2048 文字まで）"
+          },
+          "keys": {
+            "type": "object",
+            "properties": {
+              "p256dh": {
+                "type": "string",
+                "maxLength": 256,
+                "description": "端末の公開鍵（P-256 の非圧縮の点 65 バイト）の base64url"
+              },
+              "auth": {
+                "type": "string",
+                "maxLength": 256,
+                "description": "認証の秘密（16 バイト）の base64url"
+              }
+            },
+            "required": [
+              "p256dh",
+              "auth"
+            ]
+          }
+        },
+        "required": [
+          "endpoint",
+          "keys"
+        ]
+      },
       "Setting": {
         "type": "object",
         "properties": {
@@ -1018,6 +1132,12 @@
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/SyncWorkspace"
+            }
+          },
+          "bells": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SyncBell"
             }
           },
           "defaultWorkspaceOnSubscribe": {
@@ -1490,6 +1610,49 @@
             "allOf": [
               {
                 "$ref": "#/components/schemas/Workspace"
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "deleted": {
+                    "type": "boolean",
+                    "enum": [
+                      false
+                    ]
+                  }
+                },
+                "required": [
+                  "deleted"
+                ]
+              }
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "deleted": {
+                "type": "boolean",
+                "enum": [
+                  true
+                ]
+              }
+            },
+            "required": [
+              "id",
+              "deleted"
+            ]
+          }
+        ]
+      },
+      "SyncBell": {
+        "oneOf": [
+          {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Bell"
               },
               {
                 "type": "object",
@@ -3822,6 +3985,245 @@
         }
       }
     },
+    "/bells": {
+      "get": {
+        "summary": "有効なベルを作った順で返す",
+        "responses": {
+          "200": {
+            "description": "有効なベルの一覧",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Bell"
+                      }
+                    }
+                  },
+                  "required": [
+                    "items"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "ベルを付ける",
+        "description": "購読だけ、言葉だけ、購読 AND 言葉のベルを付ける。有効なベルは 100 個まで。クライアントは応答の id を正とする。",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AddBellRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "同じ組（購読と言葉）の有効なベルがある。送った id と言葉の並びによらず、そのベルを返す",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "bell": {
+                      "$ref": "#/components/schemas/Bell"
+                    }
+                  },
+                  "required": [
+                    "bell"
+                  ]
+                }
+              }
+            }
+          },
+          "201": {
+            "description": "付けた",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "bell": {
+                      "$ref": "#/components/schemas/Bell"
+                    }
+                  },
+                  "required": [
+                    "bell"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "入力が正しくない。feedId も words もないか、言葉が上限などに合わない",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "feedId のフィードの有効な購読がない",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "有効なベルが 100 個ある（bell_limit_reached）か、指定した id はほかのベルに使われている（bell_id_taken）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/bells/{id}": {
+      "delete": {
+        "summary": "ベルを外す",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "外した、または外してあった"
+          },
+          "404": {
+            "description": "ベルがない",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/push": {
+      "get": {
+        "summary": "Web Push の有無と VAPID の公開鍵",
+        "responses": {
+          "200": {
+            "description": "有無と公開鍵",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PushStatus"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/push/registration": {
+      "put": {
+        "summary": "この端末の Web Push の登録を置く",
+        "description": "ブラウザが返した登録（PushSubscription.toJSON() の形）を、このセッションに結んで置く。同じ登録を何度送ってもよい。このセッションの前の登録と、ほかのセッションの同じエンドポイントの登録は外れる。ログアウトすると外れる。",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PushRegistration"
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": "置いた"
+          },
+          "400": {
+            "description": "エンドポイントか鍵の形が正しくない",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "ブラウザのセッションではない（アクセストークンでは使えない）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Web Push を使う設定（VAPID_SUBJECT と READER_URL）がない",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "summary": "この端末の Web Push の登録を外す",
+        "description": "登録がなくても、Web Push を使えない設定でも 204 を返す。",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "外した、または登録がない"
+          },
+          "403": {
+            "description": "ブラウザのセッションではない（アクセストークンでは使えない）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/settings/{deviceType}": {
       "get": {
         "summary": "設定の項目の一覧",
@@ -3945,7 +4347,7 @@
     "/sync": {
       "get": {
         "summary": "前回の同期からの差分を取る",
-        "description": "カーソルなしで呼ぶと、最初の同期を始める（消した印の付いていないフォルダ・購読・設定、未読・スター・直近 30 日の記事）。\n応答の cursor を次に渡すと、そのあとに変わったものだけを返す。hasMore が true なら、すぐにもう一度呼ぶ。\n配列は変更番号の順に並んでいる。同じ id が続けて来たら、後のものを採る。\ndeleted が true のものは手元から消す。手元の行を消すのは、その行の deleted が届いたときだけにする。購読をやめた（feeds の deleted）からといって、そのフィードの記事を消さない（配列ごとにページを送るので、配列をまたいだ順序は保証されない）。\nsettings には、どの端末の種類の項目も届く。クライアントは、自分の種類の分だけを使えばよい。\nincludeSaved=true なら、あとで読むページの新規保存と解除も savedPages に載せる。\nincludeWorkspaces=true なら、workspaces と、有効な feeds の workspaceId・subscriptionId を返す。対応する位置がない既存のカーソルでは、購読とワークスペースだけを番号0から返す。差分の有無にかかわらず、購読先の省略に対応した印 defaultWorkspaceOnSubscribe を返す。\ncursor の中身には意味を持たせていないので、クライアントはそのまま送り返すだけにする。",
+        "description": "カーソルなしで呼ぶと、最初の同期を始める（消した印の付いていないフォルダ・購読・設定、未読・スター・直近 30 日の記事）。\n応答の cursor を次に渡すと、そのあとに変わったものだけを返す。hasMore が true なら、すぐにもう一度呼ぶ。\n配列は変更番号の順に並んでいる。同じ id が続けて来たら、後のものを採る。\ndeleted が true のものは手元から消す。手元の行を消すのは、その行の deleted が届いたときだけにする。購読をやめた（feeds の deleted）からといって、そのフィードの記事を消さない（配列ごとにページを送るので、配列をまたいだ順序は保証されない）。\nsettings には、どの端末の種類の項目も届く。クライアントは、自分の種類の分だけを使えばよい。\nincludeSaved=true なら、あとで読むページの新規保存と解除も savedPages に載せる。\nincludeWorkspaces=true なら、workspaces と、有効な feeds の workspaceId・subscriptionId を返す。対応する位置がない既存のカーソルでは、購読とワークスペースだけを番号0から返す。差分の有無にかかわらず、購読先の省略に対応した印 defaultWorkspaceOnSubscribe を返す。\nincludeBells=true なら、通知のベルの付けたものと外したものも bells に載せる。ベルの位置がない既存のカーソルでは、ベルだけを最初から送る。購読をやめると、その購読のベルも deleted で届く。\ncursor の中身には意味を持たせていないので、クライアントはそのまま送り返すだけにする。",
         "parameters": [
           {
             "schema": {
@@ -3969,6 +4371,18 @@
             },
             "required": false,
             "name": "includeWorkspaces",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "true",
+                "false"
+              ]
+            },
+            "required": false,
+            "name": "includeBells",
             "in": "query"
           },
           {
