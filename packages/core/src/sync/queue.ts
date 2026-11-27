@@ -250,7 +250,7 @@ export async function push(
           if (sent.savedPage === undefined) await removeSavedPage(tx, op.id);
           else await putSavedPage(tx, sent.savedPage);
         }
-        if (op.kind === "setFeedBell") {
+        if (op.kind === "setBell") {
           if (sent.bell === undefined) await removeBell(tx, op.bellId);
           else {
             await putBell(tx, sent.bell);
@@ -292,7 +292,7 @@ export async function push(
       result.sent += 1;
       const changed = new Set<Table>();
       if (op.kind === "setSavedPage") changed.add("savedPages");
-      if (op.kind === "setFeedBell") changed.add("bells");
+      if (op.kind === "setBell") changed.add("bells");
       if (workspacesChanged) changed.add("workspaces");
       if (sent.remap !== undefined) {
         result.remapped.push(sent.remap);
@@ -355,7 +355,7 @@ export async function push(
           ? []
           : op.kind === "setSavedPage"
             ? ["savedPages"]
-            : op.kind === "setFeedBell"
+            : op.kind === "setBell"
               ? ["bells"]
               : op.kind === "setSettings"
                 ? ["settings"]

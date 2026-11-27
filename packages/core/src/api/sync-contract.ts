@@ -14,6 +14,7 @@
  * 組み立てる。sendo が使う項目の形を変えたら、ここが型チェックで止まる。
  */
 
+import { bellMatchKey } from "../bell-words";
 import {
   type Bell,
   DEVICE_TYPES,
@@ -78,7 +79,7 @@ export function toSyncPage(body: unknown): SyncPage {
       changes.workspaces !== undefined && changes.defaultWorkspaceOnSubscribe === true,
     bells:
       changes.bells?.map((row) =>
-        row.deleted ? row : { ...row, createdAt: Date.parse(row.createdAt) },
+        row.deleted ? row : { ...toLocalBell(row), deleted: false as const },
       ) ?? null,
     cursor: changes.cursor,
     hasMore: changes.hasMore,
@@ -364,8 +365,20 @@ function parseSavedPage(row: Record<string, unknown>, field: string): Schemas["S
 
 /** ベルを付けた応答（POST /bells）にも、差分同期と同じ境界の検証を使う */
 export function toBell(body: unknown): Bell {
-  const bell = parseBell(record(body, "bell"), "bell");
-  return { ...bell, createdAt: Date.parse(bell.createdAt) };
+  return toLocalBell(parseBell(record(body, "bell"), "bell"));
+}
+
+/** sendo のベルを core の形にする。組を見分けるための照合用の言葉も、ここで作る */
+function toLocalBell(bell: Schemas["Bell"]): Bell {
+  const common = {
+    id: bell.id,
+    subscriptionId: bell.subscriptionId,
+    feedId: bell.feedId,
+    createdAt: Date.parse(bell.createdAt),
+  };
+  return bell.words === null
+    ? { ...common, words: null, matchKey: null }
+    : { ...common, words: bell.words, matchKey: bellMatchKey(bell.words) };
 }
 
 function parseBell(row: Record<string, unknown>, field: string): Schemas["Bell"] {

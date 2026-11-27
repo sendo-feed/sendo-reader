@@ -25,6 +25,15 @@ export {
   parseBellWords,
 } from "./bell-words";
 export {
+  applyBellChange,
+  type BellChange,
+  type BellTarget,
+  bellRemoval,
+  feedBellChange,
+  feedBellWordsChange,
+  wordBellChange,
+} from "./bells";
+export {
   CONTENT_STORAGE_LIMITS,
   type ContentStorage,
   DEFAULT_CONTENT_STORAGE_LIMIT,

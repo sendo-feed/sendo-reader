@@ -34,7 +34,7 @@
   let fetchTimes = $state<FeedFetchTimes | null>(null);
   let fetchTimesStatus = $state<"loading" | "ready" | "unavailable">("loading");
   let latestArticleDates = $state.raw<Map<string, number> | null>(null);
-  /** 購読だけのベルを付けたフィード（手元の DB を読んだもの） */
+  /** ベルを付けたフィード（購読だけでも、購読 AND 言葉でも。手元の DB を読んだもの） */
   let belledFeeds = $state.raw<ReadonlySet<string>>(new Set());
   /**
    * 押してから、手元の DB を読み直すまでの間に出す状態（楽観的な更新。docs/decisions/performance.md の
@@ -116,9 +116,7 @@
     const read = ++lastBellRead;
     const bells = await reader.client.listBells();
     if (read !== lastBellRead) return;
-    belledFeeds = new Set(
-      bells.flatMap((bell) => (bell.words === null && bell.feedId !== null ? [bell.feedId] : [])),
-    );
+    belledFeeds = new Set(bells.flatMap((bell) => (bell.feedId === null ? [] : [bell.feedId])));
   }
 
   function hasBell(feed: Feed): boolean {

@@ -25,8 +25,9 @@ export type BellWords = {
 /** 言葉を受けられない理由 */
 export type BellWordsProblem = "empty" | "too_many_words" | "too_long" | "invalid_character";
 
-/** 言葉が空でない理由ごとの、画面に出す文 */
-export const BELL_WORDS_PROBLEMS: Record<Exclude<BellWordsProblem, "empty">, string> = {
+/** 受けられない理由ごとの、画面に出す文 */
+export const BELL_WORDS_PROBLEMS: Record<BellWordsProblem, string> = {
+  empty: "言葉を入れてください。",
   too_many_words: `言葉は ${MAX_BELL_WORDS} 個まで入れられます。`,
   too_long: `言葉は全体で ${MAX_BELL_WORDS_LENGTH} 文字まで入れられます。`,
   invalid_character: "言葉に使えない文字（制御文字など）が入っています。",
