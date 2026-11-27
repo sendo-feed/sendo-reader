@@ -145,6 +145,85 @@ describe("購読のベル", () => {
     expect(await core.listBells()).toEqual([]);
   });
 
+  test("sendo が付けたあとに応答が届かず、その間に外したら、送り直して同じベルが返り、sendo でも外れる", async () => {
+    const server = new FakeSendo();
+    const feed = server.subscribe({ url: "https://blog.example/feed.xml", title: "Blog" });
+    server.signInAs();
+    let lost = false;
+    const core = await ReaderCore.open({
+      db: await openMemoryDb(),
+      baseUrl: "https://sendo.test/api/v1",
+      now: () => server.now,
+      fetch: async (input, init) => {
+        const request = input as Request;
+        const response = await server.fetch(input, init);
+        if (
+          !lost &&
+          request.method === "POST" &&
+          new URL(request.url).pathname.endsWith("/bells")
+        ) {
+          lost = true;
+          throw new TypeError("fetch failed");
+        }
+        return response;
+      },
+    });
+    await core.restoreSession();
+    await core.sync();
+    await core.setFeedBell(feed.id, true);
+    const [local] = await core.listBells();
+    await expect(core.sync()).rejects.toMatchObject({ kind: "network" });
+    expect(server.activeBells()).toMatchObject([{ id: local?.id }]);
+
+    await core.setFeedBell(feed.id, false);
+    await core.sync();
+    expect(server.bellRequests).toEqual([
+      { id: local?.id, feedId: feed.id },
+      { id: local?.id, feedId: feed.id },
+    ]);
+    expect(server.activeBells()).toEqual([]);
+    expect([...server.bells.values()]).toMatchObject([{ id: local?.id, deleted: true }]);
+    expect(await core.countPending()).toBe(0);
+    expect(await core.listBells()).toEqual([]);
+  });
+
+  test("ベルが先のページに、その購読があとのページに届いても、購読が届いたらベルが見える", async () => {
+    const server = new FakeSendo();
+    server.signInAs();
+    let reorder = false;
+    let feedsPage: Record<string, unknown> | null = null;
+    let beforeFeeds: unknown[] = [];
+    const core: ReaderCore = await ReaderCore.open({
+      db: await openMemoryDb(),
+      baseUrl: "https://sendo.test/api/v1",
+      now: () => server.now,
+      fetch: async (input, init) => {
+        const url = new URL((input as Request).url);
+        if (!reorder || !url.pathname.endsWith("/sync")) return server.fetch(input, init);
+        if (url.searchParams.get("cursor") === "bells-first") {
+          beforeFeeds = await core.listBells();
+          return Response.json(feedsPage);
+        }
+        // sendo は表ごとにページを送るので、ベルの行が購読の行より先のページに入ることがある
+        const body = (await (await server.fetch(input, init)).json()) as Record<string, unknown>;
+        feedsPage = { ...body, bells: [] };
+        return Response.json({ ...body, feeds: [], cursor: "bells-first", hasMore: true });
+      },
+    });
+    await core.restoreSession();
+    await core.sync();
+    const feed = server.subscribe({ url: "https://blog.example/feed.xml", title: "Blog" });
+    const bell = server.addBell({ feedId: feed.id });
+    const changes: Table[][] = [];
+    core.onChange((tables) => changes.push([...tables].sort()));
+
+    reorder = true;
+    await core.sync();
+    expect(beforeFeeds).toEqual([]);
+    expect(changes).toEqual([["bells"], ["bells", "feeds"]]);
+    expect(await core.listBells()).toMatchObject([{ id: bell.id, feedId: feed.id }]);
+  });
+
   test("購読がほかの端末で消されていたら、付けたベルは断られて表示が戻る", async () => {
     const { server, core, feed } = await subscribed();
     server.unsubscribe(feed.id);

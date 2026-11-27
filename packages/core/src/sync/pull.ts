@@ -217,7 +217,11 @@ async function applyPage(tx: Executor, page: SyncPage): Promise<Set<Table>> {
     changed.add("workspaces");
   }
   for (const feed of page.feeds) await applyFeed(tx, feed);
-  if (page.feeds.length > 0) changed.add("feeds");
+  if (page.feeds.length > 0) {
+    changed.add("feeds");
+    // 見えるベルは購読の行にもよる。ベルが先のページに届き、購読があとのページに届くことがある
+    changed.add("bells");
+  }
   for (const article of page.articles) await applyArticle(tx, article);
   if (page.articles.length > 0) changed.add("articles");
   // 配列は変更番号の順。同じ項目が続けて来たら、後のものが残る
