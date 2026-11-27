@@ -1,5 +1,5 @@
 import { type BrowserContext, expect, type Page, test } from "@playwright/test";
-import { FakeSendo, routeFakeSendo, signIn } from "./fake-sendo";
+import { FakeSendo, routeFakeSendo, signIn, type USER } from "./fake-sendo";
 import { leading, openOtherVersion } from "./other-version";
 
 /**
@@ -22,6 +22,8 @@ interface StubState {
   subscription: { endpoint: string; key: string } | null;
   /** 許可を求めた数（requestPermission と、許可が決まる前の subscribe） */
   requests: number;
+  /** true なら、unsubscribe が答えを返さない（外し終える前にタブが閉じる・落ちるのを真似る） */
+  hangUnsubscribe?: boolean;
 }
 
 async function stubPush(
@@ -62,6 +64,7 @@ async function stubPush(
         }),
         unsubscribe: async () => {
           const next = read();
+          if (next.hangUnsubscribe === true) return new Promise<boolean>(() => {});
           if (next.subscription?.endpoint === stored.endpoint) next.subscription = null;
           write(next);
           return true;
@@ -115,6 +118,38 @@ const stubState = (page: Page) =>
     (key) => JSON.parse(localStorage.getItem(key) ?? "null") as StubState | null,
     STATE_KEY,
   );
+
+/** unsubscribe が答えを返さないようにする ／ 戻す */
+const hangUnsubscribe = (page: Page, hang: boolean) =>
+  page.evaluate(
+    ({ key, hang }) => {
+      const state = JSON.parse(localStorage.getItem(key) ?? "null") as StubState;
+      localStorage.setItem(key, JSON.stringify({ ...state, hangUnsubscribe: hang }));
+    },
+    { key: STATE_KEY, hang },
+  );
+
+const USER_B = { id: "user-b", email: "b@example.com" };
+const USER_C = { id: "user-c", email: "c@example.com" };
+
+/** 別のタブなどで、別のアカウントでログインし直した（ブラウザーのクッキーが替わった） */
+async function switchSession(
+  context: BrowserContext,
+  server: FakeSendo,
+  user: typeof USER,
+): Promise<void> {
+  const session = server.createSession(user);
+  await context.addCookies([
+    {
+      name: "__Host-sendo_session",
+      value: session,
+      url: "https://localhost/",
+      secure: true,
+      httpOnly: true,
+      sameSite: "Lax",
+    },
+  ]);
+}
 
 async function openNotifications(page: Page): Promise<void> {
   await page.goto("/settings");
@@ -295,6 +330,44 @@ test("ログアウトすると、この端末の登録を外し、出ている�
   expect(await rememberedTags(page)).toEqual([]);
   expect(server.pushRegistrations.size).toBe(0);
   expect(server.requests).not.toContain("DELETE /push/registration");
+});
+
+test("ログアウトで手元を消したあと、登録を外し終える前にタブが閉じても、次の起動とログインで、送り直さずに外す", async ({
+  page,
+  context,
+}) => {
+  const server = new FakeSendo();
+  await routeFakeSendo(context, server);
+  await stubPush(context);
+  await openNotifications(page);
+  await turnOnButton(page).click();
+  await expect(page.getByText("この端末で通知を受けています。")).toBeVisible();
+
+  // ログアウトで手元を消したあと、登録を外している途中でタブが閉じる
+  await page.goto("/");
+  await expect(page.getByRole("button", { name: "Sign out", exact: true })).toBeVisible();
+  await hangUnsubscribe(page, true);
+  await page.getByRole("button", { name: "Sign out", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Google でログイン" })).toBeVisible();
+  expect((await stubState(page))?.subscription).not.toBeNull();
+  await page.close();
+
+  // 次の人が、この端末でログインする（ログインはページごと移るので、起動になる）
+  server.loginUser = USER_B;
+  const next = await context.newPage();
+  await next.goto("/");
+  await hangUnsubscribe(next, false);
+  const puts = () => server.requests.filter((r) => r === "PUT /push/registration").length;
+  const before = puts();
+  await signIn(next);
+  await expect(next.getByRole("button", { name: "Sign out", exact: true })).toBeVisible();
+  await expect.poll(async () => (await stubState(next))?.subscription ?? null).toBeNull();
+  // 起動したときの送り直し（登録のロックを取る）が済んでから、送っていないことを確かめる
+  await next.evaluate(() => navigator.locks.request("sendo-reader:push", async () => {}));
+  expect(puts()).toBe(before);
+  expect(server.pushRegistrations.size).toBe(0);
+  // 許可を求め直さない
+  expect((await stubState(next))?.requests).toBe(1);
 });
 
 test("Web Push を使えない Sendo では使えないと出し、登録が残っていれば外す操作を出す", async ({
@@ -894,6 +967,72 @@ test.describe("ベルを付けたときの勧め", () => {
     await expect(suggestion(page)).toBeVisible();
     // 起動しただけ、勧めを出しただけでは、許可を求めない
     expect((await stubState(page))?.requests ?? 0).toBe(0);
+  });
+
+  test("確かめている間にもう一度押してベルを外したら、勧めない", async ({ page, context }) => {
+    const server = seed();
+    await routeFakeSendo(context, server);
+    await stubPush(context);
+    await page.goto("/manage");
+    await signIn(page);
+    // 使えるかの確かめ（GET /api/v1/push）の答えを止めておく
+    let release = () => {};
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let asked = false;
+    await context.route("**/api/v1/push", async (route) => {
+      asked = true;
+      await held;
+      await route.fallback();
+    });
+    await bell(page, "Blog").click();
+    await expect.poll(() => asked).toBe(true);
+    await bell(page, "Blog").click();
+    await expect(bell(page, "Blog")).toHaveAttribute("aria-pressed", "false");
+    const before = pushChecks(server);
+    release();
+    await pushChecked(server, before);
+    await page.waitForTimeout(300);
+    await expect(suggestion(page)).toHaveCount(0);
+  });
+
+  test("ユーザーが替わったら、前の人に出した勧めと閉じた印を、次の人に残さない", async ({
+    page,
+    context,
+  }) => {
+    const server = seed();
+    await routeFakeSendo(context, server);
+    await stubPush(context);
+    await page.goto("/manage");
+    await signIn(page);
+    await bell(page, "Blog").click();
+    await expect(suggestion(page)).toBeVisible();
+    await page.getByRole("button", { name: "Dismiss", exact: true }).click();
+    await expect(suggestion(page)).toHaveCount(0);
+
+    // 別のアカウントに替わる。ベルを押したあとの同期で、手元のユーザーが替わる（読み込み直さない）
+    // 替わったクッキーでユーザーを確かめ（GET /me）、そのあとに同期した
+    const syncedSince = (start: number) => {
+      const since = server.requests.slice(start);
+      const me = since.indexOf("GET /me");
+      return me >= 0 && since.slice(me).some((r) => r.startsWith("GET /sync"));
+    };
+    await switchSession(context, server, USER_B);
+    let start = server.requests.length;
+    await bell(page, "News").click();
+    await expect.poll(() => syncedSince(start)).toBe(true);
+    await expect(bell(page, "News")).toHaveAttribute("aria-pressed", "false");
+    // 前の人が閉じていても、次の人には勧める
+    await bell(page, "News").click();
+    await expect(suggestion(page)).toBeVisible();
+
+    // また替わったら、出している勧めも消える（外す操作では勧めない）
+    await switchSession(context, server, USER_C);
+    start = server.requests.length;
+    await bell(page, "News").click();
+    await expect.poll(() => syncedSince(start)).toBe(true);
+    await expect(suggestion(page)).toHaveCount(0);
   });
 
   test("許可を拒否していたら、勧めない", async ({ page, context }) => {

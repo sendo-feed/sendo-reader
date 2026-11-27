@@ -128,7 +128,8 @@
   /**
    * ベルを付け外しする。押したらすぐ出し、手元の DB への書き込みはそのあとに待つ。sendo へは同期で
    * 送る（断られたら、同期のあとに手元の DB が戻り、読み直した表示も戻る）。付けたら、この端末で
-   * 通知を受けていなければ勧める（docs/decisions/notifications.md の 1。ベルの操作は待たせない）
+   * 通知を受けていなければ勧める（docs/decisions/notifications.md の 1。ベルの操作は待たせない）。
+   * 確かめている間にもう一度押して外したら、勧めない
    */
   async function toggleBell(feed: Feed) {
     const on = !hasBell(feed);
@@ -137,7 +138,7 @@
     message = null;
     try {
       await reader.client.setFeedBell(feed.id, on);
-      if (on) void notificationSuggestion.offer();
+      if (on) void notificationSuggestion.offer(() => hasBell(feed));
     } catch (error) {
       message = describeError(error);
     }

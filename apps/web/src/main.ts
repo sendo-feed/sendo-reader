@@ -14,6 +14,7 @@ import {
   watchNotificationOpens,
 } from "./lib/notification-open";
 import { forgetTag, listTags } from "./lib/notification-store";
+import { notificationSuggestion } from "./lib/notification-suggestion.svelte";
 import { pushDevice } from "./lib/push-device";
 import { startReader } from "./lib/reader";
 import { reloadGuard } from "./lib/reload-guard.svelte";
@@ -70,9 +71,16 @@ if (location.pathname === AUTHORIZE_PATH) {
     // 通知を許可したときと、ログアウトとユーザーの切り替えで登録を外したときに書き直す
     // （docs/decisions/notifications.md の 4・11）
     refreshBadge,
+    // 手元を消すときに core が置く、解除待ちの印（docs/decisions/notifications.md の 4）
+    unsubscribePending: () => state.client.isPushUnsubscribePending(),
+    clearUnsubscribePending: () => state.client.clearPushUnsubscribePending(),
   });
-  // ログアウトとユーザーの切り替えで、この端末の登録を外す（どのタブで起きても届く）
-  state.client.onCleared(() => void pushDevice.forget());
+  // ログアウトとユーザーの切り替えで、この端末の登録を外し、前の人への勧めを消す（どのタブで
+  // 起きても届く）
+  state.client.onCleared(() => {
+    notificationSuggestion.reset();
+    void pushDevice.forget();
+  });
   mount(App, { target, context: readerContext(state) });
   // 起動したら、登録があれば送り直す（sendo は登録をセッションに結ぶ。docs/decisions/notifications.md の 3）。
   // 起動が版の違うタブのために止まったら、止まりが解けてログインしていると分かったときに送る

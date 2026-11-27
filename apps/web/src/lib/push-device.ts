@@ -22,12 +22,16 @@ const PUSH_LOCK = "sendo-reader:push";
 
 /**
  * この端末で通知を受ける操作の、ブラウザーの本物（lib/push.ts の PushEnvironment）。main.ts が
- * connect で、手元のユーザーと、セッションのユーザーが違ったときの扱いと、バッジの書き直し方を渡す
+ * connect で、手元のユーザーと、セッションのユーザーが違ったときの扱いと、バッジの書き直し方と、
+ * 解除待ちの印の読み書きを渡す
  */
 class PushDevice {
   #user: () => User | null = () => null;
   #onAccountChanged: () => void = () => {};
   #refreshBadge: () => void = () => {};
+  // つなぐ前は、印を読めないとする（送り直さず、登録も作らない）
+  #unsubscribePending: () => Promise<boolean> = () => Promise.reject(new Error("つないでいない"));
+  #clearUnsubscribePending: () => Promise<void> = () => Promise.reject(new Error("つないでいない"));
 
   readonly #env: PushEnvironment = {
     support: browserSupport({
@@ -49,6 +53,8 @@ class PushDevice {
     },
     refreshBadge: () => this.#refreshBadge(),
     clearShownTags: clearTags,
+    unsubscribePending: () => this.#unsubscribePending(),
+    clearUnsubscribePending: () => this.#clearUnsubscribePending(),
   };
 
   connect(options: {
@@ -58,10 +64,16 @@ class PushDevice {
     onAccountChanged: () => void;
     /** アプリのバッジを、手元の DB の未読の数で書き直す（lib/app-badge.ts） */
     refreshBadge: () => void;
+    /** 解除待ちの印があるか（手元の DB。docs/decisions/notifications.md の 4） */
+    unsubscribePending: () => Promise<boolean>;
+    /** 解除待ちの印を消す */
+    clearUnsubscribePending: () => Promise<void>;
   }): void {
     this.#user = options.user;
     this.#onAccountChanged = options.onAccountChanged;
     this.#refreshBadge = options.refreshBadge;
+    this.#unsubscribePending = options.unsubscribePending;
+    this.#clearUnsubscribePending = options.clearUnsubscribePending;
   }
 
   check(): Promise<DeviceState> {
