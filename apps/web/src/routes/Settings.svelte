@@ -187,20 +187,18 @@
     }
   }
 
+  /*
+   * 列の数は、幅に入るだけにする。列の最小の幅は、一番長い名前（Notifications を太字にしたもの）が、
+   * 字の幅の広い字体（Linux の DejaVu Sans など）でも収まる幅に、余裕を足したもの。rem で書くので、
+   * 文字の大きさの設定に合わせて広がる。列の数を幅の段で決めると、字体の幅で収まらない段が出る
+   */
   .categories {
     display: grid;
-    grid-template-columns: repeat(5, auto);
+    grid-template-columns: repeat(auto-fit, minmax(6.5rem, 1fr));
     padding: 0.25rem;
     border: 1px solid var(--border);
     border-radius: var(--radius-small);
     background: var(--surface);
-  }
-
-  /* スマホの幅では 5 つが 1 行に収まらないので、3 つずつ 2 行にする */
-  @media (max-width: 30rem) {
-    .categories {
-      grid-template-columns: repeat(3, minmax(0, 1fr));
-    }
   }
 
   .categories button {
