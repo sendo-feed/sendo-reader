@@ -78,3 +78,41 @@ export function notificationPath(tag: string): string {
   const articleId = articleIdFromTag(tag);
   return articleId === null ? "/" : articlePath(articleId);
 }
+
+/**
+ * Service Worker が、押された通知の記事を開かせる知らせ（docs/decisions/notifications.md の 7）。画面は
+ * 知らせに付けたポートで OpenArticleReply を返す。形は変えない（変えるときは、別の名前の知らせにする。
+ * 古い版の画面は答えず、Service Worker が新しい窓で開く）
+ */
+export const OPEN_ARTICLE = "sendo-reader:open-article";
+
+export interface OpenArticleMessage {
+  type: typeof OPEN_ARTICLE;
+  articleId: string;
+  /** Service Worker が送った時刻（ミリ秒） */
+  sentAt: number;
+}
+
+export interface OpenArticleReply {
+  accepted: boolean;
+}
+
+/** Service Worker が、画面が受けたことを待つ時間 */
+export const OPEN_ARTICLE_WAIT_MS = 500;
+
+/**
+ * 画面が知らせを受ける上限。待つ時間より、受けたことの返事が届く分だけ短くする（待つのをやめて
+ * 新しい窓で開いたあとに、遅れて届いた知らせで移ると、2 か所で開く）
+ */
+export const OPEN_ARTICLE_MAX_AGE_MS = 300;
+
+export function isOpenArticleMessage(value: unknown): value is OpenArticleMessage {
+  if (typeof value !== "object" || value === null) return false;
+  const message = value as Partial<OpenArticleMessage>;
+  return (
+    message.type === OPEN_ARTICLE &&
+    typeof message.articleId === "string" &&
+    message.articleId !== "" &&
+    typeof message.sentAt === "number"
+  );
+}

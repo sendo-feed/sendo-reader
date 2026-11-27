@@ -7,10 +7,11 @@
   } from "@sendo-reader/core";
   import { onMount } from "svelte";
   import { account } from "../lib/account";
-  import { AUTHORIZE_PATH, saveAuthorizeQuery, takeAuthorizeQuery } from "../lib/authorize";
+  import { saveAuthorizeQuery, takeAuthorizeQuery } from "../lib/authorize";
   import { describeError } from "../lib/errors";
   import { truncate } from "../lib/format";
   import { goToSignIn } from "../lib/login";
+  import { AUTHORIZE_PATH } from "../lib/reload-paths";
 
   /**
    * OAuth の許可の画面（docs/decisions/account.md の 5、sendo の docs/decisions/mcp.md の 4）。

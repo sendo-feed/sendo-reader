@@ -408,3 +408,265 @@ test.describe("push を受けたとき", () => {
     expect(await rememberedTags(page)).toEqual([]);
   });
 });
+
+/**
+ * Service Worker に、通知を押したことを届ける。Playwright は OS の通知を押せないので、出ている通知で
+ * notificationclick を起こす（利用者の操作ではないので、Service Worker は新しい窓を開けず、前にも
+ * 出せない。開いている画面で開く道を確かめる）
+ */
+async function clickNotification(context: BrowserContext, tag: string): Promise<void> {
+  const worker = context.serviceWorkers()[0] ?? (await context.waitForEvent("serviceworker"));
+  await worker.evaluate(async (tag) => {
+    const scope = self as unknown as {
+      registration: { getNotifications(filter: { tag: string }): Promise<Notification[]> };
+      dispatchEvent(event: Event): boolean;
+    };
+    const [notification] = await scope.registration.getNotifications({ tag });
+    if (notification === undefined) throw new Error(`通知が出ていない：${tag}`);
+    const NotificationEventClass = (
+      self as unknown as {
+        NotificationEvent: new (type: string, init: { notification: Notification }) => Event;
+      }
+    ).NotificationEvent;
+    scope.dispatchEvent(new NotificationEventClass("notificationclick", { notification }));
+  }, tag);
+}
+
+test.describe("通知を押したとき", () => {
+  test.beforeEach(async ({ context }) => {
+    await context.grantPermissions(["notifications"], { origin: "http://localhost:4173" });
+  });
+
+  test("開いている画面で、押した通知の記事を開く。押していない通知は残り、その記事は開かない", async ({
+    page,
+    context,
+  }) => {
+    const server = new FakeSendo();
+    const feed = server.subscribe({
+      url: "https://www.publickey1.jp/atom.xml",
+      title: "Publickey",
+    });
+    const first = server.deliver(feed.id, { title: "Azure の東日本リージョンで障害" });
+    const second = server.deliver(feed.id, { title: "Rust 1.92 が出た" });
+    await routeFakeSendo(context, server);
+    await page.goto("/");
+    await signIn(page);
+    await expect(page.locator(".article-list").getByText("Rust 1.92 が出た")).toBeVisible();
+
+    await deliverPush(
+      context,
+      page,
+      bellPush(first.id, "Publickey", "Azure の東日本リージョンで障害"),
+    );
+    await deliverPush(context, page, bellPush(second.id, "Publickey", "Rust 1.92 が出た"));
+    await expect.poll(async () => (await shownNotifications(page)).length).toBe(2);
+
+    await clickNotification(context, `bell:bell-1:${first.id}`);
+    await expect(page).toHaveURL(new RegExp(`\\?article=${first.id}$`));
+    await expect(
+      page.getByRole("heading", { name: "Azure の東日本リージョンで障害", exact: true }),
+    ).toBeVisible();
+    // 押した通知は閉じて覚えから外し、押していない通知は残す
+    await expect
+      .poll(async () => (await shownNotifications(page)).map((n) => n.tag))
+      .toEqual([`bell:bell-1:${second.id}`]);
+    expect(await rememberedTags(page)).toEqual([
+      { tag: `bell:bell-1:${second.id}`, at: expect.any(Number) },
+    ]);
+    // 読み込み直さずに移った（履歴が増え、戻ると一覧）
+    await page.goBack();
+    await expect(page).not.toHaveURL(/article=/);
+  });
+
+  test("読み込み直すと消えるものを出している画面（Settings）では、記事へ移らない", async ({
+    page,
+    context,
+  }) => {
+    const server = new FakeSendo();
+    const feed = server.subscribe({
+      url: "https://www.publickey1.jp/atom.xml",
+      title: "Publickey",
+    });
+    const article = server.deliver(feed.id, { title: "Azure の東日本リージョンで障害" });
+    await routeFakeSendo(context, server);
+    await page.goto("/settings");
+    await signIn(page);
+    await deliverPush(context, page, bellPush(article.id, "Publickey", "Azure"));
+    await expect.poll(async () => (await shownNotifications(page)).length).toBe(1);
+    await clickNotification(context, `bell:bell-1:${article.id}`);
+    await expect.poll(async () => (await shownNotifications(page)).length).toBe(0);
+    // Service Worker の待つ時間（0.5 秒）を過ぎても、Settings のまま
+    await page.waitForTimeout(800);
+    await expect(page).toHaveURL(/\/settings$/);
+  });
+
+  test("まだ手元に届いていない記事は、記事の画面のまま同期を待ってから出す。同期しても届かなければ、ないと出す", async ({
+    page,
+    context,
+  }) => {
+    const server = new FakeSendo();
+    const feed = server.subscribe({
+      url: "https://www.publickey1.jp/atom.xml",
+      title: "Publickey",
+    });
+    server.deliver(feed.id, { title: "前からある記事" });
+    await routeFakeSendo(context, server);
+    await page.goto("/");
+    await signIn(page);
+    await expect(page.locator(".article-list").getByText("前からある記事")).toBeVisible();
+
+    // sendo は受信箱に配ってから通知を送る。画面の同期はまだ
+    const fresh = server.deliver(feed.id, { title: "通知で届いた記事" });
+    let release = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    server.onRequest = async (path) => {
+      if (path === "GET /sync") await gate;
+    };
+    await deliverPush(context, page, bellPush(fresh.id, "Publickey", "通知で届いた記事"));
+    await expect.poll(async () => (await shownNotifications(page)).length).toBe(1);
+    await clickNotification(context, `bell:bell-1:${fresh.id}`);
+    await expect(page.getByText("記事を同期しています…")).toBeVisible();
+    release();
+    await expect(
+      page.getByRole("heading", { name: "通知で届いた記事", exact: true }),
+    ).toBeVisible();
+    await expect(page).toHaveURL(new RegExp(`\\?article=${fresh.id}$`));
+    server.onRequest = null;
+
+    // 受信箱から消えた記事
+    await deliverPush(context, page, bellPush("gone", "Publickey", "消えた記事"));
+    await expect.poll(async () => (await shownNotifications(page)).length).toBe(1);
+    await clickNotification(context, "bell:bell-1:gone");
+    await expect(page.getByText("この記事は手元にありません。")).toBeVisible();
+    await expect(page).toHaveURL(/\?article=gone$/);
+  });
+
+  test("選んでいるワークスペースの範囲の外の記事は開かず、開かなかったことを知らせる", async ({
+    page,
+    context,
+  }) => {
+    const server = new FakeSendo();
+    server.workspacesSupported = true;
+    const publicSpace = server.createWorkspace("Public");
+    const privateSpace = server.createWorkspace("Personal");
+    const ordinary = server.subscribe({
+      url: "https://public.example/feed",
+      title: "Public feed",
+      workspaceId: publicSpace.id,
+    });
+    const personal = server.subscribe({
+      url: "https://private.example/feed",
+      title: "Hidden feed",
+      workspaceId: privateSpace.id,
+    });
+    server.deliver(ordinary.id, { title: "Public article" });
+    const hidden = server.deliver(personal.id, { title: "Hidden article" });
+    await routeFakeSendo(context, server);
+    await page.goto("/");
+    await signIn(page);
+    const list = page.locator(".article-list");
+    await expect(list.getByText("Hidden article")).toBeVisible();
+    const nav = page.getByRole("navigation", { name: "Feeds", exact: true });
+    await nav.getByRole("button", { name: /^Workspaces:/ }).click();
+    const dialog = page.getByRole("dialog", { name: "Workspaces", exact: true });
+    await dialog.getByRole("button", { name: "Only Public", exact: true }).click();
+    await dialog.getByRole("button", { name: "Close", exact: true }).click();
+    await expect(list.getByText("Hidden article")).toHaveCount(0);
+
+    await deliverPush(context, page, bellPush(hidden.id, "Hidden feed", "Hidden article"));
+    await expect.poll(async () => (await shownNotifications(page)).length).toBe(1);
+    await clickNotification(context, `bell:bell-1:${hidden.id}`);
+    await expect(
+      page.getByText(
+        "通知の記事は、選んでいるワークスペースに入っていないため、開きませんでした。",
+      ),
+    ).toBeVisible();
+    await expect(page).not.toHaveURL(/article=/);
+    await expect(page.getByRole("heading", { name: "Hidden article" })).toHaveCount(0);
+
+    // 範囲の中の記事で、まだ手元に届いていないものは、範囲を決める前に同期を待つ
+    const fresh = server.deliver(ordinary.id, { title: "Fresh public article" });
+    let release = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    server.onRequest = async (path) => {
+      if (path === "GET /sync") await gate;
+    };
+    await deliverPush(context, page, bellPush(fresh.id, "Public feed", "Fresh public article"));
+    await expect.poll(async () => (await shownNotifications(page)).length).toBe(1);
+    await clickNotification(context, `bell:bell-1:${fresh.id}`);
+    await expect(page.getByText("記事を同期しています…")).toBeVisible();
+    release();
+    await expect(
+      page.getByRole("heading", { name: "Fresh public article", exact: true }),
+    ).toBeVisible();
+    await expect(page).toHaveURL(new RegExp(`\\?article=${fresh.id}$`));
+  });
+});
+
+test.describe("消えた通知で見分ける（iPhone と iPad のホーム画面のアプリを真似る）", () => {
+  test.beforeEach(async ({ context }) => {
+    await context.grantPermissions(["notifications"], { origin: "http://localhost:4173" });
+    // ホーム画面のアプリ（navigator.standalone）で、触れる画面
+    await context.addInitScript(() => {
+      Object.defineProperty(Navigator.prototype, "standalone", { get: () => true });
+      Object.defineProperty(Navigator.prototype, "maxTouchPoints", { get: () => 5 });
+    });
+  });
+
+  function changeVisibility(page: Page, visibility: DocumentVisibilityState): Promise<void> {
+    return page.evaluate((value) => {
+      Object.defineProperty(document, "visibilityState", { configurable: true, get: () => value });
+      document.dispatchEvent(new Event("visibilitychange"));
+    }, visibility);
+  }
+
+  /** 通知センターから通知が消えた（押されても、iOS では notificationclick も notificationclose も来ない） */
+  const dismiss = (page: Page, tag: string) =>
+    page.evaluate(async (tag) => {
+      const registration = await navigator.serviceWorker.ready;
+      for (const notification of await registration.getNotifications({ tag })) notification.close();
+    }, tag);
+
+  test("裏にある間に 1 件だけ消えたら、前に出たときにその記事を開く。2 件以上なら開かない", async ({
+    page,
+    context,
+  }) => {
+    const server = new FakeSendo();
+    const feed = server.subscribe({
+      url: "https://www.publickey1.jp/atom.xml",
+      title: "Publickey",
+    });
+    const first = server.deliver(feed.id, { title: "Azure の東日本リージョンで障害" });
+    const second = server.deliver(feed.id, { title: "Rust 1.92 が出た" });
+    const third = server.deliver(feed.id, { title: "Go 1.27 が出た" });
+    await routeFakeSendo(context, server);
+    await page.goto("/");
+    await signIn(page);
+    await expect(page.locator(".article-list").getByText("Rust 1.92 が出た")).toBeVisible();
+    for (const article of [first, second, third]) {
+      await deliverPush(context, page, bellPush(article.id, "Publickey", article.title ?? ""));
+    }
+    await expect.poll(async () => (await rememberedTags(page)).length).toBe(3);
+
+    await changeVisibility(page, "hidden");
+    await dismiss(page, `bell:bell-1:${second.id}`);
+    await changeVisibility(page, "visible");
+    await expect(page).toHaveURL(new RegExp(`\\?article=${second.id}$`));
+    await expect(
+      page.getByRole("heading", { name: "Rust 1.92 が出た", exact: true }),
+    ).toBeVisible();
+    await expect.poll(async () => (await rememberedTags(page)).length).toBe(2);
+
+    // 2 件まとめて消えたら、どれも開かずに覚えから外す
+    await changeVisibility(page, "hidden");
+    await dismiss(page, `bell:bell-1:${first.id}`);
+    await dismiss(page, `bell:bell-1:${third.id}`);
+    await changeVisibility(page, "visible");
+    await expect.poll(async () => (await rememberedTags(page)).length).toBe(0);
+    await expect(page).toHaveURL(new RegExp(`\\?article=${second.id}$`));
+  });
+});

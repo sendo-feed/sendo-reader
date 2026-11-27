@@ -3,7 +3,7 @@
  *
  * パスで分からないもの（開いている Save a URL の窓など）は、出している部品が hold() で印を付け、
  * 閉じたら戻す。自動の読み込み直し（main.ts の canReload）と、新しい版の知らせ（App.svelte）の両方が
- * lib/app-update.ts の canReloadPage を通して見る。$state なので、閉じたら知らせを出し直せる
+ * lib/reload-paths.ts の canReloadPage を通して見る。$state なので、閉じたら知らせを出し直せる
  */
 class ReloadGuard {
   /**

@@ -21,8 +21,17 @@ import {
 import { NavigationRoute, registerRoute } from "workbox-routing";
 import { CacheFirst } from "workbox-strategies";
 import { SENDO_NAVIGATION_DENYLIST } from "../sendo-paths";
-import { notificationPath, type PushEventLike, readPush } from "../src/lib/notification";
-import { rememberTag } from "../src/lib/notification-store";
+import {
+  articleIdFromTag,
+  notificationPath,
+  OPEN_ARTICLE,
+  OPEN_ARTICLE_WAIT_MS,
+  type OpenArticleMessage,
+  type PushEventLike,
+  readPush,
+} from "../src/lib/notification";
+import { forgetTag, rememberTag } from "../src/lib/notification-store";
+import { canReloadPage } from "../src/lib/reload-paths";
 
 declare const self: ServiceWorkerGlobalScope;
 
@@ -127,4 +136,59 @@ async function showPush(event: PushEvent): Promise<void> {
   await self.registration.showNotification(payload.title, options);
   // 出し終えてから覚える（出せなかった通知を、押されたものと取り違えない。8）
   await rememberTag(payload.tag, Date.now()).catch(() => {});
+}
+
+/**
+ * 押したことが届いたら、その記事を開く（docs/decisions/notifications.md の 7）。通知を閉じ、覚えた tag を
+ * 外してから、開いている reader の画面に開かせる。選べる画面がない、断られた、0.5 秒のうちに受けた
+ * ことが返らないときは、新しい窓で開く。記事の ID は tag から読む（iOS で取り直した通知は data が空）
+ */
+self.addEventListener("notificationclick", (event) => {
+  event.notification.close();
+  event.waitUntil(openFromNotification(event.notification.tag));
+});
+
+/** 利用者が消した通知は、覚えから外す（押された通知と取り違えない。8） */
+self.addEventListener("notificationclose", (event) => {
+  event.waitUntil(forgetTag(event.notification.tag).catch(() => {}));
+});
+
+async function openFromNotification(tag: string): Promise<void> {
+  await forgetTag(tag).catch(() => {});
+  const articleId = articleIdFromTag(tag);
+  if (articleId !== null) {
+    const client = await readerWindow();
+    if (client !== null && (await askToOpen(client, articleId))) {
+      await client.focus().catch(() => {});
+      return;
+    }
+  }
+  await self.clients.openWindow(notificationPath(tag));
+}
+
+/**
+ * 開いている reader の画面を、最後に前に出ていたものから選ぶ（matchAll は前に出た順に返す）。OAuth の
+ * 許可の画面と、読み込み直すと消えるものを出している画面（パスで分かるもの）は選ばない
+ */
+async function readerWindow(): Promise<WindowClient | null> {
+  const windows = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
+  return windows.find((client) => canReloadPage(new URL(client.url).pathname, false)) ?? null;
+}
+
+/** 画面に記事を開かせ、受けたことが返ったら true。断られたか、待つ時間を過ぎたら false */
+function askToOpen(client: WindowClient, articleId: string): Promise<boolean> {
+  return new Promise((resolve) => {
+    const channel = new MessageChannel();
+    const finish = (accepted: boolean) => {
+      clearTimeout(timer);
+      channel.port1.close();
+      resolve(accepted);
+    };
+    const timer = setTimeout(() => finish(false), OPEN_ARTICLE_WAIT_MS);
+    channel.port1.onmessage = (event: MessageEvent) => {
+      finish((event.data as { accepted?: unknown } | null)?.accepted === true);
+    };
+    const message: OpenArticleMessage = { type: OPEN_ARTICLE, articleId, sentAt: Date.now() };
+    client.postMessage(message, [channel.port2]);
+  });
 }

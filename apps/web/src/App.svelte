@@ -2,9 +2,9 @@
   import LeaveStalled from "./components/LeaveStalled.svelte";
   import UpdateReady from "./components/UpdateReady.svelte";
   import VersionMismatch from "./components/VersionMismatch.svelte";
-  import { canReloadPage } from "./lib/app-update";
   import { useReader } from "./lib/context";
   import { reloadGuard } from "./lib/reload-guard.svelte";
+  import { canReloadPage } from "./lib/reload-paths";
   import { router } from "./lib/router.svelte";
   import { selectNotice, updateNotice } from "./lib/update-notice.svelte";
   import Login from "./routes/Login.svelte";

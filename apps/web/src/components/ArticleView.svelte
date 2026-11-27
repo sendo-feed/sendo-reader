@@ -53,6 +53,14 @@
   );
   let article = $state<Article | null>(null);
   let missing = $state(false);
+  /**
+   * 手元にない記事を開いたときに、同期を頼んで待っている記事（docs/decisions/notifications.md の 9）。
+   * 頼んだあとに始まった同期が終わるまで「記事を同期しています…」と出す。頼むのは記事ごとに 1 度
+   */
+  let syncingFor = $state<string | null>(null);
+  let syncRequestedFor: string | null = null;
+  /** 開いたときに手元になく、まだ既読にしていない記事（届いたら、開いたときと同じく既読にする） */
+  let unmarkedFor: string | null = null;
   let scroller = $state<HTMLElement>();
   let toolbarHeight = $state(0);
   /** 本文（見出しと本文）。X のウィジェットの中を押したあと、フォーカスをここに戻す */
@@ -118,6 +126,29 @@
     if (id !== articleId) return;
     article = found;
     missing = found === null;
+    if (found !== null && unmarkedFor === id) {
+      unmarkedFor = null;
+      markOnOpen(id).catch(() => void list.refreshAfterFailure());
+    }
+    if (found === null && syncRequestedFor !== id) void waitForSync(id);
+  }
+
+  /**
+   * 記事の画面のまま、同期で届くのを待つ（一覧には戻さない）。起動したときや前に出たときの同期と
+   * 重なっても、頼んだあとに始まった同期が終わるまで待つ。終わっても届かなければ「この記事は手元に
+   * ありません。」と出し、あとの同期で届いたら記事を出す（articlesVersion で読み直す）
+   */
+  async function waitForSync(id: string) {
+    syncRequestedFor = id;
+    syncingFor = id;
+    try {
+      await reader.client.syncNow();
+    } catch {
+      // 届かなくても、手元にあるかを読み直して決める
+    }
+    if (id !== articleId) return;
+    await load(id);
+    if (syncingFor === id) syncingFor = null;
   }
 
   /**
@@ -268,7 +299,11 @@
    */
   async function markOnOpen(id: string) {
     const found = list.find(id) ?? (await reader.client.getArticle(id, reader.workspaceIds));
-    if (found === null || found.readAt !== null) return;
+    if (found === null) {
+      if (id === articleId) unmarkedFor = id;
+      return;
+    }
+    if (found.readAt !== null) return;
     const readAt = Date.now();
     list.patch(id, { readAt });
     if (article?.id === id) article = { ...article, readAt };
@@ -325,6 +360,9 @@
       requested = null;
       retranslateConfirmOpen = false;
       translateError = null;
+      syncingFor = null;
+      syncRequestedFor = null;
+      unmarkedFor = null;
       if (id === null) {
         article = null;
         missing = false;
@@ -1372,7 +1410,11 @@
       </div>
     {/key}
   {:else if missing}
-    <div class="placeholder"><p>この記事は手元にありません。</p></div>
+    <div class="placeholder">
+      <p role="status">
+        {syncingFor === articleId ? "記事を同期しています…" : "この記事は手元にありません。"}
+      </p>
+    </div>
   {:else}
     <div class="placeholder">
       <Icon name="inbox" />
