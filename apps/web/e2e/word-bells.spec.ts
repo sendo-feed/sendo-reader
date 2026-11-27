@@ -150,3 +150,88 @@ test.describe("Search のベル", () => {
     await expect(bell).toHaveAttribute("aria-pressed", "true");
   });
 });
+
+test.describe("manage feed のベルの言葉", () => {
+  function rowBell(page: Page) {
+    return page.getByRole("main").getByRole("button", { name: "Bell: Hacker News", exact: true });
+  }
+
+  async function openFeedOptions(page: Page) {
+    await page.getByRole("button", { name: "Feed options: Hacker News", exact: true }).click();
+    return page.getByRole("dialog", { name: "Hacker News" });
+  }
+
+  async function closeDialog(page: Page) {
+    const dialog = page.getByRole("dialog", { name: "Hacker News" });
+    await dialog.getByRole("button", { name: "Close" }).click();
+    await expect(dialog).toHaveCount(0);
+  }
+
+  test("Hacker News のベルに Rust を足すと「Hacker News AND Rust」のベルになり、言葉を消すと購読だけのベルに戻る", async ({
+    page,
+    context,
+  }) => {
+    const { server, news } = seed();
+    await routeFakeSendo(context, server);
+    await page.goto("/manage");
+    await signIn(page);
+    await rowBell(page).click();
+    await expect(rowBell(page)).toHaveAttribute("aria-pressed", "true");
+
+    let dialog = await openFeedOptions(page);
+    await expect(dialog.getByRole("checkbox", { name: "Notify new articles" })).toBeChecked();
+    const words = dialog.getByRole("textbox", { name: "含む言葉（任意）" });
+    await expect(words).toHaveValue("");
+    await words.fill("Rust");
+    await words.press("Enter");
+    await closeDialog(page);
+    // 言葉のあるベルも、行のベルは付いたまま
+    await expect(rowBell(page)).toHaveAttribute("aria-pressed", "true");
+    await syncNow(page);
+    expect(serverTargets(server)).toEqual([{ feedId: news.id, words: "Rust" }]);
+
+    dialog = await openFeedOptions(page);
+    await expect(words).toHaveValue("Rust");
+    await words.fill("");
+    await words.press("Enter");
+    await closeDialog(page);
+    await syncNow(page);
+    expect(serverTargets(server)).toEqual([{ feedId: news.id, words: null }]);
+    await expect(rowBell(page)).toHaveAttribute("aria-pressed", "true");
+  });
+
+  test("上限を超える言葉は打っている間に知らせて付け替えず、上限ちょうどは付けられる。Notify new articles を外すとベルが外れる", async ({
+    page,
+    context,
+  }) => {
+    const { server, news } = seed();
+    await routeFakeSendo(context, server);
+    await page.goto("/manage");
+    await signIn(page);
+    await rowBell(page).click();
+    await syncNow(page);
+
+    const dialog = await openFeedOptions(page);
+    const words = dialog.getByRole("textbox", { name: "含む言葉（任意）" });
+    const eight = Array.from({ length: 8 }, (_, i) => `w${i}`).join(" ");
+    await words.fill(`${eight} w8`);
+    await expect(dialog.getByRole("alert")).toHaveText("言葉は 8 個まで入れられます。");
+    await words.press("Enter");
+    await words.fill(eight);
+    await expect(dialog.getByRole("alert")).toHaveCount(0);
+    await words.press("Enter");
+    await closeDialog(page);
+    await syncNow(page);
+    expect(serverTargets(server)).toEqual([{ feedId: news.id, words: eight }]);
+    expect(server.bellRequests.map((body) => body.words)).toEqual([undefined, eight]);
+
+    await openFeedOptions(page);
+    const notify = dialog.getByRole("checkbox", { name: "Notify new articles" });
+    await notify.uncheck();
+    await expect(words).toHaveCount(0);
+    await closeDialog(page);
+    await expect(rowBell(page)).toHaveAttribute("aria-pressed", "false");
+    await syncNow(page);
+    expect(server.activeBells()).toEqual([]);
+  });
+});

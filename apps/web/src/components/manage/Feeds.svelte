@@ -1,5 +1,15 @@
 <script lang="ts">
-  import { type Feed, type FeedFetchTimes, type Folder, feedName } from "@sendo-reader/core";
+  import {
+    BELL_WORDS_PROBLEMS,
+    type Feed,
+    type FeedFetchTimes,
+    type Folder,
+    feedBellChange,
+    feedBellWordsChange,
+    feedName,
+    parseBellWords,
+  } from "@sendo-reader/core";
+  import { BellList } from "../../lib/bells.svelte";
   import { useReader } from "../../lib/context";
   import { describeError } from "../../lib/errors";
   import { formatArticleAge, formatDate, formatDateTime } from "../../lib/format";
@@ -34,15 +44,10 @@
   let fetchTimes = $state<FeedFetchTimes | null>(null);
   let fetchTimesStatus = $state<"loading" | "ready" | "unavailable">("loading");
   let latestArticleDates = $state.raw<Map<string, number> | null>(null);
-  /** ベルを付けたフィード（購読だけでも、購読 AND 言葉でも。手元の DB を読んだもの） */
-  let belledFeeds = $state.raw<ReadonlySet<string>>(new Set());
-  /**
-   * 押してから、手元の DB を読み直すまでの間に出す状態（楽観的な更新。docs/decisions/performance.md の
-   * 操作の反応 100ms）
-   */
-  let pressedBells = $state.raw<ReadonlyMap<string, { on: boolean; press: number }>>(new Map());
-  let lastBellPress = 0;
-  let lastBellRead = 0;
+  /** 手元に見えるベル。押したら、手元の DB を読み直すまで見込みを出す（lib/bells.svelte.ts） */
+  const bellList = new BellList(reader.client);
+  /** 購読のベルの言葉の入力（打っている途中の値。sendo の上限を超えたら、その場で知らせる） */
+  let wordsDraft = $state<{ feedId: string; value: string } | null>(null);
   const userId = $derived(reader.user?.id);
   const selected = $derived(reader.feeds.find((feed) => feed.id === selectedId));
   const term = $derived(query.trim().toLowerCase());
@@ -99,29 +104,26 @@
   });
 
   $effect(() => {
-    belledFeeds = new Set();
-    pressedBells = new Map();
     if (userId === undefined) return;
-    const off = reader.client.onChange((tables) => {
-      if (tables.has("bells")) void readBells().catch(() => {});
-    });
-    void readBells().catch(() => {});
-    return () => {
-      lastBellRead += 1;
-      off();
-    };
+    return bellList.watch();
   });
 
-  async function readBells(): Promise<void> {
-    const read = ++lastBellRead;
-    const bells = await reader.client.listBells();
-    if (read !== lastBellRead) return;
-    belledFeeds = new Set(bells.flatMap((bell) => (bell.feedId === null ? [] : [bell.feedId])));
+  /** ベルが付いているか（購読だけでも、購読 AND 言葉でも） */
+  function hasBell(feed: Feed): boolean {
+    return bellList.bells.some((bell) => bell.feedId === feed.id);
   }
 
-  function hasBell(feed: Feed): boolean {
-    return pressedBells.get(feed.id)?.on ?? belledFeeds.has(feed.id);
+  /** 購読のベルの言葉（購読だけのベルなら空） */
+  function bellWords(feed: Feed): string {
+    return bellList.bells.find((bell) => bell.feedId === feed.id)?.words ?? "";
   }
+
+  /** 打っている言葉が sendo の上限を超えていれば、その理由（空は購読だけのベルなので通す） */
+  const wordsProblem = $derived.by(() => {
+    if (wordsDraft === null || wordsDraft.feedId !== selectedId) return null;
+    const parsed = parseBellWords(wordsDraft.value);
+    return typeof parsed === "string" && parsed !== "empty" ? parsed : null;
+  });
 
   /**
    * ベルを付け外しする。押したらすぐ出し、手元の DB への書き込みはそのあとに待つ。sendo へは同期で
@@ -130,22 +132,43 @@
    */
   async function toggleBell(feed: Feed) {
     const on = !hasBell(feed);
-    const press = ++lastBellPress;
-    pressedBells = new Map(pressedBells).set(feed.id, { on, press });
     message = null;
     try {
-      await reader.client.setFeedBell(feed.id, on);
+      await bellList.change(
+        (bells) => feedBellChange(bells, feed.id, on),
+        () => reader.client.setFeedBell(feed.id, on),
+      );
       if (on) void notificationSuggestion.offer();
     } catch (error) {
       message = describeError(error);
     }
-    await readBells().catch(() => {});
-    // 待っている間にもう一度押していたら、そちらの書き込みのあとに任せる
-    if (pressedBells.get(feed.id)?.press === press) {
-      const next = new Map(pressedBells);
-      next.delete(feed.id);
-      pressedBells = next;
+  }
+
+  /**
+   * 購読のベルを、その言葉の購読 AND 言葉のベルにする（空なら購読だけのベル）。sendo の上限を
+   * 超える言葉は積まない（理由は入力の下に出している）
+   */
+  async function setBellWords(feed: Feed, input: string) {
+    const parsed = parseBellWords(input);
+    if (typeof parsed === "string" && parsed !== "empty") return;
+    const words = parsed === "empty" ? null : parsed;
+    message = null;
+    try {
+      await bellList.change(
+        (bells) => feedBellWordsChange(bells, feed.id, words),
+        () => reader.client.setFeedBellWords(feed.id, input),
+      );
+      wordsDraft = null;
+    } catch (error) {
+      message = describeError(error);
     }
+  }
+
+  /** Enter で入力から抜けて、言葉を決める（change が届く） */
+  function onWordsKeydown(event: KeyboardEvent & { currentTarget: HTMLInputElement }) {
+    if (event.isComposing || event.key !== "Enter") return;
+    event.preventDefault();
+    event.currentTarget.blur();
   }
 
   $effect(() => {
@@ -202,6 +225,7 @@
     movingWorkspace = false;
     workspaceDestination = feed.workspaceId ?? "";
     message = null;
+    wordsDraft = null;
     menuOpen = true;
   }
 
@@ -453,6 +477,37 @@
           <button type="button" onclick={() => (movingWorkspace = true)}>Move to workspace…</button>
         {/if}
       {/if}
+      {@const feed = selected}
+      {@const belled = hasBell(feed)}
+      <section class="notifications" aria-labelledby="feed-notifications">
+        <h3 id="feed-notifications">Notifications</h3>
+        <label class="notify">
+          <input type="checkbox" checked={belled} onchange={() => toggleBell(feed)}>
+          Notify new articles
+        </label>
+        {#if belled}
+          <label for="feed-bell-words">含む言葉（任意）</label>
+          <input
+            id="feed-bell-words"
+            type="text"
+            autocomplete="off"
+            enterkeyhint="done"
+            value={bellWords(feed)}
+            aria-invalid={wordsProblem !== null}
+            aria-describedby="feed-bell-words-note"
+            oninput={(event) =>
+              (wordsDraft = { feedId: feed.id, value: event.currentTarget.value })}
+            onchange={(event) => setBellWords(feed, event.currentTarget.value)}
+            onkeydown={onWordsKeydown}
+          >
+          <p id="feed-bell-words-note" class="words-note">
+            スペースで区切ると、すべての言葉を含む記事だけを知らせます。空のときは、新しい記事をすべて知らせます。
+          </p>
+          {#if wordsProblem !== null}
+            <p class="error words-error" role="alert">{BELL_WORDS_PROBLEMS[wordsProblem]}</p>
+          {/if}
+        {/if}
+      </section>
       <div class="unsubscribe">
         <button
           type="button"
@@ -622,6 +677,37 @@
 
   .fetch-times-note {
     font-size: 0.875rem;
+  }
+
+  .notifications {
+    display: grid;
+    gap: 0.5rem;
+    border-top: 1px solid var(--border);
+    margin-top: 1.25rem;
+    padding-top: 1rem;
+  }
+
+  .notifications h3 {
+    margin: 0;
+    font-size: 0.9375rem;
+  }
+
+  .notifications label {
+    font-size: 0.875rem;
+  }
+
+  .notify {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+
+  .words-note,
+  .words-error {
+    margin: 0;
+    color: var(--muted);
+    font-size: 0.75rem;
+    line-height: 1.6;
   }
 
   .unsubscribe {
