@@ -18,7 +18,7 @@ function setup() {
   const page = Object.assign(new EventTarget(), {
     visibilityState: "visible" as DocumentVisibilityState,
   });
-  showUnreadBadge(
+  const refresh = showUnreadBadge(
     {
       countUnread: () =>
         new Promise<UnreadCounts>((resolve, reject) => {
@@ -46,7 +46,7 @@ function setup() {
     reads[index]?.answer(total);
     await new Promise((resolve) => setTimeout(resolve));
   };
-  return { reads, calls, badge, changeArticles, setVisibility, read };
+  return { reads, calls, badge, changeArticles, setVisibility, read, refresh };
 }
 
 test("読んでいる間にまた変わったら、あとの読み出しの数を出し、先の答えが遅れて届いても書き戻さない", async () => {
@@ -88,4 +88,16 @@ test("前に出たら、同じ数でも数え直して書く。裏に回った�
   setVisibility("visible");
   await read(1, 12);
   expect(calls).toEqual([12, 12]);
+});
+
+test("通知を許可したら（refresh）、手元の数が変わっていなくても数え直して書く", async () => {
+  const { calls, badge, read, refresh } = setup();
+  // iOS では、許可の前は書くのに失敗する
+  badge.fail = true;
+  await read(0, 4);
+  expect(calls).toEqual([4]);
+  badge.fail = false;
+  refresh();
+  await read(1, 4);
+  expect(calls).toEqual([4, 4]);
 });

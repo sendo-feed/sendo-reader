@@ -15,12 +15,15 @@ export interface AppBadge {
  * 数え直し、裏にある間や閉じている間に push の app_badge でブラウザーが書いた数を残さない。
  * 書けなければ（iOS では、通知を許可していないと失敗する）、画面には何も出さず、次に数え直したときに
  * また書く（docs/decisions/notifications.md の 11）。
+ *
+ * 返した関数で、すぐ数え直して書く。通知を許可したときに呼ぶ（iOS では許可の前に書けなかったので、
+ * 手元の数が変わっていなくても書き直す）
  */
 export function showUnreadBadge(
   client: Pick<ReaderClient, "countUnread" | "onChange">,
   badge: AppBadge,
   page: Pick<Document, "visibilityState" | "addEventListener">,
-): void {
+): () => void {
   let reads = 0;
 
   const update = async () => {
@@ -48,4 +51,5 @@ export function showUnreadBadge(
     if (page.visibilityState === "visible") void update();
   });
   void update();
+  return () => void update();
 }

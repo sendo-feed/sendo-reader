@@ -59,12 +59,16 @@ if (location.pathname === AUTHORIZE_PATH) {
   const state = new ReaderState(reader.client, page.leave);
   // 設定の正は手元の DB（docs/decisions/settings.md）。つないで、読み直す
   prefs.connect(state.client);
+  // インストールしたアプリのアイコンに、未読の数を出す。Badging API のないブラウザーでは何もしない
+  const refreshBadge =
+    "setAppBadge" in navigator ? showUnreadBadge(state.client, navigator, document) : () => {};
   // この端末で通知を受ける操作（docs/decisions/notifications.md の 1〜4）。送る前に、セッションの
   // ユーザーが手元のユーザーと同じかを確かめ、違えば同期に切り替えを任せる
   pushDevice.connect({
     user: () => state.user,
     onAccountChanged: () => void state.client.syncNow().catch(() => {}),
-    onGranted: () => {},
+    // 通知を許可したら、手元の数が変わっていなくても書き直す（docs/decisions/notifications.md の 11）
+    onGranted: refreshBadge,
   });
   // ログアウトとユーザーの切り替えで、この端末の登録を外す（どのタブで起きても届く）
   state.client.onCleared(() => void pushDevice.forget());
@@ -73,9 +77,6 @@ if (location.pathname === AUTHORIZE_PATH) {
   void state.init().then(() => {
     if (state.signedIn) void pushDevice.resend();
   });
-  // インストールしたアプリのアイコンに、未読の数を出す。Badging API のないブラウザーでは何もしない
-  if ("setAppBadge" in navigator) showUnreadBadge(state.client, navigator, document);
-
   // 画像のキャッシュが上限（100MB）を超えていたら、古いものから捨てる（docs/decisions/images.md
   // の 3）。起動してしばらくしてからと、そのあとは一定の間隔で見る（画面の表示は待たせない）
   const trim = () => void trimImageCache().catch(() => {});

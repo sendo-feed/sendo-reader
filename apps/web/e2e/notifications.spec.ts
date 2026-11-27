@@ -141,6 +141,48 @@ test("Turn on notifications で許可すると、sendo に登録ができ、Turn
   expect((await stubState(page))?.subscription).toBeNull();
 });
 
+test("通知を許可したら、手元の未読の数が変わっていなくても、バッジを書き直す", async ({
+  page,
+  context,
+}) => {
+  const server = new FakeSendo();
+  const feed = server.subscribe({ url: "https://blog.example/feed.xml", title: "Blog" });
+  for (const title of ["記事 1", "記事 2", "記事 3"]) server.deliver(feed.id, { title });
+  await routeFakeSendo(context, server);
+  await stubPush(context);
+  // バッジに書いた数を、呼んだ順に覚える
+  await context.addInitScript(() => {
+    const calls: unknown[] = [];
+    Object.assign(window, { badgeCalls: calls });
+    Object.defineProperty(Navigator.prototype, "setAppBadge", {
+      configurable: true,
+      value: (contents: number) => {
+        calls.push(contents);
+        return Promise.resolve();
+      },
+    });
+    Object.defineProperty(Navigator.prototype, "clearAppBadge", {
+      configurable: true,
+      value: () => {
+        calls.push("clear");
+        return Promise.resolve();
+      },
+    });
+  });
+  const badgeCalls = () =>
+    page.evaluate(() => [...(window as unknown as { badgeCalls: unknown[] }).badgeCalls]);
+  await openNotifications(page);
+  await expect.poll(async () => (await badgeCalls()).at(-1)).toBe(3);
+  await expect(turnOnButton(page)).toBeEnabled();
+  const before = (await badgeCalls()).length;
+
+  await turnOnButton(page).click();
+  await expect(page.getByText("この端末で通知を受けています。")).toBeVisible();
+  const after = await badgeCalls();
+  expect(after.length).toBeGreaterThan(before);
+  expect(after.at(-1)).toBe(3);
+});
+
 test("拒むと登録せず、どうすれば許可できるかを日本語で出す", async ({ page, context }) => {
   const server = new FakeSendo();
   await routeFakeSendo(context, server);
