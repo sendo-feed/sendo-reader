@@ -1,4 +1,4 @@
-import { expect, type Locator, type Page, test } from "@playwright/test";
+import { expect, type Locator, type Page, type Route, test } from "@playwright/test";
 import { FakeSendo, routeFakeSendo, signIn } from "./fake-sendo";
 
 test("選択中の購読だけを表示し、記事を直接開いても再読み込みしても範囲を維持する", async ({
@@ -183,6 +183,7 @@ function twoWorkspaces() {
   const server = new FakeSendo();
   server.workspacesSupported = true;
   const spaces: Record<string, ReturnType<FakeSendo["createWorkspace"]>> = {};
+  const articles: Record<string, ReturnType<FakeSendo["deliver"]>> = {};
   for (const name of ["Public", "Personal"]) {
     const workspace = server.createWorkspace(name);
     spaces[name] = workspace;
@@ -191,9 +192,9 @@ function twoWorkspaces() {
       title: `${name} feed`,
       workspaceId: workspace.id,
     });
-    server.deliver(feed.id, { title: `${name} article`, url: null });
+    articles[name] = server.deliver(feed.id, { title: `${name} article`, url: null });
   }
-  return { server, spaces };
+  return { server, spaces, articles };
 }
 
 function workspaceUi(page: Page) {
@@ -302,7 +303,9 @@ test("覚えたワークスペースがすべて消えていたら All、一部�
   context,
   page,
 }) => {
-  const { server, spaces } = twoWorkspaces();
+  // タブを何度も開き、ワークスペースを 2 度消すので、ほかのテストより長くかかる
+  test.setTimeout(60_000);
+  const { server, spaces, articles } = twoWorkspaces();
   const empty = server.createWorkspace("Empty");
   const spare = server.createWorkspace("Spare");
   await routeFakeSendo(context, server);
@@ -326,19 +329,37 @@ test("覚えたワークスペースがすべて消えていたら All、一部�
   await expect.poll(() => empty.deletedAt).not.toBeNull();
   await page.goto("/");
   await expect(ui.choice).toHaveAccessibleName("Workspaces: No workspace selected");
+  // 引き継いだ範囲（Empty）の外の記事を URL で開いても、照らして All になってから決めるので閉じない
   const allTab = await context.newPage();
-  await allTab.goto("/");
+  await allTab.goto(`/?article=${articles.Personal?.id}`);
   const allUi = workspaceUi(allTab);
   await expect(allUi.choice).toHaveAccessibleName("Workspaces: All workspaces");
-  await expect(allUi.list.getByText("Personal article")).toBeVisible();
-  await expect(allUi.list.getByText("Public article")).toBeVisible();
-  // All で始めたタブは、照らした結果をタブの選択として置く（読み込み直しても All のまま）
+  await expect(
+    allTab.getByRole("heading", { name: "Personal article", exact: true }),
+  ).toBeVisible();
+  await expect(allTab).toHaveURL(/article=/);
+  // オフラインで開いても、前に揃えた手元の一覧ですぐ照らし、All で始まる
+  const offline = (route: Route) => route.abort("internetdisconnected");
+  await context.route("**/api/v1/**", offline);
+  const offlineTab = await context.newPage();
+  await offlineTab.goto("/");
+  const offlineUi = workspaceUi(offlineTab);
+  await expect(offlineUi.choice).toHaveAccessibleName("Workspaces: All workspaces");
+  // Personal article は、上で開いて既読になった
+  await expect(offlineUi.list.getByText("Public article")).toBeVisible();
+  await offlineTab.close();
+  await context.unroute("**/api/v1/**", offline);
+  // 照らして All にしたタブは、All をタブの選択として置く。ほかのタブで写しが変わってから読み込み
+  // 直しても、写しから引き継ぎ直さない
+  await ui.choose(ui.only("Public"));
+  await allTab.goto("/");
   await allTab.reload();
   await expect(allUi.choice).toHaveAccessibleName("Workspaces: All workspaces");
+  await expect(allUi.list.getByText("Public article")).toBeVisible();
 
   // Personal と Spare を覚え、Spare だけが消える
+  await ui.choose(ui.only("Personal"));
   await ui.choose(async (d) => {
-    await d.getByRole("checkbox", { name: "Personal", exact: true }).check();
     await d.getByRole("checkbox", { name: "Spare", exact: true }).check();
   });
   await page.goto("/manage");
@@ -348,7 +369,7 @@ test("覚えたワークスペースがすべて消えていたら All、一部�
   await partTab.goto("/");
   const partUi = workspaceUi(partTab);
   await expect(partUi.choice).toHaveAccessibleName("Workspaces: Personal");
-  await expect(partUi.list.getByText("Personal article")).toBeVisible();
+  await expect(partTab.locator("nav.sidebar")).toContainText("Personal feed");
   await expect(partUi.list.getByText("Public article")).toHaveCount(0);
   expect(spaces.Personal?.deletedAt).toBeNull();
 });

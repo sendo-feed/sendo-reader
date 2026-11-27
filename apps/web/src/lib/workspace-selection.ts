@@ -76,9 +76,14 @@ function normalize(ids: readonly string[]): readonly string[] {
  * 直さない）
  */
 export function settleWorkspaceSelection(userId: string, ids: readonly string[] | undefined): void {
+  // 印は先に外す（タブの選択を置けなくても、読み込み直したときに印の範囲から続けない）
+  try {
+    sessionStorage.removeItem(pendingPrefix + userId);
+  } catch {
+    // 外せない環境では、読めもしない
+  }
   try {
     sessionStorage.setItem(prefix + userId, JSON.stringify(ids ?? null));
-    sessionStorage.removeItem(pendingPrefix + userId);
   } catch {
     // タブが開いている間の選択はメモリにある。保存を許可されない環境では読み込み直したときだけ失う。
   }
@@ -94,7 +99,12 @@ export function chooseWorkspaceSelection(userId: string, ids: readonly string[] 
     if (ids === undefined || ids.length === 0) localStorage.removeItem(lastPrefix + userId);
     else localStorage.setItem(lastPrefix + userId, JSON.stringify(ids));
   } catch {
-    // 写せなければ、新しいタブは All で始まる
+    // 写せなければ前の写しを消し、新しいタブは All で始める（前の、広いかもしれない範囲で始めない）
+    try {
+      localStorage.removeItem(lastPrefix + userId);
+    } catch {
+      // 消せない環境では、読めもしない
+    }
   }
 }
 

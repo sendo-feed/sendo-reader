@@ -145,6 +145,30 @@ describe("ワークスペースの選択の置き場", () => {
     expect(local.getItem("sendo.prefs.snapshot")).toBe("{}");
   });
 
+  it("写しを書けなければ前の写しを消し、新しいタブは All で始まる", () => {
+    chooseWorkspaceSelection("u1", ["a", "b"]);
+    const setItem = vi.spyOn(local, "setItem").mockImplementation(() => {
+      throw new Error("quota");
+    });
+    chooseWorkspaceSelection("u1", ["a"]);
+    setItem.mockRestore();
+    openTab();
+    expect(loadWorkspaceSelection("u1")).toEqual({ ids: undefined, inherited: false });
+  });
+
+  it("タブの選択を置けなくても、照らす前の印は外す（読み込み直して印の範囲から続けない）", () => {
+    chooseWorkspaceSelection("u1", ["a", "b"]);
+    openTab();
+    expect(loadWorkspaceSelection("u1")).toEqual({ ids: ["a", "b"], inherited: true });
+    const tab = sessionStorage;
+    const setItem = vi.spyOn(tab, "setItem").mockImplementation(() => {
+      throw new Error("quota");
+    });
+    chooseWorkspaceSelection("u1", ["a"]);
+    setItem.mockRestore();
+    expect(loadWorkspaceSelection("u1")).toEqual({ ids: ["a"], inherited: true });
+  });
+
   it("localStorage を使えなければ、引き継がずに All で始まる", () => {
     vi.stubGlobal("localStorage", {
       getItem: () => {
