@@ -272,7 +272,7 @@ export class FakeSendo {
   /** 受けた POST /bells の本文 */
   readonly bellRequests: Record<string, unknown>[] = [];
   /**
-   * Web Push（sendo の notifications.md の 19・20）。unavailable は使えない設定（GET /push は
+   * Web Push（sendo の web-push.md の 3・4）。unavailable は使えない設定（GET /push は
    * available: false、PUT は 501）、unsupported は Web Push に対応する前の版（/push は 404）
    */
   push: "available" | "unavailable" | "unsupported" = "available";
@@ -338,7 +338,7 @@ export class FakeSendo {
     if (this.cookie !== null) this.#endSession(this.cookie);
   }
 
-  /** セッションを消す。そのセッションの Web Push の登録も消える（sendo の notifications.md の 20） */
+  /** セッションを消す。そのセッションの Web Push の登録も消える（sendo の web-push.md の 4） */
   #endSession(value: string): void {
     this.sessions.delete(value);
     this.pushRegistrations.delete(value);

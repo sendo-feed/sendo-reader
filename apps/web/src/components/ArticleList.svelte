@@ -364,8 +364,13 @@
         (bells) => wordBellChange(bells, words, on),
         () => reader.client.setWordBell(input, on),
       );
-      // 付けたら、この端末で通知を受けていなければ勧める（docs/decisions/notifications.md の 1）
-      if (on) void notificationSuggestion.offer();
+      // 付けたら、この端末で通知を受けていなければ勧める（docs/decisions/notifications.md の 1）。
+      // 確かめている間にもう一度押して外したら、勧めない
+      if (on) {
+        void notificationSuggestion.offer(() =>
+          bellList.bells.some((bell) => bell.feedId === null && bell.matchKey === words.matchKey),
+        );
+      }
     } catch (error) {
       bellError = { search: input, message: describeError(error) };
     }

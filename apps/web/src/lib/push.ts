@@ -5,8 +5,10 @@ import { AccountChangedError } from "./account";
  * この端末で通知を受ける（Web Push の登録。docs/decisions/notifications.md の 1〜4）。
  *
  * 受けているかは、ブラウザーの登録（pushManager.getSubscription()）があり、許可が granted かで決める。
- * 手元の DB にも sendo にも、受けるかの印を持たない。登録を作る、送り直す、外すは、タブどうしで同じ
- * ロックを取って 1 つずつにし、ロックの中で登録を読み直してから決める。許可を求めるのはロックの外。
+ * 手元の DB にも sendo にも、受けるかの印を持たない。ただし、ログアウトとユーザーの切り替えで手元を
+ * 消すと、core が解除待ちの印を置き、残った登録は前の人のものとして、受けていないとする。登録を作る、
+ * 送り直す、外すは、タブどうしで同じロックを取って 1 つずつにし、ロックの中で登録を読み直してから
+ * 決める。許可を求めるのはロックの外。
  *
  * 使うものだけを、形で受ける（テストでは、にせものを渡す。本物は push-device.ts）。
  */
@@ -123,6 +125,13 @@ export interface PushEnvironment {
   refreshBadge(): void;
   /** 覚えた通知の tag を消す（docs/decisions/notifications.md の 8） */
   clearShownTags(): Promise<void>;
+  /**
+   * 解除待ちの印（docs/decisions/notifications.md の 4）があるか。ログアウトとユーザーの切り替えで、
+   * 手元を消すのと同じトランザクションで core が置く。読めなければ投げる
+   */
+  unsubscribePending(): Promise<boolean>;
+  /** 解除待ちの印を消す。ロックの中で、登録がないと確かめてから呼ぶ。消せなければ投げる */
+  clearUnsubscribePending(): Promise<void>;
 }
 
 /**
@@ -190,8 +199,10 @@ export async function checkDevice(env: PushEnvironment): Promise<DeviceState> {
   // 合わせた上限までにロックを取れなければ、確かめられないとする
   let subscribed = false;
   if (env.permission() === "granted") {
-    const read = await lockWithin(env, READY_TIMEOUT_MS - (Date.now() - started), () =>
-      currentSubscription(env),
+    // 解除待ちの印がある間は、残った登録を受けていないとする（次の起動で外し、送り直さないため）。
+    // 印を読めなければ、登録で決める
+    const read = await lockWithin(env, READY_TIMEOUT_MS - (Date.now() - started), async () =>
+      (await env.unsubscribePending().catch(() => false)) ? null : currentSubscription(env),
     );
     if (read === "timeout") return { kind: "unreachable" };
     subscribed = read !== null;
@@ -246,7 +257,8 @@ export function suggestionFor(state: DeviceState): Suggestion | null {
 /**
  * Turn on notifications を押した結果。dismissed は許可の窓を決めずに閉じた（何も出さずに戻す）、
  * subscribe-failed はブラウザーが登録を断った、send-failed は sendo に送れなかった（作った登録は外した）、
- * unreachable はロックを上限（10 秒）までに取れず、何もしなかった（Retry を出す）
+ * unreachable はロックを上限（10 秒）までに取れなかったか、解除待ちの印を読めない ／ 残った登録を外し
+ * 終えられなかったかで、登録を作らなかった（Retry を出す）
  */
 export type TurnOnResult =
   | { kind: "on" }
@@ -280,11 +292,21 @@ export async function turnOn(env: PushEnvironment, publicKey: string): Promise<T
     const registration = await env.registration().catch(() => null);
     if (registration === null) return { kind: "subscribe-failed" };
     const { pushManager } = registration;
+    let pending: boolean;
+    try {
+      pending = await env.unsubscribePending();
+    } catch {
+      return { kind: "unreachable" };
+    }
     let subscription = await pushManager.getSubscription().catch(() => null);
-    if (subscription !== null && !usesKey(subscription, publicKey)) {
+    // 解除待ちの印があれば、残った登録（前の人のもの）は使わずに外す
+    if (subscription !== null && (pending || !usesKey(subscription, publicKey))) {
       await subscription.unsubscribe().catch(() => false);
       subscription = null;
     }
+    // 印は、外し終えてから消す。外し終えられないか、印を消せなければ、作らない（作っても、印が
+    // 残れば次の起動で外れる）
+    if (pending && !(await clearPendingIfUnsubscribed(env))) return { kind: "unreachable" };
     if (subscription === null) {
       try {
         subscription = await pushManager.subscribe({
@@ -334,6 +356,7 @@ async function turnOffLocked(
 
 /**
  * 画面が起動したとき（タブごと）に、登録があれば送り直す（docs/decisions/notifications.md の 3）。
+ * 先に解除待ちの印を見て、あれば送り直さず、ログアウトと同じく外す（読めなければ何もしない）。
  * 許可が granted でなければ、Turn off notifications と同じく外す（GET /api/v1/push の結果によらない）。
  * 使える Sendo なら送り直し、公開鍵が登録の鍵と違えば作り直してから送る。失敗は画面に出さず、次の
  * 起動でまた送る
@@ -341,6 +364,18 @@ async function turnOffLocked(
 export async function resendOnStartup(env: PushEnvironment): Promise<void> {
   if (env.support !== "supported") return;
   await env.lock(async () => {
+    let pending: boolean;
+    try {
+      pending = await env.unsubscribePending();
+    } catch {
+      // 次に起動したときにまた見る
+      return;
+    }
+    if (pending) {
+      // 手元を消したあと、外し終える前にタブが閉じたか落ちた。残った登録は前の人のもの
+      await forgetLocked(env);
+      return;
+    }
     const registration = await env.registration().catch(() => null);
     let subscription =
       (await registration?.pushManager.getSubscription().catch(() => null)) ?? null;
@@ -388,7 +423,8 @@ export async function resendOnStartup(env: PushEnvironment): Promise<void> {
  * unsubscribe() が終わってから、出ている通知を閉じ、覚えた tag を消し、バッジを書き直す。手元の DB を
  * 消したあとなので、ログアウトなら 0 件で消える。ユーザーの切り替えで次の人の記事がもう届いていれば、
  * その数を出す（消すと、次に記事の表が変わるまで、次の人の数が出ない）。unsubscribe() が投げても、
- * 閉じて消す。sendo の登録はセッションと一緒に消えるので、DELETE は送らない
+ * 閉じて消す。sendo の登録はセッションと一緒に消えるので、DELETE は送らない。外し終えたら（もともと
+ * なくても）、解除待ちの印を消す
  */
 export async function forgetDevice(env: PushEnvironment): Promise<void> {
   await env.lock(() => forgetLocked(env));
@@ -399,8 +435,9 @@ async function forgetLocked(env: PushEnvironment): Promise<void> {
   try {
     await (await registration?.pushManager.getSubscription())?.unsubscribe();
   } catch {
-    // 外せなくても、通知と tag は消し、バッジは書き直す
+    // 外せなくても、通知と tag は消し、バッジは書き直す（解除待ちの印は残る）
   }
+  await clearPendingIfUnsubscribed(env);
   try {
     for (const notification of (await registration?.getNotifications()) ?? []) {
       notification.close();
@@ -410,6 +447,30 @@ async function forgetLocked(env: PushEnvironment): Promise<void> {
   }
   await env.clearShownTags().catch(() => {});
   env.refreshBadge();
+}
+
+/**
+ * 解除待ちの印を、ブラウザーの登録がないと確かめてから消す（ロックの中で呼ぶ）。消せたら true。
+ * 登録が残っている、確かめられない、印を消せないときは false（印は残る）。ロックの外では登録を
+ * 作らないので、ここで登録がなければ、そのあとに置かれた印が指す登録もない
+ */
+async function clearPendingIfUnsubscribed(env: PushEnvironment): Promise<boolean> {
+  // 使えないブラウザーでは、登録を作らない（ホーム画面に追加していない iPhone と iPad の Safari には、
+  // PushManager もない）
+  if (env.support === "supported") {
+    try {
+      const registration = await env.registration();
+      if (((await registration?.pushManager.getSubscription()) ?? null) !== null) return false;
+    } catch {
+      return false;
+    }
+  }
+  try {
+    await env.clearUnsubscribePending();
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /** 登録が、この公開鍵で作ったものか（鍵が分からなければ、違うとみなす） */

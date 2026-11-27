@@ -63,6 +63,8 @@ export const READER_METHODS = [
   "restoreSession",
   "prepareSignIn",
   "signOut",
+  "isPushUnsubscribePending",
+  "clearPushUnsubscribePending",
   "countPending",
   "listFolders",
   "listWorkspaces",

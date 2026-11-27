@@ -141,6 +141,13 @@ const LOGOUT_PENDING_KEY = "auth.logoutPending";
 const CONTENT_STORAGE_LIMIT_KEY = "content.storageLimit";
 
 /**
+ * この端末の通知の登録（ブラウザーの登録）の解除待ちの印（docs/decisions/notifications.md の 4）。
+ * ログアウトとユーザーの切り替えで、手元の DB を消すのと同じトランザクションで置き、手元の DB を
+ * 消しても残す。画面が、登録がないと確かめてから消す。置いたことだけを入れる
+ */
+const PUSH_UNSUBSCRIBE_PENDING_KEY = "push.unsubscribePending";
+
+/**
  * 最後に開いた記事（いま開いている記事）の ID を置く設定の鍵。開封の記録を積むときに覚え、
  * その記事の本文は上限のために消さない（docs/decisions/local-first.md の「記事の本文」）。
  * sendo には預けず、ログアウトで消える
@@ -395,6 +402,7 @@ export class ReaderCore {
     await this.#db.transaction(async (tx) => {
       await clearAll(tx);
       await setSetting(tx, LOGOUT_PENDING_KEY, "1");
+      await setSetting(tx, PUSH_UNSUBSCRIBE_PENDING_KEY, "1");
       this.#user = null;
     });
     await this.#afterDataCleared("signOut");
@@ -457,6 +465,8 @@ export class ReaderCore {
       current = this.#beginSession();
       switched = this.#user === null ? "adopt" : "switchUser";
       await clearAll(tx);
+      // 手元にいたユーザーを替えるときは、この端末の通知の登録の解除待ちの印を置く
+      if (switched === "switchUser") await setSetting(tx, PUSH_UNSUBSCRIBE_PENDING_KEY, "1");
       await setSetting(tx, USER_KEY, JSON.stringify(user));
       // DB の呼び出しは 1 列に並ぶので、手元のユーザーもトランザクションの中で替える
       // （あとに並んだログアウトが、確実に消す）
@@ -467,6 +477,19 @@ export class ReaderCore {
       this.#emit(ALL_TABLES);
     }
     return current;
+  }
+
+  /**
+   * この端末の通知の登録の解除待ちの印があるか（docs/decisions/notifications.md の 3・4）。ログアウトと
+   * ユーザーの切り替えで置き、画面が登録を外し終えるまで残る
+   */
+  async isPushUnsubscribePending(): Promise<boolean> {
+    return (await getSetting(this.#db, PUSH_UNSUBSCRIBE_PENDING_KEY)) !== null;
+  }
+
+  /** 解除待ちの印を消す。画面が、登録を作る・外すロックの中で、登録がないと確かめてから呼ぶ */
+  async clearPushUnsubscribePending(): Promise<void> {
+    await deleteSetting(this.#db, PUSH_UNSUBSCRIBE_PENDING_KEY);
   }
 
   /** 今のログインで動いている処理を中断し、新しいログインの中断の合図を返す */
@@ -2020,8 +2043,12 @@ async function clearAll(tx: Executor): Promise<void> {
   await tx.run("delete from synced_settings");
   await clearSavedPages(tx);
   await clearBells(tx);
-  // 本文を置く量の上限は、端末ごとの設定なので残す
-  await tx.run("delete from settings where key <> ?", [CONTENT_STORAGE_LIMIT_KEY]);
+  // 本文を置く量の上限は、端末ごとの設定なので残す。通知の登録の解除待ちの印も、画面が登録を
+  // 外し終えるまで残す（来たユーザーを入れる前に消すときも）
+  await tx.run("delete from settings where key not in (?, ?)", [
+    CONTENT_STORAGE_LIMIT_KEY,
+    PUSH_UNSUBSCRIBE_PENDING_KEY,
+  ]);
 }
 
 /**

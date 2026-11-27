@@ -58,9 +58,14 @@ function setup(
     del?: Error;
     confirm?: Error;
     unsubscribe?: Error;
+    /** 解除待ちの印（core が手元の DB に置く）があるか。Error なら読めない */
+    pending?: boolean | Error;
+    /** 解除待ちの印を消せない */
+    clearPending?: Error;
   } = {},
 ) {
   const events: string[] = [];
+  let pending = options.pending === true;
   let permission = options.permission ?? "default";
   let otherTab = options.otherTab;
   let current: PushSubscriptionLike | null = null;
@@ -146,8 +151,17 @@ function setup(
     clearShownTags: async () => {
       events.push("clear tags");
     },
+    unsubscribePending: async () => {
+      if (options.pending instanceof Error) throw options.pending;
+      return pending;
+    },
+    clearUnsubscribePending: async () => {
+      events.push("clear pending");
+      if (options.clearPending !== undefined) throw options.clearPending;
+      pending = false;
+    },
   };
-  return { env, events, put, subscribed: () => current !== null };
+  return { env, events, put, subscribed: () => current !== null, pending: () => pending };
 }
 
 describe("ブラウザーの見分け", () => {
@@ -302,6 +316,31 @@ describe("この端末を確かめる", () => {
     expect(await checkDevice(revoked.env)).toEqual({ kind: "off", publicKey: KEY });
   });
 
+  test("解除待ちの印がある間は、登録が残っていても受けていないとする。印を読めなければ、登録で決める", async () => {
+    const pending = setup({
+      permission: "granted",
+      subscription: subscription(KEY),
+      pending: true,
+    });
+    expect(await checkDevice(pending.env)).toEqual({ kind: "off", publicKey: KEY });
+    // 確かめるだけで、外さない（外すのは起動したときと、Turn on notifications）
+    expect(pending.subscribed()).toBe(true);
+    expect(pending.pending()).toBe(true);
+    const unavailable = setup({
+      permission: "granted",
+      subscription: subscription(KEY),
+      pending: true,
+      status: { available: false },
+    });
+    expect(await checkDevice(unavailable.env)).toEqual({ kind: "unavailable", subscribed: false });
+    const unreadable = setup({
+      permission: "granted",
+      subscription: subscription(KEY),
+      pending: new Error("読めない"),
+    });
+    expect(await checkDevice(unreadable.env)).toEqual({ kind: "on" });
+  });
+
   test("登録はロックの中で読み、ほかのタブが作り終えた登録を見る", async () => {
     const { env, events } = setup({ permission: "granted", otherTab: "subscribe" });
     expect(await checkDevice(env)).toEqual({ kind: "on" });
@@ -396,6 +435,55 @@ describe("Turn on notifications", () => {
       "PUT /push/registration",
     ]);
     expect(put.map((r) => r.endpoint)).toEqual(["https://push.example/other"]);
+  });
+});
+
+describe("Turn on notifications で、解除待ちの印があるとき", () => {
+  test("残った登録（前の人のもの）を外し、印を消してから、作って送る", async () => {
+    const { env, events, put, pending } = setup({
+      permission: "granted",
+      subscription: subscription(KEY),
+      pending: true,
+    });
+    expect(await turnOn(env, KEY)).toEqual({ kind: "on" });
+    expect(events).toEqual([
+      "requestPermission",
+      "refresh badge",
+      "lock",
+      "getSubscription",
+      "unsubscribe https://push.example/a",
+      "getSubscription",
+      "clear pending",
+      "subscribe 65",
+      "GET /me",
+      "PUT /push/registration",
+    ]);
+    expect(put.map((r) => r.endpoint)).toEqual(["https://push.example/new"]);
+    expect(pending()).toBe(false);
+  });
+
+  test("残った登録がなければ、印を消してから作る", async () => {
+    const { env, events, pending } = setup({ permission: "granted", pending: true });
+    expect(await turnOn(env, KEY)).toEqual({ kind: "on" });
+    expect(events.slice(3, 6)).toEqual(["getSubscription", "getSubscription", "clear pending"]);
+    expect(pending()).toBe(false);
+  });
+
+  test("印を読めない、残った登録を外せない、印を消せないときは、作らずに Retry を出す", async () => {
+    for (const options of [
+      { pending: new Error("読めない") },
+      { pending: true, unsubscribe: new DOMException("外せない", "InvalidStateError") },
+      { pending: true, clearPending: new Error("消せない") },
+    ]) {
+      const { env, events, put } = setup({
+        permission: "granted",
+        subscription: subscription(KEY),
+        ...options,
+      });
+      expect(await turnOn(env, KEY)).toEqual({ kind: "unreachable" });
+      expect(events.filter((event) => event.startsWith("subscribe"))).toEqual([]);
+      expect(put).toEqual([]);
+    }
   });
 });
 
@@ -597,8 +685,10 @@ describe("起動したときの送り直し", () => {
     });
     await resendOnStartup(env);
     expect(events).not.toContain("PUT /push/registration");
-    expect(events.slice(-4)).toEqual([
+    expect(events.slice(-6)).toEqual([
       "unsubscribe https://push.example/a",
+      "getSubscription",
+      "clear pending",
       "close notification",
       "clear tags",
       "refresh badge",
@@ -613,34 +703,123 @@ describe("起動したときの送り直し", () => {
       expect(events).toEqual([]);
     }
   });
+
+  describe("手元を消したあと、登録を外し終える前にタブが閉じていた（解除待ちの印がある）", () => {
+    test("送り直さず、sendo にも聞かずに、ログアウトと同じく外して印を消す", async () => {
+      const { env, events, put, subscribed, pending } = setup({
+        permission: "granted",
+        subscription: subscription(KEY),
+        pending: true,
+      });
+      await resendOnStartup(env);
+      expect(events).toEqual([
+        "lock",
+        "getSubscription",
+        "unsubscribe https://push.example/a",
+        "getSubscription",
+        "clear pending",
+        "close notification",
+        "clear tags",
+        "refresh badge",
+      ]);
+      expect(put).toEqual([]);
+      expect(subscribed()).toBe(false);
+      expect(pending()).toBe(false);
+    });
+
+    test("登録がなくても、出ている通知を閉じ、tag を消して、印を消す", async () => {
+      const { env, events, pending } = setup({ permission: "granted", pending: true });
+      await resendOnStartup(env);
+      expect(events).toEqual([
+        "lock",
+        "getSubscription",
+        "getSubscription",
+        "clear pending",
+        "close notification",
+        "clear tags",
+        "refresh badge",
+      ]);
+      expect(pending()).toBe(false);
+    });
+
+    test("外せなければ、印を残して送り直さない。次の起動で外し直す", async () => {
+      const { env, events, put, pending } = setup({
+        permission: "granted",
+        subscription: subscription(KEY),
+        pending: true,
+        unsubscribe: new DOMException("外せない", "InvalidStateError"),
+      });
+      await resendOnStartup(env);
+      expect(events).not.toContain("clear pending");
+      expect(put).toEqual([]);
+      expect(pending()).toBe(true);
+    });
+
+    test("印を読めなければ、送り直さず、外しもしない", async () => {
+      const { env, events, put, subscribed } = setup({
+        permission: "granted",
+        subscription: subscription(KEY),
+        pending: new Error("読めない"),
+      });
+      await resendOnStartup(env);
+      expect(events).toEqual(["lock"]);
+      expect(put).toEqual([]);
+      expect(subscribed()).toBe(true);
+    });
+  });
 });
 
 describe("ログアウトとユーザーの切り替え", () => {
-  test("登録を外し終えてから、通知を閉じ、覚えた tag を消し、バッジを手元の数で書き直す。sendo には送らない", async () => {
-    const { env, events, subscribed } = setup({
+  test("登録を外し終えてから、解除待ちの印を消し、通知を閉じ、覚えた tag を消し、バッジを手元の数で書き直す。sendo には送らない", async () => {
+    const { env, events, subscribed, pending } = setup({
       permission: "granted",
       subscription: subscription(KEY),
+      pending: true,
     });
     await forgetDevice(env);
     expect(events).toEqual([
       "lock",
       "getSubscription",
       "unsubscribe https://push.example/a",
+      "getSubscription",
+      "clear pending",
       "close notification",
       "clear tags",
       "refresh badge",
     ]);
     expect(subscribed()).toBe(false);
+    expect(pending()).toBe(false);
   });
 
-  test("unsubscribe() が投げても、通知を閉じ、tag を消し、バッジを書き直す", async () => {
-    const { env, events } = setup({
+  test("unsubscribe() が投げても、通知を閉じ、tag を消し、バッジを書き直す。解除待ちの印は残す", async () => {
+    const { env, events, pending } = setup({
       permission: "granted",
       subscription: subscription(KEY),
+      pending: true,
       unsubscribe: new DOMException("外せない", "InvalidStateError"),
     });
     await forgetDevice(env);
     expect(events.slice(-3)).toEqual(["close notification", "clear tags", "refresh badge"]);
+    expect(events).not.toContain("clear pending");
+    expect(pending()).toBe(true);
+  });
+
+  test("解除待ちの印を消せなくても、通知を閉じ、tag を消し、バッジを書き直す", async () => {
+    const { env, events, subscribed } = setup({
+      permission: "granted",
+      subscription: subscription(KEY),
+      pending: true,
+      clearPending: new Error("消せない"),
+    });
+    await forgetDevice(env);
+    expect(events.slice(-3)).toEqual(["close notification", "clear tags", "refresh badge"]);
+    expect(subscribed()).toBe(false);
+  });
+
+  test("使えないブラウザーでも、解除待ちの印を消す（登録を作らない）", async () => {
+    const { env, pending } = setup({ support: "unsupported", pending: true });
+    await forgetDevice(env);
+    expect(pending()).toBe(false);
   });
 });
 
