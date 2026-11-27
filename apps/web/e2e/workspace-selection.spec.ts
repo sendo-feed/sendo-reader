@@ -283,6 +283,15 @@ test("最後の選択が All か 0 件選択なら、新しいタブは All で�
     await expect(tabUi.list.getByText("Public article")).toBeVisible();
   };
 
+  // 写しがなく All で始めたタブは、ほかのタブで選んでから読み込み直しても All のまま
+  const other = await context.newPage();
+  await other.goto("/");
+  const otherUi = workspaceUi(other);
+  await otherUi.choose(otherUi.only("Public"));
+  await page.reload();
+  await expect(ui.choice).toHaveAccessibleName("Workspaces: All workspaces");
+  await other.close();
+
   await ui.choose(ui.only("Public"));
   await ui.choose(async (d) => {
     await d.getByRole("button", { name: "All workspaces", exact: true }).click();

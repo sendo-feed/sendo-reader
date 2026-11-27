@@ -44,7 +44,13 @@ afterEach(() => {
 });
 
 describe("ワークスペースの選択の置き場", () => {
-  it("写しがなければ、新しいタブは All で始まる", () => {
+  it("写しがなければ、新しいタブは All で始まり、All をタブの選択として置く", () => {
+    expect(loadWorkspaceSelection("u1")).toEqual({ ids: undefined, inherited: false });
+    const tab = sessionStorage;
+    // ほかのタブで選んでから読み込み直しても、このタブは All のまま
+    openTab();
+    chooseWorkspaceSelection("u1", ["a"]);
+    vi.stubGlobal("sessionStorage", tab);
     expect(loadWorkspaceSelection("u1")).toEqual({ ids: undefined, inherited: false });
   });
 

@@ -31,7 +31,12 @@ export function loadWorkspaceSelection(userId: string): StoredWorkspaceSelection
   // 写しを変えても、このタブの範囲は広がらない）
   if (pending !== null) return { ids: parseOwnSelection(pending) ?? [], inherited: true };
   const last = loadLastSelection(userId);
-  if (last === undefined) return { ids: undefined, inherited: false };
+  if (last === undefined) {
+    // 写しがなければ All で始め、All をこのタブの選択として置く（読み込み直したときに、その間に
+    // ほかのタブが書いた写しを引き継がない）
+    settleWorkspaceSelection(userId, undefined);
+    return { ids: undefined, inherited: false };
+  }
   try {
     sessionStorage.setItem(pendingPrefix + userId, JSON.stringify(last));
   } catch {
