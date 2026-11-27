@@ -1,7 +1,14 @@
 <script lang="ts">
-  import type { Article } from "@sendo-reader/core";
+  import {
+    type Article,
+    BELL_WORDS_PROBLEMS,
+    parseBellWords,
+    wordBellChange,
+  } from "@sendo-reader/core";
   import { tick, untrack } from "svelte";
+  import { BellList } from "../lib/bells.svelte";
   import { useReader } from "../lib/context";
+  import { describeError } from "../lib/errors";
   import { compactCount, dayLabel, shortTime } from "../lib/format";
   import {
     layout,
@@ -10,6 +17,7 @@
     scrollTopOf,
   } from "../lib/layout.svelte";
   import type { ArticleListState, ListProgress } from "../lib/list.svelte";
+  import { notificationSuggestion } from "../lib/notification-suggestion.svelte";
   import { prefs, type ViewOptions } from "../lib/prefs.svelte";
   import { handleLink, isPlainClick, type ListAnchor, router } from "../lib/router.svelte";
   import { listTitle, translationLabel } from "../lib/translation";
@@ -305,6 +313,53 @@
     if (search === null) clearTimeout(searchTimer);
     return () => clearTimeout(searchTimer);
   });
+
+  /**
+   * 探す言葉のベル（言葉だけのベル。sendo の docs/decisions/notifications.md の 1）。言葉が空なら
+   * 出さない。押したらすぐ出し、手元の DB と操作キューに積む（sendo へは同期で送る）。sendo の上限を
+   * 超える言葉は、積む前に知らせる
+   */
+  const bellList = new BellList(reader.client);
+  const searching = $derived(search !== null);
+  const userId = $derived(reader.user?.id);
+  $effect(() => {
+    if (!searching || userId === undefined) return;
+    return bellList.watch();
+  });
+  const searchBell = $derived.by(() => {
+    if (search === null) return null;
+    const parsed = parseBellWords(search);
+    if (parsed === "empty") return null;
+    if (typeof parsed === "string") return { label: search.trim(), problem: parsed, on: false };
+    const on = bellList.bells.some(
+      (bell) => bell.feedId === null && bell.matchKey === parsed.matchKey,
+    );
+    return { label: parsed.words, words: parsed, problem: null, on };
+  });
+  /** 押して付けられなかった理由（その言葉を探している間だけ出す） */
+  let bellError = $state<{ search: string; message: string } | null>(null);
+
+  async function toggleSearchBell() {
+    if (search === null || searchBell === null) return;
+    const input = search;
+    if (searchBell.problem !== null) {
+      bellError = { search: input, message: BELL_WORDS_PROBLEMS[searchBell.problem] };
+      return;
+    }
+    const words = searchBell.words;
+    const on = !searchBell.on;
+    bellError = null;
+    try {
+      await bellList.change(
+        (bells) => wordBellChange(bells, words, on),
+        () => reader.client.setWordBell(input, on),
+      );
+      // 付けたら、この端末で通知を受けていなければ勧める（docs/decisions/notifications.md の 1）
+      if (on) void notificationSuggestion.offer();
+    } catch (error) {
+      bellError = { search: input, message: describeError(error) };
+    }
+  }
 
   /** Enter か Esc で、入力から抜ける（そのあと j / k で結果を移れる。スマホではキーボードを閉じる） */
   function onSearchKeydown(event: KeyboardEvent & { currentTarget: HTMLInputElement }) {
@@ -808,6 +863,18 @@
         onkeydown={onSearchKeydown}
         use:focusOnOpen
       >
+      {#if searchBell !== null}
+        <button
+          type="button"
+          class="icon-button"
+          aria-label="Bell: {searchBell.label}"
+          aria-pressed={searchBell.on}
+          title={searchBell.on ? "Turn off bell" : "Turn on bell"}
+          onclick={toggleSearchBell}
+        >
+          <Icon name="bell" filled={searchBell.on} />
+        </button>
+      {/if}
     {:else}
       <h2>
         <button type="button" class="to-top" title="Back to top" onclick={scrollToTop}>
@@ -844,6 +911,15 @@
       </button>
     {/if}
   </header>
+  {#if searchBell?.on}
+    <p class="bell-note">
+      <Icon name="bell" filled />
+      <span>「{searchBell.label}」を含む新しい記事を、どのフィードでも知らせます。</span>
+    </p>
+  {/if}
+  {#if bellError !== null && bellError.search === search}
+    <p class="bell-error" role="alert">{bellError.message}</p>
+  {/if}
 
   <!--
     先頭で下に引いたときの、すき間。引いた分だけ一覧を下に押し、まんなかに、回る印だけを出す
@@ -1184,6 +1260,26 @@
     padding: 0.4rem 0.75rem;
     border-radius: 999px;
     background: var(--surface);
+  }
+
+  .bell-note,
+  .bell-error {
+    margin: 0;
+    padding: 0.625rem 1rem;
+    font-size: 0.8125rem;
+    line-height: 1.6;
+  }
+
+  .bell-note {
+    display: flex;
+    gap: 0.5rem;
+    align-items: flex-start;
+    background: var(--selected);
+    color: var(--accent-strong);
+  }
+
+  .bell-error {
+    color: var(--danger);
   }
 
   .empty .hint {

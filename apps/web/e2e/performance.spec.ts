@@ -197,4 +197,30 @@ test.describe("速さの予算", () => {
     console.log(`ベルの反応：${Math.round(elapsed)}ms`);
     expect(elapsed).toBeLessThan(100);
   });
+
+  test("Search のベルを押した反応は 100ms 以内", async ({ page, context }) => {
+    await page.goto("/search?q=%E8%A8%98%E4%BA%8B");
+    const bell = page.getByRole("button", { name: "Bell: 記事", exact: true });
+    await expect(bell).toHaveAttribute("aria-pressed", "false");
+    const cdp = await context.newCDPSession(page);
+    await cdp.send("Emulation.setCPUThrottlingRate", { rate: CPU_SLOWDOWN });
+
+    // 押してから、付いた表示になるまで 100ms 以内
+    const elapsed = await page.evaluate(
+      () =>
+        new Promise<number>((resolve) => {
+          const selector = 'button[aria-label="Bell: 記事"]';
+          const start = performance.now();
+          document.querySelector<HTMLButtonElement>(selector)?.click();
+          const check = () => {
+            if (document.querySelector(selector)?.getAttribute("aria-pressed") === "true") {
+              resolve(performance.now() - start);
+            } else requestAnimationFrame(check);
+          };
+          check();
+        }),
+    );
+    console.log(`Search のベルの反応：${Math.round(elapsed)}ms`);
+    expect(elapsed).toBeLessThan(100);
+  });
 });
