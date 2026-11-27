@@ -17,7 +17,7 @@ export interface AppBadge {
  * また書く（docs/decisions/notifications.md の 11）。
  *
  * 返した関数で、すぐ数え直して書く。通知を許可したときに呼ぶ（iOS では許可の前に書けなかったので、
- * 手元の数が変わっていなくても書き直す）
+ * 手元の数が変わっていなくても書き直す）。登録を外したあと（forget）にも呼ぶ
  */
 export function showUnreadBadge(
   client: Pick<ReaderClient, "countUnread" | "onChange">,

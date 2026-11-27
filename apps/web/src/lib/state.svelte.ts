@@ -165,11 +165,13 @@ export class ReaderState {
    */
   onceSignedIn(run: () => void): void {
     let done = false;
-    $effect.root(() => {
+    const destroy = $effect.root(() => {
       $effect(() => {
         if (done || this.signedIn !== true) return;
         done = true;
         untrack(run);
+        // 効果の中では壊せないので、終わってから壊す（destroy は、まだ代入前のこともある）
+        queueMicrotask(() => destroy());
       });
     });
   }

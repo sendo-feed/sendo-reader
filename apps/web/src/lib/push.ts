@@ -174,6 +174,7 @@ async function currentSubscription(env: PushEnvironment): Promise<PushSubscripti
 
 /** この端末を確かめる（Settings を開いたとき、前に出たとき、ベルを付けたとき） */
 export async function checkDevice(env: PushEnvironment): Promise<DeviceState> {
+  const started = Date.now();
   if (env.support === "ios-home-screen") {
     // ホーム画面に追加する案内も、Web Push を使える Sendo でだけ出す
     const service = await checkService(env);
@@ -184,13 +185,39 @@ export async function checkDevice(env: PushEnvironment): Promise<DeviceState> {
   const [service, readiness] = await Promise.all([checkService(env), env.ready()]);
   if (readiness === "unsupported") return { kind: "unsupported" };
   if (service.kind === "unauthorized" || service.kind === "unreachable") return service;
-  // 登録はロックの中で読む（ほかのタブが作り直している途中の、外したところを見ない）
-  const subscribed =
-    env.permission() === "granted" && (await env.lock(() => currentSubscription(env))) !== null;
+  if (service.kind === "available" && readiness === "timeout") return { kind: "unreachable" };
+  // 登録はロックの中で読む（ほかのタブが作り直している途中の、外したところを見ない）。ほかのタブが
+  // ロックを持ったままのこともある（Safari は bfcache に入ったページのロックを残すことがある）ので、
+  // ready と合わせた上限までに読めなければ、確かめられないとする
+  let subscribed = false;
+  if (env.permission() === "granted") {
+    const read = await beforeDeadline(
+      env.lock(() => currentSubscription(env)),
+      READY_TIMEOUT_MS - (Date.now() - started),
+    );
+    if (read === "timeout") return { kind: "unreachable" };
+    subscribed = read !== null;
+  }
   if (service.kind === "unavailable") return { kind: "unavailable", subscribed };
-  if (readiness === "timeout") return { kind: "unreachable" };
   if (env.permission() === "denied") return { kind: "denied", publicKey: service.publicKey };
   return subscribed ? { kind: "on" } : { kind: "off", publicKey: service.publicKey };
+}
+
+/** task が ms までに終わらなければ timeout を返す（task は止めない） */
+function beforeDeadline<T>(task: Promise<T>, ms: number): Promise<T | "timeout"> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => resolve("timeout"), Math.max(ms, 0));
+    task.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (error: unknown) => {
+        clearTimeout(timer);
+        reject(error);
+      },
+    );
+  });
 }
 
 /** iPhone と iPad の Safari で、ホーム画面に追加していないときの案内（docs/decisions/notifications.md の 2） */

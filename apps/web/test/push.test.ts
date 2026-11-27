@@ -238,9 +238,49 @@ describe("この端末を確かめる", () => {
     expect(await checkDevice(subscribed.env)).toEqual({ kind: "unavailable", subscribed: true });
   });
 
-  test("Service Worker の ready が上限までに返らなければ、確かめられない", async () => {
-    expect(await checkDevice(setup({ readiness: "timeout" }).env)).toEqual({
-      kind: "unreachable",
+  test("Service Worker の ready が上限までに返らなければ、ロックを待たずに、確かめられない", async () => {
+    const { env, events } = setup({
+      readiness: "timeout",
+      permission: "granted",
+      subscription: subscription(KEY),
+    });
+    expect(await checkDevice(env)).toEqual({ kind: "unreachable" });
+    expect(events).not.toContain("lock");
+  });
+
+  describe("ほかのタブがロックを持ったまま返さない", () => {
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    /** ready が readyAfter ミリ秒で返り、ロックはずっと取れない環境で確かめ始める */
+    function check(options: Parameters<typeof setup>[0], readyAfter: number) {
+      vi.useFakeTimers();
+      const { env } = setup(options);
+      env.lock = () => new Promise<never>(() => {});
+      env.ready = () => new Promise((resolve) => setTimeout(() => resolve("ready"), readyAfter));
+      let state: Awaited<ReturnType<typeof checkDevice>> | undefined;
+      void checkDevice(env).then((value) => {
+        state = value;
+      });
+      return () => state;
+    }
+
+    test("ready を待った分も含めて、ちょうど 10 秒で、確かめられないとする", async () => {
+      const state = check({ permission: "granted", subscription: subscription(KEY) }, 4_000);
+      await vi.advanceTimersByTimeAsync(9_999);
+      expect(state()).toBeUndefined();
+      await vi.advanceTimersByTimeAsync(1);
+      expect(state()).toEqual({ kind: "unreachable" });
+    });
+
+    test("Web Push を使えない Sendo でも、上限で確かめられないとする", async () => {
+      const state = check(
+        { status: { available: false }, permission: "granted", subscription: subscription(KEY) },
+        0,
+      );
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(state()).toEqual({ kind: "unreachable" });
     });
   });
 
