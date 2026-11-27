@@ -8,8 +8,15 @@ import type { Bell } from "./models";
 
 /** 付けるベルの組。購読も言葉もないベルは作らない */
 export type BellTarget =
-  | { feedId: string; words: BellWords | null }
-  | { feedId: null; words: BellWords };
+  | { feedId: string; words: null }
+  | { feedId: string | null; words: BellWords };
+
+/** 見えるベルの組 */
+export function bellTarget(bell: Bell): BellTarget {
+  return bell.words === null
+    ? { feedId: bell.feedId, words: null }
+    : { feedId: bell.feedId, words: { words: bell.words, matchKey: bell.matchKey } };
+}
 
 /**
  * 見えるベルへの変更。外すのが先（sendo でも外してから付けるので、上限ちょうどでも付け替え
@@ -31,19 +38,31 @@ export function feedBellChange(visible: readonly Bell[], feedId: string, on: boo
 }
 
 /**
- * 購読のベルを、その言葉の購読 AND 言葉のベルにする（null なら購読だけのベル）。sendo にはベルを
- * 書き換える API がないので、その購読のほかのベルを外して付ける。同じ組のベルがもうあれば付けず、
- * その購読にベルがなければ付ける
+ * manage feed が出す、その購読のベル（1 つ）。いちばんあとに作ったもの（言葉を替えると、替えた
+ * ベルが出たままになる）。なければ undefined
+ */
+export function feedBell(visible: readonly Bell[], feedId: string): Bell | undefined {
+  return visible.findLast((bell) => bell.feedId === feedId);
+}
+
+/**
+ * manage feed が出している購読のベル（feedBell）を、その言葉の購読 AND 言葉のベルにする（null なら
+ * 購読だけのベル。docs/decisions/notifications.md の 13）。sendo にはベルを書き換える API がないので、
+ * 出しているベルを外して付ける。同じ購読のほかのベルは外さない。出しているベルがもうその組なら何も
+ * せず、ほかのベルがその組なら、出しているベルを外すだけ（同じ組を 2 つ作らない）。その購読にベルが
+ * なければ付ける
  */
 export function feedBellWordsChange(
   visible: readonly Bell[],
   feedId: string,
   words: BellWords | null,
 ): BellChange {
-  const current = visible.filter((bell) => bell.feedId === feedId);
-  const same = current.find((bell) => bell.matchKey === (words?.matchKey ?? null));
-  const remove = current.filter((bell) => bell !== same);
-  return same === undefined ? { remove, add: { feedId, words } } : { remove };
+  const matchKey = words?.matchKey ?? null;
+  const shown = feedBell(visible, feedId);
+  if (shown !== undefined && shown.matchKey === matchKey) return { remove: [] };
+  const remove = shown === undefined ? [] : [shown];
+  const exists = visible.some((bell) => bell.feedId === feedId && bell.matchKey === matchKey);
+  return exists ? { remove } : { remove, add: { feedId, words } };
 }
 
 /** 言葉だけのベルを付ける ／ 外す。照合用の言葉が同じなら同じベル（同じベルを 2 つ作らない） */
@@ -75,13 +94,13 @@ export function applyBellChange(
 ): Bell[] {
   const removed = new Set(change.remove);
   const kept = visible.filter((bell) => !removed.has(bell));
-  if (change.add === undefined) return kept;
-  const { feedId, words } = change.add;
-  const common = { ...draft, feedId, subscriptionId: null };
+  const { add } = change;
+  if (add === undefined) return kept;
+  const common = { ...draft, subscriptionId: null };
   return [
     ...kept,
-    words === null
-      ? { ...common, words: null, matchKey: null }
-      : { ...common, words: words.words, matchKey: words.matchKey },
+    add.words === null
+      ? { ...common, feedId: add.feedId, words: null, matchKey: null }
+      : { ...common, feedId: add.feedId, words: add.words.words, matchKey: add.words.matchKey },
   ];
 }

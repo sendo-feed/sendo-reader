@@ -25,8 +25,11 @@
       return feed === undefined ? [] : [{ bell, feed }];
     }),
   );
-  /** 範囲の外の購読のベルがあるか（あることだけ知らせ、名前は出さない） */
-  const hidden = $derived(rows.length < bellList.bells.length);
+  /**
+   * 範囲の外の購読のベルがあるか（あることだけ知らせ、名前は出さない）。範囲の購読を読み終えるまでは
+   * 数えない（読む前は、範囲の購読がないように見える）
+   */
+  const hidden = $derived(reader.workspaceDataReady && rows.length < bellList.bells.length);
 
   function title(bell: Bell, feed: Feed | null): string {
     return feed === null ? (bell.words ?? "") : feedName(feed);
@@ -58,11 +61,11 @@
 
 <section class="bells" aria-labelledby="notifications-bells">
   <h2 id="notifications-bells">Bells</h2>
-  {#if rows.length === 0}
+  {#if bellList.bells.length === 0}
     <p class="note">
       ベルはまだありません。Manage feeds の購読や Search の言葉にベルを付けると、ここに並びます。
     </p>
-  {:else}
+  {:else if rows.length > 0}
     <ul>
       {#each rows as { bell, feed } (bell.id)}
         <li>

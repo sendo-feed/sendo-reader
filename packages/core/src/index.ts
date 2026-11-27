@@ -29,6 +29,7 @@ export {
   type BellChange,
   type BellTarget,
   bellRemoval,
+  feedBell,
   feedBellChange,
   feedBellWordsChange,
   wordBellChange,

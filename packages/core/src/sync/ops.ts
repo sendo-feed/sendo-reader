@@ -1,6 +1,6 @@
 import { ApiError, errorFromBody, type SendoApi } from "../api/client";
 import { toBell, toSavedPage } from "../api/sync-contract";
-import type { BellWords } from "../bell-words";
+import type { BellTarget } from "../bells";
 import type { Executor } from "../db/database";
 import { getSetting, setSetting } from "../db/settings";
 import { requestResync } from "../db/synced";
@@ -69,14 +69,7 @@ export type Operation =
    * 決めた小文字の UUID（オフラインで付けて外しても、外す相手を指せる）。外すときは、押したときに
    * 手元に見えていたベルの ID と、そのベルの組。at は付けた時刻（送るまで手元に見せる作った時刻）
    */
-  | {
-      kind: "setBell";
-      feedId: string | null;
-      words: BellWords | null;
-      bellId: string;
-      on: boolean;
-      at: number;
-    }
+  | ({ kind: "setBell"; bellId: string; on: boolean; at: number } & BellTarget)
   | { kind: "recordArticleOpens"; events: ArticleOpenEvent[] }
   /**
    * 設定を置く ／ 消す（docs/decisions/settings.md）。同じ名前は、put と remove のどちらか一方に

@@ -2,6 +2,7 @@ import { describe, expect, test } from "vitest";
 import {
   ApiError,
   BELL_WORDS_PROBLEMS,
+  feedBell,
   MAX_BELL_WORDS,
   MAX_BELL_WORDS_LENGTH,
   MAX_BELLS,
@@ -387,7 +388,10 @@ describe("購読のベル", () => {
     expect(await core.listBells()).toEqual([]);
   });
 
-  test("同期で届いたベルの形が違えば server として失敗し、手元は変えない", async () => {
+  test.each([
+    ["フィードの ID が文字列でない", { feedId: 1 }],
+    ["購読も言葉もない", { feedId: null, words: null }],
+  ])("同期で届いたベルの形が違えば（%s）server として失敗し、手元は変えない", async (_, patch) => {
     const server = new FakeSendo();
     const feed = server.subscribe({ url: "https://blog.example/feed.xml" });
     server.addBell({ feedId: feed.id });
@@ -399,7 +403,7 @@ describe("購読のベル", () => {
         const response = await server.fetch(input, init);
         if (!new URL((input as Request).url).pathname.endsWith("/sync")) return response;
         const body = (await response.json()) as { bells: Record<string, unknown>[] };
-        body.bells = body.bells.map((bell) => ({ ...bell, feedId: 1 }));
+        body.bells = body.bells.map((bell) => ({ ...bell, ...patch }));
         return new Response(JSON.stringify(body));
       },
     });
@@ -624,6 +628,67 @@ describe("言葉のベル", () => {
     expect(serverTargets(server)).toEqual([{ feedId: feed.id, words: "Go" }]);
     expect(await core.countPending()).toBe(0);
     expect(await bellTargets(core)).toEqual([{ feedId: feed.id, words: "Go" }]);
+  });
+
+  test("同じ購読にベルが 2 つあるとき、言葉を替えると、出しているベル（あとに作ったもの）だけを外して付け、ほかのベルは残す", async () => {
+    const { server, core, feed } = await subscribed();
+    const feedOnly = server.addBell({ feedId: feed.id });
+    server.advance(1);
+    const rust = server.addBell({ feedId: feed.id, words: "Rust" });
+    await core.sync();
+    expect(feedBell(await core.listBells(), feed.id)).toMatchObject({ id: rust.id });
+
+    await core.setFeedBellWords(feed.id, "Go");
+    expect(await bellTargets(core)).toEqual([
+      { feedId: feed.id, words: null },
+      { feedId: feed.id, words: "Go" },
+    ]);
+    expect(feedBell(await core.listBells(), feed.id)).toMatchObject({ words: "Go" });
+    await core.sync();
+    expect(server.bells.get(rust.id)?.deleted).toBe(true);
+    expect(server.bells.get(feedOnly.id)?.deleted).toBe(false);
+    expect(serverTargets(server)).toEqual([
+      { feedId: feed.id, words: null },
+      { feedId: feed.id, words: "Go" },
+    ]);
+  });
+
+  test("同じ購読のほかのベルがもうその組なら、出しているベルを外すだけで、同じ組を 2 つ作らない", async () => {
+    const { server, core, feed } = await subscribed();
+    const feedOnly = server.addBell({ feedId: feed.id });
+    server.advance(1);
+    server.addBell({ feedId: feed.id, words: "Rust" });
+    await core.sync();
+
+    await core.setFeedBellWords(feed.id, "");
+    expect(await core.countPending()).toBe(1);
+    expect(await core.listBells()).toMatchObject([{ id: feedOnly.id }]);
+    await core.sync();
+    expect(server.bellRequests).toEqual([]);
+    expect(serverTargets(server)).toEqual([{ feedId: feed.id, words: null }]);
+  });
+
+  test("言葉を替えるときに付けるほうが断られると（ほかの端末が同時に上限に達した）、外したベルも戻らず、その購読にベルは残らない", async () => {
+    const { server, core, feed } = await subscribed();
+    for (let i = 1; i < MAX_BELLS; i++) server.addBell({ words: `word${i}` });
+    const feedOnly = server.addBell({ feedId: feed.id });
+    await core.sync();
+
+    await core.setFeedBellWords(feed.id, "Rust");
+    // 外したあと、付ける前に、ほかの端末が空いた 1 つにベルを付ける
+    server.onRequest = async (path) => {
+      if (path !== "POST /bells") return;
+      server.onRequest = null;
+      server.addBell({ words: "other" });
+    };
+    const result = await core.sync();
+    expect(result.push.rejected).toMatchObject([
+      { op: { kind: "setBell", feedId: feed.id, words: { words: "Rust" }, on: true } },
+    ]);
+    expect(server.bells.get(feedOnly.id)?.deleted).toBe(true);
+    expect(server.activeBells().filter((bell) => bell.feedId !== null)).toEqual([]);
+    expect(await core.countPending()).toBe(0);
+    expect((await core.listBells()).filter((bell) => bell.feedId !== null)).toEqual([]);
   });
 
   test("一覧から外すと、そのベルだけが外れる（同じ購読のほかのベルは残る）", async () => {

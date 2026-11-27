@@ -162,11 +162,12 @@ export type Bell = {
   id: string;
   /** 鳴らす購読の ID。購読し直すと変わる */
   subscriptionId: string | null;
-  feedId: string | null;
   createdAt: number;
 } & (
-  | { words: null; matchKey: null }
+  | { feedId: string; words: null; matchKey: null }
   | {
+      /** null なら言葉だけのベル（購読も言葉もないベルはない） */
+      feedId: string | null;
       /** 当てる言葉（区切って、空白 1 つでつないだもの。bell-words.ts） */
       words: string;
       /** 照合用の言葉。フィードの ID と照合用の言葉が同じベルは、sendo では同じ組のベル */

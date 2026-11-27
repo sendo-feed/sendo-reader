@@ -4,6 +4,7 @@ import { BELL_WORDS_PROBLEMS, type BellWords, parseBellWords } from "./bell-word
 import {
   type BellChange,
   bellRemoval,
+  bellTarget,
   feedBellChange,
   feedBellWordsChange,
   wordBellChange,
@@ -1046,11 +1047,9 @@ export class ReaderCore {
       }
       const at = this.#now();
       for (const bell of remove) {
-        const words = bell.words === null ? null : { words: bell.words, matchKey: bell.matchKey };
         await this.#enqueue(tx, {
           kind: "setBell",
-          feedId: bell.feedId,
-          words,
+          ...bellTarget(bell),
           bellId: bell.id,
           on: false,
           at,

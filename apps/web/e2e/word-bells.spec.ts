@@ -71,9 +71,9 @@ test.describe("Search のベル", () => {
     await signIn(page);
     await searchBox(page).fill("Azure");
     await expect(searchBell(page, "Azure")).toBeVisible();
-    // 探すのは打ち終えて少し待ってから。その前に押す
+    // 探すのは打ち終えて少し待ってから。その前に押す（ベルの名前が、まだ前の言葉のうちに押す）
     await searchBox(page).pressSequentially(" 障害");
-    await page.getByRole("button", { name: /^Bell:/ }).click();
+    await searchBell(page, "Azure").click();
     await expect(searchBell(page, "Azure 障害")).toHaveAttribute("aria-pressed", "true");
     await syncNow(page);
     expect(serverTargets(server)).toEqual([{ feedId: null, words: "Azure 障害" }]);
@@ -195,7 +195,7 @@ test.describe("manage feed のベルの言葉", () => {
 
     let dialog = await openFeedOptions(page);
     await expect(dialog.getByRole("checkbox", { name: "Notify new articles" })).toBeChecked();
-    const words = dialog.getByRole("textbox", { name: "含む言葉（任意）" });
+    const words = dialog.getByRole("textbox", { name: "Words (optional)" });
     await expect(words).toHaveValue("");
     await words.fill("Rust");
     await words.press("Enter");
@@ -223,6 +223,44 @@ test.describe("manage feed のベルの言葉", () => {
     expect(serverTargets(server)).toEqual([{ feedId: news.id, words: "Go" }]);
   });
 
+  test("同じ購読にベルが 2 つあれば、あとに作ったほうの言葉を出してそれだけを替え、ほかにもあると知らせる。大文字と小文字だけ違う言葉は積まず、保存した形に戻す", async ({
+    page,
+    context,
+  }) => {
+    const { server, news } = seed();
+    const feedOnly = server.addBell({ feedId: news.id });
+    server.advance(1);
+    const rust = server.addBell({ feedId: news.id, words: "Rust" });
+    await routeFakeSendo(context, server);
+    await page.goto("/manage");
+    await signIn(page);
+
+    const dialog = await openFeedOptions(page);
+    const words = dialog.getByRole("textbox", { name: "Words (optional)" });
+    await expect(words).toHaveValue("Rust");
+    await expect(
+      dialog.getByText(
+        "このフィードには、ほかにもベルがあります。Settings の Notifications で見られます。",
+      ),
+    ).toBeVisible();
+
+    await words.fill("rust");
+    await words.press("Enter");
+    await expect(words).toHaveValue("Rust");
+
+    await words.fill("Go");
+    await words.press("Enter");
+    await closeDialog(page);
+    await syncNow(page);
+    expect(server.bells.get(rust.id)?.deleted).toBe(true);
+    expect(server.bells.get(feedOnly.id)?.deleted).toBe(false);
+    expect(serverTargets(server)).toEqual([
+      { feedId: news.id, words: null },
+      { feedId: news.id, words: "Go" },
+    ]);
+    expect(server.bellRequests.map((body) => body.words)).toEqual(["Go"]);
+  });
+
   test("上限を超える言葉は打っている間に知らせて付け替えず、上限ちょうどは付けられる。Notify new articles を外すとベルが外れる", async ({
     page,
     context,
@@ -235,7 +273,7 @@ test.describe("manage feed のベルの言葉", () => {
     await syncNow(page);
 
     const dialog = await openFeedOptions(page);
-    const words = dialog.getByRole("textbox", { name: "含む言葉（任意）" });
+    const words = dialog.getByRole("textbox", { name: "Words (optional)" });
     const eight = Array.from({ length: 8 }, (_, i) => `w${i}`).join(" ");
     await words.fill(`${eight} w8`);
     await expect(dialog.getByRole("alert")).toHaveText("言葉は 8 個まで入れられます。");
@@ -315,7 +353,7 @@ test("Settings の Notifications に付けたベルを並べ、押すとその�
   ]);
 });
 
-test("Settings のベルの一覧には、選んでいないワークスペースの購読の名前を出さない", async ({
+test("Settings のベルの一覧には、選んでいないワークスペースの購読の名前を出さず、あることだけを知らせる", async ({
   page,
   context,
 }) => {
@@ -351,7 +389,15 @@ test("Settings のベルの一覧には、選んでいないワークスペー�
   const region = page.getByRole("region", { name: "Bells" });
   await expect(region.getByRole("listitem")).toHaveText([/Public feed/, /Azure 障害/]);
   await expect(region).not.toContainText("Hidden feed");
-  await expect(region).toContainText(
+  const hidden = region.getByText(
     "選んでいないワークスペースの購読のベルは、ここに出していません。",
   );
+  await expect(hidden).toBeVisible();
+
+  // 出しているベルを外しても、範囲の外のベルがあれば「まだありません」とは出さない
+  await region.getByRole("button", { name: "Turn off bell: Public feed", exact: true }).click();
+  await region.getByRole("button", { name: "Turn off bell: Azure 障害", exact: true }).click();
+  await expect(region.getByRole("listitem")).toHaveCount(0);
+  await expect(hidden).toBeVisible();
+  await expect(region).not.toContainText("ベルはまだありません。");
 });

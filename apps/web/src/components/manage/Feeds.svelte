@@ -4,6 +4,7 @@
     type Feed,
     type FeedFetchTimes,
     type Folder,
+    feedBell,
     feedBellChange,
     feedBellWordsChange,
     feedName,
@@ -113,9 +114,14 @@
     return bellList.bells.some((bell) => bell.feedId === feed.id);
   }
 
-  /** 購読のベルの言葉（購読だけのベルなら空） */
+  /** 出している購読のベル（core の feedBell）の言葉。購読だけのベルなら空 */
   function bellWords(feed: Feed): string {
-    return bellList.bells.find((bell) => bell.feedId === feed.id)?.words ?? "";
+    return feedBell(bellList.bells, feed.id)?.words ?? "";
+  }
+
+  /** 同じ購読に、出しているベルのほかにもベルがあるか（ほかのクライアントで付けたものなど） */
+  function hasOtherBells(feed: Feed): boolean {
+    return bellList.bells.filter((bell) => bell.feedId === feed.id).length > 1;
   }
 
   /** 打っている言葉が sendo の上限を超えていれば、その理由（空は購読だけのベルなので通す） */
@@ -145,14 +151,22 @@
   }
 
   /**
-   * 購読のベルを、その言葉の購読 AND 言葉のベルにする（空なら購読だけのベル）。sendo の上限を
-   * 超える言葉は積まない（理由は入力の下に出している）
+   * 出している購読のベルを、その言葉の購読 AND 言葉のベルにする（空なら購読だけのベル）。sendo の
+   * 上限を超える言葉は積まない（理由は入力の下に出している）。もうその組なら（大文字と小文字だけ
+   * 違うなど）積まず、入力を保存している形に戻す
    */
-  async function setBellWords(feed: Feed, input: string) {
+  async function setBellWords(feed: Feed, field: HTMLInputElement) {
+    const input = field.value;
     const parsed = parseBellWords(input);
     if (typeof parsed === "string" && parsed !== "empty") return;
     const words = parsed === "empty" ? null : parsed;
     message = null;
+    const { remove, add } = feedBellWordsChange(bellList.bells, feed.id, words);
+    if (remove.length === 0 && add === undefined) {
+      field.value = bellWords(feed);
+      wordsDraft = null;
+      return;
+    }
     try {
       await bellList.change(
         (bells) => feedBellWordsChange(bells, feed.id, words),
@@ -486,7 +500,7 @@
           Notify new articles
         </label>
         {#if belled}
-          <label for="feed-bell-words">含む言葉（任意）</label>
+          <label for="feed-bell-words">Words (optional)</label>
           <input
             id="feed-bell-words"
             type="text"
@@ -497,12 +511,17 @@
             aria-describedby="feed-bell-words-note"
             oninput={(event) =>
               (wordsDraft = { feedId: feed.id, value: event.currentTarget.value })}
-            onchange={(event) => setBellWords(feed, event.currentTarget.value)}
+            onchange={(event) => setBellWords(feed, event.currentTarget)}
             onkeydown={onWordsKeydown}
           >
           <p id="feed-bell-words-note" class="words-note">
             スペースで区切ると、すべての言葉を含む記事だけを知らせます。空のときは、新しい記事をすべて知らせます。
           </p>
+          {#if hasOtherBells(feed)}
+            <p class="words-note">
+              このフィードには、ほかにもベルがあります。Settings の Notifications で見られます。
+            </p>
+          {/if}
           {#if wordsProblem !== null}
             <p class="error words-error" role="alert">{BELL_WORDS_PROBLEMS[wordsProblem]}</p>
           {/if}
