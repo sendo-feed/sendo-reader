@@ -23,12 +23,12 @@ const READY_TIMEOUT_MS = 10_000;
 
 /**
  * この端末で通知を受ける操作の、ブラウザーの本物（lib/push.ts の PushEnvironment）。main.ts が
- * connect で、手元のユーザーと、セッションのユーザーが違ったときの扱いと、許可したときの扱いを渡す
+ * connect で、手元のユーザーと、セッションのユーザーが違ったときの扱いと、バッジの書き直し方を渡す
  */
 class PushDevice {
   #user: () => User | null = () => null;
   #onAccountChanged: () => void = () => {};
-  #onGranted: () => void = () => {};
+  #refreshBadge: () => void = () => {};
 
   readonly #env: PushEnvironment = {
     support: browserSupport({
@@ -48,11 +48,8 @@ class PushDevice {
       deleteRegistration: () => account.deletePushRegistration(),
       confirmUser: () => confirmAccount(this.#user(), this.#onAccountChanged),
     },
-    onGranted: () => this.#onGranted(),
+    refreshBadge: () => this.#refreshBadge(),
     clearShownTags: clearTags,
-    clearBadge: async () => {
-      if ("clearAppBadge" in navigator) await navigator.clearAppBadge();
-    },
   };
 
   connect(options: {
@@ -60,12 +57,12 @@ class PushDevice {
     user: () => User | null;
     /** sendo のセッションが、手元のユーザーと違った（同期を頼んで、切り替えを任せる） */
     onAccountChanged: () => void;
-    /** 通知を許可した */
-    onGranted: () => void;
+    /** アプリのバッジを、手元の DB の未読の数で書き直す（lib/app-badge.ts） */
+    refreshBadge: () => void;
   }): void {
     this.#user = options.user;
     this.#onAccountChanged = options.onAccountChanged;
-    this.#onGranted = options.onGranted;
+    this.#refreshBadge = options.refreshBadge;
   }
 
   check(): Promise<DeviceState> {

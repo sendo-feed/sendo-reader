@@ -8,7 +8,7 @@ import { AccountChangedError } from "./account";
  * 手元の DB にも sendo にも、受けるかの印を持たない。登録を作る、送り直す、外すは、タブどうしで同じ
  * ロックを取って 1 つずつにし、ロックの中で登録を読み直してから決める。許可を求めるのはロックの外。
  *
- * 使うものだけを、形で受ける（テストでは、にせものを渡す。本物は push-device.svelte.ts）。
+ * 使うものだけを、形で受ける（テストでは、にせものを渡す。本物は push-device.ts）。
  */
 
 /**
@@ -71,11 +71,10 @@ export interface PushEnvironment {
     /** セッションのユーザーが手元のユーザーと同じかを確かめる。違えば AccountChangedError */
     confirmUser(): Promise<void>;
   };
-  /** 通知を許可した（バッジを書き直す。docs/decisions/notifications.md の 11） */
-  onGranted(): void;
+  /** アプリのバッジを、手元の DB の未読の数で書き直す（docs/decisions/notifications.md の 11） */
+  refreshBadge(): void;
   /** 覚えた通知の tag を消す（docs/decisions/notifications.md の 8） */
   clearShownTags(): Promise<void>;
-  clearBadge(): Promise<void>;
 }
 
 /**
@@ -137,7 +136,9 @@ export async function checkDevice(env: PushEnvironment): Promise<DeviceState> {
   const [service, readiness] = await Promise.all([checkService(env), env.ready()]);
   if (readiness === "unsupported") return { kind: "unsupported" };
   if (service.kind === "unauthorized" || service.kind === "unreachable") return service;
-  const subscribed = env.permission() === "granted" && (await currentSubscription(env)) !== null;
+  // 登録はロックの中で読む（ほかのタブが作り直している途中の、外したところを見ない）
+  const subscribed =
+    env.permission() === "granted" && (await env.lock(() => currentSubscription(env))) !== null;
   if (service.kind === "unavailable") return { kind: "unavailable", subscribed };
   if (readiness === "timeout") return { kind: "unreachable" };
   if (env.permission() === "denied") return { kind: "denied", publicKey: service.publicKey };
@@ -171,13 +172,20 @@ export type TurnOnResult =
 /**
  * Turn on notifications を押したときに呼ぶ。利用者の操作のすぐあとでないと許可の窓を出さない
  * ブラウザーがあるので、待ちを挟まずに許可を求める（ロックの外。許可してあれば窓は出ない）。
- * 許可されたら、ロックの中で登録を読み直してから、作って送る
+ * 許可を求めるのに失敗したら、受けられなかったと返す。許可されたら、ロックの中で登録を読み直して
+ * から、作って送る
  */
 export async function turnOn(env: PushEnvironment, publicKey: string): Promise<TurnOnResult> {
-  const permission = await env.requestPermission();
+  let permission: NotificationPermission;
+  try {
+    permission = await env.requestPermission();
+  } catch {
+    return { kind: "subscribe-failed" };
+  }
   if (permission === "default") return { kind: "dismissed" };
   if (permission === "denied") return { kind: "denied" };
-  env.onGranted();
+  // 許可したら、手元の数が変わっていなくても書き直す（iOS では、許可の前に書けなかった）
+  env.refreshBadge();
   return env.lock(async (): Promise<TurnOnResult> => {
     const registration = await env.registration().catch(() => null);
     if (registration === null) return { kind: "subscribe-failed" };
@@ -278,8 +286,10 @@ export async function resendOnStartup(env: PushEnvironment): Promise<void> {
 
 /**
  * ログアウトとユーザーの切り替えで、この端末の登録を外す（docs/decisions/notifications.md の 4）。
- * unsubscribe() が終わってから、出ている通知を閉じ、覚えた tag とバッジを消す。unsubscribe() が
- * 投げても、閉じて消す。sendo の登録はセッションと一緒に消えるので、DELETE は送らない
+ * unsubscribe() が終わってから、出ている通知を閉じ、覚えた tag を消し、バッジを書き直す。手元の DB を
+ * 消したあとなので、ログアウトなら 0 件で消える。ユーザーの切り替えで次の人の記事がもう届いていれば、
+ * その数を出す（消すと、次に記事の表が変わるまで、次の人の数が出ない）。unsubscribe() が投げても、
+ * 閉じて消す。sendo の登録はセッションと一緒に消えるので、DELETE は送らない
  */
 export async function forgetDevice(env: PushEnvironment): Promise<void> {
   await env.lock(() => forgetLocked(env));
@@ -290,7 +300,7 @@ async function forgetLocked(env: PushEnvironment): Promise<void> {
   try {
     await (await registration?.pushManager.getSubscription())?.unsubscribe();
   } catch {
-    // 外せなくても、通知と tag とバッジは消す
+    // 外せなくても、通知と tag は消し、バッジは書き直す
   }
   try {
     for (const notification of (await registration?.getNotifications()) ?? []) {
@@ -300,7 +310,7 @@ async function forgetLocked(env: PushEnvironment): Promise<void> {
     // 閉じられなくても続ける
   }
   await env.clearShownTags().catch(() => {});
-  await env.clearBadge().catch(() => {});
+  env.refreshBadge();
 }
 
 /** 登録が、この公開鍵で作ったものか（鍵が分からなければ、違うとみなす） */

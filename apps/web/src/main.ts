@@ -67,16 +67,17 @@ if (location.pathname === AUTHORIZE_PATH) {
   pushDevice.connect({
     user: () => state.user,
     onAccountChanged: () => void state.client.syncNow().catch(() => {}),
-    // 通知を許可したら、手元の数が変わっていなくても書き直す（docs/decisions/notifications.md の 11）
-    onGranted: refreshBadge,
+    // 通知を許可したときと、ログアウトとユーザーの切り替えで登録を外したときに書き直す
+    // （docs/decisions/notifications.md の 4・11）
+    refreshBadge,
   });
   // ログアウトとユーザーの切り替えで、この端末の登録を外す（どのタブで起きても届く）
   state.client.onCleared(() => void pushDevice.forget());
   mount(App, { target, context: readerContext(state) });
-  // 起動したら、登録があれば送り直す（sendo は登録をセッションに結ぶ。docs/decisions/notifications.md の 3）
-  void state.init().then(() => {
-    if (state.signedIn) void pushDevice.resend();
-  });
+  // 起動したら、登録があれば送り直す（sendo は登録をセッションに結ぶ。docs/decisions/notifications.md の 3）。
+  // 起動が版の違うタブのために止まったら、止まりが解けてログインしていると分かったときに送る
+  state.onceSignedIn(() => void pushDevice.resend());
+  void state.init();
   // 画像のキャッシュが上限（100MB）を超えていたら、古いものから捨てる（docs/decisions/images.md
   // の 3）。起動してしばらくしてからと、そのあとは一定の間隔で見る（画面の表示は待たせない）
   const trim = () => void trimImageCache().catch(() => {});

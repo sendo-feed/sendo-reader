@@ -9,6 +9,7 @@ import {
   type Workspace,
 } from "@sendo-reader/core";
 import { ProtocolMismatchError, type ReaderClient } from "@sendo-reader/core/web";
+import { untrack } from "svelte";
 import { takeLoginError } from "./login";
 import { loadWorkspaceSelection, saveWorkspaceSelection } from "./workspace-selection";
 
@@ -156,6 +157,21 @@ export class ReaderState {
   async init(): Promise<void> {
     this.loginError = takeLoginError();
     await this.#start();
+  }
+
+  /**
+   * ログインしていると初めて分かったときに、1 回だけ呼ぶ。起動が版の違うタブのために止まったら、
+   * init は先に返るので、止まりが解けて分かったときに呼ぶ
+   */
+  onceSignedIn(run: () => void): void {
+    let done = false;
+    $effect.root(() => {
+      $effect(() => {
+        if (done || this.signedIn !== true) return;
+        done = true;
+        untrack(run);
+      });
+    });
   }
 
   async #start(): Promise<void> {

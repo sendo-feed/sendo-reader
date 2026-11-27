@@ -1,6 +1,7 @@
-import { type BrowserContext, expect, type Locator, type Page, test } from "@playwright/test";
+import { expect, type Locator, type Page, test } from "@playwright/test";
 import { PROTOCOL_VERSION } from "../../../packages/core/src/web/protocol";
 import { FakeSendo, routeFakeSendo, signIn } from "./fake-sendo";
+import { leading, openOtherVersion } from "./other-version";
 
 /**
  * 版の違うタブが開いているときの知らせ（docs/decisions/local-first.md の 5）。版の違うタブの代表の
@@ -20,55 +21,6 @@ function seed() {
 }
 
 /**
- * 版の違うタブの代表を真似るページを開く。代表のロックを頼むところまで待ち、ロックを取ったら
- * 名乗り、本物の代表と同じく同期の様子も送る。version が null なら、番号を付けずに名乗る（この
- * 決まりより前の版）
- */
-async function openOtherVersion(context: BrowserContext, version: number | null): Promise<Page> {
-  const other = await context.newPage();
-  // アプリを動かさない、同じオリジンのページ
-  await other.goto("/manifest.webmanifest");
-  await other.evaluate((version) => {
-    const leaderId = crypto.randomUUID();
-    const peers = new BroadcastChannel("sendo-reader:peers");
-    const leader =
-      version === null ? { type: "leader", leaderId } : { type: "leader", version, leaderId };
-    const status = {
-      type: "status",
-      ...(version === null ? {} : { version }),
-      status: {
-        signedIn: true,
-        user: null,
-        syncing: false,
-        lastSyncedAt: null,
-        error: null,
-        pending: 0,
-        logoutPending: false,
-        savedPageError: null,
-      },
-    };
-    const announce = () => {
-      peers.postMessage(leader);
-      peers.postMessage(status);
-    };
-    let isLeader = false;
-    peers.addEventListener("message", (event: MessageEvent<{ type: string }>) => {
-      if (isLeader && event.data.type === "hello") announce();
-    });
-    const granted = new Promise<void>((resolve) => {
-      void navigator.locks.request("sendo-reader:leader", () => {
-        isLeader = true;
-        announce();
-        resolve();
-        return new Promise(() => {});
-      });
-    });
-    Object.assign(window, { peers, granted, announce });
-  }, version);
-  return other;
-}
-
-/**
  * 真似たページに、もう一度名乗らせ、同期の様子を送らせる。番号の合わない代表の同期の様子では、
  * 知らせが消えないことを確かめる（届く順の保証はないので、少し待ってから確かめる。ワーカーで
  * 止めることは、core のテストが届く順の保証のある形で確かめている）
@@ -76,11 +28,6 @@ async function openOtherVersion(context: BrowserContext, version: number | null)
 async function announceAgain(other: Page, tab: Page): Promise<void> {
   await other.evaluate(() => (window as unknown as { announce: () => void }).announce());
   await tab.waitForTimeout(300);
-}
-
-/** 真似たページが代表のロックを取るまで待つ */
-async function leading(other: Page): Promise<void> {
-  await other.evaluate(() => (window as unknown as { granted: Promise<void> }).granted);
 }
 
 /** ログインし、記事の一覧が出るまで待つ（手元の DB にログインしたユーザーと記事が入る） */

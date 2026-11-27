@@ -1,5 +1,6 @@
 import { type BrowserContext, expect, type Page, test } from "@playwright/test";
 import { FakeSendo, routeFakeSendo, signIn } from "./fake-sendo";
+import { leading, openOtherVersion } from "./other-version";
 
 /**
  * この端末で通知を受ける（docs/decisions/notifications.md の 1〜4）を、本番のビルドと本番の CSP で確かめる。
@@ -242,6 +243,33 @@ test("起動したら、残っている登録を sendo に送り直す", async (
   await expect.poll(() => server.pushRegistrations.size).toBe(1);
   // 起動したことで許可を求め直さない
   expect((await stubState(page))?.requests).toBe(1);
+});
+
+test("起動が版の違うタブのために止まったら、止まりが解けてログインが分かったときに送り直す", async ({
+  page,
+  context,
+}) => {
+  const server = new FakeSendo();
+  await routeFakeSendo(context, server);
+  await stubPush(context);
+  await openNotifications(page);
+  await turnOnButton(page).click();
+  await expect(page.getByText("この端末で通知を受けています。")).toBeVisible();
+  server.pushRegistrations.clear();
+  await page.close();
+
+  const other = await openOtherVersion(context, null);
+  await leading(other);
+  const tab = await context.newPage();
+  await tab.goto("/");
+  await expect(tab.getByRole("alert")).toContainText("古い版の画面が、ほかのタブで開いています");
+  await tab.waitForTimeout(300);
+  expect(server.pushRegistrations.size).toBe(0);
+
+  await other.close();
+  await expect(tab.getByRole("button", { name: "Sign out", exact: true })).toBeVisible();
+  await expect.poll(() => server.pushRegistrations.size).toBe(1);
+  expect((await stubState(tab))?.requests).toBe(1);
 });
 
 test("ログアウトすると、この端末の登録を外し、出ている通知と覚えた tag も消す。sendo の登録はセッションと一緒に消える", async ({

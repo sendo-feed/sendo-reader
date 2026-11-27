@@ -40,8 +40,8 @@ function setup(
   options: {
     support?: PushEnvironment["support"];
     permission?: NotificationPermission;
-    /** requestPermission が返す答え */
-    answer?: NotificationPermission;
+    /** requestPermission が返す答え。Error なら投げる */
+    answer?: NotificationPermission | Error;
     readiness?: ServiceWorkerReadiness;
     subscription?: PushSubscriptionLike | null;
     /** subscribe で作る登録の endpoint。null なら断る */
@@ -83,6 +83,7 @@ function setup(
     permission: () => permission,
     requestPermission: async () => {
       events.push("requestPermission");
+      if (options.answer instanceof Error) throw options.answer;
       permission = options.answer ?? permission;
       return permission;
     },
@@ -139,12 +140,9 @@ function setup(
         if (options.confirm !== undefined) throw options.confirm;
       },
     },
-    onGranted: () => events.push("granted"),
+    refreshBadge: () => events.push("refresh badge"),
     clearShownTags: async () => {
       events.push("clear tags");
-    },
-    clearBadge: async () => {
-      events.push("clear badge");
     },
   };
   return { env, events, put, subscribed: () => current !== null };
@@ -261,6 +259,12 @@ describe("この端末を確かめる", () => {
     const revoked = setup({ permission: "default", subscription: subscription(KEY) });
     expect(await checkDevice(revoked.env)).toEqual({ kind: "off", publicKey: KEY });
   });
+
+  test("登録はロックの中で読み、ほかのタブが作り終えた登録を見る", async () => {
+    const { env, events } = setup({ permission: "granted", otherTab: "subscribe" });
+    expect(await checkDevice(env)).toEqual({ kind: "on" });
+    expect(events).toEqual(["GET /push", "lock", "other tab: subscribe", "getSubscription"]);
+  });
 });
 
 describe("Turn on notifications", () => {
@@ -272,7 +276,7 @@ describe("Turn on notifications", () => {
     expect(await result).toEqual({ kind: "on" });
     expect(events).toEqual([
       "requestPermission",
-      "granted",
+      "refresh badge",
       "lock",
       "getSubscription",
       "subscribe 65",
@@ -292,6 +296,12 @@ describe("Turn on notifications", () => {
     const denied = setup({ answer: "denied" });
     expect(await turnOn(denied.env, KEY)).toEqual({ kind: "denied" });
     expect(denied.events).toEqual(["requestPermission"]);
+  });
+
+  test("許可を求めるのに失敗したら、ロックを取らずに受けられなかったと返す", async () => {
+    const { env, events } = setup({ answer: new TypeError("requestPermission がない") });
+    expect(await turnOn(env, KEY)).toEqual({ kind: "subscribe-failed" });
+    expect(events).toEqual(["requestPermission"]);
   });
 
   test("ブラウザーが登録を断ったら、送らずに受けられなかったと返す", async () => {
@@ -336,7 +346,7 @@ describe("Turn on notifications", () => {
     expect(await turnOn(env, KEY)).toEqual({ kind: "on" });
     expect(events).toEqual([
       "requestPermission",
-      "granted",
+      "refresh badge",
       "lock",
       "other tab: subscribe",
       "getSubscription",
@@ -457,7 +467,7 @@ describe("起動したときの送り直し", () => {
       "unsubscribe https://push.example/a",
       "close notification",
       "clear tags",
-      "clear badge",
+      "refresh badge",
     ]);
     expect(subscribed()).toBe(false);
   });
@@ -472,7 +482,7 @@ describe("起動したときの送り直し", () => {
 });
 
 describe("ログアウトとユーザーの切り替え", () => {
-  test("登録を外し終えてから、通知を閉じ、覚えた tag とバッジを消す。sendo には送らない", async () => {
+  test("登録を外し終えてから、通知を閉じ、覚えた tag を消し、バッジを手元の数で書き直す。sendo には送らない", async () => {
     const { env, events, subscribed } = setup({
       permission: "granted",
       subscription: subscription(KEY),
@@ -484,18 +494,18 @@ describe("ログアウトとユーザーの切り替え", () => {
       "unsubscribe https://push.example/a",
       "close notification",
       "clear tags",
-      "clear badge",
+      "refresh badge",
     ]);
     expect(subscribed()).toBe(false);
   });
 
-  test("unsubscribe() が投げても、通知を閉じ、tag とバッジを消す", async () => {
+  test("unsubscribe() が投げても、通知を閉じ、tag を消し、バッジを書き直す", async () => {
     const { env, events } = setup({
       permission: "granted",
       subscription: subscription(KEY),
       unsubscribe: new DOMException("外せない", "InvalidStateError"),
     });
     await forgetDevice(env);
-    expect(events.slice(-3)).toEqual(["close notification", "clear tags", "clear badge"]);
+    expect(events.slice(-3)).toEqual(["close notification", "clear tags", "refresh badge"]);
   });
 });
