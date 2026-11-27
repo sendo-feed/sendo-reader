@@ -202,7 +202,7 @@ export function runReaderWorker(options: ReaderWorkerOptions = {}): void {
         if (leader !== null) onVisible(leader);
         return;
       case "cleared":
-        if (leader === null) toTab({ type: "cleared" });
+        if (leader === null && message.version === version) toTab({ type: "cleared" });
         return;
     }
   });

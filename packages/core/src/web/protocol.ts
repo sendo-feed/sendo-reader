@@ -218,9 +218,8 @@ export type WorkerMessage =
  * result（失敗の name と peerVersion を含む）、call の from と id と version の形は、番号を上げても
  * 変えない。
  *
- * cleared は、番号を上げずに足した種類（docs/decisions/notifications.md の 4）。古い版のワーカーは
- * 知らない種類として捨てる。番号を確かめずに受ける（ユーザーが替わったことは、版によらない）。
- * 形を変えるときは、別の種類にする
+ * cleared も、changed、status と同じく、番号の合う代表のものだけを画面に渡す（版の違うタブは、
+ * 版が合うまで受けない。docs/decisions/notifications.md の 4）
  */
 export type PeerMessage =
   | { type: "call"; version?: number; from: string; id: number; method: Method; args: unknown[] }
