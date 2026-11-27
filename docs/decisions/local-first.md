@@ -1,11 +1,11 @@
 # ローカルファースト
 
 - 状態：提案中
-- 関連：[UI とツール](ui.md)、[記事の翻訳](translation.md)、[コンテナ版](container.md)、[アカウントの画面](account.md)、[画像](images.md)、[記事の中の X の投稿](embeds.md)、sendo の[差分同期](https://github.com/sendo-feed/sendo/blob/main/docs/decisions/sync.md)・[ユーザーと認証](https://github.com/sendo-feed/sendo/blob/main/docs/decisions/accounts.md)・[古い記事の片付け](https://github.com/sendo-feed/sendo/blob/main/docs/decisions/retention.md)、[技術構成](https://github.com/sendo-feed/sendo/blob/main/docs/tech-deck.md)（方針 03・06）
+- 関連：[UI とツール](ui.md)、[記事の翻訳](translation.md)、[コンテナ版](container.md)、[アカウントの画面](account.md)、[画像](images.md)、[記事の中の X の投稿](embeds.md)、[通知](notifications.md)、sendo の[差分同期](https://github.com/sendo-feed/sendo/blob/main/docs/decisions/sync.md)・[ユーザーと認証](https://github.com/sendo-feed/sendo/blob/main/docs/decisions/accounts.md)・[古い記事の片付け](https://github.com/sendo-feed/sendo/blob/main/docs/decisions/retention.md)、[技術構成](https://github.com/sendo-feed/sendo/blob/main/docs/tech-deck.md)（方針 03・06）
 
 ## 決定
 
-1. **ローカルファーストで動く。** 画面はネットワークを待たない。読み書きは手元の SQLite に対して行い、sendo とは同期で揃える。例外は、sendo にしかないものを扱うアカウントの画面（トークンと許可の管理、OAuth の許可の画面）で、[アカウントの画面](account.md)で決める。記事の翻訳を頼む操作も、sendo が訳すので、sendo に届かないとできない（[記事の翻訳](translation.md)の 6）。
+1. **ローカルファーストで動く。** 画面はネットワークを待たない。読み書きは手元の SQLite に対して行い、sendo とは同期で揃える。例外は、sendo にしかないものを扱うアカウントの画面（トークンと許可の管理、OAuth の許可の画面）で、[アカウントの画面](account.md)で決める。記事の翻訳を頼む操作も、sendo が訳すので、sendo に届かないとできない（[記事の翻訳](translation.md)の 6）。この端末で通知を受ける操作（Settings と、ベルを付けたときの勧め）も、sendo とプッシュサービスに届かないとできない（[通知](notifications.md)の 1・3）。
 2. **同期とローカル DB のロジックは、すべて `packages/core` に置く。** core は UI のフレームワークにも `apps/` にも依存しない。SQLite には core の DB の窓口（インターフェース）越しに触れ、Web の実装（下の Wasm）と、ネイティブの実装（Capacitor で包むとき）を差し替えられるようにする。スキーマとマイグレーションは SQL で書き、どのプラットフォームでも同じにする。
 3. **同期は sendo の[差分同期](https://github.com/sendo-feed/sendo/blob/main/docs/decisions/sync.md)に従う。** 決まりはそちらが正で、ここには書き写さない。reader の側では、特に次を守る。
    - カーソルの中身は解釈せず、受け取ったものをそのまま送り返す
@@ -87,7 +87,7 @@
 - **Trusted Types を強制する**（`require-trusted-types-for 'script'`）。許すポリシーは、Svelte が作るもの（`svelte-trusted-html`）と、ワーカーの URL を自分のオリジンに限るものだけにする。対応していないブラウザでは効かないので、ほかの対策と重ねる。
 - **記事のデータを HTML として出さない。** `{@html}` を使わず、URL は http ／ https を確かめてから `href` に入れる（[UI とツール](ui.md)の守る規約）。
 - **秘密を外に出さない。** sendo が返す秘密（発行したアクセストークンなど）は、画面に一度出すだけにし、手元の DB、ログ、エラーの表示、URL、Service Worker のキャッシュに入れない。画像の URL に付く署名は、sendo が配信用に署名した URL であることを示す。画像の取得にはセッションが要る。
-- **ログアウトで消す。** ログアウトしたら、手元の DB と、画像のキャッシュ（[画像](images.md)の 4）をまとめて消す（決定の 6）。ユーザーが替わって手元の DB を消すときも、同じく消す。
+- **ログアウトで消す。** ログアウトしたら、手元の DB と、画像のキャッシュ（[画像](images.md)の 4）をまとめて消す（決定の 6）。ユーザーが替わって手元の DB を消すときも、同じく消す。この端末の通知の登録、覚えた通知の `tag`、出ている通知も、同じときに外して消し、アプリのバッジは数え直す（[通知](notifications.md)の 4）。
 
 ## 理由
 

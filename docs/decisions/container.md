@@ -1,7 +1,7 @@
 # コンテナ版
 
 - 状態：提案中
-- 関連：[UI とツール](ui.md)（4。配信と中継、手元の開発）、[記事の中の X の投稿](embeds.md)（3。隔離フレームの配り方と設定）、[ローカルファースト](local-first.md)（6 のログイン、「記事の本文」、「ページの守り」）、[アカウントの画面](account.md)（5 の OAuth の許可の画面）、sendo の[テックスタック](https://github.com/sendo-feed/sendo/blob/main/docs/decisions/tech-stack.md)（2）・[コンテナ版](https://github.com/sendo-feed/sendo/blob/main/docs/decisions/container.md)・[MCP サーバー](https://github.com/sendo-feed/sendo/blob/main/docs/decisions/mcp.md)（3・4）
+- 関連：[UI とツール](ui.md)（4。配信と中継、手元の開発）、[記事の中の X の投稿](embeds.md)（3。隔離フレームの配り方と設定）、[ローカルファースト](local-first.md)（6 のログイン、「記事の本文」、「ページの守り」）、[アカウントの画面](account.md)（5 の OAuth の許可の画面）、[通知](notifications.md)（1 の Web Push の有無）、[プッシュの受信と、押したとき](push-receive.md)（1 の `sw.js`）、sendo の[テックスタック](https://github.com/sendo-feed/sendo/blob/main/docs/decisions/tech-stack.md)（2）・[コンテナ版](https://github.com/sendo-feed/sendo/blob/main/docs/decisions/container.md)・[MCP サーバー](https://github.com/sendo-feed/sendo/blob/main/docs/decisions/mcp.md)（3・4）
 
 sendo-reader は、[sendo のコンテナ版](https://github.com/sendo-feed/sendo/blob/main/docs/decisions/container.md)と並べて、コンテナだけで動かす。reader が公式の画面と中継を提供し、ログインや MCP の OAuth の許可も同じオリジンで扱う。
 
@@ -22,7 +22,7 @@ sendo-reader は、[sendo のコンテナ版](https://github.com/sendo-feed/send
    - Google Reader 互換 API の廃止後の一覧：`/api`、`/api/`（の下すべて）、`/mcp`、`/.well-known/oauth-protected-resource/mcp`、`/.well-known/oauth-authorization-server`、`/oauth/token`、`/oauth/register`、`/healthz`
    - [Sendo の Google Reader 互換 API の廃止](https://github.com/sendo-feed/sendo/blob/main/docs/decisions/greader.md)に合わせて、Sendo で入口が削除されたら `/accounts/ClientLogin` と `/reader/api/0/` 以下を同じ一覧から外す。
    - 一覧にないパスには、静的なファイルか、なければ `index.html` を返す（SPA）
-   - 一覧は 1 か所に置き、コンテナのサーバー、Service Worker のページの移動の横取り（`navigateFallbackDenylist`）、手元の Vite の dev サーバーの中継（[UI とツール](ui.md)の 4）が同じものを使う。ブラウザでこれらのパスを開いたときに、Service Worker が `index.html` を返さないようにする
+   - 一覧は 1 か所に置き、コンテナのサーバー、Service Worker のページの移動の横取り（`index.html` を返す道から除く一覧）、手元の Vite の dev サーバーの中継（[UI とツール](ui.md)の 4）が同じものを使う。ブラウザでこれらのパスを開いたときに、Service Worker が `index.html` を返さないようにする
    - 画面のルートは、一覧と重ねない。`/oauth/authorize` は画面（許可の画面）で、`/oauth/token` と `/oauth/register` は sendo。`/oauth/` で始まるパスをまとめて回さない
    - sendo が外に出すパスを足したら、この一覧にも足す。CI で、sendo の `main` の実際のルートと一覧を突き合わせる
    - `/healthz` は sendo の生死を答える。外から `https://reader.example.com/healthz` を見ると、reader と sendo をつないだ全体を確かめられる
@@ -38,7 +38,7 @@ sendo-reader は、[sendo のコンテナ版](https://github.com/sendo-feed/send
    - X の投稿の隔離フレームを使うときだけ、設定 `X_EMBED_ORIGIN`（隔離フレームのオリジン）を足す。このホスト名への要求には、隔離フレームのページだけを返し、sendo には中継しない。未設定なら、この機能は出ない（[記事の中の X の投稿](embeds.md)の 3）
 5. **静的なファイルは、次のように返す。**
    - `apps/web/security-headers.ts` のヘッダーを、静的なファイルのすべての応答に付ける。手元の Vite の dev サーバー・preview も同じところから付け、別に書き写さない。例外は、隔離フレームのホスト名への応答で、隔離フレームのページのヘッダーを付ける（[記事の中の X の投稿](embeds.md)の 2）
-   - `X_EMBED_ORIGIN` を設定したときは、起動時に、メモリーに読んだ `index.html` に隔離フレームのオリジンの `<meta>` を足し、CSP に `frame-src` を足し、`sw.js` の中の `index.html` の版の印を書き換える。書き換える場所が見つからなければ起動しない。未設定なら、ビルドしたものをそのまま返す（[記事の中の X の投稿](embeds.md)の 3）
+   - `X_EMBED_ORIGIN` を設定したときは、起動時に、メモリーに読んだ `index.html` に隔離フレームのオリジンの `<meta>` を足し、CSP に `frame-src` を足し、`sw.js` の中の `index.html` の版の印（形は[プッシュの受信と、押したとき](push-receive.md)の 1）を書き換える。書き換える場所が見つからなければ起動しない。未設定なら、ビルドしたものをそのまま返す（[記事の中の X の投稿](embeds.md)の 3）
    - キャッシュは、毎回確かめさせる（`Cache-Control: public, max-age=0, must-revalidate` と ETag で、変わっていなければ 304）。Service Worker（`sw.js`）が新しい版を見つけられるように、長く持たせない
    - JS、CSS、wasm などは、ブラウザが受けられれば圧縮して返す（brotli か gzip）
 6. **reader のコンテナのヘルスチェック（イメージの `HEALTHCHECK`）は、reader 自身が返す `/`（`index.html`）を見る。** `/healthz` は sendo に中継するので、reader のコンテナで見ると sendo の生死を見ることになる。reader のためだけのパスは足さない（sendo のパスと重なるおそれを増やさない）。
@@ -47,6 +47,7 @@ sendo-reader は、[sendo のコンテナ版](https://github.com/sendo-feed/send
    - sendo はページ本文の抽出と言語判定を常に動かす（sendo の同じ決定の 1、2）。reader は、機能の有無を事前に確かめずに全文を取り、取得に失敗したときは表示中の本文か要約を残す（[ローカルファースト](local-first.md)の「記事の本文」）
    - 翻訳の表示と操作は、差分同期で記事ごとに届く翻訳の項目と状態に従う（[記事の翻訳](translation.md)の 1、4、5）
    - Discord の設定画面は、`GET /api/v1/integrations/discord` の `available` が true のとき、接続状態に応じて接続か新規購読の操作を出す。設定を外して `available` が false になっても、接続が残っていれば連携解除を出し、購読済みのチャンネルには購読解除も出す
+   - Web Push は、`GET /api/v1/push` の `available` が true のとき、この端末で受ける操作を出す。設定を外して `available` が false になっても、この端末の登録が残っていれば、使えないことと、切る操作を出す。404（Web Push に対応する前の Sendo）は、`available` が false と同じに扱う（[通知](notifications.md)の 1〜3）
    - Service Worker に残った古い版の画面が `GET /api/v1/features` を呼んで 404 を受けたときは、全文の取得の操作を出さずに動き続ける。現行の画面への切り替えは[UI とツール](ui.md)の 5 に従う
 9. **テストは Node で動かす。** 中継するパスの振り分け、中継（ヘッダー、`Set-Cookie`、リダイレクト、ストリーム、WebSocket の Upgrade）、静的なファイルのヘッダー、`X_EMBED_ORIGIN` を設定したときの値の確かめ・振り分け・書き換えを、偽の sendo を相手に Vitest で確かめる。CI では、PR でイメージが作れて動くことを確かめ、`main` に入ったらイメージを出す（sendo と同じ形）。
 

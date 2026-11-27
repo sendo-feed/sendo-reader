@@ -50,8 +50,8 @@ Sendo の公式リーダー。`packages/core`（同期エンジン）と `apps/w
   - `src/`：画面。`main.ts` が入口、`App.svelte` が一番外の部品
     - `db.worker.ts`：DB と同期を持つワーカーの入口（`@sendo-reader/core/web/worker` を動かすだけ）
     - `lib/reader.ts`：ワーカーを起こす。`lib/trusted.ts` の Trusted Types の `sendo-worker` のポリシーで、自分のオリジンの URL だけを許す（Service Worker の登録も同じ）
-    - Service Worker（vite-plugin-pwa、`vite.config.ts`）：アプリの外枠と SQLite の wasm をキャッシュし、ネットワークがなくても起動する。Trusted Types の都合で、Workbox の実行部分は `sw.js` に入れている（`importScripts` を使わない）
-    - `lib/app-update.ts`：新しい版への切り替え（`docs/decisions/ui.md` の 5）。前に出たときと一定の間隔で新しい版を確かめ、替わったら、画面が裏にある間か次に前に出たときに読み込み直す。前に出ている間は、新しい版に替わったことを画面で知らせる（出す場所は `ui.md` の 5。`lib/update-notice.svelte.ts`、`components/UpdateReady.svelte`）。読み込み直すと消えるものを出す画面を足したら、パスなら `app-update.ts` の `canReloadPage` に、パスで分からないもの（窓など）なら出している間 `lib/reload-guard.svelte.ts` の `reloadGuard.hold()` で印を付ける（自動の読み込み直しと知らせの両方が使う）
+    - Service Worker（vite-plugin-pwa、`vite.config.ts`）：アプリの外枠と SQLite の wasm をキャッシュし、ネットワークがなくても起動する。Trusted Types の都合で、`importScripts` を使わず、Workbox の部品も含めて 1 つの `sw.js` にまとめる。push と通知を押したときの処理は、injectManifest に移して自分で書く（`docs/decisions/push-receive.md` の 1〜4）。移しても、今のキャッシュ、画像のキャッシュ、新しい版への切り替え（`docs/decisions/ui.md` の 5）を保つ
+    - `lib/app-update.ts`：新しい版への切り替え（`docs/decisions/ui.md` の 5）。前に出たときと一定の間隔で新しい版を確かめ、替わったら、画面が裏にある間か次に前に出たときに読み込み直す。前に出ている間は、新しい版に替わったことを画面で知らせる（出す場所は `ui.md` の 5。`lib/update-notice.svelte.ts`、`components/UpdateReady.svelte`）。読み込み直すと消えるものを出す画面を足したら、パスなら `app-update.ts` の `canReloadPage` に、パスで分からないもの（窓など）なら出している間 `lib/reload-guard.svelte.ts` の `reloadGuard.hold()` で印を付ける（自動の読み込み直しと知らせの両方が使う）。自動で読み込み直す前に `sessionStorage` に印を置き、前に出たときは読み込み直すかを先に決めてから、消えた通知を比べる（`docs/decisions/push-receive.md` の 4）
     - `lib/back-forward-cache.ts`：reader の外へページごと移る前（`ReaderState` の `leave`。Google のログイン、Discord の連携）と、ページが bfcache に入るときに DB のワーカーを止め、bfcache から戻ったら読み込み直す。Safari はワーカーごとページを止めて残すので、代表のロックを持ったまま、次に開いたページを待たせる。reader の外へ移る操作を足したら `leave` を使う
     - `e2e/`：画面を通したテスト（Playwright）
     - `lib/state.svelte.ts`：画面の状態（フォルダ、フィード、未読の数、同期の様子）。手元の表が変わったら読み直す
@@ -67,7 +67,7 @@ Sendo の公式リーダー。`packages/core`（同期エンジン）と `apps/w
     - 画面は `@sendo-reader/core/web` の窓口だけを使い、DB や sendo の API に直接触れない
   - `server/`：reader のコンテナのサーバー（`docs/decisions/container.md`）。画面を配る唯一の形（Cloudflare では動かさない）。Node で動き、ここだけ `node:*` を使ってよい。`assets.ts` が画面のビルドを起動するときにメモリーに読み、`static.ts` が決まった応答（ヘッダー、ETag、圧縮、SPA）で返し、`proxy.ts` が sendo のパスを書き換えずに中継する（WebSocket の Upgrade は `websocket.ts`）。依存ごと esbuild で 1 つのファイルにまとめる（イメージに `node_modules` を入れない）
   - `x-embed/`：X の投稿の隔離フレームのページ（`index.html` と `embed.js`。`docs/decisions/embeds.md`）。画面のビルド（`dist`）には入れず、サーバーのバンドルに文字として取り込み（`server/x-embed-page.ts`）、コンテナのサーバー（と dev ／ preview）が、`X_EMBED_ORIGIN` のホスト名の `/` と `/embed.js` でだけ返す。CSP は `security-headers.ts` の `xEmbedPageHeaders`（Trusted Types と style 属性は使えないので、見た目は CSSOM で付ける）
-  - `sendo-paths.ts`：sendo に中継するパスの一覧。Service Worker の `navigateFallbackDenylist` と、手元の Vite の dev サーバーの中継も同じものを使う。sendo が外に出すパスを足したらここに足し、画面のルートはここと重ねない（`/oauth/authorize` は画面、`/oauth/token` は sendo）
+  - `sendo-paths.ts`：sendo に中継するパスの一覧。Service Worker が `index.html` を返す道から除く一覧と、手元の Vite の dev サーバーの中継も同じものを使う。sendo が外に出すパスを足したらここに足し、画面のルートはここと重ねない（`/oauth/authorize` は画面、`/oauth/token` は sendo）
   - `security-headers.ts`：CSP などのヘッダー。dev サーバー・preview と、本番のコンテナのサーバーの両方に使う
   - `test/`：ヘッダーと、新しい版への切り替えのテスト。`test/server/` はコンテナのサーバーのテストで、偽の sendo と reader のサーバーを本物の HTTP で動かして確かめる
 - `scripts/`：手元と CI で動かす道具（Node で動く。`node:*` を使ってよい）
@@ -99,11 +99,12 @@ Conventional Commits を土台にする。全文は https://github.com/sendo-fee
 
 - 同期とローカル DB のロジックはすべて `packages/core` に入れる。`packages/core` は UI のフレームワーク（`svelte`）と `apps/` に依存しない（Biome の `noRestrictedImports` で検査している）
 - `packages/core`、`apps/web/src` では `node:*` を使わない（ブラウザで動くため。Biome で検査している）。コンテナのサーバー（`apps/web/server`）は Node で動くので使ってよい
-- 画面はネットワークを待たない。読み書きはローカル DB に対して行い、サーバーとは同期で揃える。例外は、sendo にしかないものを扱うアカウントの画面（設定、OAuth の許可の画面。`docs/decisions/account.md`）で、手元の DB に置かず、core の API の窓口（`createAccountApi`）で sendo に聞く。記事の翻訳を頼む操作も、sendo に届かないとできない（`docs/decisions/translation.md` の 6）
+- 画面はネットワークを待たない。読み書きはローカル DB に対して行い、サーバーとは同期で揃える。例外は、sendo にしかないものを扱うアカウントの画面（設定、OAuth の許可の画面。`docs/decisions/account.md`）で、手元の DB に置かず、core の API の窓口（`createAccountApi`）で sendo に聞く。記事の翻訳を頼む操作も、sendo に届かないとできない（`docs/decisions/translation.md` の 6）。この端末で通知を受ける操作（Settings と、ベルを付けたときの勧め）も、sendo とプッシュサービスに届かないとできない（`docs/decisions/notifications.md` の 1・3）
 - OpenAPI から生成したファイルは手で直さない。sendo の OpenAPI を直して生成し直す
 - 記事のデータ（タイトル、要約、本文）は信頼できないデータとして扱う
   - `{@html}` を使わない（Biome の `noSvelteAtHtmlTags` で検査している）。本文の HTML は、sendo がサニタイズしてあっても信頼しない。core で、通すタグと属性だけの木にしてから（`src/content/parse.ts`）、専用の部品（`ArticleBody.svelte`）で出す。HTML の文字列を、画面に渡さない（`innerHTML` や `DOMParser` に入れない）
   - URL は `toSafeHttpUrl`（`packages/core`）を通し、http ／ https のものだけを `href` に入れる
+  - 通知の中身（タイトルと本文）は、Service Worker が文字のまま通知に出すだけにする。画面に渡さず、手元の DB、IndexedDB、ログ、Service Worker のキャッシュに入れない。IndexedDB に覚えるのは `tag` と覚えた時刻だけ（`docs/decisions/push-receive.md` の 6）
   - 画像の URL（記事の `thumbnailUrl`、フィードの `iconUrl`）は、sendo から受け取ったものをそのまま使う。組み立てない、書き換えない、中身（`url=` や `sig=`）を読まない（`docs/decisions/images.md`）。同じオリジンを指すかは、同期で受けるときに `toSameOriginUrl` で確かめる
 - CSP を緩めない（`apps/web/security-headers.ts`）。インラインのスクリプト、`eval`、テンプレートの `style` 属性（本番の CSP で止まる。`style:` ディレクティブか CSS のクラスを使う）、ほかのオリジンへの通信を使わない。緩める必要が出たら、`docs/decisions/local-first.md` を直してから変える。例外は、`frame-src` に X の投稿の隔離フレームのオリジンを 1 つ足すことだけ（`docs/decisions/embeds.md`）
 - ログインは sendo のセッションのクッキーで行う（`docs/decisions/local-first.md` の 6）。リクエストに `Authorization` を付けない。アクセストークンなど sendo が返す秘密は、画面に一度出すだけにし、手元の DB、ログ、エラーの表示、URL、Service Worker のキャッシュに入れない
@@ -158,7 +159,7 @@ PR の説明に `Closes #番号` があるときは、その Issue を読む。�
 レビューは日本語で書く。いまは2人で試作を繰り返している段階なので、捨てる前提の試作の完成度や、書き方の好みは指摘しなくてよい（整形と lint は Biome に任せる）。次の観点を優先する。
 
 1. **core と画面の境界**：`packages/core` が UI のフレームワークや `apps/` に依存していないか。同期やデータのロジックが `apps/` に漏れていないか
-2. **ローカルファースト**：画面の操作がネットワークの応答を待っていないか（アカウントの画面と、翻訳を頼む操作を除く）。オフラインで操作したときに、操作キューと楽観的更新で正しく戻せるか
+2. **ローカルファースト**：画面の操作がネットワークの応答を待っていないか（アカウントの画面と、翻訳を頼む操作、この端末で通知を受ける操作を除く）。オフラインで操作したときに、操作キューと楽観的更新で正しく戻せるか
 3. **速さの予算**：JS が gzip 後 100KB を超えそうな依存の追加や、操作の反応が 100ms を超えそうな処理がないか
 4. **セキュリティ**：記事のデータの HTML の出し方（XSS）、URL のスキームの確かめ漏れ、CSP や Trusted Types を緩める変更、秘密（発行したトークンなど）の置き場所、ログへの秘密情報の出力、状態を変えるリクエストを同じオリジンから送っているか
 5. **生成物**：OpenAPI から生成したファイルを手で直していないか
