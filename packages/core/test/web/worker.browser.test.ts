@@ -413,20 +413,28 @@ describe("版の違うタブが混ざったとき", () => {
     const { open, openLegacyLeader } = world();
     const legacy = await openLegacyLeader();
     const tab = open();
+    let cleared = 0;
+    tab.client.onCleared(() => {
+      cleared += 1;
+    });
     await expectMismatch(tab.client.createFolder("Tech"), null);
     await expectMismatch(tab.client.isSignedIn(), null);
     expect(legacy.received).toEqual([]);
 
     legacy.post({ type: "changed", tables: ["folders"] });
     legacy.post({ type: "status", status: { signedIn: true } });
+    legacy.post({ type: "cleared" });
     legacy.post({ type: "changed", version: PROTOCOL_VERSION + 1, tables: ["feeds"] });
     legacy.post({ type: "status", version: PROTOCOL_VERSION + 1, status: { signedIn: true } });
+    // 手元を消した知らせも、版が合うまで受けない（docs/decisions/notifications.md の 4）
+    legacy.post({ type: "cleared", version: PROTOCOL_VERSION + 1 });
     // 同じ送り手の知らせは、送った順に届く。番号の合う知らせが画面に届いたら、その前の知らせも
     // タブのワーカーに届いている
     const marker = { signedIn: false, marker: true };
     legacy.post({ type: "status", version: PROTOCOL_VERSION, status: marker });
     await vi.waitFor(() => expect(tab.statuses).toEqual([marker]));
     expect(tab.changes).toEqual([]);
+    expect(cleared).toBe(0);
     // 頼みを送っていれば、たいていはここまでに届いている（届く順の保証はない）
     expect(legacy.received).toEqual([]);
   });
