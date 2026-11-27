@@ -47,7 +47,7 @@ export function feedBell(visible: readonly Bell[], feedId: string): Bell | undef
 
 /**
  * manage feed が出している購読のベル（feedBell）を、その言葉の購読 AND 言葉のベルにする（null なら
- * 購読だけのベル。docs/decisions/notifications.md の 13）。sendo にはベルを書き換える API がないので、
+ * 購読だけのベル。docs/decisions/notifications.md の 7）。sendo にはベルを書き換える API がないので、
  * 出しているベルを外して付ける。同じ購読のほかのベルは外さない。出しているベルがもうその組なら何も
  * せず、ほかのベルがその組なら、出しているベルを外すだけ（同じ組を 2 つ作らない）。その購読にベルが
  * なければ付ける
