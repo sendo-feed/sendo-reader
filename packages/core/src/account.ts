@@ -22,12 +22,12 @@ export type DiscordIntegration = components["schemas"]["DiscordIntegration"];
 export type DiscordSubscription = DiscordIntegration["subscriptions"][number];
 
 /**
- * この Sendo で Web Push を使えるか（GET /push。sendo の notifications.md の 19）。使えるなら、
+ * この Sendo で Web Push を使えるか（GET /push。sendo の web-push.md の 3）。使えるなら、
  * PushManager.subscribe の applicationServerKey に渡す VAPID の公開鍵（base64url）
  */
 export type PushStatus = { available: true; publicKey: string } | { available: false };
 
-/** この端末の Web Push の登録（PushSubscription.toJSON() の形。sendo の notifications.md の 20） */
+/** この端末の Web Push の登録（PushSubscription.toJSON() の形。sendo の web-push.md の 4） */
 export type PushRegistration = components["schemas"]["PushRegistration"];
 
 /** アクセストークン（中身は含まない。中身は発行したときにしか受け取れない） */
