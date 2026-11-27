@@ -169,6 +169,23 @@ describe("ワークスペースの選択の置き場", () => {
     expect(loadWorkspaceSelection("u1")).toEqual({ ids: ["a"], inherited: true });
   });
 
+  it("照らした選択をタブに置けなければ印を残し、読み込み直したら印の範囲から照らし直す", () => {
+    chooseWorkspaceSelection("u1", ["a"]);
+    openTab();
+    expect(loadWorkspaceSelection("u1")).toEqual({ ids: ["a"], inherited: true });
+    const tab = sessionStorage;
+    const setItem = vi.spyOn(tab, "setItem").mockImplementation(() => {
+      throw new Error("quota");
+    });
+    settleWorkspaceSelection("u1", ["a"]);
+    setItem.mockRestore();
+    // その間に、ほかのタブが写しを広げる
+    openTab();
+    chooseWorkspaceSelection("u1", ["a", "b"]);
+    vi.stubGlobal("sessionStorage", tab);
+    expect(loadWorkspaceSelection("u1")).toEqual({ ids: ["a"], inherited: true });
+  });
+
   it("localStorage を使えなければ、引き継がずに All で始まる", () => {
     vi.stubGlobal("localStorage", {
       getItem: () => {

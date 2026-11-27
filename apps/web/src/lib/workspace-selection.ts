@@ -72,18 +72,13 @@ function normalize(ids: readonly string[]): readonly string[] {
 }
 
 /**
- * タブの選択として置き、照らす前の印を外す。All も置く（読み込み直したときに、写しから引き継ぎ
- * 直さない）
+ * 照らし終えた選択を、タブの選択として置き、照らす前の印を外す。All も置く（読み込み直したときに、
+ * 写しから引き継ぎ直さない）。置けなければ印を残す（読み込み直したら、印の範囲から照らし直す）
  */
 export function settleWorkspaceSelection(userId: string, ids: readonly string[] | undefined): void {
-  // 印は先に外す（タブの選択を置けなくても、読み込み直したときに印の範囲から続けない）
-  try {
-    sessionStorage.removeItem(pendingPrefix + userId);
-  } catch {
-    // 外せない環境では、読めもしない
-  }
   try {
     sessionStorage.setItem(prefix + userId, JSON.stringify(ids ?? null));
+    sessionStorage.removeItem(pendingPrefix + userId);
   } catch {
     // タブが開いている間の選択はメモリにある。保存を許可されない環境では読み込み直したときだけ失う。
   }
@@ -94,12 +89,19 @@ export function settleWorkspaceSelection(userId: string, ids: readonly string[] 
  * （新しいタブは All で始まる）
  */
 export function chooseWorkspaceSelection(userId: string, ids: readonly string[] | undefined): void {
+  // 印は先に外す（タブの選択を置けなくても、読み込み直したときに、選ぶ前の印の範囲から続けない。
+  // 写しには選んだ範囲が入る）
+  try {
+    sessionStorage.removeItem(pendingPrefix + userId);
+  } catch {
+    // 外せない環境では、読めもしない
+  }
   settleWorkspaceSelection(userId, ids);
   try {
     if (ids === undefined || ids.length === 0) localStorage.removeItem(lastPrefix + userId);
     else localStorage.setItem(lastPrefix + userId, JSON.stringify(ids));
   } catch {
-    // 写せなければ前の写しを消し、新しいタブは All で始める（前の、広いかもしれない範囲で始めない）
+    // 写せなければ前の写しを消し、新しいタブは All で始める（最後の選択でない古い写しを使わない）
     try {
       localStorage.removeItem(lastPrefix + userId);
     } catch {
