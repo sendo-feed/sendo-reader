@@ -71,12 +71,47 @@ test.describe("Search のベル", () => {
     await signIn(page);
     await searchBox(page).fill("Azure");
     await expect(searchBell(page, "Azure")).toBeVisible();
-    // 探すのは打ち終えて少し待ってから。その前に押す（ベルの名前が、まだ前の言葉のうちに押す）
+    // 探すのは打ち終えて少し待ってから。ベルの名前は、探すのを待たずに入力にある言葉になる
     await searchBox(page).pressSequentially(" 障害");
-    await searchBell(page, "Azure").click();
+    await searchBell(page, "Azure 障害").click({ timeout: 150 });
     await expect(searchBell(page, "Azure 障害")).toHaveAttribute("aria-pressed", "true");
     await syncNow(page);
     expect(serverTargets(server)).toEqual([{ feedId: null, words: "Azure 障害" }]);
+  });
+
+  test("空の検索から打ってすぐ、探し終えるのを待たずに、Tab でもクリックでもベルを押せる", async ({
+    page,
+    context,
+  }) => {
+    const { server } = seed();
+    await routeFakeSendo(context, server);
+    await page.goto("/search");
+    await signIn(page);
+    await expect(searchBox(page)).toBeFocused();
+    // 探すのは打ち終えて少し待ってから（200ms）。その前に、Tab で移って押す
+    await searchBox(page).pressSequentially("Azure");
+    await page.keyboard.press("Tab");
+    await expect(searchBell(page, "Azure")).toBeFocused();
+    await page.keyboard.press("Space");
+    await expect(searchBell(page, "Azure")).toHaveAttribute("aria-pressed", "true");
+    await expect(
+      page.getByText("「Azure」を含む新しい記事を、どのフィードでも知らせます。"),
+    ).toBeVisible();
+    // 押したら、待っていた検索も流す
+    await expect(page).toHaveURL(/[?&]q=Azure$/);
+
+    // 空に戻して探し終えてから、打ってすぐクリックで押す
+    await searchBox(page).fill("");
+    await expect(page).toHaveURL(/\/search$/);
+    await expect(page.getByRole("button", { name: /^Bell:/ })).toHaveCount(0);
+    await searchBox(page).pressSequentially("Rust");
+    await searchBell(page, "Rust").click({ timeout: 150 });
+    await expect(searchBell(page, "Rust")).toHaveAttribute("aria-pressed", "true");
+    await syncNow(page);
+    expect(serverTargets(server)).toEqual([
+      { feedId: null, words: "Azure" },
+      { feedId: null, words: "Rust" },
+    ]);
   });
 
   test("言葉が空ならベルを出さない", async ({ page, context }) => {

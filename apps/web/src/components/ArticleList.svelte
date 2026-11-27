@@ -303,6 +303,7 @@
 
   function onSearchInput(event: Event & { currentTarget: HTMLInputElement }) {
     const value = event.currentTarget.value;
+    typed = value;
     clearTimeout(searchTimer);
     searchTimer = setTimeout(() => onsearch(value), 200);
   }
@@ -326,9 +327,14 @@
     if (!searching || userId === undefined) return;
     return bellList.watch();
   });
-  let searchInput = $state<HTMLInputElement>();
-  const searchBell = $derived(search === null ? null : bellFor(search));
-  /** 押して付けられなかった理由（その言葉を探している間だけ出す） */
+  /**
+   * 入力にある言葉（探すのを待っている間も、打った値）。ベルを出すか、その見込み、押したときの言葉は、
+   * これで決める（空の検索から打ってすぐ押せるように）。探す言葉が替わったら（探し終えた、戻る・
+   * 進む、別の画面から来た）、それにそろう
+   */
+  let typed = $derived(search);
+  const searchBell = $derived(typed === null ? null : bellFor(typed));
+  /** 押して付けられなかった理由（その言葉が入力にある間だけ出す） */
   let bellError = $state<{ search: string; message: string } | null>(null);
 
   /** その言葉のベル。言葉が空なら null */
@@ -344,7 +350,7 @@
 
   async function toggleSearchBell() {
     // 打ってすぐ押したら、待っている検索を先に流し、入力にある言葉に付ける
-    const input = searchInput?.value ?? search;
+    const input = typed;
     if (input === null) return;
     if (input !== search) {
       clearTimeout(searchTimer);
@@ -877,7 +883,6 @@
         oninput={onSearchInput}
         onkeydown={onSearchKeydown}
         use:focusOnOpen
-        bind:this={searchInput}
       >
       {#if searchBell !== null}
         <button
@@ -933,7 +938,7 @@
       <span>「{searchBell.label}」を含む新しい記事を、どのフィードでも知らせます。</span>
     </p>
   {/if}
-  {#if bellError !== null && bellError.search === search}
+  {#if bellError !== null && bellError.search === typed}
     <p class="bell-error" role="alert">{bellError.message}</p>
   {/if}
 
