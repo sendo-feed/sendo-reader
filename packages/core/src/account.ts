@@ -34,9 +34,9 @@ export type PushRegistration = components["schemas"]["PushRegistration"];
 export interface AccessToken {
   id: string;
   name: string;
-  /** reader はリーダーアプリと REST API 用、mcp は MCP サーバー（/mcp）用 */
+  /** reader は REST API 用、mcp は MCP サーバー（/mcp）用 */
   purpose: TokenPurpose;
-  /** MCP 用の範囲。リーダーアプリ用は空 */
+  /** MCP 用の範囲。REST API 用は空 */
   scopes: Scope[];
   createdAt: number;
   /** 最後に使った時刻（sendo は 1 時間ごとにしか書き直さない）。使っていなければ null */
@@ -46,7 +46,7 @@ export interface AccessToken {
 export interface NewAccessToken {
   name: string;
   purpose: TokenPurpose;
-  /** MCP 用の範囲。既定は read だけ。リーダーアプリ用には付けない */
+  /** MCP 用の範囲。既定は read だけ。REST API 用には付けない */
   scopes?: Scope[];
 }
 
