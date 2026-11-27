@@ -21,6 +21,8 @@ import {
 import { NavigationRoute, registerRoute } from "workbox-routing";
 import { CacheFirst } from "workbox-strategies";
 import { SENDO_NAVIGATION_DENYLIST } from "../sendo-paths";
+import { notificationPath, type PushEventLike, readPush } from "../src/lib/notification";
+import { rememberTag } from "../src/lib/notification-store";
 
 declare const self: ServiceWorkerGlobalScope;
 
@@ -87,3 +89,42 @@ registerRoute(
   }),
   "GET",
 );
+
+/** 宣言型の push の navigate（TypeScript の型にまだない） */
+type NotificationOptionsWithNavigate = NotificationOptions & { navigate: string };
+
+/**
+ * push を受けたら、届いた中身で通知を出し直す（docs/decisions/notifications.md の 6）。reader を開いて
+ * いても出す（userVisibleOnly の登録は、push のたびに通知を出す約束）。中身は通知に出すだけにし、
+ * どこにも残さない（10）。push の中では setAppBadge を呼ばない（iOS で、宣言型の push の中で呼ぶと
+ * 返らず、通知ごと出ない。閉じている間のバッジは、sendo の app_badge でブラウザーが書く。11）
+ */
+self.addEventListener("push", (event) => {
+  event.waitUntil(showPush(event));
+});
+
+async function showPush(event: PushEvent): Promise<void> {
+  const { declarative, payload } = readPush(event as unknown as PushEventLike);
+  if (payload === null) {
+    // 宣言型では出し直さない（宣言した通知が出る）。読まないブラウザーでは、「Sendo」とだけ出し、
+    // 押したら reader の先頭を開く
+    if (!declarative) {
+      const fallback: NotificationOptionsWithNavigate = {
+        navigate: new URL("/", self.location.origin).href,
+      };
+      await self.registration.showNotification("Sendo", fallback);
+    }
+    return;
+  }
+  // navigate は届いた値を使わず、tag の記事の ID から、自分のオリジンの URL を組み立てる。宣言型の
+  // push で出し直すときに navigate がないと、例外になる
+  const options: NotificationOptionsWithNavigate = {
+    tag: payload.tag,
+    data: payload.data,
+    navigate: new URL(notificationPath(payload.tag), self.location.origin).href,
+  };
+  if (payload.body !== undefined) options.body = payload.body;
+  await self.registration.showNotification(payload.title, options);
+  // 出し終えてから覚える（出せなかった通知を、押されたものと取り違えない。8）
+  await rememberTag(payload.tag, Date.now()).catch(() => {});
+}
