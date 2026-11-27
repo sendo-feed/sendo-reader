@@ -123,8 +123,6 @@ describe("sendo への中継", () => {
     ["GET", "/.well-known/oauth-protected-resource/mcp"],
     ["POST", "/oauth/token"],
     ["POST", "/oauth/register"],
-    ["POST", "/accounts/ClientLogin"],
-    ["GET", "/reader/api/0/user-info"],
     ["GET", "/healthz"],
   ])("%s %s は sendo に届く", async (method, path) => {
     const { sendo, reader } = await start(ok);
@@ -134,6 +132,19 @@ describe("sendo への中継", () => {
     });
     expect(response.status).toBe(200);
     expect(sendo.received.map((request) => request.url)).toEqual([path]);
+  });
+
+  test("廃止した Google Reader 互換 API を Sendo に中継しない", async () => {
+    const { sendo, reader } = await start(ok);
+
+    const login = await fetch(`${reader.origin}/accounts/ClientLogin`, {
+      method: "POST",
+      body: new URLSearchParams({ Email: "reader@example.com" }),
+    });
+    expect(login.status).toBe(405);
+    const items = await fetch(`${reader.origin}/reader/api/0/user-info`);
+    expect(await items.text()).toBe(INDEX_HTML);
+    expect(sendo.received).toEqual([]);
   });
 
   test("画面のパスは sendo に届かない（/oauth/authorize は画面）", async () => {
