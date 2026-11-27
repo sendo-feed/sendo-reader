@@ -154,7 +154,7 @@ export type SavedPage = {
 };
 
 /**
- * 通知のベル（sendo の docs/decisions/notifications.md の 1〜5）。購読だけのベルは words が null、
+ * 通知のベル（sendo の docs/decisions/notifications.md の 1〜7）。購読だけのベルは words が null、
  * 言葉だけのベルは feedId と subscriptionId が null
  */
 export type Bell = {
@@ -162,11 +162,18 @@ export type Bell = {
   id: string;
   /** 鳴らす購読の ID。購読し直すと変わる */
   subscriptionId: string | null;
-  feedId: string | null;
-  /** 当てる言葉（sendo が区切って、空白 1 つでつないだもの） */
-  words: string | null;
   createdAt: number;
-};
+} & (
+  | { feedId: string; words: null; matchKey: null }
+  | {
+      /** null なら言葉だけのベル（購読も言葉もないベルはない） */
+      feedId: string | null;
+      /** 当てる言葉（区切って、空白 1 つでつないだもの。bell-words.ts） */
+      words: string;
+      /** 照合用の言葉。フィードの ID と照合用の言葉が同じベルは、sendo では同じ組のベル */
+      matchKey: string;
+    }
+);
 
 /**
  * 記事の本文の中の要素。本文の HTML（信頼できない）を、通すと決めたタグと属性だけの木にしたもの

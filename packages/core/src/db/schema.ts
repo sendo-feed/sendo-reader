@@ -346,6 +346,24 @@ const migrations: readonly (readonly string[])[] = [
     `create index pending_feed_bells_idx on pending_ops (key, id)
        where kind = 'setFeedBell'`,
   ],
+  [
+    // 言葉のベル（sendo の docs/decisions/notifications.md の 6）。購読と照合用の言葉が同じベルは
+    // 同じ組なので、届いた行にも照合用の言葉を置く（小文字にする決まりが SQLite の lower と違うので、
+    // 置くときに core で作る。bell-words.ts）
+    "alter table bells add column match_key text",
+    // 前の版で置いた言葉のベルには照合用の言葉がない。消して、次の同期で最初から取り直す
+    `insert into settings (key, value)
+       select 'sync.resync', '1' where exists (select 1 from bells where words is not null)
+       on conflict (key) do nothing`,
+    "delete from bells where words is not null",
+    // 購読のベルの操作（setFeedBell）を、購読と言葉の組のベルの操作（setBell。鍵は組。購読だけの
+    // 組の鍵はフィードの ID のまま）に移す
+    `update pending_ops set kind = 'setBell',
+       payload = json_set(payload, '$.kind', 'setBell', '$.words', null)
+     where kind = 'setFeedBell'`,
+    "drop index pending_feed_bells_idx",
+    "create index pending_bells_idx on pending_ops (key, id) where kind = 'setBell'",
+  ],
 ];
 
 export const SCHEMA_VERSION = migrations.length;

@@ -1,3 +1,5 @@
+import { parseBellWords } from "../src/bell-words";
+
 /**
  * テスト用の偽の sendo。差分同期の決定（sendo の docs/decisions/sync.md）と、sendo の OpenAPI
  * （src/api/openapi.json の /sync と /articles/mark-read）に沿って、手元のメモリーで動く。
@@ -22,9 +24,10 @@
  *   same-origin のものだけを受ける
  * - 行はユーザーごとに分けない（どのユーザーでも同じ行を返す。手元を消すかの確かめに使う）
  *
- * 通知のベル（sendo の docs/decisions/notifications.md の 1〜5）は、付ける・外す・一覧と、同期の
+ * 通知のベル（sendo の docs/decisions/notifications.md の 1〜7）は、付ける・外す・一覧と、同期の
  * includeBells に答える。購読をやめると、その購読のベルに外した印を付ける（sendo のトリガーと同じ）。
- * 言葉は空白で区切ってつなぎ直すだけにする（NFKC と小文字の照合は見ない）
+ * 言葉は sendo と同じ決まり（sendo と同じ値で確かめた src/bell-words.ts）で受け、同じ組かは
+ * 照合用の言葉で見分ける
  *
  * アカウントの画面のための、アクセストークン（発行・一覧・取り消し）と OAuth の許可（一覧・
  * 取り消し、許可の画面の確かめと決定）にも、sendo と同じ形で答える。認可のリクエストは、
@@ -45,6 +48,8 @@ export interface BellRow {
   subscriptionId: string | null;
   feedId: string | null;
   words: string | null;
+  /** 照合用の言葉（同期と API では返さない） */
+  matchKey: string | null;
   createdAt: number;
   deleted: boolean;
   seq: number;
@@ -450,14 +455,17 @@ export class FakeSendo {
     }
   }
 
-  /** ほかの端末でベルを付けたことにする（購読は、そのフィードの今の購読） */
+  /** ほかの端末でベルを付けたことにする（購読は、そのフィードの今の購読。言葉は sendo と同じ形にする） */
   addBell(input: { feedId?: string; words?: string; id?: string }): BellRow {
     const feed = input.feedId === undefined ? undefined : this.#mustGet(this.feeds, input.feedId);
+    const words = input.words === undefined ? null : parseBellWords(input.words);
+    if (typeof words === "string") throw new Error(`言葉を受けられない：${words}`);
     const row: BellRow = {
       id: input.id ?? crypto.randomUUID(),
       subscriptionId: feed?.subscriptionId ?? null,
       feedId: feed?.id ?? null,
-      words: input.words ?? null,
+      words: words?.words ?? null,
+      matchKey: words?.matchKey ?? null,
       createdAt: this.now,
       deleted: false,
       seq: this.#bump("bells"),
@@ -1048,12 +1056,16 @@ export class FakeSendo {
       this.bellRequests.push(body);
       const { id, feedId } = body;
       const words =
-        typeof body.words === "string" ? body.words.trim().split(/\s+/).join(" ") : undefined;
+        body.words === undefined
+          ? null
+          : typeof body.words === "string"
+            ? parseBellWords(body.words)
+            : "invalid";
       if (
-        (feedId === undefined && words === undefined) ||
+        (feedId === undefined && words === null) ||
         (id !== undefined && (typeof id !== "string" || !UUID.test(id))) ||
         (feedId !== undefined && typeof feedId !== "string") ||
-        words === ""
+        typeof words === "string"
       ) {
         return error(400, "invalid_request", "invalid bell");
       }
@@ -1063,7 +1075,8 @@ export class FakeSendo {
       }
       const subscriptionId = feed?.subscriptionId ?? null;
       const same = this.activeBells().find(
-        (row) => row.subscriptionId === subscriptionId && row.words === (words ?? null),
+        (row) =>
+          row.subscriptionId === subscriptionId && row.matchKey === (words?.matchKey ?? null),
       );
       if (same !== undefined) return json(200, { bell: bellJson(same) });
       if (this.activeBells().length >= this.maxBells) {
@@ -1074,7 +1087,7 @@ export class FakeSendo {
       }
       const created = this.addBell({
         ...(feed === undefined ? {} : { feedId: feed.id }),
-        ...(words === undefined ? {} : { words }),
+        ...(words === null ? {} : { words: words.words }),
         ...(id === undefined ? {} : { id }),
       });
       return json(201, { bell: bellJson(created) });

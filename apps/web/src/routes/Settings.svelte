@@ -1,5 +1,6 @@
 <script lang="ts">
   import Appearance from "../components/settings/Appearance.svelte";
+  import Bells from "../components/settings/Bells.svelte";
   import Discord from "../components/settings/Discord.svelte";
   import Grants from "../components/settings/Grants.svelte";
   import Notifications from "../components/settings/Notifications.svelte";
@@ -129,11 +130,12 @@
           {/key}
         {:else if category === "Notifications"}
           <p class="note">
-            ベルを付けたフィードに新しい記事が来たら、この端末に知らせます。ベルは同期で、ほかの端末と共有します。
+            ベルを付けたフィードと言葉に新しい記事が来たら、この端末に知らせます。ベルは同期で、ほかの端末と共有します。
           </p>
           {#key reader.user?.id}
             {#if reader.user !== null}
               <Notifications />
+              <Bells />
             {/if}
           {/key}
         {:else if category === "Integrations"}

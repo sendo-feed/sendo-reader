@@ -14,6 +14,7 @@
  * 組み立てる。sendo が使う項目の形を変えたら、ここが型チェックで止まる。
  */
 
+import { bellMatchKey } from "../bell-words";
 import {
   type Bell,
   DEVICE_TYPES,
@@ -38,6 +39,9 @@ type ParsedSyncArticle =
   | (Omit<Extract<Schemas["SyncArticle"], { deleted: false }>, "translation"> & {
       translation: ParsedTranslation | null;
     });
+type ParsedSyncBell =
+  | Extract<Schemas["SyncBell"], { deleted: true }>
+  | (ParsedBell & { deleted: false });
 type ParsedSyncWorkspace =
   | Extract<Schemas["SyncWorkspace"], { deleted: true }>
   | (Omit<Extract<Schemas["SyncWorkspace"], { deleted: false }>, "isDefault"> & {
@@ -78,7 +82,7 @@ export function toSyncPage(body: unknown): SyncPage {
       changes.workspaces !== undefined && changes.defaultWorkspaceOnSubscribe === true,
     bells:
       changes.bells?.map((row) =>
-        row.deleted ? row : { ...row, createdAt: Date.parse(row.createdAt) },
+        row.deleted ? row : { ...toLocalBell(row), deleted: false as const },
       ) ?? null,
     cursor: changes.cursor,
     hasMore: changes.hasMore,
@@ -150,7 +154,7 @@ function parseSyncChanges(body: unknown): Omit<
   settings: SyncChanges["settings"] | undefined;
   savedPages: SyncChanges["savedPages"];
   workspaces: ParsedSyncWorkspace[] | undefined;
-  bells: SyncChanges["bells"];
+  bells: ParsedSyncBell[] | undefined;
 } {
   const root = record(body, "(root)");
   return {
@@ -201,7 +205,7 @@ function parseSyncChanges(body: unknown): Omit<
     bells:
       root.bells === undefined
         ? undefined
-        : array(root.bells, "bells").map((value, i): Schemas["SyncBell"] => {
+        : array(root.bells, "bells").map((value, i): ParsedSyncBell => {
             const field = `bells[${i}]`;
             const row = record(value, field);
             if (boolean(row.deleted, `${field}.deleted`)) {
@@ -364,18 +368,36 @@ function parseSavedPage(row: Record<string, unknown>, field: string): Schemas["S
 
 /** ベルを付けた応答（POST /bells）にも、差分同期と同じ境界の検証を使う */
 export function toBell(body: unknown): Bell {
-  const bell = parseBell(record(body, "bell"), "bell");
-  return { ...bell, createdAt: Date.parse(bell.createdAt) };
+  return toLocalBell(parseBell(record(body, "bell"), "bell"));
 }
 
-function parseBell(row: Record<string, unknown>, field: string): Schemas["Bell"] {
-  return {
+/** sendo のベルを core の形にする。組を見分けるための照合用の言葉も、ここで作る */
+function toLocalBell(bell: ParsedBell): Bell {
+  const common = {
+    id: bell.id,
+    subscriptionId: bell.subscriptionId,
+    createdAt: Date.parse(bell.createdAt),
+  };
+  return bell.words === null
+    ? { ...common, feedId: bell.feedId, words: null, matchKey: null }
+    : { ...common, feedId: bell.feedId, words: bell.words, matchKey: bellMatchKey(bell.words) };
+}
+
+/** 確かめたベル。購読も言葉もない有効なベルは、sendo にない（sendo の通知の 1） */
+type ParsedBell = Omit<Schemas["Bell"], "feedId" | "words"> &
+  ({ feedId: string; words: null } | { feedId: string | null; words: string });
+
+function parseBell(row: Record<string, unknown>, field: string): ParsedBell {
+  const common = {
     id: string(row.id, `${field}.id`),
     subscriptionId: nullableString(row.subscriptionId, `${field}.subscriptionId`),
-    feedId: nullableString(row.feedId, `${field}.feedId`),
-    words: nullableString(row.words, `${field}.words`),
     createdAt: time(row.createdAt, `${field}.createdAt`),
   };
+  const feedId = nullableString(row.feedId, `${field}.feedId`);
+  const words = nullableString(row.words, `${field}.words`);
+  if (words !== null) return { ...common, feedId, words };
+  if (feedId !== null) return { ...common, feedId, words };
+  throw invalid(`${field}.feedId`);
 }
 
 function savedId(value: unknown, field: string): string {

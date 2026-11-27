@@ -1,12 +1,21 @@
 import { disconnectDiscord, getDiscord, unsubscribeDiscord } from "./account";
 import { ApiError, createSendoApi, type SendoApi } from "./api/client";
+import { BELL_WORDS_PROBLEMS, type BellWords, parseBellWords } from "./bell-words";
+import {
+  type BellChange,
+  bellRemoval,
+  bellTarget,
+  feedBellChange,
+  feedBellWordsChange,
+  wordBellChange,
+} from "./bells";
 import { hasVisibleContent, parseContent } from "./content/parse";
 import {
   CONTENT_STORAGE_LIMITS,
   type ContentStorage,
   parseContentStorageLimit,
 } from "./content/storage";
-import { clearBells, countVisibleBells, listBells, visibleFeedBellId } from "./db/bells";
+import { clearBells, listBells } from "./db/bells";
 import {
   type ContentSource,
   clearPageMissing,
@@ -1013,27 +1022,72 @@ export class ReaderCore {
   }
 
   /**
-   * 購読だけのベルを付ける（true）／外す（false）。すでにその状態なら何もしない（代表のタブが
-   * 替わって同じ頼みを送り直しても、2 回付けない）。付けるベルの ID は、ここで決める
+   * 購読のベルを付ける（true）／外す（false）。決まりは bells.ts の feedBellChange。すでにその状態
+   * なら何もしない（代表のタブが替わって同じ頼みを送り直しても、2 回付けない）
    */
-  async setFeedBell(feedId: string, on: boolean): Promise<void> {
+  setFeedBell(feedId: string, on: boolean): Promise<void> {
+    return this.#changeBells((visible) => feedBellChange(visible, feedId, on));
+  }
+
+  /**
+   * 購読のベルを、購読 AND 言葉のベルにする。言葉が空なら、購読だけのベルにする（bells.ts の
+   * feedBellWordsChange）。外す操作と付ける操作を、同じトランザクションで積む
+   *
+   * @throws ApiError（invalid） 言葉が sendo の上限を超える（送る前に断る）
+   */
+  async setFeedBellWords(feedId: string, input: string): Promise<void> {
+    const parsed = parseBellWords(input);
+    const words = parsed === "empty" ? null : toBellWords(parsed);
+    return this.#changeBells((visible) => feedBellWordsChange(visible, feedId, words));
+  }
+
+  /**
+   * 言葉だけのベルを付ける（true）／外す（false）。言葉の並びや大文字と小文字が違っても、照合用の
+   * 言葉が同じなら同じベル（bells.ts の wordBellChange）
+   *
+   * @throws ApiError（invalid） 言葉が空か、sendo の上限を超える（送る前に断る）
+   */
+  async setWordBell(input: string, on: boolean): Promise<void> {
+    const words = toBellWords(parseBellWords(input));
+    return this.#changeBells((visible) => wordBellChange(visible, words, on));
+  }
+
+  /** 手元に見えるベルを 1 つ外す。もう見えなければ何もしない */
+  removeBell(bellId: string): Promise<void> {
+    return this.#changeBells((visible) => bellRemoval(visible, bellId));
+  }
+
+  /** 手元に見えるベルへの変更を決めて、外す操作と付ける操作を同じトランザクションで積む */
+  async #changeBells(plan: (visible: Bell[]) => BellChange): Promise<void> {
     this.#requireSignedIn();
     const session = this.#session.signal;
     const changed = await this.#db.transaction(async (tx) => {
       throwIfSessionEnded(session);
-      const current = await visibleFeedBellId(tx, feedId);
-      if ((current !== null) === on) return false;
-      if (on && (await countVisibleBells(tx)) >= MAX_BELLS) {
+      const visible = await listBells(tx);
+      const { remove, add } = plan(visible);
+      if (add !== undefined && visible.length - remove.length >= MAX_BELLS) {
         throw new ApiError("invalid", `ベルは ${MAX_BELLS} 個まで付けられます。`);
       }
-      await this.#enqueue(tx, {
-        kind: "setFeedBell",
-        feedId,
-        bellId: current ?? crypto.randomUUID(),
-        on,
-        at: this.#now(),
-      });
-      return true;
+      const at = this.#now();
+      for (const bell of remove) {
+        await this.#enqueue(tx, {
+          kind: "setBell",
+          ...bellTarget(bell),
+          bellId: bell.id,
+          on: false,
+          at,
+        });
+      }
+      if (add !== undefined) {
+        await this.#enqueue(tx, {
+          kind: "setBell",
+          ...add,
+          bellId: crypto.randomUUID(),
+          on: true,
+          at,
+        });
+      }
+      return remove.length > 0 || add !== undefined;
     });
     if (changed) this.#emit(new Set<Table>(["bells"]));
   }
@@ -2071,6 +2125,12 @@ export function normalizeFolderName(value: string): string {
 async function protectedArticles(tx: Executor, keep?: string): Promise<string[]> {
   const opened = await getSetting(tx, LAST_OPENED_KEY);
   return [opened, keep].filter((id): id is string => typeof id === "string");
+}
+
+/** 受けた言葉。sendo の上限に合わなければ、送る前に断る（文は画面にそのまま出す） */
+function toBellWords(parsed: ReturnType<typeof parseBellWords>): BellWords {
+  if (typeof parsed === "string") throw new ApiError("invalid", BELL_WORDS_PROBLEMS[parsed]);
+  return parsed;
 }
 
 /** 書き込みを始めたときのログインが、もう終わっていたら投げる */
