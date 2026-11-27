@@ -221,7 +221,7 @@ export default defineConfig({
     },
     // アプリの外枠と SQLite の wasm をキャッシュして、ネットワークがなくても起動する
     // （docs/decisions/ui.md の 5）。Service Worker は sw/sw.ts に自分で書き、通知も受ける
-    // （docs/decisions/notifications.md の 5）。登録は src/main.ts で、Trusted Types のポリシーを通して行う
+    // （docs/decisions/push-receive.md の 1）。登録は src/main.ts で、Trusted Types のポリシーを通して行う
     VitePWA({
       strategies: "injectManifest",
       srcDir: "sw",

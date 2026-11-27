@@ -7,7 +7,7 @@ import {
 import type { ShownTag } from "./notification-store";
 
 /**
- * 押された通知の記事を、開いている画面で開く（docs/decisions/notifications.md の 7・8）。
+ * 押された通知の記事を、開いている画面で開く（docs/decisions/push-receive.md の 3・4）。
  *
  * - 押したことが Service Worker に届いたら（notificationclick）、Service Worker が知らせてくるので、
  *   読み込み直すと消えるものを出していなければ受け、その記事へ移る
@@ -126,7 +126,7 @@ export function noteNotificationOpen(articleId: string): void {
 
 /**
  * その記事が、通知から開こうとした記事なら true（覚えは消す）。範囲の外の記事を出さないと決めたときに
- * 呼び、知らせを出すかを決める（docs/decisions/notifications.md の 9）
+ * 呼び、知らせを出すかを決める（docs/decisions/push-receive.md の 5）
  */
 export function takeNotificationOpen(articleId: string): boolean {
   const opened = openedFromNotification === articleId;

@@ -121,9 +121,9 @@ export interface PushEnvironment {
     /** セッションのユーザーが手元のユーザーと同じかを確かめる。違えば AccountChangedError */
     confirmUser(): Promise<void>;
   };
-  /** アプリのバッジを、手元の DB の未読の数で書き直す（docs/decisions/notifications.md の 11） */
+  /** アプリのバッジを、手元の DB の未読の数で書き直す（docs/decisions/notifications.md の 5） */
   refreshBadge(): void;
-  /** 覚えた通知の tag を消す（docs/decisions/notifications.md の 8） */
+  /** 覚えた通知の tag を消す（docs/decisions/push-receive.md の 4） */
   clearShownTags(): Promise<void>;
   /**
    * 解除待ちの印（docs/decisions/notifications.md の 4）があるか。ログアウトとユーザーの切り替えで、

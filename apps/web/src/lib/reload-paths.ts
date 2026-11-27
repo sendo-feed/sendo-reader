@@ -1,7 +1,7 @@
 /**
  * 読み込み直すと消えるものを出している画面のパス（docs/decisions/ui.md の 5）。画面（自動の読み込み直し、
  * 新しい版の知らせ）と Service Worker（押された通知の記事を開かせる画面を選ぶ。
- * docs/decisions/notifications.md の 7）の両方が見るので、画面だけの API を使わない。
+ * docs/decisions/push-receive.md の 3）の両方が見るので、画面だけの API を使わない。
  */
 
 /** OAuth の許可の画面（docs/decisions/account.md の 5） */

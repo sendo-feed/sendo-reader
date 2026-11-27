@@ -474,7 +474,7 @@ describe("/version.json との比較", () => {
   });
 });
 
-describe("前に出たときの、読み込み直すかの決まり（docs/decisions/notifications.md の 8）", () => {
+describe("前に出たときの、読み込み直すかの決まり（docs/decisions/push-receive.md の 4）", () => {
   test("新しい版の worker に替わって待っていたら、前に出たときに読み込み直すと決めてから知らせる", async () => {
     const decisions: boolean[] = [];
     const app = setup({ onVisible: (reloading) => decisions.push(reloading) });

@@ -9,7 +9,7 @@ import {
 import { canReloadPage } from "./reload-paths";
 
 /**
- * 押された通知の記事を開く（docs/decisions/notifications.md の 7）。Service Worker（sw/sw.ts）の
+ * 押された通知の記事を開く（docs/decisions/push-receive.md の 3）。Service Worker（sw/sw.ts）の
  * notificationclick から呼ぶ。Service Worker の型（webworker）と画面の型（dom）の両方で調べるので、
  * 使うものだけを形で受ける（テストでは、にせものを渡す）。
  */
@@ -25,7 +25,7 @@ export interface NotificationClickEnvironment {
   /** 開いている窓を、最後に前に出ていたものから並べる（clients.matchAll） */
   windows(): Promise<readonly WindowLike[]>;
   openWindow(url: string): Promise<unknown>;
-  /** 覚えた tag を外す（docs/decisions/notifications.md の 8） */
+  /** 覚えた tag を外す（docs/decisions/push-receive.md の 4） */
   forgetTag(tag: string): Promise<void>;
 }
 

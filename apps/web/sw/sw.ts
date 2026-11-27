@@ -1,5 +1,5 @@
 /**
- * reader の Service Worker（docs/decisions/ui.md の 5、docs/decisions/notifications.md の 5）。
+ * reader の Service Worker（docs/decisions/ui.md の 5、docs/decisions/push-receive.md の 1）。
  *
  * vite-plugin-pwa の injectManifest でビルドし、Workbox の部品も含めて 1 つのファイル（sw.js）にする。
  * 本番の CSP の下で動き、Trusted Types を強制しているので、importScripts は使わない。
@@ -98,10 +98,10 @@ registerRoute(
 type NotificationOptionsWithNavigate = NotificationOptions & { navigate: string };
 
 /**
- * push を受けたら、届いた中身で通知を出し直す（docs/decisions/notifications.md の 6）。reader を開いて
+ * push を受けたら、届いた中身で通知を出し直す（docs/decisions/push-receive.md の 2）。reader を開いて
  * いても出す（userVisibleOnly の登録は、push のたびに通知を出す約束）。中身は通知に出すだけにし、
- * どこにも残さない（10）。push の中では setAppBadge を呼ばない（iOS で、宣言型の push の中で呼ぶと
- * 返らず、通知ごと出ない。閉じている間のバッジは、sendo の app_badge でブラウザーが書く。11）
+ * どこにも残さない（6）。push の中では setAppBadge を呼ばない（iOS で、宣言型の push の中で呼ぶと
+ * 返らず、通知ごと出ない。閉じている間のバッジは、sendo の app_badge でブラウザーが書く。docs/decisions/notifications.md の 5）
  */
 self.addEventListener("push", (event) => {
   event.waitUntil(showPush(event));
@@ -129,7 +129,7 @@ async function showPush(event: PushEvent): Promise<void> {
   };
   if (payload.body !== undefined) options.body = payload.body;
   await self.registration.showNotification(payload.title, options);
-  // 出し終えてから覚える（出せなかった通知を、押されたものと取り違えない。8）
+  // 出し終えてから覚える（出せなかった通知を、押されたものと取り違えない。4）
   await rememberTag(payload.tag, Date.now()).catch(() => {});
 }
 
@@ -142,7 +142,7 @@ const clickEnvironment: NotificationClickEnvironment = {
 };
 
 /**
- * 押したことが届いたら、その記事を開く（docs/decisions/notifications.md の 7）。通知を閉じ、覚えた tag を
+ * 押したことが届いたら、その記事を開く（docs/decisions/push-receive.md の 3）。通知を閉じ、覚えた tag を
  * 外してから、開いている reader の画面に開かせる。選べる画面がない、断られた、0.5 秒のうちに受けた
  * ことが返らないときは、新しい窓で開く
  */
@@ -151,7 +151,7 @@ self.addEventListener("notificationclick", (event) => {
   event.waitUntil(openFromNotification(clickEnvironment, event.notification.tag));
 });
 
-/** 利用者が消した通知は、覚えから外す（押された通知と取り違えない。8） */
+/** 利用者が消した通知は、覚えから外す（押された通知と取り違えない。4） */
 self.addEventListener("notificationclose", (event) => {
   event.waitUntil(forgetTag(event.notification.tag).catch(() => {}));
 });
