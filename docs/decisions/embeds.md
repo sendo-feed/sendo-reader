@@ -1,7 +1,7 @@
 # 記事の中の X の投稿
 
 - 状態：提案中
-- 関連：[ローカルファースト](local-first.md)（「ページの守り」）、[コンテナ版](container.md)（2・4・5）、[UI とツール](ui.md)（1・5・8）、[設定の同期](settings.md)、[画像](images.md)、[通知](notifications.md)（5 の Service Worker）、sendo の[記事の本文](https://github.com/sendo-feed/sendo/blob/main/docs/decisions/content.md)
+- 関連：[ローカルファースト](local-first.md)（「ページの守り」）、[コンテナ版](container.md)（2・4・5）、[UI とツール](ui.md)（1・5・8）、[設定の同期](settings.md)、[画像](images.md)、[プッシュの受信と、押したとき](push-receive.md)（1 の Service Worker）、sendo の[記事の本文](https://github.com/sendo-feed/sendo/blob/main/docs/decisions/content.md)
 
 記事の本文にある X の投稿の引用（公式の埋め込みコード）を、X の公式ウィジェットで読めるようにする。X のスクリプトは、reader のオリジンでは動かさず、別のホスト名で配る隔離フレーム（iframe）の中で動かす。投稿の見分け方（`blockquote` に付ける `data-x-post` の印）は、sendo の[記事の本文](https://github.com/sendo-feed/sendo/blob/main/docs/decisions/content.md)が正で、ここには書き写さない。
 
@@ -89,7 +89,7 @@
 ## 見直す条件
 
 - X がウィジェットの作り、置き場、通信先を変えたとき（隔離フレームの CSP と、成功・失敗の決め方を確かめ直す）。
-- injectManifest が差し込む precache の一覧の形が変わり、`sw.js` の版の印を書き換えられなくなったとき（[通知](notifications.md)の 5）。
+- injectManifest が差し込む precache の一覧の形が変わり、`sw.js` の版の印を書き換えられなくなったとき（[プッシュの受信と、押したとき](push-receive.md)の 1）。
 - Service Worker が返した `index.html` の CSP が、取り直した応答のヘッダーのものにならないと分かったとき。
 - iOS の Safari や Firefox で、位置がずれる、出ない、Tab キーでウィジェットの中に入る、と分かったとき（確かめたのは Chromium と、デスクトップの WebKit。Tab キーの順は Chromium だけ）。
 - 通信の量や、X に伝わることが困ると分かったとき。
