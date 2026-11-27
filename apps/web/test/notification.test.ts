@@ -1,5 +1,11 @@
 import { describe, expect, test } from "vitest";
-import { articleIdFromTag, articlePath, notificationPath, readPush } from "../src/lib/notification";
+import {
+  articleIdFromTag,
+  articlePath,
+  notificationPath,
+  readPush,
+  takeNotificationMark,
+} from "../src/lib/notification";
 
 /** 宣言型の push を読まないブラウザーの event（中身は event.data の JSON） */
 function dataEvent(body: unknown) {
@@ -79,8 +85,23 @@ describe("tag と開く URL", () => {
     expect(articlePath("a&b=c/d")).toBe("/?article=a%26b%3Dc%2Fd");
   });
 
-  test("tag を読めなければ、reader の先頭を開く", () => {
-    expect(notificationPath("bell:b1:a1")).toBe("/?article=a1");
+  test("通知から開く URL には、通知から開いたことの印を付ける。tag を読めなければ、reader の先頭を開く", () => {
+    expect(notificationPath("bell:b1:a1")).toBe("/?article=a1&from=notification");
+    expect(notificationPath("bell:b1:a&b=c")).toBe("/?article=a%26b%3Dc&from=notification");
     expect(notificationPath("broken")).toBe("/");
+  });
+
+  test("印を外した URL と、印の付いていた記事を返す", () => {
+    const base = "https://reader.example";
+    const marked = takeNotificationMark(new URL(notificationPath("bell:b1:a1"), base));
+    expect(marked?.url.href).toBe(`${base}/?article=a1`);
+    expect(marked?.articleId).toBe("a1");
+    expect(takeNotificationMark(new URL("/?from=notification", base))).toEqual({
+      url: new URL("/", base),
+      articleId: null,
+    });
+    // 印のない URL と、ほかの値の from は、そのまま
+    expect(takeNotificationMark(new URL("/?article=a1", base))).toBeNull();
+    expect(takeNotificationMark(new URL("/?article=a1&from=elsewhere", base))).toBeNull();
   });
 });

@@ -709,7 +709,7 @@ test.describe("通知を押したとき", () => {
     await clickNotification(context, `bell:bell-1:${article.id}`);
     await expect.poll(async () => (await shownNotifications(page)).length).toBe(0);
     // 選べる画面がないので、記事の URL を新しい窓で開く
-    await expect.poll(openedWindows).toEqual([`/?article=${article.id}`]);
+    await expect.poll(openedWindows).toEqual([`/?article=${article.id}&from=notification`]);
     // Service Worker の待つ時間（0.5 秒）を過ぎても、Settings のまま
     await page.waitForTimeout(800);
     await expect(page).toHaveURL(/\/settings$/);
@@ -833,6 +833,126 @@ test.describe("通知を押したとき", () => {
       page.getByRole("heading", { name: "Fresh public article", exact: true }),
     ).toBeVisible();
     await expect(page).toHaveURL(new RegExp(`\\?article=${fresh.id}$`));
+  });
+});
+
+test.describe("通知から開いた新しい窓", () => {
+  test.beforeEach(async ({ context }) => {
+    await context.grantPermissions(["notifications"], { origin: "http://localhost:4173" });
+  });
+
+  const outOfScope = "通知の記事は、選んでいるワークスペースに入っていないため、開きませんでした。";
+
+  test("最後に選んだ範囲の外の記事なら開かず、開かなかったことを知らせる。印は URL に残さない", async ({
+    page,
+    context,
+  }) => {
+    const server = new FakeSendo();
+    server.workspacesSupported = true;
+    const publicSpace = server.createWorkspace("Public");
+    const privateSpace = server.createWorkspace("Personal");
+    const ordinary = server.subscribe({
+      url: "https://public.example/feed",
+      title: "Public feed",
+      workspaceId: publicSpace.id,
+    });
+    const personal = server.subscribe({
+      url: "https://private.example/feed",
+      title: "Hidden feed",
+      workspaceId: privateSpace.id,
+    });
+    const shown = server.deliver(ordinary.id, { title: "Public article" });
+    const hidden = server.deliver(personal.id, { title: "Hidden article" });
+    await routeFakeSendo(context, server);
+    await page.goto("/");
+    await signIn(page);
+    const nav = page.getByRole("navigation", { name: "Feeds", exact: true });
+    await nav.getByRole("button", { name: /^Workspaces:/ }).click();
+    const dialog = page.getByRole("dialog", { name: "Workspaces", exact: true });
+    await dialog.getByRole("button", { name: "Only Public", exact: true }).click();
+    await dialog.getByRole("button", { name: "Close", exact: true }).click();
+
+    // 開かせられる画面がないので（Settings）、Service Worker は印を付けた URL を新しい窓で開く
+    await page.goto("/settings");
+    await deliverPush(context, page, bellPush(hidden.id, "Hidden feed", "Hidden article"));
+    await expect.poll(async () => (await shownNotifications(page)).length).toBe(1);
+    const openedWindows = await recordOpenWindow(context);
+    await clickNotification(context, `bell:bell-1:${hidden.id}`);
+    await expect.poll(openedWindows).toEqual([`/?article=${hidden.id}&from=notification`]);
+    const [opened = ""] = await openedWindows();
+
+    // 新しい窓は、最後に選んだ範囲（Public）で始まる
+    const window = await context.newPage();
+    await window.goto(opened);
+    await expect(window.getByText(outOfScope)).toBeVisible();
+    await expect(window).toHaveURL(/\/$/);
+    await expect(window.getByRole("heading", { name: "Hidden article" })).toHaveCount(0);
+    await expect(window.locator(".article-list").getByText("Public article")).toBeVisible();
+    // 印は外したので、読み込み直しても戻っても、知らせは繰り返さない
+    await window.reload();
+    await expect(window.locator(".article-list").getByText("Public article")).toBeVisible();
+    await expect(window.getByText(outOfScope)).toHaveCount(0);
+
+    // 範囲の中の記事は、印付きでも開き、印を外す
+    const inScope = await context.newPage();
+    await inScope.goto(`/?article=${shown.id}&from=notification`);
+    await expect(
+      inScope.getByRole("heading", { name: "Public article", exact: true }),
+    ).toBeVisible();
+    await expect(inScope).toHaveURL(new RegExp(`/\\?article=${shown.id}$`));
+    await expect(inScope.getByText(outOfScope)).toHaveCount(0);
+
+    // 印のない記事の URL は、今までどおり知らせずに一覧に戻る
+    const plain = await context.newPage();
+    await plain.goto(`/?article=${hidden.id}`);
+    await expect(plain).toHaveURL(/\/$/);
+    // 開いた Public article は既読になったので、一覧ではなく範囲の表示で待つ
+    await expect(
+      plain
+        .getByRole("navigation", { name: "Feeds", exact: true })
+        .getByRole("button", { name: "Workspaces: Public", exact: true }),
+    ).toBeVisible();
+    await expect(plain.getByRole("heading", { name: "Hidden article" })).toHaveCount(0);
+    await expect(plain.getByText(outOfScope)).toHaveCount(0);
+
+    // まだ手元にない記事は、記事の画面で同期を待ち、届いたものが範囲の外なら知らせる
+    const late = server.deliver(personal.id, { title: "Late hidden article" });
+    let release = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    server.onRequest = async (path) => {
+      if (path === "GET /sync") await gate;
+    };
+    const waiting = await context.newPage();
+    await waiting.goto(`/?article=${late.id}&from=notification`);
+    await expect(waiting.getByText("記事を同期しています…")).toBeVisible();
+    release();
+    await expect(waiting.getByText(outOfScope)).toBeVisible();
+    await expect(waiting).toHaveURL(/\/$/);
+    await expect(waiting.getByRole("heading", { name: "Late hidden article" })).toHaveCount(0);
+  });
+
+  test("All で始まる新しい窓では、印付きの記事を開いて印を外す", async ({ page, context }) => {
+    const server = new FakeSendo();
+    server.workspacesSupported = true;
+    const privateSpace = server.createWorkspace("Personal");
+    const personal = server.subscribe({
+      url: "https://private.example/feed",
+      title: "Hidden feed",
+      workspaceId: privateSpace.id,
+    });
+    const hidden = server.deliver(personal.id, { title: "Hidden article" });
+    await routeFakeSendo(context, server);
+    await page.goto("/");
+    await signIn(page);
+    const window = await context.newPage();
+    await window.goto(`/?article=${hidden.id}&from=notification`);
+    await expect(
+      window.getByRole("heading", { name: "Hidden article", exact: true }),
+    ).toBeVisible();
+    await expect(window).toHaveURL(new RegExp(`/\\?article=${hidden.id}$`));
+    await expect(window.getByText(outOfScope)).toHaveCount(0);
   });
 });
 

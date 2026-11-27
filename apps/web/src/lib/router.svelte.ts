@@ -1,4 +1,6 @@
 import { CAPTURE_PATH } from "./bookmarklet";
+import { takeNotificationMark } from "./notification";
+import { noteNotificationOpen } from "./notification-open";
 import { parseXPostSizes, type XPostSize } from "./x-post-size";
 
 /**
@@ -82,6 +84,14 @@ class Router {
   beforeLeave: (() => Position | null) | null = null;
 
   constructor() {
+    // 通知から開いた URL の印は、読んだら外す（読み込み直しや戻る・進むで、知らせを繰り返さない。
+    // docs/decisions/push-receive.md の 3・5）。履歴の項目は置き換える
+    const marked = takeNotificationMark(this.url);
+    if (marked !== null) {
+      history.replaceState(history.state, "", marked.url);
+      this.url = marked.url;
+      if (marked.articleId !== null) noteNotificationOpen(marked.articleId);
+    }
     this.#key = keyOf(history.state) ?? this.#stamp();
     this.#entered = positionOf(history.state);
     window.addEventListener("popstate", () => {
