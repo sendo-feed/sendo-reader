@@ -653,6 +653,36 @@ describe("言葉のベル", () => {
     ]);
   });
 
+  test("端末の時計が sendo より遅くても、送る前に言葉を 2 回替えると、出しているベルだけが替わり、ほかのベルは残る", async () => {
+    const server = new FakeSendo();
+    const core = await ReaderCore.open({
+      db: await openMemoryDb(),
+      baseUrl: "https://sendo.test/api/v1",
+      fetch: server.fetch,
+      now: () => server.now - 60_000,
+    });
+    server.signInAs();
+    await core.restoreSession();
+    const feed = server.subscribe({ url: "https://blog.example/feed.xml", title: "Blog" });
+    const feedOnly = server.addBell({ feedId: feed.id });
+    server.advance(1);
+    server.addBell({ feedId: feed.id, words: "Rust" });
+    await core.sync();
+
+    await core.setFeedBellWords(feed.id, "Go");
+    await core.setFeedBellWords(feed.id, "Python");
+    expect(await bellTargets(core)).toEqual([
+      { feedId: feed.id, words: null },
+      { feedId: feed.id, words: "Python" },
+    ]);
+    await core.sync();
+    expect(server.bells.get(feedOnly.id)?.deleted).toBe(false);
+    expect(serverTargets(server)).toEqual([
+      { feedId: feed.id, words: null },
+      { feedId: feed.id, words: "Python" },
+    ]);
+  });
+
   test("同じ購読のほかのベルがもうその組なら、出しているベルを外すだけで、同じ組を 2 つ作らない", async () => {
     const { server, core, feed } = await subscribed();
     const feedOnly = server.addBell({ feedId: feed.id });

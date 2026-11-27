@@ -12,7 +12,9 @@ import type { Executor } from "./database";
  * ベルの操作や、送って受け付けられた行は残る（sendo は購読をやめるとベルを外し、その知らせは
  * 同期で届く）。届く前に購読し直しても、購読が替わるので古いベルは見せない（手元の購読に ID が
  * ないときは、ワークスペースに対応する前の sendo から届いた行なので、フィードがあれば見せる）。
- * 言葉だけのベルは、購読によらず見せる
+ * 言葉だけのベルは、購読によらず見せる。
+ *
+ * pending は、まだ送っていないベルなら 1
  */
 const VISIBLE_BELLS = `
   with ops as (
@@ -26,7 +28,7 @@ const VISIBLE_BELLS = `
       where id in (select max(id) from pending_ops where kind = 'setBell' group by key)
   )
   select id, subscription_id as subscriptionId, feed_id as feedId, words, match_key as matchKey,
-      created_at as createdAt
+      created_at as createdAt, 0 as pending
     from bells
     where (feed_id is null or exists (
         select 1 from feeds
@@ -37,13 +39,20 @@ const VISIBLE_BELLS = `
         select 1 from ops where ops.feed_id is bells.feed_id and ops.match_key is bells.match_key
       )
   union all
-  select ops.id, feeds.subscription_id, ops.feed_id, ops.words, ops.match_key, ops.at
+  select ops.id, feeds.subscription_id, ops.feed_id, ops.words, ops.match_key, ops.at, 1
     from ops left join feeds on feeds.id = ops.feed_id
     where ops.adds = 1 and (ops.feed_id is null or feeds.id is not null)`;
 
-/** 手元に見えるベルを、作った順に読む */
+/**
+ * 手元に見えるベルを、作った順に読む。まだ送っていないベルは、届いたベルより後ろに並べる（作った
+ * 時刻は端末の時計なので、sendo の時計より遅れていると、届いたベルより前に並んでしまう。画面の
+ * 見込みも末尾に足す）
+ */
 export function listBells(db: Executor): Promise<Bell[]> {
-  return db.all<Bell>(`select * from (${VISIBLE_BELLS}) order by createdAt, id`);
+  return db.all<Bell>(
+    `select id, subscriptionId, feedId, words, matchKey, createdAt
+       from (${VISIBLE_BELLS}) order by pending, createdAt, id`,
+  );
 }
 
 export function putBell(tx: Executor, bell: Bell): Promise<void> {
