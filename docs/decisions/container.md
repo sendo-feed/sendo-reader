@@ -1,7 +1,7 @@
 # コンテナ版
 
 - 状態：提案中
-- 関連：[UI とツール](ui.md)（4。配信と中継、手元の開発）、[記事の中の X の投稿](embeds.md)（3。隔離フレームの配り方と設定）、[ローカルファースト](local-first.md)（6 のログイン、「記事の本文」、「ページの守り」）、[アカウントの画面](account.md)（5 の OAuth の許可の画面）、[通知](notifications.md)（1 の Web Push の有無、5 の `sw.js`）、sendo の[テックスタック](https://github.com/sendo-feed/sendo/blob/main/docs/decisions/tech-stack.md)（2）・[コンテナ版](https://github.com/sendo-feed/sendo/blob/main/docs/decisions/container.md)・[MCP サーバー](https://github.com/sendo-feed/sendo/blob/main/docs/decisions/mcp.md)（3・4）
+- 関連：[UI とツール](ui.md)（4。配信と中継、手元の開発）、[記事の中の X の投稿](embeds.md)（3。隔離フレームの配り方と設定）、[ローカルファースト](local-first.md)（6 のログイン、「記事の本文」、「ページの守り」）、[アカウントの画面](account.md)（5 の OAuth の許可の画面）、[通知](notifications.md)（1 の Web Push の有無）、[プッシュの受信と、押したとき](push-receive.md)（1 の `sw.js`）、sendo の[テックスタック](https://github.com/sendo-feed/sendo/blob/main/docs/decisions/tech-stack.md)（2）・[コンテナ版](https://github.com/sendo-feed/sendo/blob/main/docs/decisions/container.md)・[MCP サーバー](https://github.com/sendo-feed/sendo/blob/main/docs/decisions/mcp.md)（3・4）
 
 sendo-reader は、[sendo のコンテナ版](https://github.com/sendo-feed/sendo/blob/main/docs/decisions/container.md)と並べて、コンテナだけで動かす。reader が公式の画面と中継を提供し、ログインや MCP の OAuth の許可も同じオリジンで扱う。
 
@@ -38,7 +38,7 @@ sendo-reader は、[sendo のコンテナ版](https://github.com/sendo-feed/send
    - X の投稿の隔離フレームを使うときだけ、設定 `X_EMBED_ORIGIN`（隔離フレームのオリジン）を足す。このホスト名への要求には、隔離フレームのページだけを返し、sendo には中継しない。未設定なら、この機能は出ない（[記事の中の X の投稿](embeds.md)の 3）
 5. **静的なファイルは、次のように返す。**
    - `apps/web/security-headers.ts` のヘッダーを、静的なファイルのすべての応答に付ける。手元の Vite の dev サーバー・preview も同じところから付け、別に書き写さない。例外は、隔離フレームのホスト名への応答で、隔離フレームのページのヘッダーを付ける（[記事の中の X の投稿](embeds.md)の 2）
-   - `X_EMBED_ORIGIN` を設定したときは、起動時に、メモリーに読んだ `index.html` に隔離フレームのオリジンの `<meta>` を足し、CSP に `frame-src` を足し、`sw.js` の中の `index.html` の版の印（形は[通知](notifications.md)の 5）を書き換える。書き換える場所が見つからなければ起動しない。未設定なら、ビルドしたものをそのまま返す（[記事の中の X の投稿](embeds.md)の 3）
+   - `X_EMBED_ORIGIN` を設定したときは、起動時に、メモリーに読んだ `index.html` に隔離フレームのオリジンの `<meta>` を足し、CSP に `frame-src` を足し、`sw.js` の中の `index.html` の版の印（形は[プッシュの受信と、押したとき](push-receive.md)の 1）を書き換える。書き換える場所が見つからなければ起動しない。未設定なら、ビルドしたものをそのまま返す（[記事の中の X の投稿](embeds.md)の 3）
    - キャッシュは、毎回確かめさせる（`Cache-Control: public, max-age=0, must-revalidate` と ETag で、変わっていなければ 304）。Service Worker（`sw.js`）が新しい版を見つけられるように、長く持たせない
    - JS、CSS、wasm などは、ブラウザが受けられれば圧縮して返す（brotli か gzip）
 6. **reader のコンテナのヘルスチェック（イメージの `HEALTHCHECK`）は、reader 自身が返す `/`（`index.html`）を見る。** `/healthz` は sendo に中継するので、reader のコンテナで見ると sendo の生死を見ることになる。reader のためだけのパスは足さない（sendo のパスと重なるおそれを増やさない）。
