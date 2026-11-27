@@ -21,7 +21,7 @@ import type { SyncStatus } from "../sync/scheduler";
  * 上げると、番号の違うタブどうしは、読み込み直すまでやり取りしない（「版が合わない」失敗を返す）。
  * ふつうの配備では上げない（版の混ざったタブも、そのまま使える）。
  */
-export const PROTOCOL_VERSION = 10;
+export const PROTOCOL_VERSION = 11;
 
 /** DB の名前、代表を決めるロックの名前、タブの間のチャンネルの名前の元の既定 */
 export const DEFAULT_NAMESPACE = "sendo-reader";
@@ -63,6 +63,8 @@ export const READER_METHODS = [
   "restoreSession",
   "prepareSignIn",
   "signOut",
+  "isPushUnsubscribePending",
+  "clearPushUnsubscribePending",
   "countPending",
   "listFolders",
   "listWorkspaces",
@@ -194,7 +196,12 @@ export type TabMessage =
 export type WorkerMessage =
   | { type: "result"; id: number; result: Result }
   | { type: "changed"; tables: Table[] }
-  | { type: "status"; status: SyncStatus };
+  | { type: "status"; status: SyncStatus }
+  /**
+   * 代表が、ログアウトか、手元にいたユーザーを別のユーザーに替えるために手元の DB を消した
+   * （docs/decisions/notifications.md の 4）
+   */
+  | { type: "cleared" };
 
 /**
  * ワーカー ⇄ ほかのタブのワーカー（BroadcastChannel）。
@@ -205,7 +212,10 @@ export type WorkerMessage =
  *
  * 版の違うワーカーどうしが番号の食い違いに気づけるよう、hello、leader（leaderId と version）、
  * result（失敗の name と peerVersion を含む）、call の from と id と version の形は、番号を上げても
- * 変えない
+ * 変えない。
+ *
+ * cleared も、changed、status と同じく、番号の合う代表のものだけを画面に渡す（版の違うタブは、
+ * 版が合うまで受けない。docs/decisions/notifications.md の 4）
  */
 export type PeerMessage =
   | { type: "call"; version?: number; from: string; id: number; method: Method; args: unknown[] }
@@ -217,7 +227,9 @@ export type PeerMessage =
   /** 起動した（代表がいれば、名乗り出て、今の同期の様子を送る） */
   | { type: "hello"; from: string }
   /** タブが前に出た（代表に同期を促す） */
-  | { type: "visible" };
+  | { type: "visible" }
+  /** 代表が、ログアウトかユーザーの切り替えで手元の DB を消した */
+  | { type: "cleared"; version?: number };
 
 export function serializeError(error: unknown): SerializedError {
   if (error instanceof ProtocolMismatchError) {

@@ -16,6 +16,7 @@
   import { useReader } from "../lib/context";
   import { layout, reducedMotion } from "../lib/layout.svelte";
   import { ArticleListState, type ListProgress } from "../lib/list.svelte";
+  import { leaveNotificationOpen, takeNotificationOpen } from "../lib/notification-open";
   import { openListScope } from "../lib/open-list";
   import { prefs } from "../lib/prefs.svelte";
   import {
@@ -49,6 +50,11 @@
   let lastArticleRoute = $state<string | null>(null);
   let verifiedArticleKey = $state<string | null>(null);
   let verifiedArticleFeed = $state<string | null>(null);
+  /**
+   * 手元にない記事（どのワークスペースにも）。記事の画面のまま同期を待ち（ArticleView）、範囲の外かは
+   * 届いてから決める（docs/decisions/push-receive.md の 5）
+   */
+  let missingArticleKey = $state<string | null>(null);
   const workspaceIds = $derived(reader.visibleWorkspaceIds);
   const requestedWorkspaceIds = $derived(reader.workspaceIds);
   const workspaceKey = $derived(JSON.stringify([reader.user?.id, requestedWorkspaceIds ?? null]));
@@ -62,8 +68,9 @@
   const detailChecking = $derived(
     requestedWorkspaceIds !== undefined &&
       (!reader.workspaceDataReady ||
-        verifiedArticleKey !== articleKey ||
-        !reader.feeds.some((feed) => feed.id === verifiedArticleFeed)),
+        (missingArticleKey !== articleKey &&
+          (verifiedArticleKey !== articleKey ||
+            !reader.feeds.some((feed) => feed.id === verifiedArticleFeed)))),
   );
 
   $effect(() => {
@@ -88,22 +95,46 @@
     }
     if (id === null) return;
     let active = true;
-    void reader.client
-      .getArticle(id, ids)
-      .then((article) => {
-        if (!active || key !== articleKey || !reader.workspaceDataReady) return;
-        if (article === null) {
-          verifiedArticleKey = null;
-          if (complete) router.replace("/");
-        } else {
-          lastArticleRoute = route;
-          verifiedArticleFeed = article.feedId;
-          verifiedArticleKey = key;
-        }
-      })
-      .catch(() => {});
+    const current = () => active && key === articleKey && reader.workspaceDataReady;
+    void (async () => {
+      const article = await reader.client.getArticle(id, ids);
+      if (!current()) return;
+      if (article !== null) {
+        missingArticleKey = null;
+        takeNotificationOpen(id);
+        lastArticleRoute = route;
+        verifiedArticleFeed = article.feedId;
+        verifiedArticleKey = key;
+        return;
+      }
+      verifiedArticleKey = null;
+      // どのワークスペースにもない（まだ届いていない）なら、記事の画面のまま同期を待つ
+      const anywhere = await reader.client.getArticle(id);
+      if (!current()) return;
+      if (anywhere === null) {
+        missingArticleKey = key;
+        lastArticleRoute = route;
+        return;
+      }
+      missingArticleKey = null;
+      if (!complete) return;
+      // 範囲の外の記事は、記事の URL を開いたときと同じく出さない。通知から開こうとした記事なら、
+      // 開かなかったことを知らせる（記事の名前は出さない）
+      if (takeNotificationOpen(id)) {
+        showToast("通知の記事は、選んでいるワークスペースに入っていないため、開きませんでした。");
+      }
+      router.replace("/");
+    })().catch(() => {});
     return () => {
       active = false;
+    };
+  });
+
+  // 通知から開こうとした記事の画面を離れたら、その記事の待ちを終える（docs/decisions/push-receive.md の 5）
+  $effect(() => {
+    const id = router.articleId;
+    return () => {
+      if (id !== null) leaveNotificationOpen(id);
     };
   });
 

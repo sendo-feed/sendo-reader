@@ -132,6 +132,13 @@ const LOGOUT_PENDING_KEY = "auth.logoutPending";
 const CONTENT_STORAGE_LIMIT_KEY = "content.storageLimit";
 
 /**
+ * この端末の通知の登録（ブラウザーの登録）の解除待ちの印（docs/decisions/notifications.md の 4）。
+ * ログアウトとユーザーの切り替えで、手元の DB を消すのと同じトランザクションで置き、手元の DB を
+ * 消しても残す。画面が、登録がないと確かめてから消す。置いたことだけを入れる
+ */
+const PUSH_UNSUBSCRIBE_PENDING_KEY = "push.unsubscribePending";
+
+/**
  * 最後に開いた記事（いま開いている記事）の ID を置く設定の鍵。開封の記録を積むときに覚え、
  * その記事の本文は上限のために消さない（docs/decisions/local-first.md の「記事の本文」）。
  * sendo には預けず、ログアウトで消える
@@ -139,6 +146,12 @@ const CONTENT_STORAGE_LIMIT_KEY = "content.storageLimit";
 const LAST_OPENED_KEY = "content.lastOpened";
 
 const ALL_TABLES: ReadonlySet<Table> = new Set<Table>(TABLES);
+
+/**
+ * 手元の DB をまとめて消したわけ。signOut はログアウト、switchUser は手元にいたユーザーを別のユーザーに
+ * 替えた、adopt は手元にユーザーがいないときに、来たユーザーを入れる前に消した
+ */
+export type DataClearReason = "signOut" | "switchUser" | "adopt";
 
 export interface ReaderCoreOptions {
   db: Database;
@@ -153,7 +166,7 @@ export interface ReaderCoreOptions {
    * その人のデータ（Web では、Service Worker の画像のキャッシュ。docs/decisions/images.md の 4）を
    * 一緒に消す。失敗しても、ログアウトやユーザーの切り替えは止めない
    */
-  onDataCleared?: () => Promise<void>;
+  onDataCleared?: (reason: DataClearReason) => Promise<void>;
   /**
    * 同期のあとに、未読の記事の全文を 1 件ずつ選び直しながら先に取っておく（開いたときに待たず、
    * オフラインでも読めるように）。1 回の同期のあとに頼む数。既定は 0（取らない。開いたときに取る）
@@ -234,7 +247,7 @@ export class ReaderCore {
   readonly #db: Database;
   readonly #api: SendoApi;
   readonly #now: () => number;
-  readonly #onDataCleared: (() => Promise<void>) | undefined;
+  readonly #onDataCleared: ((reason: DataClearReason) => Promise<void>) | undefined;
   readonly #listeners = new Set<ChangeListener>();
   readonly #rejectionListeners = new Set<(rejection: RejectedOperation) => void>();
   /** 手元に置いた、ログインしたユーザー。毎回 DB を読まずに済むように持っておく */
@@ -380,9 +393,10 @@ export class ReaderCore {
     await this.#db.transaction(async (tx) => {
       await clearAll(tx);
       await setSetting(tx, LOGOUT_PENDING_KEY, "1");
+      await setSetting(tx, PUSH_UNSUBSCRIBE_PENDING_KEY, "1");
       this.#user = null;
     });
-    await this.#afterDataCleared();
+    await this.#afterDataCleared("signOut");
     this.#emit(ALL_TABLES);
   }
 
@@ -427,7 +441,7 @@ export class ReaderCore {
    */
   async #adopt(user: User, signal: AbortSignal): Promise<AbortSignal> {
     let current = signal;
-    let switched = false;
+    let switched: DataClearReason | null = null;
     await this.#db.transaction(async (tx) => {
       throwIfSessionEnded(signal);
       if (this.#user?.id === user.id) {
@@ -440,18 +454,33 @@ export class ReaderCore {
       // 前のユーザーのために走っている処理（同期、通信が要る操作、書き込み）を中断し、
       // 応答を、消したあとの手元に書き戻させない
       current = this.#beginSession();
+      switched = this.#user === null ? "adopt" : "switchUser";
       await clearAll(tx);
+      // 手元にいたユーザーを替えるときは、この端末の通知の登録の解除待ちの印を置く
+      if (switched === "switchUser") await setSetting(tx, PUSH_UNSUBSCRIBE_PENDING_KEY, "1");
       await setSetting(tx, USER_KEY, JSON.stringify(user));
       // DB の呼び出しは 1 列に並ぶので、手元のユーザーもトランザクションの中で替える
       // （あとに並んだログアウトが、確実に消す）
       this.#user = { ...user };
-      switched = true;
     });
-    if (switched) {
-      await this.#afterDataCleared();
+    if (switched !== null) {
+      await this.#afterDataCleared(switched);
       this.#emit(ALL_TABLES);
     }
     return current;
+  }
+
+  /**
+   * この端末の通知の登録の解除待ちの印があるか（docs/decisions/notifications.md の 3・4）。ログアウトと
+   * ユーザーの切り替えで置き、画面が登録を外し終えるまで残る
+   */
+  async isPushUnsubscribePending(): Promise<boolean> {
+    return (await getSetting(this.#db, PUSH_UNSUBSCRIBE_PENDING_KEY)) !== null;
+  }
+
+  /** 解除待ちの印を消す。画面が、登録を作る・外すロックの中で、登録がないと確かめてから呼ぶ */
+  async clearPushUnsubscribePending(): Promise<void> {
+    await deleteSetting(this.#db, PUSH_UNSUBSCRIBE_PENDING_KEY);
   }
 
   /** 今のログインで動いている処理を中断し、新しいログインの中断の合図を返す */
@@ -616,9 +645,9 @@ export class ReaderCore {
   }
 
   /** 手元の DB を消したあとに、DB の外に置いたその人のデータも消してもらう */
-  async #afterDataCleared(): Promise<void> {
+  async #afterDataCleared(reason: DataClearReason): Promise<void> {
     try {
-      await this.#onDataCleared?.();
+      await this.#onDataCleared?.(reason);
     } catch {
       // 消せなくても、ログアウトやユーザーの切り替えは進める（手元の DB は、もう消してある）
     }
@@ -1960,8 +1989,12 @@ async function clearAll(tx: Executor): Promise<void> {
   await tx.run("delete from synced_settings");
   await clearSavedPages(tx);
   await clearBells(tx);
-  // 本文を置く量の上限は、端末ごとの設定なので残す
-  await tx.run("delete from settings where key <> ?", [CONTENT_STORAGE_LIMIT_KEY]);
+  // 本文を置く量の上限は、端末ごとの設定なので残す。通知の登録の解除待ちの印も、画面が登録を
+  // 外し終えるまで残す（来たユーザーを入れる前に消すときも）
+  await tx.run("delete from settings where key not in (?, ?)", [
+    CONTENT_STORAGE_LIMIT_KEY,
+    PUSH_UNSUBSCRIBE_PENDING_KEY,
+  ]);
 }
 
 /**

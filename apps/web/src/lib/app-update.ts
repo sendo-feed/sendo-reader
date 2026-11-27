@@ -12,8 +12,6 @@
  * - 前に出ている間は、利用者がその場で切り替えられるように知らせる。取り込みに失敗したときも知らせる
  */
 
-import { AUTHORIZE_PATH } from "./authorize";
-
 /** 開いたままのときに、新しい版を確かめる間隔 */
 export const UPDATE_CHECK_INTERVAL_MS = 60 * 60 * 1000;
 /** 版の応答が止まったときも、Service Worker 自身の確認に進める */
@@ -58,22 +56,11 @@ export interface AppUpdateEnvironment {
   canReload: () => boolean;
   setInterval: (fn: () => void, ms: number) => unknown;
   onNotice: (notice: AppUpdateNotice | null) => void;
-}
-
-/**
- * 読み込み直すと消えるものを出している画面のパス。設定（発行したトークン）、購読の管理（入力中の
- * フォーム・取り込み結果）、ブックマークレットからの追加、OAuth の許可
- */
-const KEEP_PATHS: readonly string[] = ["/settings", "/manage", "/add", AUTHORIZE_PATH];
-
-/**
- * いまの画面を読み込み直してよいか。読み込み直すと消えるものを出している画面（上のパス）と、出している
- * 間（held。lib/reload-guard.svelte.ts の印。開いている Save a URL の窓など）は false。自動の読み込み
- * 直し（main.ts の canReload）と、新しい版の知らせ（App.svelte）の両方が、これで決める。パスはここに、
- * パスで分からないものは reloadGuard の印で足す
- */
-export function canReloadPage(pathname: string, held: boolean): boolean {
-  return !KEEP_PATHS.includes(pathname) && !held;
+  /**
+   * 画面が前に出たときに、自動で読み込み直すかを決めてから呼ぶ（reloading は読み込み直すと決めた）。
+   * 消えた通知を比べるのは、この結果を見てから（docs/decisions/push-receive.md の 4）
+   */
+  onVisible?: (reloading: boolean) => void;
 }
 
 /**
@@ -287,10 +274,22 @@ export function watchAppUpdate(env: AppUpdateEnvironment): void {
     const visible = env.document.visibilityState === "visible";
     const resumed = previousVisibility === "hidden" && visible;
     previousVisibility = env.document.visibilityState;
+    let checking: Promise<void> | null = null;
     if (waitingForWorkerReload()) reloadIfAllowed();
     else if (update?.kind === "ready" || visible) {
-      void check(resumed ? "resume" : "visibility");
+      checking = check(resumed ? "resume" : "visibility");
     }
+    if (!visible) return;
+    // 前に出たときに読み込み直すかがサーバーの版を取ってから決まるのは、受け持つ Service Worker が
+    // なく、待っている版が分かっているときだけ。ほかは、ここまでで決まっている
+    const decided =
+      checking !== null &&
+      controller() === null &&
+      update?.kind === "ready" &&
+      update.version !== null
+        ? checking
+        : Promise.resolve();
+    void decided.then(() => env.onVisible?.(reloading));
   });
   env.setInterval(() => void check("interval"), UPDATE_CHECK_INTERVAL_MS);
   void check("startup");

@@ -23,6 +23,18 @@ export function describeDiscordError(error: unknown): string {
   return describeError(error);
 }
 
+/** Web Push を使えない Sendo（docs/decisions/notifications.md の 2） */
+export const PUSH_UNAVAILABLE = "この Sendo では通知を使えません。";
+
+/**
+ * Turn on notifications で、作った登録を sendo に送れなかったときの文（docs/decisions/notifications.md
+ * の 3）。受けない状態のままなので、もう一度押せる
+ */
+export function describePushSendError(error: unknown): string {
+  if (error instanceof ApiError && error.code === "feature_unavailable") return PUSH_UNAVAILABLE;
+  return `通知の登録を Sendo に送れませんでした。${describeError(error)}`;
+}
+
 /**
  * 版の違うタブと、やり取りの版の番号が合わない（docs/decisions/local-first.md の 5）。自分のほうが
  * 古ければ、自分を読み込み直せば直る。相手が番号を名乗らなければ（この決まりより前の版）、相手が古い

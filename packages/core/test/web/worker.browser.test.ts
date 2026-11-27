@@ -240,6 +240,37 @@ describe("複数のタブ", () => {
   });
 });
 
+describe("手元の DB を消したとき", () => {
+  /** タブの画面に、手元の DB を消した知らせ（cleared）が届いた数を数える */
+  const countCleared = (tab: Tab) => {
+    const counter = { count: 0 };
+    tab.client.onCleared(() => {
+      counter.count += 1;
+    });
+    return counter;
+  };
+
+  test("ログアウトとユーザーの切り替えは、代表でないタブの画面にも知らせ、初めて使い始めたときは知らせない", async () => {
+    const { server, open } = world();
+    const first = open();
+    const second = open();
+    const cleared = [countCleared(first), countCleared(second)];
+    // 手元にユーザーがいないときに、来たユーザーを入れる前に消したのは、知らせない
+    server.signInAs();
+    expect(await second.client.restoreSession()).toBe(true);
+    await first.client.syncNow();
+    expect(cleared.map((c) => c.count)).toEqual([0, 0]);
+
+    // 別のタブなどで、別のユーザーでログインし直した
+    server.signInAs({ id: "user-2", email: "other@example.com" });
+    await second.client.syncNow();
+    await vi.waitFor(() => expect(cleared.map((c) => c.count)).toEqual([1, 1]));
+
+    await second.client.signOut();
+    await vi.waitFor(() => expect(cleared.map((c) => c.count)).toEqual([2, 2]));
+  });
+});
+
 describe("セッションが切れたとき", () => {
   test("ほかのタブでログインし直して戻ってきたら、代表のタブの止まっていた同期を再開する", async () => {
     const { server, open, signIn } = world();
@@ -382,20 +413,28 @@ describe("版の違うタブが混ざったとき", () => {
     const { open, openLegacyLeader } = world();
     const legacy = await openLegacyLeader();
     const tab = open();
+    let cleared = 0;
+    tab.client.onCleared(() => {
+      cleared += 1;
+    });
     await expectMismatch(tab.client.createFolder("Tech"), null);
     await expectMismatch(tab.client.isSignedIn(), null);
     expect(legacy.received).toEqual([]);
 
     legacy.post({ type: "changed", tables: ["folders"] });
     legacy.post({ type: "status", status: { signedIn: true } });
+    legacy.post({ type: "cleared" });
     legacy.post({ type: "changed", version: PROTOCOL_VERSION + 1, tables: ["feeds"] });
     legacy.post({ type: "status", version: PROTOCOL_VERSION + 1, status: { signedIn: true } });
+    // 手元を消した知らせも、版が合うまで受けない（docs/decisions/notifications.md の 4）
+    legacy.post({ type: "cleared", version: PROTOCOL_VERSION + 1 });
     // 同じ送り手の知らせは、送った順に届く。番号の合う知らせが画面に届いたら、その前の知らせも
     // タブのワーカーに届いている
     const marker = { signedIn: false, marker: true };
     legacy.post({ type: "status", version: PROTOCOL_VERSION, status: marker });
     await vi.waitFor(() => expect(tab.statuses).toEqual([marker]));
     expect(tab.changes).toEqual([]);
+    expect(cleared).toBe(0);
     // 頼みを送っていれば、たいていはここまでに届いている（届く順の保証はない）
     expect(legacy.received).toEqual([]);
   });

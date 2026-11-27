@@ -1,5 +1,5 @@
 import { describe, expect, test, vi } from "vitest";
-import { type ApiError, ReaderCore } from "../src";
+import { type ApiError, type Executor, ReaderCore } from "../src";
 import { migrate } from "../src/db/schema";
 import { FakeSendo, USER } from "./fake-sendo";
 import { openMemoryDb, setup } from "./helpers";
@@ -61,7 +61,10 @@ describe("ログイン（sendo のセッション）", () => {
     expect(core.currentUser()).toBeNull();
     expect(await core.listArticles()).toEqual([]);
     expect(await core.listFeeds()).toEqual([]);
-    expect(await db.all("select key from settings")).toEqual([{ key: "auth.logoutPending" }]);
+    expect(await db.all("select key from settings order by key")).toEqual([
+      { key: "auth.logoutPending" },
+      { key: "push.unsubscribePending" },
+    ]);
     expect(changes).toEqual([
       ["articles", "bells", "feeds", "folders", "savedPages", "settings", "workspaces"],
     ]);
@@ -69,7 +72,8 @@ describe("ログイン（sendo のセッション）", () => {
     expect(await core.sendPendingSignOut()).toBe(true);
     expect(server.requests).toEqual(["POST /auth/logout"]);
     expect(server.sessions.size).toBe(0);
-    expect(await db.all("select key from settings")).toEqual([]);
+    // 通知の登録の解除待ちの印は、画面が登録を外し終えるまで残る
+    expect(await db.all("select key from settings")).toEqual([{ key: "push.unsubscribePending" }]);
     // 送るものがなければ、何も送らない
     expect(await core.sendPendingSignOut()).toBe(true);
     expect(server.requests).toEqual(["POST /auth/logout"]);
@@ -88,7 +92,10 @@ describe("ログイン（sendo のセッション）", () => {
     server.failNext("network");
     expect(await core.sendPendingSignOut()).toBe(false);
     expect(core.isSignedIn()).toBe(false);
-    expect(await db.all("select key from settings")).toEqual([{ key: "auth.logoutPending" }]);
+    expect(await db.all("select key from settings order by key")).toEqual([
+      { key: "auth.logoutPending" },
+      { key: "push.unsubscribePending" },
+    ]);
 
     // 開き直しても、sendo に聞かずにログインしていないことにする
     server.requests.length = 0;
@@ -98,7 +105,8 @@ describe("ログイン（sendo のセッション）", () => {
     // ログインの操作をしたら、先にログアウトを送る
     await core.prepareSignIn();
     expect(server.sessions.size).toBe(0);
-    expect(await db.all("select key from settings")).toEqual([]);
+    // 通知の登録の解除待ちの印は、画面が登録を外し終えるまで残る
+    expect(await db.all("select key from settings")).toEqual([{ key: "push.unsubscribePending" }]);
     server.signInAs();
     expect(await core.restoreSession()).toBe(true);
   });
@@ -109,7 +117,10 @@ describe("ログイン（sendo のセッション）", () => {
     server.failNext("network");
     const error = await core.prepareSignIn().catch((e: unknown) => e);
     expect((error as ApiError).kind).toBe("network");
-    expect(await db.all("select key from settings")).toEqual([{ key: "auth.logoutPending" }]);
+    expect(await db.all("select key from settings order by key")).toEqual([
+      { key: "auth.logoutPending" },
+      { key: "push.unsubscribePending" },
+    ]);
   });
 
   test("送れていないログアウトがなければ、prepareSignIn は何も送らない", async () => {
@@ -248,7 +259,10 @@ describe("ログアウトと中断", () => {
     expect((error as ApiError).kind).toBe("network");
     expect(core.isSignedIn()).toBe(false);
     expect(await core.listFeeds()).toEqual([]);
-    expect(await db.all("select key from settings")).toEqual([{ key: "auth.logoutPending" }]);
+    expect(await db.all("select key from settings order by key")).toEqual([
+      { key: "auth.logoutPending" },
+      { key: "push.unsubscribePending" },
+    ]);
   });
 
   test("ログアウトの前に届いていたページも、ログアウトのあとには書き戻さない", async () => {
@@ -342,7 +356,10 @@ describe("ログインとログアウトが重なったとき", () => {
     };
     expect(await core.restoreSession()).toBe(false);
     expect(core.isSignedIn()).toBe(false);
-    expect(await db.all("select key from settings")).toEqual([{ key: "auth.logoutPending" }]);
+    expect(await db.all("select key from settings order by key")).toEqual([
+      { key: "auth.logoutPending" },
+      { key: "push.unsubscribePending" },
+    ]);
   });
 
   test("確かめている間にログアウトして答えが止まっていても、ログインは中断される", async () => {
@@ -393,31 +410,38 @@ describe("ログインとログアウトが重なったとき", () => {
     expect(core.currentUser()).toEqual(USER_B);
   });
 
-  test("手元の DB を消すとき（ログアウト、ユーザーの切り替え）にだけ、DB の外のデータも消してもらう", async () => {
-    let cleared = 0;
+  test("手元の DB を消すとき（ログアウト、ユーザーの切り替え）にだけ、わけを添えて DB の外のデータも消してもらう", async () => {
+    const cleared: string[] = [];
     const { server, core } = await setup({
-      onDataCleared: async () => {
-        cleared += 1;
+      onDataCleared: async (reason) => {
+        cleared.push(reason);
       },
     });
-    // 初めて使い始めたときにも消す（前に使っていた人のものが残っていないように）
-    expect(cleared).toBe(1);
+    // 初めて使い始めたときにも消す（前に使っていた人のものが残っていないように）。手元にユーザーが
+    // いなかったので、ユーザーの切り替えとは分ける（docs/decisions/notifications.md の 4）
+    expect(cleared).toEqual(["adopt"]);
     await core.sync();
-    expect(cleared).toBe(1);
+    expect(cleared).toEqual(["adopt"]);
 
     // セッションが切れただけでは、手元のデータと同じく残す
     server.expireSession();
     await core.sync().catch(() => {});
-    expect(cleared).toBe(1);
+    expect(cleared).toEqual(["adopt"]);
 
     // 別のユーザーに替わったら消す
     server.signInAs(USER_B);
     await core.sync();
-    expect(cleared).toBe(2);
+    expect(cleared).toEqual(["adopt", "switchUser"]);
 
-    // ログアウトで消す。消すのに失敗しても、ログアウトは終わる
+    // ログアウトで消す
     await core.signOut();
-    expect(cleared).toBe(3);
+    expect(cleared).toEqual(["adopt", "switchUser", "signOut"]);
+
+    // ログアウトのあとに次の人がログインしたときは、手元にユーザーがいない
+    await core.prepareSignIn();
+    server.signInAs();
+    expect(await core.restoreSession()).toBe(true);
+    expect(cleared).toEqual(["adopt", "switchUser", "signOut", "adopt"]);
   });
 
   test("DB の外のデータを消せなくても、ログアウトは終わる", async () => {
@@ -426,5 +450,75 @@ describe("ログインとログアウトが重なったとき", () => {
     });
     await core.signOut();
     expect(core.isSignedIn()).toBe(false);
+  });
+});
+
+describe("通知の登録の解除待ちの印（docs/decisions/notifications.md の 4）", () => {
+  test("ログアウトで手元を消すときに置き、開き直しても、次の人のログインで手元を消しても残り、消すまで残る", async () => {
+    const { db, server, core } = await setup();
+    expect(await core.isPushUnsubscribePending()).toBe(false);
+    await core.signOut();
+    expect(await core.isPushUnsubscribePending()).toBe(true);
+
+    // 画面が登録を外し終える前に、タブが閉じた。開き直して、次の人がログインする
+    const reopened = await ReaderCore.open({
+      db,
+      baseUrl: "https://sendo.test/api/v1",
+      fetch: server.fetch,
+    });
+    expect(await reopened.isPushUnsubscribePending()).toBe(true);
+    await reopened.prepareSignIn();
+    server.signInAs(USER_B);
+    expect(await reopened.restoreSession()).toBe(true);
+    expect(reopened.currentUser()).toEqual(USER_B);
+    expect(await reopened.isPushUnsubscribePending()).toBe(true);
+
+    await reopened.clearPushUnsubscribePending();
+    expect(await reopened.isPushUnsubscribePending()).toBe(false);
+    // 消したあとに同期しても、置き直さない（同じユーザーのまま）
+    await reopened.sync();
+    expect(await reopened.isPushUnsubscribePending()).toBe(false);
+  });
+
+  test("手元にいたユーザーを替えるときに置き、手元にユーザーがいないときのログインでは置かない", async () => {
+    const { server, core } = await setup({ signIn: false });
+    server.signInAs();
+    expect(await core.restoreSession()).toBe(true);
+    expect(await core.isPushUnsubscribePending()).toBe(false);
+
+    server.signInAs(USER_B);
+    await core.sync();
+    expect(core.currentUser()).toEqual(USER_B);
+    expect(await core.isPushUnsubscribePending()).toBe(true);
+  });
+
+  test("印を置けなければ、手元も消さない（同じトランザクション）。やり直せば、消して印を置く", async () => {
+    const { server, core, db } = await setup();
+    const feed = server.subscribe({ url: "https://example.com/feed.xml" });
+    server.deliver(feed.id);
+    await core.sync();
+    const original = db.transaction.bind(db);
+    let fail = true;
+    db.transaction = (<T>(fn: (tx: Executor) => Promise<T>) =>
+      original((tx) =>
+        fn({
+          run: (sql, params) =>
+            fail &&
+            sql.startsWith("insert into settings") &&
+            params?.[0] === "push.unsubscribePending"
+              ? Promise.reject(new Error("書けない"))
+              : tx.run(sql, params),
+          all: (sql, params) => tx.all(sql, params),
+        }),
+      )) as typeof db.transaction;
+
+    await expect(core.signOut()).rejects.toThrow("書けない");
+    expect(await core.listArticles()).toHaveLength(1);
+    expect(await core.isPushUnsubscribePending()).toBe(false);
+
+    fail = false;
+    await core.signOut();
+    expect(await core.listArticles()).toEqual([]);
+    expect(await core.isPushUnsubscribePending()).toBe(true);
   });
 });

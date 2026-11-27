@@ -340,7 +340,13 @@ test("幅 320px の画面でも各カテゴリを選べ、プレビューの文�
   await page.goto("/settings");
   await signIn(page);
   await page.getByRole("slider", { name: "Text size" }).fill("4");
-  for (const category of ["Reading", "Connections", "Integrations", "Appearance"]) {
+  for (const category of [
+    "Reading",
+    "Notifications",
+    "Connections",
+    "Integrations",
+    "Appearance",
+  ]) {
     const tab = page.getByRole("tab", { name: category, exact: true });
     await tab.click();
     await expect(tab).toHaveAttribute("aria-selected", "true");

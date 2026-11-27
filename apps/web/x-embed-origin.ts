@@ -84,8 +84,11 @@ export function withXEmbedMeta(html: string, origin: string): string {
   return `${parts[0]}${meta}</head>${parts[1]}`;
 }
 
-/** sw.js の precache の一覧の中の、index.html の項目（Workbox の generateSW の出力の形） */
-const INDEX_REVISION = /\{url:"index\.html",revision:"[0-9a-f]+"\}/g;
+/**
+ * sw.js の precache の一覧の中の、index.html の項目。injectManifest（workbox-build）は、一覧を鍵を
+ * 並べた JSON にして差し込む（docs/decisions/push-receive.md の 1）
+ */
+const INDEX_REVISION = /\{"revision":"[0-9a-f]+","url":"index\.html"\}/g;
 
 /**
  * sw.js の precache の一覧の、index.html の revision を替える。Service Worker は、sw.js が変わると
@@ -99,7 +102,7 @@ export function withIndexRevision(sw: string, revision: string): string {
       `sw.js の precache の一覧に、index.html の revision がちょうど 1 つあるはずが、${found.length} 個だった`,
     );
   }
-  return sw.replace(INDEX_REVISION, `{url:"index.html",revision:"${revision}"}`);
+  return sw.replace(INDEX_REVISION, `{"revision":"${revision}","url":"index.html"}`);
 }
 
 /** 書き換えたあとの index.html と、付ける CSP から、index.html の版の印を作る */

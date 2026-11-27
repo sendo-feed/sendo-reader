@@ -21,6 +21,15 @@ export type Scope = "read" | "write";
 export type DiscordIntegration = components["schemas"]["DiscordIntegration"];
 export type DiscordSubscription = DiscordIntegration["subscriptions"][number];
 
+/**
+ * この Sendo で Web Push を使えるか（GET /push。sendo の web-push.md の 3）。使えるなら、
+ * PushManager.subscribe の applicationServerKey に渡す VAPID の公開鍵（base64url）
+ */
+export type PushStatus = { available: true; publicKey: string } | { available: false };
+
+/** この端末の Web Push の登録（PushSubscription.toJSON() の形。sendo の web-push.md の 4） */
+export type PushRegistration = components["schemas"]["PushRegistration"];
+
 /** アクセストークン（中身は含まない。中身は発行したときにしか受け取れない） */
 export interface AccessToken {
   id: string;
@@ -128,6 +137,40 @@ export function createAccountApi(options: SendoApiOptions) {
         .POST("/integrations/discord/subscriptions", { body: { url } });
       if (data === undefined) throw errorFromBody(response.status, error);
       return data;
+    },
+
+    /**
+     * Web Push を使えるか（docs/decisions/notifications.md の 1）。404（Web Push に対応する前の
+     * Sendo）は使えないとする。応答の形が読めなければ ApiError（server）。届かない、401 などは
+     * ApiError のまま投げる
+     */
+    async getPush(signal?: AbortSignal): Promise<PushStatus> {
+      const { data, error, response } = await api.client(signal).GET("/push");
+      if (response.status === 404) return { available: false };
+      if (data === undefined) throw errorFromBody(response.status, error);
+      const body = data as { available?: unknown; publicKey?: unknown } | null;
+      if (body?.available === false) return { available: false };
+      if (body?.available === true && typeof body.publicKey === "string" && body.publicKey !== "") {
+        return { available: true, publicKey: body.publicKey };
+      }
+      throw new ApiError("server", "sendo の Web Push の応答の形が違う");
+    },
+
+    /**
+     * この端末の登録を、今のセッションに結んで置く（何度送ってもよい）。登録は秘密として扱い、
+     * 失敗の文にも入れない。使えない設定なら ApiError（status 501）
+     */
+    async putPushRegistration(registration: PushRegistration, signal?: AbortSignal): Promise<void> {
+      const { error, response } = await api
+        .client(signal)
+        .PUT("/push/registration", { body: registration });
+      if (!response.ok) throw errorFromBody(response.status, error);
+    },
+
+    /** 今のセッションの登録を外す（なくても成功する） */
+    async deletePushRegistration(signal?: AbortSignal): Promise<void> {
+      const { error, response } = await api.client(signal).DELETE("/push/registration");
+      if (!response.ok) throw errorFromBody(response.status, error);
     },
 
     /** アクセストークンの一覧（新しい順） */

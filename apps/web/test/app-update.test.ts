@@ -2,11 +2,11 @@ import { describe, expect, test, vi } from "vitest";
 import {
   type AppUpdateEnvironment,
   type AppUpdateNotice,
-  canReloadPage,
   UPDATE_CHECK_INTERVAL_MS,
   updateReadyMessage,
   watchAppUpdate,
 } from "../src/lib/app-update";
+import { canReloadPage } from "../src/lib/reload-paths";
 
 const A = { commit: "aaaaaaa", builtAt: "2026-11-24T00:00:00.000Z" };
 const B = { ...A, builtAt: "2026-11-24T00:00:01.000Z" };
@@ -20,6 +20,7 @@ function setup(
     unsupported?: boolean;
     server?: typeof A;
     fetch?: (init: RequestInit) => Promise<Response>;
+    onVisible?: (reloading: boolean) => void;
   } = {},
 ) {
   const listeners = new Map<string, () => void>();
@@ -97,6 +98,7 @@ function setup(
       return 0;
     },
     onNotice: (notice) => state.notices.push(notice),
+    ...(options.onVisible === undefined ? {} : { onVisible: options.onVisible }),
   };
   watchAppUpdate(env);
   return {
@@ -469,5 +471,66 @@ describe("/version.json との比較", () => {
     app.show();
     await settle();
     expect(app.state.notices).toEqual(["ready"]);
+  });
+});
+
+describe("前に出たときの、読み込み直すかの決まり（docs/decisions/push-receive.md の 4）", () => {
+  test("新しい版の worker に替わって待っていたら、前に出たときに読み込み直すと決めてから知らせる", async () => {
+    const decisions: boolean[] = [];
+    const app = setup({ onVisible: (reloading) => decisions.push(reloading) });
+    await settle();
+    // 読み込み直すと消えるものを出している間に替わり、裏に回っても読み込み直せなかった
+    app.state.canReload = false;
+    app.newVersion();
+    app.hide();
+    expect(app.state.reloads).toBe(0);
+    app.state.canReload = true;
+    app.show();
+    await settle();
+    expect(app.state.reloads).toBe(1);
+    expect(decisions).toEqual([true]);
+  });
+
+  test("待っている版がなければ、読み込み直さないと知らせる", async () => {
+    const decisions: boolean[] = [];
+    const app = setup({ onVisible: (reloading) => decisions.push(reloading) });
+    await settle();
+    app.hide();
+    app.show();
+    await settle();
+    expect(decisions).toEqual([false]);
+    expect(app.state.reloads).toBe(0);
+  });
+
+  test("読み込み直すと消えるものを出している画面では、読み込み直さないと知らせる", async () => {
+    const decisions: boolean[] = [];
+    const app = setup({ visible: false, onVisible: (reloading) => decisions.push(reloading) });
+    await settle();
+    app.state.canReload = false;
+    app.newVersion();
+    app.show();
+    await settle();
+    expect(decisions).toEqual([false]);
+  });
+
+  test("worker がなく新版を待っていたら、版を取り直して決めてから知らせる", async () => {
+    const decisions: boolean[] = [];
+    const app = setup({
+      unsupported: true,
+      server: B,
+      onVisible: (reloading) => decisions.push(reloading),
+    });
+    await settle();
+    expect(app.state.notices).toEqual(["ready"]);
+    // 裏に回ったときはオフラインで、読み込み直せなかった
+    app.state.offline = true;
+    app.hide();
+    await settle();
+    app.state.offline = false;
+    app.show();
+    expect(decisions).toEqual([]);
+    await settle();
+    expect(app.state.reloads).toBe(1);
+    expect(decisions).toEqual([true]);
   });
 });

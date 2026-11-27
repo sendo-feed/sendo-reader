@@ -8,8 +8,6 @@
  * 過ぎたもの）は使わない。
  */
 
-export const AUTHORIZE_PATH = "/oauth/authorize";
-
 const KEY = "sendo-reader:oauth-authorize";
 const MAX_AGE_MS = 10 * 60 * 1000;
 

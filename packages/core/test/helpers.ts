@@ -1,5 +1,6 @@
 import sqlite3InitModule from "@sqlite.org/sqlite-wasm";
 import { type Database, ReaderCore, wrapSqliteWasm } from "../src";
+import type { DataClearReason } from "../src/reader";
 import { FakeSendo } from "./fake-sendo";
 
 let sqlite3: Awaited<ReturnType<typeof sqlite3InitModule>> | undefined;
@@ -14,7 +15,7 @@ export async function openMemoryDb(): Promise<Database> {
 export async function setup(
   options: {
     signIn?: boolean;
-    onDataCleared?: () => Promise<void>;
+    onDataCleared?: (reason: DataClearReason) => Promise<void>;
     /** 同期のあとに先読みを頼む数（本番の Web は DEFAULT_PREFETCH_CONTENTS）。既定は 0 */
     prefetchContents?: number;
   } = {},

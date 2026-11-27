@@ -3,14 +3,25 @@ import { trimImageCache } from "@sendo-reader/core/web/image-cache";
 import { mount } from "svelte";
 import App from "./App.svelte";
 import { showUnreadBadge } from "./lib/app-badge";
-import { canReloadPage, watchAppUpdate } from "./lib/app-update";
-import { AUTHORIZE_PATH } from "./lib/authorize";
+import { watchAppUpdate } from "./lib/app-update";
 import { watchBackForwardCache } from "./lib/back-forward-cache";
 import { readerContext } from "./lib/context";
+import { articlePath } from "./lib/notification";
+import {
+  markAutoReload,
+  noteNotificationOpen,
+  takeAutoReloadMark,
+  watchNotificationOpens,
+} from "./lib/notification-open";
+import { forgetTag, listTags } from "./lib/notification-store";
+import { notificationSuggestion } from "./lib/notification-suggestion.svelte";
+import { pushDevice } from "./lib/push-device";
 import { startReader } from "./lib/reader";
 import { reloadGuard } from "./lib/reload-guard.svelte";
+import { AUTHORIZE_PATH, canReloadPage } from "./lib/reload-paths";
+import { router } from "./lib/router.svelte";
+import { registerServiceWorker } from "./lib/service-worker";
 import { ReaderState } from "./lib/state.svelte";
-import { trustedScriptUrl } from "./lib/trusted";
 import { updateNotice } from "./lib/update-notice.svelte";
 import Authorize from "./routes/Authorize.svelte";
 import "./app.css";
@@ -19,6 +30,9 @@ import { prefs } from "./lib/prefs.svelte";
 
 const target = document.getElementById("app");
 if (!target) throw new Error("#app が見つからない");
+
+/** 画面が前に出て、自動で読み込み直すかが決まったら呼ぶ（消えた通知を比べる） */
+let onVisible: (reloading: boolean) => void = () => {};
 
 if (location.pathname === AUTHORIZE_PATH) {
   // OAuth の許可の画面は、sendo のセッションだけで動き、手元のデータを使わない
@@ -46,16 +60,61 @@ if (location.pathname === AUTHORIZE_PATH) {
   const state = new ReaderState(reader.client, page.leave);
   // 設定の正は手元の DB（docs/decisions/settings.md）。つないで、読み直す
   prefs.connect(state.client);
-  mount(App, { target, context: readerContext(state) });
-  void state.init();
   // インストールしたアプリのアイコンに、未読の数を出す。Badging API のないブラウザーでは何もしない
-  if ("setAppBadge" in navigator) showUnreadBadge(state.client, navigator, document);
-
+  const refreshBadge =
+    "setAppBadge" in navigator ? showUnreadBadge(state.client, navigator, document) : () => {};
+  // この端末で通知を受ける操作（docs/decisions/notifications.md の 1〜4）。送る前に、セッションの
+  // ユーザーが手元のユーザーと同じかを確かめ、違えば同期に切り替えを任せる
+  pushDevice.connect({
+    user: () => state.user,
+    onAccountChanged: () => void state.client.syncNow().catch(() => {}),
+    // 通知を許可したときと、ログアウトとユーザーの切り替えで登録を外したときに書き直す
+    // （docs/decisions/notifications.md の 4・5）
+    refreshBadge,
+    // 手元を消すときに core が置く、解除待ちの印（docs/decisions/notifications.md の 4）
+    unsubscribePending: () => state.client.isPushUnsubscribePending(),
+    clearUnsubscribePending: () => state.client.clearPushUnsubscribePending(),
+  });
+  // ログアウトとユーザーの切り替えで、この端末の登録を外し、前の人への勧めを消す（どのタブで
+  // 起きても届く）
+  state.client.onCleared(() => {
+    notificationSuggestion.reset();
+    void pushDevice.forget();
+  });
+  mount(App, { target, context: readerContext(state) });
+  // 起動したら、登録があれば送り直す（sendo は登録をセッションに結ぶ。docs/decisions/notifications.md の 3）。
+  // 起動が版の違うタブのために止まったら、止まりが解けてログインしていると分かったときに送る
+  state.onceSignedIn(() => void pushDevice.resend());
+  void state.init();
   // 画像のキャッシュが上限（100MB）を超えていたら、古いものから捨てる（docs/decisions/images.md
   // の 3）。起動してしばらくしてからと、そのあとは一定の間隔で見る（画面の表示は待たせない）
   const trim = () => void trimImageCache().catch(() => {});
   setTimeout(trim, 10_000);
   setInterval(trim, 10 * 60_000);
+
+  // 押された通知の記事を、この画面で開く（docs/decisions/push-receive.md の 3・4）。記事の URL を
+  // 開いたときと同じ道で開く
+  const opens = watchNotificationOpens({
+    serviceWorker: navigator.serviceWorker ?? null,
+    shownTags: async () => {
+      const registration = await navigator.serviceWorker?.getRegistration("/");
+      return ((await registration?.getNotifications()) ?? []).map((n) => n.tag);
+    },
+    listTags,
+    forgetTag,
+    now: () => Date.now(),
+    visibility: () => document.visibilityState,
+    takeAutoReloadMark,
+    vanishedOpens:
+      (navigator as Navigator & { standalone?: boolean }).standalone === true &&
+      navigator.maxTouchPoints > 1,
+    canOpen: () => canReloadPage(location.pathname, reloadGuard.held),
+    open: (articleId) => {
+      noteNotificationOpen(articleId);
+      router.navigate(articlePath(articleId));
+    },
+  });
+  onVisible = opens.onVisible;
 
   // タブが前に出たら、しばらく同期していなければ同期してもらう
   document.addEventListener("visibilitychange", () => {
@@ -75,17 +134,23 @@ if (import.meta.env.PROD) {
             return container.controller;
           },
           addEventListener: (type, listener) => container.addEventListener(type, listener),
-          register: () => container.register(trustedScriptUrl("/sw.js"), { scope: "/" }),
+          register: () => registerServiceWorker(container),
         }
       : null,
     version: __APP_VERSION__,
     fetch: (path, init) => fetch(path, init),
     document,
-    reload: () => location.reload(),
+    // 自動で読み込み直す前に印を置く（読み込み直したあとの起動を、前に出たときと同じに扱う。
+    // docs/decisions/push-receive.md の 4）
+    reload: () => {
+      markAutoReload();
+      location.reload();
+    },
     // 読み込み直すと消えるものを出している画面では、ほかの画面に移ってから切り替える
     canReload: () => canReloadPage(location.pathname, reloadGuard.held),
     setInterval: (fn, ms) => setInterval(fn, ms),
     // 前に出ている間は読み込み直さないので、画面で知らせる（App.svelte）
     onNotice: (notice) => updateNotice.show(notice),
+    onVisible: (reloading) => onVisible(reloading),
   });
 }
