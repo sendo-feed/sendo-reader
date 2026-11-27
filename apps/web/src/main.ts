@@ -23,6 +23,7 @@ import { router } from "./lib/router.svelte";
 import { registerServiceWorker } from "./lib/service-worker";
 import { ReaderState } from "./lib/state.svelte";
 import { updateNotice } from "./lib/update-notice.svelte";
+import { forgetLastWorkspaceSelections } from "./lib/workspace-selection";
 import Authorize from "./routes/Authorize.svelte";
 import "./app.css";
 // 表示の好み（テーマ、文字の大きさ）を、画面を出す前に当てる
@@ -75,10 +76,11 @@ if (location.pathname === AUTHORIZE_PATH) {
     unsubscribePending: () => state.client.isPushUnsubscribePending(),
     clearUnsubscribePending: () => state.client.clearPushUnsubscribePending(),
   });
-  // ログアウトとユーザーの切り替えで、この端末の登録を外し、前の人への勧めを消す（どのタブで
-  // 起きても届く）
+  // ログアウトとユーザーの切り替えで、この端末の登録を外し、前の人への勧めと、ワークスペースの最後の
+  // 選択の写し（docs/decisions/workspaces.md の 2）を消す（どのタブで起きても届く）
   state.client.onCleared(() => {
     notificationSuggestion.reset();
+    forgetLastWorkspaceSelections();
     void pushDevice.forget();
   });
   mount(App, { target, context: readerContext(state) });
