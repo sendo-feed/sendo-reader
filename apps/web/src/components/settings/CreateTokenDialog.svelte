@@ -6,7 +6,7 @@
     type TokenPurpose,
   } from "@sendo-reader/core";
   import { onDestroy } from "svelte";
-  import { account } from "../../lib/account";
+  import { account, PURPOSE_LABELS } from "../../lib/account";
   import { describeError } from "../../lib/errors";
   import { truncate } from "../../lib/format";
   import Dialog from "../Dialog.svelte";
@@ -92,7 +92,7 @@
           id={`${fieldId}-name`}
           bind:value={name}
           maxlength={MAX_TOKEN_NAME_LENGTH}
-          placeholder="Reeder（iPhone）"
+          placeholder="購読を確認するスクリプト"
           disabled={busy}
           required
         >
@@ -100,13 +100,13 @@
       <div class="field">
         <label for={`${fieldId}-purpose`}>Use with</label>
         <select id={`${fieldId}-purpose`} bind:value={purpose} disabled={busy}>
-          <option value="reader">Reader app</option>
-          <option value="mcp">MCP client</option>
+          <option value="reader">{PURPOSE_LABELS.reader}</option>
+          <option value="mcp">{PURPOSE_LABELS.mcp}</option>
         </select>
       </div>
       <p class="hint">
         {purpose === "reader"
-          ? "Reeder や NetNewsWire のパスワード欄に入れます。"
+          ? "REST API のリクエストで Authorization: Bearer のトークンとして使います。"
           : "Claude Code などのMCPクライアントで使います（sendo の /mcp 専用）。"}
       </p>
       {#if purpose === "mcp"}

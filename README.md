@@ -70,7 +70,6 @@ Sendo と並べて、コンテナで動かします（[決定](docs/decisions/co
 - TLS は、手前に置くリバースプロキシ（Caddy など）や Cloudflare Tunnel で終えます。コンテナは HTTP（既定はポート 8080）だけを受けます
 - 手前のプロキシは、WebSocket の Upgrade を通すようにします（Caddy と Cloudflare Tunnel は何も足さずに通します。nginx などの設定は [Sendo の README](https://github.com/sendo-feed/sendo#動かす) にあります）。通さなくても、画面は定期同期だけで動きます
 - reader は、Sendo のヘルスチェックが通ってから始まります。更新は `docker compose pull && docker compose up -d` で、Sendo と一緒に新しくなります
-Google Reader 互換 API の入口も、Sendo から削除されるまでは中継します。詳細は [Sendo の廃止方針](https://github.com/sendo-feed/sendo/blob/main/docs/decisions/greader.md) を参照してください。
 
 reader のコンテナの設定（環境変数）は、次のとおりです。`SENDO_URL` と `PORT` は、ふつうは変えません。
 
