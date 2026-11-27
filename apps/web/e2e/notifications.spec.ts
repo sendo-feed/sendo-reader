@@ -842,6 +842,7 @@ test.describe("通知から開いた新しい窓", () => {
   });
 
   const outOfScope = "通知の記事は、選んでいるワークスペースに入っていないため、開きませんでした。";
+  // 知らせがないことは、その時点の数で確かめる（toHaveCount(0) は、出た知らせが消えるまで待って通る）
 
   test("最後に選んだ範囲の外の記事なら開かず、開かなかったことを知らせる。印は URL に残さない", async ({
     page,
@@ -891,7 +892,7 @@ test.describe("通知から開いた新しい窓", () => {
     // 印は外したので、読み込み直しても戻っても、知らせは繰り返さない
     await window.reload();
     await expect(window.locator(".article-list").getByText("Public article")).toBeVisible();
-    await expect(window.getByText(outOfScope)).toHaveCount(0);
+    expect(await window.getByText(outOfScope).count()).toBe(0);
 
     // 範囲の中の記事は、印付きでも開き、印を外す
     const inScope = await context.newPage();
@@ -900,7 +901,7 @@ test.describe("通知から開いた新しい窓", () => {
       inScope.getByRole("heading", { name: "Public article", exact: true }),
     ).toBeVisible();
     await expect(inScope).toHaveURL(new RegExp(`/\\?article=${shown.id}$`));
-    await expect(inScope.getByText(outOfScope)).toHaveCount(0);
+    expect(await inScope.getByText(outOfScope).count()).toBe(0);
 
     // 印のない記事の URL は、今までどおり知らせずに一覧に戻る
     const plain = await context.newPage();
@@ -913,7 +914,7 @@ test.describe("通知から開いた新しい窓", () => {
         .getByRole("button", { name: "Workspaces: Public", exact: true }),
     ).toBeVisible();
     await expect(plain.getByRole("heading", { name: "Hidden article" })).toHaveCount(0);
-    await expect(plain.getByText(outOfScope)).toHaveCount(0);
+    expect(await plain.getByText(outOfScope).count()).toBe(0);
 
     // まだ手元にない記事は、記事の画面で同期を待ち、届いたものが範囲の外なら知らせる
     const late = server.deliver(personal.id, { title: "Late hidden article" });
@@ -927,15 +928,34 @@ test.describe("通知から開いた新しい窓", () => {
     const waiting = await context.newPage();
     await waiting.goto(`/?article=${late.id}&from=notification`);
     await expect(waiting.getByText("記事を同期しています…")).toBeVisible();
+    // 決める前に読み込み直した窓は、印も覚えも消えているので、知らせない
+    const reloaded = await context.newPage();
+    await reloaded.goto(`/?article=${late.id}&from=notification`);
+    await expect(reloaded.getByText("記事を同期しています…")).toBeVisible();
+    await reloaded.reload();
+    await expect(reloaded).toHaveURL(new RegExp(`/\\?article=${late.id}$`));
+    await expect(reloaded.getByText("記事を同期しています…")).toBeVisible();
     release();
     await expect(waiting.getByText(outOfScope)).toBeVisible();
+    await expect(reloaded).toHaveURL(/\/$/);
+    await expect(reloaded.getByRole("heading", { name: "Late hidden article" })).toHaveCount(0);
+    expect(await reloaded.getByText(outOfScope).count()).toBe(0);
     await expect(waiting).toHaveURL(/\/$/);
     await expect(waiting.getByRole("heading", { name: "Late hidden article" })).toHaveCount(0);
   });
 
-  test("All で始まる新しい窓では、印付きの記事を開いて印を外す", async ({ page, context }) => {
+  test("All で始まる新しい窓では、印付きの記事を開いて印を外す。あとで範囲を変えても知らせない", async ({
+    page,
+    context,
+  }) => {
     const server = new FakeSendo();
     server.workspacesSupported = true;
+    const publicSpace = server.createWorkspace("Public");
+    server.subscribe({
+      url: "https://public.example/feed",
+      title: "Public feed",
+      workspaceId: publicSpace.id,
+    });
     const privateSpace = server.createWorkspace("Personal");
     const personal = server.subscribe({
       url: "https://private.example/feed",
@@ -952,7 +972,42 @@ test.describe("通知から開いた新しい窓", () => {
       window.getByRole("heading", { name: "Hidden article", exact: true }),
     ).toBeVisible();
     await expect(window).toHaveURL(new RegExp(`/\\?article=${hidden.id}$`));
-    await expect(window.getByText(outOfScope)).toHaveCount(0);
+    expect(await window.getByText(outOfScope).count()).toBe(0);
+
+    // まだ手元にない記事を待つ間に範囲を狭め、届いた記事が範囲の外なら、開けなかったことを知らせる
+    const late = server.deliver(personal.id, { title: "Late hidden article" });
+    let release = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    server.onRequest = async (path) => {
+      if (path === "GET /sync") await gate;
+    };
+    const waiting = await context.newPage();
+    await waiting.goto(`/?article=${late.id}&from=notification`);
+    await expect(waiting.getByText("記事を同期しています…")).toBeVisible();
+    const waitingNav = waiting.getByRole("navigation", { name: "Feeds", exact: true });
+    await expect(
+      waitingNav.getByRole("button", { name: "Workspaces: All workspaces" }),
+    ).toBeVisible();
+    await waitingNav.getByRole("button", { name: /^Workspaces:/ }).click();
+    const waitingDialog = waiting.getByRole("dialog", { name: "Workspaces", exact: true });
+    await waitingDialog.getByRole("button", { name: "Only Public", exact: true }).click();
+    await waitingDialog.getByRole("button", { name: "Close", exact: true }).click();
+    release();
+    await expect(waiting.getByText(outOfScope)).toBeVisible();
+    await expect(waiting).toHaveURL(/\/$/);
+    await waiting.close();
+
+    // 開いたあとで利用者が範囲を狭めると、記事は閉じるが、通知の知らせは出さない
+    const nav = window.getByRole("navigation", { name: "Feeds", exact: true });
+    await nav.getByRole("button", { name: /^Workspaces:/ }).click();
+    const dialog = window.getByRole("dialog", { name: "Workspaces", exact: true });
+    await dialog.getByRole("button", { name: "Only Public", exact: true }).click();
+    await dialog.getByRole("button", { name: "Close", exact: true }).click();
+    await expect(window).toHaveURL(/\/$/);
+    await expect(window.getByRole("heading", { name: "Hidden article" })).toHaveCount(0);
+    expect(await window.getByText(outOfScope).count()).toBe(0);
   });
 });
 
