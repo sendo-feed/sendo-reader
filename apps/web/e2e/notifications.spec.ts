@@ -19,7 +19,7 @@ interface StubState {
   /** requestPermission で利用者が選ぶ答え */
   answer: NotificationPermission;
   subscription: { endpoint: string; key: string } | null;
-  /** requestPermission を呼んだ数 */
+  /** 許可を求めた数（requestPermission と、許可が決まる前の subscribe） */
   requests: number;
 }
 
@@ -83,7 +83,20 @@ async function stubPush(
       };
       PushManager.prototype.subscribe = async (options) => {
         const next = read();
-        const key = options?.applicationServerKey;
+        // 本物の Chromium と同じく、通知を出す約束（userVisibleOnly）のない登録は断る
+        if (options?.userVisibleOnly !== true) {
+          throw new DOMException("userVisibleOnly でない", "NotAllowedError");
+        }
+        // 許可が決まっていなければ、本物は許可の窓を出す（許可を求めた数に数える）
+        if (next.permission === "default") {
+          next.requests += 1;
+          next.permission = next.answer;
+          write(next);
+        }
+        if (next.permission !== "granted") {
+          throw new DOMException("許可されていない", "NotAllowedError");
+        }
+        const key = options.applicationServerKey;
         next.subscription = {
           endpoint: `https://push.example/${crypto.randomUUID()}`,
           key: toText(new Uint8Array(key as ArrayBuffer)),
@@ -206,7 +219,13 @@ test("起動しただけ、画面を開いただけでは、許可を求めな�
   await expect(turnOnButton(page)).toBeEnabled();
   await page.goto("/");
   await expect(page.getByRole("button", { name: "Sign out", exact: true })).toBeVisible();
-  expect((await stubState(page))?.requests ?? 0).toBe(0);
+  // 起動したときの送り直し（登録のロックを取る）が済むのを待つ。登録のないところで登録を作ろうと
+  // すれば、許可を求めたことになる
+  await page.waitForTimeout(300);
+  await page.evaluate(() => navigator.locks.request("sendo-reader:push", async () => {}));
+  const state = await stubState(page);
+  expect(state?.requests ?? 0).toBe(0);
+  expect(state?.subscription ?? null).toBeNull();
 });
 
 test("起動したら、残っている登録を sendo に送り直す", async ({ page, context }) => {
@@ -247,6 +266,7 @@ test("ログアウトすると、この端末の登録を外し、出ている�
   await expect.poll(() => shownNotifications(page)).toEqual([]);
   expect(await rememberedTags(page)).toEqual([]);
   expect(server.pushRegistrations.size).toBe(0);
+  expect(server.requests).not.toContain("DELETE /push/registration");
 });
 
 test("Web Push を使えない Sendo では使えないと出し、登録が残っていれば外す操作を出す", async ({
@@ -317,7 +337,17 @@ test("sendo に送れなければ、作った登録を外し、もう一度押�
 
 /** Service Worker に push を届ける（DevTools の Push と同じ道。プッシュサービスは通らない） */
 async function deliverPush(context: BrowserContext, page: Page, payload: unknown): Promise<void> {
-  await page.evaluate(() => navigator.serviceWorker.ready);
+  // ready は取り込みの途中（activating）でも返る。その間に届けた push は落ちることがあるので、
+  // 取り込みが済む（activated）まで待つ
+  await page.evaluate(async () => {
+    const worker = (await navigator.serviceWorker.ready).active;
+    if (worker === null || worker.state === "activated") return;
+    await new Promise<void>((resolve) => {
+      worker.addEventListener("statechange", () => {
+        if (worker.state === "activated") resolve();
+      });
+    });
+  });
   const cdp = await context.newCDPSession(page);
   const registrations: { registrationId: string; scopeURL: string }[] = [];
   cdp.on("ServiceWorker.workerRegistrationUpdated", (event) => {
@@ -346,20 +376,22 @@ const shownNotifications = (page: Page) =>
     }));
   });
 
-/** Service Worker が IndexedDB に覚えた通知（docs/decisions/notifications.md の 8・10） */
+/**
+ * Service Worker が IndexedDB に覚えた通知（docs/decisions/notifications.md の 8・10）。まだなければ、
+ * src/lib/notification-store.ts と同じ版と形で作る（版を付けずに開くと、表のない版 1 ができ、
+ * Service Worker が表を作れなくなる）
+ */
 const rememberedTags = (page: Page) =>
   page.evaluate(
     () =>
       new Promise<unknown[]>((resolve, reject) => {
-        const request = indexedDB.open("sendo-reader-notifications");
+        const request = indexedDB.open("sendo-reader-notifications", 1);
+        request.onupgradeneeded = () => {
+          request.result.createObjectStore("tags", { keyPath: "tag" });
+        };
         request.onerror = () => reject(request.error);
         request.onsuccess = () => {
           const db = request.result;
-          if (!db.objectStoreNames.contains("tags")) {
-            db.close();
-            resolve([]);
-            return;
-          }
           const all = db.transaction("tags").objectStore("tags").getAll();
           all.onsuccess = () => {
             db.close();
@@ -451,27 +483,64 @@ test.describe("push を受けたとき", () => {
   });
 });
 
+const serviceWorker = async (context: BrowserContext) =>
+  context.serviceWorkers()[0] ?? (await context.waitForEvent("serviceworker"));
+
 /**
- * Service Worker に、通知を押したことを届ける。Playwright は OS の通知を押せないので、出ている通知で
- * notificationclick を起こす（利用者の操作ではないので、Service Worker は新しい窓を開けず、前にも
- * 出せない。開いている画面で開く道を確かめる）
+ * Service Worker に、通知を押したこと（notificationclick）か、利用者が消したこと（notificationclose）を
+ * 届ける。Playwright は OS の通知を押せないので、出ている通知でその知らせを起こす（利用者の操作では
+ * ないので、Service Worker は新しい窓を開けず、前にも出せない。開いている画面で開く道を確かめる）。
+ * 消したときは、本物と同じく、通知を閉じてから知らせる
  */
-async function clickNotification(context: BrowserContext, tag: string): Promise<void> {
-  const worker = context.serviceWorkers()[0] ?? (await context.waitForEvent("serviceworker"));
-  await worker.evaluate(async (tag) => {
+async function notificationEvent(
+  context: BrowserContext,
+  type: "notificationclick" | "notificationclose",
+  tag: string,
+): Promise<void> {
+  const worker = await serviceWorker(context);
+  await worker.evaluate(
+    async ({ type, tag }) => {
+      const scope = self as unknown as {
+        registration: { getNotifications(filter: { tag: string }): Promise<Notification[]> };
+        dispatchEvent(event: Event): boolean;
+      };
+      const [notification] = await scope.registration.getNotifications({ tag });
+      if (notification === undefined) throw new Error(`通知が出ていない：${tag}`);
+      if (type === "notificationclose") notification.close();
+      const NotificationEventClass = (
+        self as unknown as {
+          NotificationEvent: new (type: string, init: { notification: Notification }) => Event;
+        }
+      ).NotificationEvent;
+      scope.dispatchEvent(new NotificationEventClass(type, { notification }));
+    },
+    { type, tag },
+  );
+}
+
+const clickNotification = (context: BrowserContext, tag: string) =>
+  notificationEvent(context, "notificationclick", tag);
+
+/**
+ * Service Worker の clients.openWindow を、開こうとした URL を覚えるものに替える（Playwright が起こした
+ * 知らせは利用者の操作ではないので、本物は窓を開けない）。覚えた URL を返す関数を返す
+ */
+async function recordOpenWindow(context: BrowserContext): Promise<() => Promise<string[]>> {
+  const worker = await serviceWorker(context);
+  await worker.evaluate(() => {
+    const opened: string[] = [];
     const scope = self as unknown as {
-      registration: { getNotifications(filter: { tag: string }): Promise<Notification[]> };
-      dispatchEvent(event: Event): boolean;
+      clients: { openWindow(url: string): Promise<null> };
+      openedWindows: string[];
     };
-    const [notification] = await scope.registration.getNotifications({ tag });
-    if (notification === undefined) throw new Error(`通知が出ていない：${tag}`);
-    const NotificationEventClass = (
-      self as unknown as {
-        NotificationEvent: new (type: string, init: { notification: Notification }) => Event;
-      }
-    ).NotificationEvent;
-    scope.dispatchEvent(new NotificationEventClass("notificationclick", { notification }));
-  }, tag);
+    scope.openedWindows = opened;
+    scope.clients.openWindow = async (url) => {
+      opened.push(url);
+      return null;
+    };
+  });
+  return () =>
+    worker.evaluate(() => [...(self as unknown as { openedWindows: string[] }).openedWindows]);
 }
 
 test.describe("通知を押したとき", () => {
@@ -535,11 +604,28 @@ test.describe("通知を押したとき", () => {
     await signIn(page);
     await deliverPush(context, page, bellPush(article.id, "Publickey", "Azure"));
     await expect.poll(async () => (await shownNotifications(page)).length).toBe(1);
+    const openedWindows = await recordOpenWindow(context);
     await clickNotification(context, `bell:bell-1:${article.id}`);
     await expect.poll(async () => (await shownNotifications(page)).length).toBe(0);
+    // 選べる画面がないので、記事の URL を新しい窓で開く
+    await expect.poll(openedWindows).toEqual([`/?article=${article.id}`]);
     // Service Worker の待つ時間（0.5 秒）を過ぎても、Settings のまま
     await page.waitForTimeout(800);
     await expect(page).toHaveURL(/\/settings$/);
+  });
+
+  test("利用者が消した通知は、覚えから外す", async ({ page, context }) => {
+    const server = new FakeSendo();
+    await routeFakeSendo(context, server);
+    await page.goto("/");
+    await signIn(page);
+    await deliverPush(context, page, bellPush("article-1", "Publickey", "Azure"));
+    await deliverPush(context, page, bellPush("article-2", "Publickey", "Rust"));
+    await expect.poll(async () => (await rememberedTags(page)).length).toBe(2);
+    await notificationEvent(context, "notificationclose", "bell:bell-1:article-1");
+    await expect
+      .poll(() => rememberedTags(page))
+      .toEqual([{ tag: "bell:bell-1:article-2", at: expect.any(Number) }]);
   });
 
   test("まだ手元に届いていない記事は、記事の画面のまま同期を待ってから出す。同期しても届かなければ、ないと出す", async ({

@@ -46,6 +46,11 @@ function setup(
     subscription?: PushSubscriptionLike | null;
     /** subscribe で作る登録の endpoint。null なら断る */
     subscribeEndpoint?: string | null;
+    /**
+     * 最初のロックを先に取ったほかのタブが、済ませておく操作。subscribe は同じ鍵（KEY）の登録を
+     * 作り、unsubscribe は登録を外す
+     */
+    otherTab?: "subscribe" | "unsubscribe";
     status?: PushStatus | Error;
     put?: Error;
     del?: Error;
@@ -55,22 +60,23 @@ function setup(
 ) {
   const events: string[] = [];
   let permission = options.permission ?? "default";
-  let current = options.subscription ?? null;
-  const wrap = (value: PushSubscriptionLike): PushSubscriptionLike => ({
-    ...value,
-    unsubscribe: async () => {
-      events.push(`unsubscribe ${value.toJSON().endpoint}`);
-      if (options.unsubscribe !== undefined) throw options.unsubscribe;
-      if (current === wrapped.get(value)) current = null;
-      return true;
-    },
-  });
-  const wrapped = new Map<PushSubscriptionLike, PushSubscriptionLike>();
-  if (current !== null) {
-    const original = current;
-    current = wrap(original);
-    wrapped.set(original, current);
-  }
+  let otherTab = options.otherTab;
+  let current: PushSubscriptionLike | null = null;
+  /** ブラウザーの登録にする（unsubscribe で外れる） */
+  const install = (value: PushSubscriptionLike): PushSubscriptionLike => {
+    const installed: PushSubscriptionLike = {
+      ...value,
+      unsubscribe: async () => {
+        events.push(`unsubscribe ${value.toJSON().endpoint}`);
+        if (options.unsubscribe !== undefined) throw options.unsubscribe;
+        if (current === installed) current = null;
+        return true;
+      },
+    };
+    current = installed;
+    return installed;
+  };
+  if (options.subscription) install(options.subscription);
   const put: PushRegistration[] = [];
   const env: PushEnvironment = {
     support: options.support ?? "supported",
@@ -83,24 +89,34 @@ function setup(
     ready: async () => options.readiness ?? "ready",
     registration: async () => ({
       pushManager: {
-        getSubscription: async () => current,
-        subscribe: async ({ applicationServerKey }) => {
+        getSubscription: async () => {
+          events.push("getSubscription");
+          return current;
+        },
+        subscribe: async ({ userVisibleOnly, applicationServerKey }) => {
           events.push(`subscribe ${applicationServerKey.length}`);
+          // 本物と同じく、通知を出す約束のない登録と、許可のない登録は断る
+          if (!userVisibleOnly) throw new DOMException("userVisibleOnly でない", "NotAllowedError");
+          if (permission !== "granted") throw new DOMException("許可がない", "NotAllowedError");
           if (options.subscribeEndpoint === null)
             throw new DOMException("断った", "NotAllowedError");
-          const created = subscription(
-            KEY,
-            options.subscribeEndpoint ?? "https://push.example/new",
+          return install(
+            subscription(KEY, options.subscribeEndpoint ?? "https://push.example/new"),
           );
-          current = wrap(created);
-          wrapped.set(created, current);
-          return current;
         },
       },
       getNotifications: async () => [{ close: () => events.push("close notification") }],
     }),
     lock: async (task) => {
       events.push("lock");
+      if (otherTab === "subscribe") {
+        events.push("other tab: subscribe");
+        install(subscription(KEY, "https://push.example/other"));
+      } else if (otherTab === "unsubscribe") {
+        events.push("other tab: unsubscribe");
+        current = null;
+      }
+      otherTab = undefined;
       return task();
     },
     sendo: {
@@ -258,6 +274,7 @@ describe("Turn on notifications", () => {
       "requestPermission",
       "granted",
       "lock",
+      "getSubscription",
       "subscribe 65",
       "GET /me",
       "PUT /push/registration",
@@ -306,11 +323,27 @@ describe("Turn on notifications", () => {
     });
     expect(await turnOn(env, KEY)).toEqual({ kind: "on" });
     expect(events.slice(3)).toEqual([
+      "getSubscription",
       "unsubscribe https://push.example/old",
       "subscribe 65",
       "GET /me",
       "PUT /push/registration",
     ]);
+  });
+
+  test("ロックを待つ間に、ほかのタブが同じ鍵の登録を作っていたら、作らずにその登録を送る", async () => {
+    const { env, events, put } = setup({ answer: "granted", otherTab: "subscribe" });
+    expect(await turnOn(env, KEY)).toEqual({ kind: "on" });
+    expect(events).toEqual([
+      "requestPermission",
+      "granted",
+      "lock",
+      "other tab: subscribe",
+      "getSubscription",
+      "GET /me",
+      "PUT /push/registration",
+    ]);
+    expect(put.map((r) => r.endpoint)).toEqual(["https://push.example/other"]);
   });
 });
 
@@ -324,6 +357,7 @@ describe("Turn off notifications", () => {
     await turnOff(env);
     expect(events).toEqual([
       "lock",
+      "getSubscription",
       "GET /me",
       "DELETE /push/registration",
       "unsubscribe https://push.example/a",
@@ -336,7 +370,18 @@ describe("起動したときの送り直し", () => {
   test("登録がなければ、何も聞かない", async () => {
     const { env, events } = setup({ permission: "granted" });
     await resendOnStartup(env);
-    expect(events).toEqual(["lock"]);
+    expect(events).toEqual(["lock", "getSubscription"]);
+  });
+
+  test("ロックを待つ間に、ほかのタブが登録を外したら、何もしない", async () => {
+    const { env, events, put } = setup({
+      permission: "granted",
+      subscription: subscription(KEY),
+      otherTab: "unsubscribe",
+    });
+    await resendOnStartup(env);
+    expect(events).toEqual(["lock", "other tab: unsubscribe", "getSubscription"]);
+    expect(put).toEqual([]);
   });
 
   test("許可が granted でなければ、GET /api/v1/push によらずに外す", async () => {
@@ -345,7 +390,7 @@ describe("起動したときの送り直し", () => {
       subscription: subscription(KEY),
     });
     await resendOnStartup(env);
-    expect(events).toEqual(["lock", "unsubscribe https://push.example/a"]);
+    expect(events).toEqual(["lock", "getSubscription", "unsubscribe https://push.example/a"]);
     expect(subscribed()).toBe(false);
   });
 
@@ -363,6 +408,7 @@ describe("起動したときの送り直し", () => {
     await resendOnStartup(env);
     expect(events).toEqual([
       "lock",
+      "getSubscription",
       "GET /push",
       "unsubscribe https://push.example/old",
       "subscribe 65",
@@ -394,7 +440,7 @@ describe("起動したときの送り直し", () => {
         status,
       });
       await resendOnStartup(env);
-      expect(events).toEqual(["lock", "GET /push"]);
+      expect(events).toEqual(["lock", "getSubscription", "GET /push"]);
       expect(subscribed()).toBe(true);
     }
   });
@@ -434,6 +480,7 @@ describe("ログアウトとユーザーの切り替え", () => {
     await forgetDevice(env);
     expect(events).toEqual([
       "lock",
+      "getSubscription",
       "unsubscribe https://push.example/a",
       "close notification",
       "clear tags",
