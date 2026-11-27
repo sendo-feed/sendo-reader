@@ -506,7 +506,7 @@
             type="text"
             autocomplete="off"
             enterkeyhint="done"
-            value={bellWords(feed)}
+            value={wordsDraft?.feedId === feed.id ? wordsDraft.value : bellWords(feed)}
             aria-invalid={wordsProblem !== null}
             aria-describedby="feed-bell-words-note"
             oninput={(event) =>

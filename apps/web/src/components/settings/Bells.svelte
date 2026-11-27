@@ -98,7 +98,9 @@
     </ul>
   {/if}
   {#if hidden}
-    <p class="note">選んでいないワークスペースの購読のベルは、ここに出していません。</p>
+    <p class="note">
+      選んでいないワークスペースの購読のベルは、ここに出していません。外すには、そのワークスペースに切り替えてください。
+    </p>
   {/if}
   {#if message !== null}
     <p class="error" role="alert">{message}</p>

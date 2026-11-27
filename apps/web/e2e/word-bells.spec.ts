@@ -295,6 +295,33 @@ test.describe("manage feed のベルの言葉", () => {
     await syncNow(page);
     expect(server.activeBells()).toEqual([]);
   });
+
+  test("上限を超える言葉を入れたまま窓を閉じて開き直すと、保存している言葉に戻る", async ({
+    page,
+    context,
+  }) => {
+    const { server, news } = seed();
+    await routeFakeSendo(context, server);
+    await page.goto("/manage");
+    await signIn(page);
+    await rowBell(page).click();
+    await syncNow(page);
+
+    const dialog = await openFeedOptions(page);
+    const words = dialog.getByRole("textbox", { name: "Words (optional)" });
+    const nine = Array.from({ length: 9 }, (_, i) => `w${i}`).join(" ");
+    await words.fill(nine);
+    await words.press("Enter");
+    await expect(dialog.getByRole("alert")).toHaveText("言葉は 8 個まで入れられます。");
+    await closeDialog(page);
+
+    await openFeedOptions(page);
+    await expect(words).toHaveValue("");
+    await expect(dialog.getByRole("alert")).toHaveCount(0);
+    await closeDialog(page);
+    await syncNow(page);
+    expect(serverTargets(server)).toEqual([{ feedId: news.id, words: null }]);
+  });
 });
 
 test("Settings の Notifications に付けたベルを並べ、押すとそのベルだけが外れる", async ({
@@ -390,7 +417,7 @@ test("Settings のベルの一覧には、選んでいないワークスペー�
   await expect(region.getByRole("listitem")).toHaveText([/Public feed/, /Azure 障害/]);
   await expect(region).not.toContainText("Hidden feed");
   const hidden = region.getByText(
-    "選んでいないワークスペースの購読のベルは、ここに出していません。",
+    "選んでいないワークスペースの購読のベルは、ここに出していません。外すには、そのワークスペースに切り替えてください。",
   );
   await expect(hidden).toBeVisible();
 
