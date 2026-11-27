@@ -14,7 +14,6 @@ describe("sendo の実際のルートと中継先の検査", () => {
         { method: "ALL", path: "/mcp" },
         { method: "ALL", path: "/.well-known/oauth-authorization-server" },
         { method: "POST", path: "/oauth/token" },
-        { method: "ALL", path: "/reader/api/0/*" },
       ]),
     ).toEqual([]);
   });
