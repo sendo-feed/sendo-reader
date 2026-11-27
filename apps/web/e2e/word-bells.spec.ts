@@ -64,6 +64,21 @@ test.describe("Search のベル", () => {
     expect(server.bellRequests).toHaveLength(1);
   });
 
+  test("打ってすぐベルを押しても、入力にある言葉に付ける", async ({ page, context }) => {
+    const { server } = seed();
+    await routeFakeSendo(context, server);
+    await page.goto("/search");
+    await signIn(page);
+    await searchBox(page).fill("Azure");
+    await expect(searchBell(page, "Azure")).toBeVisible();
+    // 探すのは打ち終えて少し待ってから。その前に押す
+    await searchBox(page).pressSequentially(" 障害");
+    await page.getByRole("button", { name: /^Bell:/ }).click();
+    await expect(searchBell(page, "Azure 障害")).toHaveAttribute("aria-pressed", "true");
+    await syncNow(page);
+    expect(serverTargets(server)).toEqual([{ feedId: null, words: "Azure 障害" }]);
+  });
+
   test("言葉が空ならベルを出さない", async ({ page, context }) => {
     const { server } = seed();
     await routeFakeSendo(context, server);
@@ -198,6 +213,14 @@ test.describe("manage feed のベルの言葉", () => {
     await syncNow(page);
     expect(serverTargets(server)).toEqual([{ feedId: news.id, words: null }]);
     await expect(rowBell(page)).toHaveAttribute("aria-pressed", "true");
+
+    // Esc で窓を閉じても、打った言葉を決める
+    dialog = await openFeedOptions(page);
+    await words.fill("Go");
+    await words.press("Escape");
+    await expect(dialog).toHaveCount(0);
+    await syncNow(page);
+    expect(serverTargets(server)).toEqual([{ feedId: news.id, words: "Go" }]);
   });
 
   test("上限を超える言葉は打っている間に知らせて付け替えず、上限ちょうどは付けられる。Notify new articles を外すとベルが外れる", async ({

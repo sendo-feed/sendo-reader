@@ -326,28 +326,38 @@
     if (!searching || userId === undefined) return;
     return bellList.watch();
   });
-  const searchBell = $derived.by(() => {
-    if (search === null) return null;
-    const parsed = parseBellWords(search);
+  let searchInput = $state<HTMLInputElement>();
+  const searchBell = $derived(search === null ? null : bellFor(search));
+  /** 押して付けられなかった理由（その言葉を探している間だけ出す） */
+  let bellError = $state<{ search: string; message: string } | null>(null);
+
+  /** その言葉のベル。言葉が空なら null */
+  function bellFor(query: string) {
+    const parsed = parseBellWords(query);
     if (parsed === "empty") return null;
-    if (typeof parsed === "string") return { label: search.trim(), problem: parsed, on: false };
+    if (typeof parsed === "string") return { label: query.trim(), problem: parsed, on: false };
     const on = bellList.bells.some(
       (bell) => bell.feedId === null && bell.matchKey === parsed.matchKey,
     );
     return { label: parsed.words, words: parsed, problem: null, on };
-  });
-  /** 押して付けられなかった理由（その言葉を探している間だけ出す） */
-  let bellError = $state<{ search: string; message: string } | null>(null);
+  }
 
   async function toggleSearchBell() {
-    if (search === null || searchBell === null) return;
-    const input = search;
-    if (searchBell.problem !== null) {
-      bellError = { search: input, message: BELL_WORDS_PROBLEMS[searchBell.problem] };
+    // 打ってすぐ押したら、待っている検索を先に流し、入力にある言葉に付ける
+    const input = searchInput?.value ?? search;
+    if (input === null) return;
+    if (input !== search) {
+      clearTimeout(searchTimer);
+      onsearch(input);
+    }
+    const bell = bellFor(input);
+    if (bell === null) return;
+    if (bell.problem !== null) {
+      bellError = { search: input, message: BELL_WORDS_PROBLEMS[bell.problem] };
       return;
     }
-    const words = searchBell.words;
-    const on = !searchBell.on;
+    const words = bell.words;
+    const on = !bell.on;
     bellError = null;
     try {
       await bellList.change(
@@ -862,6 +872,7 @@
         oninput={onSearchInput}
         onkeydown={onSearchKeydown}
         use:focusOnOpen
+        bind:this={searchInput}
       >
       {#if searchBell !== null}
         <button
