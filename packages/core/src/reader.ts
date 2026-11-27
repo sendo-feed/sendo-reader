@@ -140,6 +140,12 @@ const LAST_OPENED_KEY = "content.lastOpened";
 
 const ALL_TABLES: ReadonlySet<Table> = new Set<Table>(TABLES);
 
+/**
+ * 手元の DB をまとめて消したわけ。signOut はログアウト、switchUser は手元にいたユーザーを別のユーザーに
+ * 替えた、adopt は手元にユーザーがいないときに、来たユーザーを入れる前に消した
+ */
+export type DataClearReason = "signOut" | "switchUser" | "adopt";
+
 export interface ReaderCoreOptions {
   db: Database;
   /** API の入口。画面では "/api/v1" */
@@ -153,7 +159,7 @@ export interface ReaderCoreOptions {
    * その人のデータ（Web では、Service Worker の画像のキャッシュ。docs/decisions/images.md の 4）を
    * 一緒に消す。失敗しても、ログアウトやユーザーの切り替えは止めない
    */
-  onDataCleared?: () => Promise<void>;
+  onDataCleared?: (reason: DataClearReason) => Promise<void>;
   /**
    * 同期のあとに、未読の記事の全文を 1 件ずつ選び直しながら先に取っておく（開いたときに待たず、
    * オフラインでも読めるように）。1 回の同期のあとに頼む数。既定は 0（取らない。開いたときに取る）
@@ -234,7 +240,7 @@ export class ReaderCore {
   readonly #db: Database;
   readonly #api: SendoApi;
   readonly #now: () => number;
-  readonly #onDataCleared: (() => Promise<void>) | undefined;
+  readonly #onDataCleared: ((reason: DataClearReason) => Promise<void>) | undefined;
   readonly #listeners = new Set<ChangeListener>();
   readonly #rejectionListeners = new Set<(rejection: RejectedOperation) => void>();
   /** 手元に置いた、ログインしたユーザー。毎回 DB を読まずに済むように持っておく */
@@ -382,7 +388,7 @@ export class ReaderCore {
       await setSetting(tx, LOGOUT_PENDING_KEY, "1");
       this.#user = null;
     });
-    await this.#afterDataCleared();
+    await this.#afterDataCleared("signOut");
     this.#emit(ALL_TABLES);
   }
 
@@ -427,7 +433,7 @@ export class ReaderCore {
    */
   async #adopt(user: User, signal: AbortSignal): Promise<AbortSignal> {
     let current = signal;
-    let switched = false;
+    let switched: DataClearReason | null = null;
     await this.#db.transaction(async (tx) => {
       throwIfSessionEnded(signal);
       if (this.#user?.id === user.id) {
@@ -440,15 +446,15 @@ export class ReaderCore {
       // 前のユーザーのために走っている処理（同期、通信が要る操作、書き込み）を中断し、
       // 応答を、消したあとの手元に書き戻させない
       current = this.#beginSession();
+      switched = this.#user === null ? "adopt" : "switchUser";
       await clearAll(tx);
       await setSetting(tx, USER_KEY, JSON.stringify(user));
       // DB の呼び出しは 1 列に並ぶので、手元のユーザーもトランザクションの中で替える
       // （あとに並んだログアウトが、確実に消す）
       this.#user = { ...user };
-      switched = true;
     });
-    if (switched) {
-      await this.#afterDataCleared();
+    if (switched !== null) {
+      await this.#afterDataCleared(switched);
       this.#emit(ALL_TABLES);
     }
     return current;
@@ -616,9 +622,9 @@ export class ReaderCore {
   }
 
   /** 手元の DB を消したあとに、DB の外に置いたその人のデータも消してもらう */
-  async #afterDataCleared(): Promise<void> {
+  async #afterDataCleared(reason: DataClearReason): Promise<void> {
     try {
-      await this.#onDataCleared?.();
+      await this.#onDataCleared?.(reason);
     } catch {
       // 消せなくても、ログアウトやユーザーの切り替えは進める（手元の DB は、もう消してある）
     }

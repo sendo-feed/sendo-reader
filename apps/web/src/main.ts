@@ -7,10 +7,11 @@ import { canReloadPage, watchAppUpdate } from "./lib/app-update";
 import { AUTHORIZE_PATH } from "./lib/authorize";
 import { watchBackForwardCache } from "./lib/back-forward-cache";
 import { readerContext } from "./lib/context";
+import { pushDevice } from "./lib/push-device";
 import { startReader } from "./lib/reader";
 import { reloadGuard } from "./lib/reload-guard.svelte";
+import { registerServiceWorker } from "./lib/service-worker";
 import { ReaderState } from "./lib/state.svelte";
-import { trustedScriptUrl } from "./lib/trusted";
 import { updateNotice } from "./lib/update-notice.svelte";
 import Authorize from "./routes/Authorize.svelte";
 import "./app.css";
@@ -46,8 +47,20 @@ if (location.pathname === AUTHORIZE_PATH) {
   const state = new ReaderState(reader.client, page.leave);
   // 設定の正は手元の DB（docs/decisions/settings.md）。つないで、読み直す
   prefs.connect(state.client);
+  // この端末で通知を受ける操作（docs/decisions/notifications.md の 1〜4）。送る前に、セッションの
+  // ユーザーが手元のユーザーと同じかを確かめ、違えば同期に切り替えを任せる
+  pushDevice.connect({
+    user: () => state.user,
+    onAccountChanged: () => void state.client.syncNow().catch(() => {}),
+    onGranted: () => {},
+  });
+  // ログアウトとユーザーの切り替えで、この端末の登録を外す（どのタブで起きても届く）
+  state.client.onCleared(() => void pushDevice.forget());
   mount(App, { target, context: readerContext(state) });
-  void state.init();
+  // 起動したら、登録があれば送り直す（sendo は登録をセッションに結ぶ。docs/decisions/notifications.md の 3）
+  void state.init().then(() => {
+    if (state.signedIn) void pushDevice.resend();
+  });
   // インストールしたアプリのアイコンに、未読の数を出す。Badging API のないブラウザーでは何もしない
   if ("setAppBadge" in navigator) showUnreadBadge(state.client, navigator, document);
 
@@ -75,7 +88,7 @@ if (import.meta.env.PROD) {
             return container.controller;
           },
           addEventListener: (type, listener) => container.addEventListener(type, listener),
-          register: () => container.register(trustedScriptUrl("/sw.js"), { scope: "/" }),
+          register: () => registerServiceWorker(container),
         }
       : null,
     version: __APP_VERSION__,

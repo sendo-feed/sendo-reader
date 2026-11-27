@@ -240,6 +240,37 @@ describe("複数のタブ", () => {
   });
 });
 
+describe("手元の DB を消したとき", () => {
+  /** タブの画面に、手元の DB を消した知らせ（cleared）が届いた数を数える */
+  const countCleared = (tab: Tab) => {
+    const counter = { count: 0 };
+    tab.client.onCleared(() => {
+      counter.count += 1;
+    });
+    return counter;
+  };
+
+  test("ログアウトとユーザーの切り替えは、代表でないタブの画面にも知らせ、初めて使い始めたときは知らせない", async () => {
+    const { server, open } = world();
+    const first = open();
+    const second = open();
+    const cleared = [countCleared(first), countCleared(second)];
+    // 手元にユーザーがいないときに、来たユーザーを入れる前に消したのは、知らせない
+    server.signInAs();
+    expect(await second.client.restoreSession()).toBe(true);
+    await first.client.syncNow();
+    expect(cleared.map((c) => c.count)).toEqual([0, 0]);
+
+    // 別のタブなどで、別のユーザーでログインし直した
+    server.signInAs({ id: "user-2", email: "other@example.com" });
+    await second.client.syncNow();
+    await vi.waitFor(() => expect(cleared.map((c) => c.count)).toEqual([1, 1]));
+
+    await second.client.signOut();
+    await vi.waitFor(() => expect(cleared.map((c) => c.count)).toEqual([2, 2]));
+  });
+});
+
 describe("セッションが切れたとき", () => {
   test("ほかのタブでログインし直して戻ってきたら、代表のタブの止まっていた同期を再開する", async () => {
     const { server, open, signIn } = world();

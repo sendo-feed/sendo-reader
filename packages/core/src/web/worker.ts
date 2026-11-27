@@ -201,6 +201,9 @@ export function runReaderWorker(options: ReaderWorkerOptions = {}): void {
       case "visible":
         if (leader !== null) onVisible(leader);
         return;
+      case "cleared":
+        if (leader === null) toTab({ type: "cleared" });
+        return;
     }
   });
 
@@ -289,8 +292,17 @@ export function runReaderWorker(options: ReaderWorkerOptions = {}): void {
       db,
       baseUrl: options.baseUrl ?? "/api/v1",
       ...(options.fetch === undefined ? {} : { fetch: options.fetch }),
-      // 手元の DB を消すとき（ログアウト、ユーザーの切り替え）に、画像のキャッシュも消す
-      onDataCleared: clearImageCache,
+      // 手元の DB を消すとき（ログアウト、ユーザーの切り替え）に、画像のキャッシュも消す。
+      // ログアウトと、手元にいたユーザーを替えたときは、すべてのタブの画面に知らせる（この端末の
+      // 通知の登録を外す。docs/decisions/notifications.md の 4）。手元にユーザーがいないときに、
+      // 来たユーザーを入れる前に消したのは知らせない
+      onDataCleared: async (reason) => {
+        if (reason !== "adopt") {
+          toTab({ type: "cleared" });
+          toPeers({ type: "cleared", version });
+        }
+        await clearImageCache();
+      },
       // 同期のあとに、未読の記事の全文を取っておく（開いたときに待たず、オフラインでも読めるように）
       prefetchContents: DEFAULT_PREFETCH_CONTENTS,
     });

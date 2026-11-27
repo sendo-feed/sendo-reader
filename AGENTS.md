@@ -51,6 +51,7 @@ Sendo の公式リーダー。`packages/core`（同期エンジン）と `apps/w
     - `db.worker.ts`：DB と同期を持つワーカーの入口（`@sendo-reader/core/web/worker` を動かすだけ）
     - `lib/reader.ts`：ワーカーを起こす。`lib/trusted.ts` の Trusted Types の `sendo-worker` のポリシーで、自分のオリジンの URL だけを許す（Service Worker の登録も同じ）
     - `lib/app-update.ts`：新しい版への切り替え（`docs/decisions/ui.md` の 5）。前に出たときと一定の間隔で新しい版を確かめ、替わったら、画面が裏にある間か次に前に出たときに読み込み直す。前に出ている間は、新しい版に替わったことを画面で知らせる（出す場所は `ui.md` の 5。`lib/update-notice.svelte.ts`、`components/UpdateReady.svelte`）。読み込み直すと消えるものを出す画面を足したら、パスなら `app-update.ts` の `canReloadPage` に、パスで分からないもの（窓など）なら出している間 `lib/reload-guard.svelte.ts` の `reloadGuard.hold()` で印を付ける（自動の読み込み直しと知らせの両方が使う）。自動で読み込み直す前に `sessionStorage` に印を置き、前に出たときは読み込み直すかを先に決めてから、消えた通知を比べる（`docs/decisions/notifications.md` の 8）
+    - `lib/push.ts`：この端末で通知を受ける操作（`docs/decisions/notifications.md` の 1〜4。許可を求める、登録を作って sendo に送る、起動したときに送り直す、受けない・ログアウト・ユーザーの切り替えで外す）。ブラウザーの本物は `lib/push-device.ts`、Settings の画面は `components/settings/Notifications.svelte`。受けているかはブラウザーの登録と許可で決め、手元に印を持たない。登録の操作はタブどうしで `navigator.locks` のロックを取って 1 つずつにし、許可を求めるのはロックの外で、押したその場で呼ぶ。ログアウトとユーザーの切り替えは、ワーカーの知らせ（`ReaderClient` の `onCleared`）で知る
     - `lib/back-forward-cache.ts`：reader の外へページごと移る前（`ReaderState` の `leave`。Google のログイン、Discord の連携）と、ページが bfcache に入るときに DB のワーカーを止め、bfcache から戻ったら読み込み直す。Safari はワーカーごとページを止めて残すので、代表のロックを持ったまま、次に開いたページを待たせる。reader の外へ移る操作を足したら `leave` を使う
     - `e2e/`：画面を通したテスト（Playwright）
     - `lib/state.svelte.ts`：画面の状態（フォルダ、フィード、未読の数、同期の様子）。手元の表が変わったら読み直す

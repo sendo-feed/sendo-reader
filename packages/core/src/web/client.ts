@@ -31,6 +31,11 @@ export type ReaderClient = Remote<Pick<ReaderCore, ReaderMethod>> & {
   onChange(listener: (tables: ReadonlySet<Table>) => void): () => void;
   /** 同期の様子が変わったら呼ぶ */
   onStatus(listener: (status: SyncStatus) => void): () => void;
+  /**
+   * ログアウトしたか、手元にいたユーザーが別のユーザーに替わって、手元の DB を消したら呼ぶ（どのタブで
+   * 起きても届く。docs/decisions/notifications.md の 4）
+   */
+  onCleared(listener: () => void): () => void;
   /** タブが前に出たことを知らせる（しばらく同期していなければ同期する） */
   notifyVisible(): void;
 };
@@ -44,6 +49,7 @@ export function connectReader(worker: Worker): ReaderClient {
   >();
   const changeListeners = new Set<(tables: ReadonlySet<Table>) => void>();
   const statusListeners = new Set<(status: SyncStatus) => void>();
+  const clearedListeners = new Set<() => void>();
 
   const post = (message: TabMessage) => worker.postMessage(message);
 
@@ -60,6 +66,8 @@ export function connectReader(worker: Worker): ReaderClient {
       for (const listener of changeListeners) listener(tables);
     } else if (message.type === "status") {
       for (const listener of statusListeners) listener(message.status);
+    } else if (message.type === "cleared") {
+      for (const listener of clearedListeners) listener();
     }
   });
 
@@ -89,6 +97,10 @@ export function connectReader(worker: Worker): ReaderClient {
   client.onStatus = (listener: (status: SyncStatus) => void) => {
     statusListeners.add(listener);
     return () => statusListeners.delete(listener);
+  };
+  client.onCleared = (listener: () => void) => {
+    clearedListeners.add(listener);
+    return () => clearedListeners.delete(listener);
   };
   client.notifyVisible = () => post({ type: "visible" });
   return client as ReaderClient;

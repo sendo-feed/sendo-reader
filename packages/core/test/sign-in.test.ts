@@ -393,31 +393,38 @@ describe("ログインとログアウトが重なったとき", () => {
     expect(core.currentUser()).toEqual(USER_B);
   });
 
-  test("手元の DB を消すとき（ログアウト、ユーザーの切り替え）にだけ、DB の外のデータも消してもらう", async () => {
-    let cleared = 0;
+  test("手元の DB を消すとき（ログアウト、ユーザーの切り替え）にだけ、わけを添えて DB の外のデータも消してもらう", async () => {
+    const cleared: string[] = [];
     const { server, core } = await setup({
-      onDataCleared: async () => {
-        cleared += 1;
+      onDataCleared: async (reason) => {
+        cleared.push(reason);
       },
     });
-    // 初めて使い始めたときにも消す（前に使っていた人のものが残っていないように）
-    expect(cleared).toBe(1);
+    // 初めて使い始めたときにも消す（前に使っていた人のものが残っていないように）。手元にユーザーが
+    // いなかったので、ユーザーの切り替えとは分ける（docs/decisions/notifications.md の 4）
+    expect(cleared).toEqual(["adopt"]);
     await core.sync();
-    expect(cleared).toBe(1);
+    expect(cleared).toEqual(["adopt"]);
 
     // セッションが切れただけでは、手元のデータと同じく残す
     server.expireSession();
     await core.sync().catch(() => {});
-    expect(cleared).toBe(1);
+    expect(cleared).toEqual(["adopt"]);
 
     // 別のユーザーに替わったら消す
     server.signInAs(USER_B);
     await core.sync();
-    expect(cleared).toBe(2);
+    expect(cleared).toEqual(["adopt", "switchUser"]);
 
-    // ログアウトで消す。消すのに失敗しても、ログアウトは終わる
+    // ログアウトで消す
     await core.signOut();
-    expect(cleared).toBe(3);
+    expect(cleared).toEqual(["adopt", "switchUser", "signOut"]);
+
+    // ログアウトのあとに次の人がログインしたときは、手元にユーザーがいない
+    await core.prepareSignIn();
+    server.signInAs();
+    expect(await core.restoreSession()).toBe(true);
+    expect(cleared).toEqual(["adopt", "switchUser", "signOut", "adopt"]);
   });
 
   test("DB の外のデータを消せなくても、ログアウトは終わる", async () => {

@@ -2,6 +2,7 @@
   import Appearance from "../components/settings/Appearance.svelte";
   import Discord from "../components/settings/Discord.svelte";
   import Grants from "../components/settings/Grants.svelte";
+  import Notifications from "../components/settings/Notifications.svelte";
   import Reading from "../components/settings/Reading.svelte";
   import Tokens from "../components/settings/Tokens.svelte";
   import { confirmAccount } from "../lib/account";
@@ -13,6 +14,8 @@
   /**
    * Connections と Integrations は、sendo にしかないもの（アクセストークン、OAuth の許可、Discord 連携）を
    * 扱うので、ネットワークが要る。手元の DB には置かず、このカテゴリを開くたびに sendo に聞く。
+   * Notifications の、この端末で通知を受ける操作も、sendo とプッシュサービスに届かないとできない
+   * （docs/decisions/notifications.md の 1）。
    *
    * 出しているアカウントは手元のユーザーで、sendo には今のクッキーで送る。別のタブなどでログインし
    * 直していると食い違うので、聞く前と送る前に、セッションのユーザーが手元のユーザーと同じかを
@@ -21,7 +24,13 @@
    */
   const reader = useReader();
 
-  const categories = ["Appearance", "Reading", "Connections", "Integrations"] as const;
+  const categories = [
+    "Appearance",
+    "Reading",
+    "Notifications",
+    "Connections",
+    "Integrations",
+  ] as const;
   type Category = (typeof categories)[number];
   let active = $state<Category>("Appearance");
   let discordResult = $state<string | null>(null);
@@ -118,6 +127,15 @@
               <Grants {confirm} />
             {/if}
           {/key}
+        {:else if category === "Notifications"}
+          <p class="note">
+            ベルを付けたフィードに新しい記事が来たら、この端末に知らせます。ベルは同期で、ほかの端末と共有します。
+          </p>
+          {#key reader.user?.id}
+            {#if reader.user !== null}
+              <Notifications />
+            {/if}
+          {/key}
         {:else if category === "Integrations"}
           {#key reader.user?.id}
             {#if reader.user !== null}
@@ -169,16 +187,17 @@
 
   .categories {
     display: grid;
-    grid-template-columns: repeat(4, auto);
+    grid-template-columns: repeat(5, auto);
     padding: 0.25rem;
     border: 1px solid var(--border);
     border-radius: var(--radius-small);
     background: var(--surface);
   }
 
-  @media (max-width: 24rem) {
+  /* スマホの幅では 5 つが 1 行に収まらないので、3 つずつ 2 行にする */
+  @media (max-width: 30rem) {
     .categories {
-      grid-template-columns: repeat(2, minmax(0, 1fr));
+      grid-template-columns: repeat(3, minmax(0, 1fr));
     }
   }
 

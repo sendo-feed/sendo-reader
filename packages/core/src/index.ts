@@ -10,6 +10,8 @@ export {
   MAX_TOKEN_NAME_LENGTH,
   type NewAccessToken,
   type OAuthGrant,
+  type PushRegistration,
+  type PushStatus,
   type Scope,
   type TokenPurpose,
 } from "./account";

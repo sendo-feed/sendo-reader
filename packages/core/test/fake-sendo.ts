@@ -183,6 +183,14 @@ export interface FakeGrant {
 /** 既定でログインしているユーザー */
 export const USER: FakeUser = { id: "user-1", email: "you@example.com" };
 
+/** 偽の VAPID の公開鍵（P-256 の非圧縮の点 65 バイトの base64url の形。鍵として使えるかは見ない） */
+export const FAKE_VAPID_PUBLIC_KEY = `B${"A".repeat(86)}`;
+
+export interface PushRegistrationRow {
+  endpoint: string;
+  keys: { p256dh: string; auth: string };
+}
+
 const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
 
 export class FakeSendo {
@@ -258,6 +266,15 @@ export class FakeSendo {
   readonly bells = new Map<string, BellRow>();
   /** 受けた POST /bells の本文 */
   readonly bellRequests: Record<string, unknown>[] = [];
+  /**
+   * Web Push（sendo の notifications.md の 19・20）。unavailable は使えない設定（GET /push は
+   * available: false、PUT は 501）、unsupported は Web Push に対応する前の版（/push は 404）
+   */
+  push: "available" | "unavailable" | "unsupported" = "available";
+  /** VAPID の公開鍵（GET /push の publicKey） */
+  pushPublicKey = FAKE_VAPID_PUBLIC_KEY;
+  /** 置いた Web Push の登録（セッションのクッキーの値から）。セッションが消えると一緒に消える */
+  readonly pushRegistrations = new Map<string, PushRegistrationRow>();
 
   readonly #maxSeq: Record<TableName, number> = {
     folders: 0,
@@ -290,7 +307,7 @@ export class FakeSendo {
    * ことにする）。前に持っていたセッションは消す（sendo と同じ）。クッキーの値を返す
    */
   signInAs(user: FakeUser = USER): string {
-    if (this.cookie !== null) this.sessions.delete(this.cookie);
+    if (this.cookie !== null) this.#endSession(this.cookie);
     const value = this.createSession(user);
     this.cookie = value;
     return value;
@@ -313,7 +330,13 @@ export class FakeSendo {
 
   /** 今のセッションを切る（期限切れ、取り消し）。クッキーは残る */
   expireSession(): void {
-    if (this.cookie !== null) this.sessions.delete(this.cookie);
+    if (this.cookie !== null) this.#endSession(this.cookie);
+  }
+
+  /** セッションを消す。そのセッションの Web Push の登録も消える（sendo の notifications.md の 20） */
+  #endSession(value: string): void {
+    this.sessions.delete(value);
+    this.pushRegistrations.delete(value);
   }
 
   /** user のセッションを作り、クッキーの値を返す（ブラウザに置くのはテストが行う） */
@@ -707,7 +730,7 @@ export class FakeSendo {
       if (fromBrowser !== null && !isSameOrigin(request)) {
         return error(403, "forbidden", "cross-site requests are not allowed");
       }
-      this.sessions.delete(sessionValue);
+      this.#endSession(sessionValue);
       if (this.cookie === sessionValue) this.cookie = null;
       return new Response(null, {
         status: 204,
@@ -750,6 +773,9 @@ export class FakeSendo {
     }
     if (request.method === "GET" && path === "/me") {
       return json(200, { user: { id: user.id, email: user.email } });
+    }
+    if (path === "/push" || path === "/push/registration") {
+      return this.#pushRequest(request, path, sessionValue ?? "");
     }
     if (path === "/tokens" || path.startsWith("/tokens/")) return this.#tokens(request, path);
     if (path === "/oauth/grants" || path.startsWith("/oauth/grants/")) {
@@ -1327,7 +1353,7 @@ export class FakeSendo {
         headers: { location: "/?login_error=not_allowed" },
       });
     }
-    if (previous !== null) this.sessions.delete(previous);
+    if (previous !== null) this.#endSession(previous);
     const value = this.createSession(this.loginUser);
     const target =
       returnTo?.startsWith("/") === true && !returnTo.startsWith("//") ? returnTo : "/";
@@ -1338,6 +1364,46 @@ export class FakeSendo {
         "set-cookie": `${SESSION_COOKIE}=${value}; Path=/; Secure; HttpOnly; SameSite=Lax`,
       },
     });
+  }
+
+  async #pushRequest(request: Request, path: string, session: string): Promise<Response> {
+    if (this.push === "unsupported") return error(404, "not_found", "not found");
+    if (request.method === "GET" && path === "/push") {
+      return json(
+        200,
+        this.push === "available"
+          ? { available: true, publicKey: this.pushPublicKey }
+          : { available: false, publicKey: null },
+      );
+    }
+    if (path !== "/push/registration") return error(404, "not_found", "not found");
+    if (request.method === "DELETE") {
+      this.pushRegistrations.delete(session);
+      return new Response(null, { status: 204 });
+    }
+    if (request.method !== "PUT") return error(405, "method_not_allowed", "method not allowed");
+    if (this.push !== "available") {
+      return error(501, "feature_unavailable", "Web Push is not configured");
+    }
+    const body = (await request.json()) as Partial<PushRegistrationRow> | null;
+    const { endpoint, keys } = body ?? {};
+    if (
+      typeof endpoint !== "string" ||
+      !endpoint.startsWith("https://") ||
+      typeof keys?.p256dh !== "string" ||
+      typeof keys.auth !== "string"
+    ) {
+      return error(400, "invalid_request", "invalid push registration");
+    }
+    // 1 つのエンドポイントに登録は 1 つ（ほかのセッションの同じエンドポイントは外れる）
+    for (const [other, row] of this.pushRegistrations) {
+      if (row.endpoint === endpoint) this.pushRegistrations.delete(other);
+    }
+    this.pushRegistrations.set(session, {
+      endpoint,
+      keys: { p256dh: keys.p256dh, auth: keys.auth },
+    });
+    return new Response(null, { status: 204 });
   }
 
   #settings(method: string, deviceType: string, body: Record<string, unknown>): Response {

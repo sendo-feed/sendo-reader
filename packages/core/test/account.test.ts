@@ -225,3 +225,65 @@ describe("OAuth の許可の画面", () => {
     });
   });
 });
+
+describe("Web Push", () => {
+  const registration = {
+    endpoint: "https://push.example/send/abc",
+    keys: { p256dh: "BKey", auth: "secret" },
+  };
+
+  test("使える Sendo は公開鍵を返し、登録を今のセッションに置いて、外せる", async () => {
+    const { server, account } = setup();
+    expect(await account.getPush()).toEqual({
+      available: true,
+      publicKey: server.pushPublicKey,
+    });
+    await account.putPushRegistration(registration);
+    // 同じ登録を送り直しても、1 つのまま
+    await account.putPushRegistration(registration);
+    expect([...server.pushRegistrations.values()]).toEqual([registration]);
+    await account.deletePushRegistration();
+    expect(server.pushRegistrations.size).toBe(0);
+    // ないものを外しても成功する
+    await account.deletePushRegistration();
+  });
+
+  test("使えない設定は available が false で、登録を送ると 501", async () => {
+    const { server, account } = setup();
+    server.push = "unavailable";
+    expect(await account.getPush()).toEqual({ available: false });
+    expect(await account.putPushRegistration(registration).catch((e: unknown) => e)).toMatchObject({
+      status: 501,
+    });
+  });
+
+  test("Web Push に対応する前の Sendo（404）は、使えないとする", async () => {
+    const { server, account } = setup();
+    server.push = "unsupported";
+    expect(await account.getPush()).toEqual({ available: false });
+  });
+
+  test.each([
+    ["available がない", {}],
+    ["publicKey が文字でない", { available: true, publicKey: null }],
+    ["publicKey が空", { available: true, publicKey: "" }],
+    ["本体が null", null],
+  ])("応答の形が読めない（%s）なら、server の失敗", async (_name, body) => {
+    const account = createAccountApi({
+      baseUrl: "https://sendo.test/api/v1",
+      fetch: async () => new Response(JSON.stringify(body)),
+    });
+    expect(await account.getPush().catch((e: unknown) => e)).toMatchObject({ kind: "server" });
+  });
+
+  test("セッションが切れていれば unauthorized、5xx は server", async () => {
+    const { server, account } = setup();
+    server.expireSession();
+    expect(await account.getPush().catch((e: unknown) => e)).toMatchObject({
+      kind: "unauthorized",
+    });
+    server.signInAs();
+    server.failNext(503);
+    expect(await account.getPush().catch((e: unknown) => e)).toMatchObject({ kind: "server" });
+  });
+});
