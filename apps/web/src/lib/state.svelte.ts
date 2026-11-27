@@ -11,7 +11,11 @@ import {
 import { ProtocolMismatchError, type ReaderClient } from "@sendo-reader/core/web";
 import { untrack } from "svelte";
 import { takeLoginError } from "./login";
-import { loadWorkspaceSelection, saveWorkspaceSelection } from "./workspace-selection";
+import {
+  chooseWorkspaceSelection,
+  loadWorkspaceSelection,
+  settleWorkspaceSelection,
+} from "./workspace-selection";
 
 const emptyUnread = (): UnreadCounts => ({ total: 0, feeds: new Map(), folders: new Map() });
 
@@ -101,6 +105,11 @@ export class ReaderState {
   #startBlocked = false;
   #workspaceRead = 0;
   #unreadRead = 0;
+  /**
+   * workspaceIds を、最後の選択の写しから引き継いだまま、まだ手元のワークスペースの一覧と照らして
+   * いない（docs/decisions/workspaces.md の 2）
+   */
+  #inheritedSelection = false;
 
   constructor(client: ReaderClient, leave: (url: string) => Promise<void>) {
     this.leave = leave;
@@ -230,7 +239,10 @@ export class ReaderState {
     if (changed) {
       ++this.#workspaceRead;
       ++this.#unreadRead;
-      this.workspaceIds = user === null ? [] : loadWorkspaceSelection(user.id);
+      const stored =
+        user === null ? { ids: [], inherited: false } : loadWorkspaceSelection(user.id);
+      this.workspaceIds = stored.ids;
+      this.#inheritedSelection = stored.inherited;
       this.workspaceDataReady = false;
       this.workspaceScopeComplete = false;
       this.workspaceReadCursor = null;
@@ -250,13 +262,32 @@ export class ReaderState {
 
   selectWorkspaces(ids: readonly string[] | undefined): void {
     if (this.user === null) return;
+    this.#inheritedSelection = false;
+    this.#changeWorkspaces(ids === undefined ? undefined : [...new Set(ids)].sort());
+    chooseWorkspaceSelection(this.user.id, this.workspaceIds);
+  }
+
+  #changeWorkspaces(ids: readonly string[] | undefined): void {
     this.workspaceReadCursor = null;
     this.#createdFolderIds = [];
-    this.workspaceIds = ids === undefined ? undefined : [...new Set(ids)].sort();
-    saveWorkspaceSelection(this.user.id, this.workspaceIds);
+    this.workspaceIds = ids;
     this.unread = emptyUnread();
     this.readToday = 0;
     void this.#loadUnread();
+  }
+
+  /**
+   * 引き継いだ選択を、差分の全ページが揃った手元のワークスペースの一覧と照らし、このタブの選択として
+   * 置く。手元に 1 つもなければ All にする。一部だけあれば、ID を保ったまま、あるものだけを出す。
+   * 範囲の外の詳細を外すかは、照らし終えてから決める（照らすのは、範囲が揃ったと知らせる前）
+   */
+  #settleInheritedSelection(user: User, workspaces: readonly Workspace[]): void {
+    this.#inheritedSelection = false;
+    const ids = this.workspaceIds;
+    if (ids !== undefined && !ids.some((id) => workspaces.some((w) => w.id === id))) {
+      this.#changeWorkspaces(undefined);
+    }
+    settleWorkspaceSelection(user.id, this.workspaceIds);
   }
 
   offerNewFolder(id: string): void {
@@ -268,7 +299,8 @@ export class ReaderState {
   }
 
   async #loadWorkspaceData(): Promise<void> {
-    if (this.user === null) return;
+    const user = this.user;
+    if (user === null) return;
     const read = ++this.#workspaceRead;
     this.workspaceDataReady = false;
     if (this.workspaceIds !== undefined) {
@@ -285,6 +317,8 @@ export class ReaderState {
       complete,
     } = await this.client.workspaceData();
     if (read !== this.#workspaceRead) return;
+    // 範囲が揃ったと知らせる前に照らす（照らす前の範囲で、範囲の外の詳細を外さない）
+    if (this.#inheritedSelection && complete) this.#settleInheritedSelection(user, workspaces);
     this.workspaces = workspaces;
     this.defaultWorkspaceId = defaultWorkspaceId;
     this.defaultWorkspaceOnSubscribe = defaultWorkspaceOnSubscribe;
