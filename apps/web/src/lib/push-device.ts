@@ -12,14 +12,12 @@ import {
   type TurnOnResult,
   turnOff,
   turnOn,
+  waitForServiceWorker,
 } from "./push";
 import { serviceWorkerRegistering } from "./service-worker";
 
 /** 登録を作る、送り直す、外すを、タブどうしで 1 つずつにするロック（docs/decisions/notifications.md の 3） */
 const PUSH_LOCK = "sendo-reader:push";
-
-/** Service Worker の ready を待つ上限（docs/decisions/notifications.md の 1） */
-const READY_TIMEOUT_MS = 10_000;
 
 /**
  * この端末で通知を受ける操作の、ブラウザーの本物（lib/push.ts の PushEnvironment）。main.ts が
@@ -91,33 +89,9 @@ class PushDevice {
 
 export const pushDevice = new PushDevice();
 
-/**
- * Service Worker が動くのを待つ（navigator.serviceWorker.ready）。取り込みが終わらない（redundant で
- * 終わった、手元の dev サーバー）と返らないので、10 秒の上限を置く。登録できなかったか、取り込みが
- * redundant で終わったと分かれば、上限を待たずに unsupported を返す
- */
+/** Service Worker が動くのを待つ（lib/push.ts の waitForServiceWorker） */
 function serviceWorkerReady(): Promise<ServiceWorkerReadiness> {
   const container = navigator.serviceWorker;
   if (container === undefined) return Promise.resolve("unsupported");
-  return new Promise((resolve) => {
-    const timer = setTimeout(() => resolve("timeout"), READY_TIMEOUT_MS);
-    const settle = (readiness: ServiceWorkerReadiness) => {
-      clearTimeout(timer);
-      resolve(readiness);
-    };
-    void container.ready.then(() => settle("ready"));
-    serviceWorkerRegistering()?.then(
-      (registration) => {
-        if (registration.active !== null) return;
-        const worker = registration.installing ?? registration.waiting;
-        if (worker === null) return;
-        const check = () => {
-          if (worker.state === "redundant" && registration.active === null) settle("unsupported");
-        };
-        worker.addEventListener("statechange", check);
-        check();
-      },
-      () => settle("unsupported"),
-    );
-  });
+  return waitForServiceWorker(container.ready, serviceWorkerRegistering());
 }

@@ -1,5 +1,5 @@
 import { ApiError, type PushRegistration, type PushStatus } from "@sendo-reader/core";
-import { describe, expect, test, vi } from "vitest";
+import { afterEach, describe, expect, test, vi } from "vitest";
 import { AccountChangedError } from "../src/lib/account";
 import {
   browserSupport,
@@ -9,9 +9,11 @@ import {
   type PushEnvironment,
   type PushSubscriptionLike,
   resendOnStartup,
+  type ServiceWorkerInstallLike,
   type ServiceWorkerReadiness,
   turnOff,
   turnOn,
+  waitForServiceWorker,
 } from "../src/lib/push";
 
 // account.ts のアカウントの窓口は、読み込むときに同じオリジンの API の場所を決める
@@ -507,5 +509,107 @@ describe("ログアウトとユーザーの切り替え", () => {
     });
     await forgetDevice(env);
     expect(events.slice(-3)).toEqual(["close notification", "clear tags", "refresh badge"]);
+  });
+});
+
+describe("Service Worker が動くのを待つ", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  /** 取り込み中の版のにせもの。become で状態を変え、statechange を起こす */
+  function installing(state: ServiceWorkerState) {
+    const listeners: (() => void)[] = [];
+    const worker = {
+      state,
+      addEventListener: (_type: "statechange", listener: () => void) => listeners.push(listener),
+    };
+    const become = (next: ServiceWorkerState) => {
+      worker.state = next;
+      for (const listener of listeners) listener();
+    };
+    return { worker, become };
+  }
+
+  /** 待ち始め、決まった答えを読めるようにする（決まっていなければ undefined） */
+  function wait(ready: Promise<unknown>, registering: Promise<ServiceWorkerInstallLike> | null) {
+    vi.useFakeTimers();
+    let readiness: ServiceWorkerReadiness | undefined;
+    void waitForServiceWorker(ready, registering).then((value) => {
+      readiness = value;
+    });
+    return () => readiness;
+  }
+
+  const never = new Promise<never>(() => {});
+
+  test("ready が返れば、動いている", async () => {
+    let start = () => {};
+    const ready = new Promise<void>((resolve) => {
+      start = resolve;
+    });
+    const readiness = wait(
+      ready,
+      Promise.resolve({ active: null, installing: null, waiting: null }),
+    );
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(readiness()).toBeUndefined();
+    start();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(readiness()).toBe("ready");
+  });
+
+  test("ready が返らなければ、ちょうど 10 秒で、確かめられないとする", async () => {
+    // 手元の dev サーバーは登録しない
+    const readiness = wait(never, null);
+    await vi.advanceTimersByTimeAsync(9_999);
+    expect(readiness()).toBeUndefined();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(readiness()).toBe("timeout");
+  });
+
+  test("登録できなければ、上限を待たずに使えないとする", async () => {
+    const readiness = wait(
+      never,
+      Promise.reject(new DOMException("登録できない", "SecurityError")),
+    );
+    await vi.advanceTimersByTimeAsync(0);
+    expect(readiness()).toBe("unsupported");
+  });
+
+  test("動いている版がないまま、取り込みが redundant で終わったら、上限を待たずに使えないとする", async () => {
+    const worker = installing("installing");
+    const readiness = wait(
+      never,
+      Promise.resolve({ active: null, installing: worker.worker, waiting: null }),
+    );
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(readiness()).toBeUndefined();
+    worker.become("redundant");
+    await vi.advanceTimersByTimeAsync(0);
+    expect(readiness()).toBe("unsupported");
+
+    // 登録の結果を受けたときに、もう redundant で終わっていた
+    const finished = installing("redundant");
+    const already = wait(
+      never,
+      Promise.resolve({ active: null, installing: null, waiting: finished.worker }),
+    );
+    await vi.advanceTimersByTimeAsync(0);
+    expect(already()).toBe("unsupported");
+  });
+
+  test("動いている版があれば、新しい版の取り込みが redundant で終わっても、ready を待つ", async () => {
+    const worker = installing("installing");
+    const readiness = wait(
+      never,
+      Promise.resolve({ active: {}, installing: worker.worker, waiting: null }),
+    );
+    await vi.advanceTimersByTimeAsync(0);
+    worker.become("redundant");
+    await vi.advanceTimersByTimeAsync(9_999);
+    expect(readiness()).toBeUndefined();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(readiness()).toBe("timeout");
   });
 });

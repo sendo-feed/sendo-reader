@@ -54,6 +54,54 @@ export interface ServiceWorkerRegistrationLike {
 /** Service Worker が動いているか。timeout は上限（10 秒）までに分からなかった */
 export type ServiceWorkerReadiness = "ready" | "timeout" | "unsupported";
 
+/** Service Worker の ready を待つ上限（docs/decisions/notifications.md の 1） */
+const READY_TIMEOUT_MS = 10_000;
+
+/** Service Worker の登録のうち、取り込みが redundant で終わったかを見るところ */
+export interface ServiceWorkerInstallLike {
+  readonly active: object | null;
+  readonly installing: ServiceWorkerStateLike | null;
+  readonly waiting: ServiceWorkerStateLike | null;
+}
+
+export interface ServiceWorkerStateLike {
+  readonly state: ServiceWorkerState;
+  addEventListener(type: "statechange", listener: () => void): void;
+}
+
+/**
+ * Service Worker が動くのを待つ。ready は navigator.serviceWorker.ready、registering は登録の結果
+ * （登録を始めていない手元の dev サーバーでは null）。取り込みが終わらない（redundant で終わった、
+ * 手元の dev サーバー）と ready が返らないので、10 秒の上限を置く。登録できなかったか、動いている版が
+ * ないまま取り込みが redundant で終わったと分かれば、上限を待たずに unsupported を返す
+ */
+export function waitForServiceWorker(
+  ready: Promise<unknown>,
+  registering: Promise<ServiceWorkerInstallLike> | null,
+): Promise<ServiceWorkerReadiness> {
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => resolve("timeout"), READY_TIMEOUT_MS);
+    const settle = (readiness: ServiceWorkerReadiness) => {
+      clearTimeout(timer);
+      resolve(readiness);
+    };
+    void ready.then(() => settle("ready"));
+    registering?.then(
+      (registration) => {
+        if (registration.active !== null) return;
+        const worker = registration.installing ?? registration.waiting;
+        if (worker === null) return;
+        const check = () => {
+          if (worker.state === "redundant" && registration.active === null) settle("unsupported");
+        };
+        worker.addEventListener("statechange", check);
+        check();
+      },
+      () => settle("unsupported"),
+    );
+  });
+}
+
 export interface PushEnvironment {
   readonly support: BrowserSupport;
   permission(): NotificationPermission;
