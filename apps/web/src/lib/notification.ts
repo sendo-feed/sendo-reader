@@ -73,10 +73,29 @@ export function articlePath(articleId: string): string {
   return `/?${new URLSearchParams({ article: articleId })}`;
 }
 
-/** 通知を押したときに開く、自分のオリジンの URL。tag を読めなければ reader の先頭 */
+/** 通知から開いたことの印（docs/decisions/push-receive.md の 3）。記事の URL に付ける */
+const FROM_PARAM = "from";
+const FROM_NOTIFICATION = "notification";
+
+/**
+ * 通知を押したときに開く、自分のオリジンの URL（出し直した通知の navigate と openWindow）。記事の URL に、
+ * 通知から開いたことの印を付ける。tag を読めなければ reader の先頭（印は付けない）
+ */
 export function notificationPath(tag: string): string {
   const articleId = articleIdFromTag(tag);
-  return articleId === null ? "/" : articlePath(articleId);
+  if (articleId === null) return "/";
+  return `/?${new URLSearchParams({ article: articleId, [FROM_PARAM]: FROM_NOTIFICATION })}`;
+}
+
+/**
+ * URL から、通知から開いたことの印を外す。印があれば、外した URL と、印の付いていた記事の ID（記事の
+ * URL でなければ null）を返す。印がなければ null
+ */
+export function takeNotificationMark(url: URL): { url: URL; articleId: string | null } | null {
+  if (url.searchParams.get(FROM_PARAM) !== FROM_NOTIFICATION) return null;
+  const next = new URL(url);
+  next.searchParams.delete(FROM_PARAM);
+  return { url: next, articleId: next.searchParams.get("article") };
 }
 
 /**

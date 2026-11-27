@@ -82,7 +82,20 @@
     void reader.articlesVersion;
     if (ids === undefined) {
       lastArticleRoute = route;
-      return;
+      if (id === null) return;
+      // All では、手元にある記事は範囲の外にならず、そのまま出す。出したら、通知から開こうとした記事の
+      // 覚えを終える（あとで利用者が範囲を変えて記事が外れても、通知の知らせを出さない）。まだ手元に
+      // ない間は覚えを残す（待つ間に範囲を狭め、届いた記事が範囲の外なら知らせる）
+      let shown = true;
+      void reader.client
+        .getArticle(id)
+        .then((article) => {
+          if (shown && article !== null) takeNotificationOpen(id);
+        })
+        .catch(() => {});
+      return () => {
+        shown = false;
+      };
     }
     if (!reader.workspaceDataReady) return;
     const view = router.view;

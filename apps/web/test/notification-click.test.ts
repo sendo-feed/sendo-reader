@@ -11,7 +11,8 @@ import {
 } from "../src/lib/notification-click";
 
 const TAG = "bell:bell-1:article-1";
-const ARTICLE_PATH = "/?article=article-1";
+/** 新しい窓で開く記事の URL（通知から開いたことの印を付ける。docs/decisions/push-receive.md の 3） */
+const ARTICLE_PATH = "/?article=article-1&from=notification";
 
 /**
  * にせものの窓。知らせを受けたら、answer のとおりに答える（accept は受け、decline は断り、silent は
