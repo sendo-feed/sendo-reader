@@ -14,7 +14,7 @@ export interface AppBadge {
  * 数の正は手元の DB で、数え直すたびに、前と同じ数でも書く（書いた数は覚えない）。前に出たときも
  * 数え直し、裏にある間や閉じている間に push の app_badge でブラウザーが書いた数を残さない。
  * 書けなければ（iOS では、通知を許可していないと失敗する）、画面には何も出さず、次に数え直したときに
- * また書く（docs/decisions/notifications.md の 11）。
+ * また書く（docs/decisions/notifications.md の 5）。
  */
 export function showUnreadBadge(
   client: Pick<ReaderClient, "countUnread" | "onChange">,
