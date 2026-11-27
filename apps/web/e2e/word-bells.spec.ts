@@ -235,3 +235,100 @@ test.describe("manage feed のベルの言葉", () => {
     expect(server.activeBells()).toEqual([]);
   });
 });
+
+test("Settings の Notifications に付けたベルを並べ、押すとそのベルだけが外れる", async ({
+  page,
+  context,
+}) => {
+  const { server, news } = seed();
+  const rust = server.subscribe({ url: "https://blog.rust-lang.org/feed.xml", title: "Rust Blog" });
+  server.addBell({ feedId: rust.id });
+  server.advance(1);
+  server.addBell({ feedId: news.id, words: "Rust" });
+  server.advance(1);
+  const azure = server.addBell({ words: "Azure 障害" });
+  await routeFakeSendo(context, server);
+  await page.goto("/settings");
+  await signIn(page);
+  await page.getByRole("tab", { name: "Notifications", exact: true }).click();
+  const panel = page.getByRole("tabpanel", { name: "Notifications" });
+  await expect(
+    panel.getByText(
+      "ベルを付けたフィードと言葉に新しい記事が来たら、この端末に知らせます。ベルは同期で、ほかの端末と共有します。",
+    ),
+  ).toBeVisible();
+  const bells = panel.getByRole("region", { name: "Bells" }).getByRole("listitem");
+  await expect(bells).toHaveText([
+    /Rust Blog\s*すべての新しい記事/,
+    /Hacker News\s*Rust を含むときだけ/,
+    /Azure 障害\s*どのフィードでも/,
+  ]);
+
+  await panel
+    .getByRole("button", { name: "Turn off bell: Hacker News · Rust", exact: true })
+    .click();
+  await expect(bells).toHaveText([/Rust Blog/, /Azure 障害/]);
+  await syncNow(page);
+  expect(serverTargets(server)).toEqual([
+    { feedId: rust.id, words: null },
+    { feedId: null, words: "Azure 障害" },
+  ]);
+
+  // ほかの画面で付けたベルも、一覧に出る（作った順。偽の sendo の時計は進めないと進まない）
+  server.advance(1);
+  await page.goto("/search?q=Go");
+  const bell = page.getByRole("button", { name: "Bell: Go", exact: true });
+  await bell.click();
+  await expect(bell).toHaveAttribute("aria-pressed", "true");
+  await page.goto("/settings");
+  await page.getByRole("tab", { name: "Notifications", exact: true }).click();
+  await expect(bells).toHaveText([/Rust Blog/, /Azure 障害/, /Go\s*どのフィードでも/]);
+  await panel.getByRole("button", { name: "Turn off bell: Azure 障害", exact: true }).click();
+  await syncNow(page);
+  expect(server.bells.get(azure.id)?.deleted).toBe(true);
+  expect(serverTargets(server)).toEqual([
+    { feedId: rust.id, words: null },
+    { feedId: null, words: "Go" },
+  ]);
+});
+
+test("Settings のベルの一覧には、選んでいないワークスペースの購読の名前を出さない", async ({
+  page,
+  context,
+}) => {
+  const server = new FakeSendo();
+  server.workspacesSupported = true;
+  const publicSpace = server.createWorkspace("Public");
+  const privateSpace = server.createWorkspace("Personal");
+  const ordinary = server.subscribe({
+    url: "https://public.example/feed",
+    title: "Public feed",
+    workspaceId: publicSpace.id,
+  });
+  const personal = server.subscribe({
+    url: "https://private.example/feed",
+    title: "Hidden feed",
+    workspaceId: privateSpace.id,
+  });
+  server.addBell({ feedId: ordinary.id });
+  server.advance(1);
+  server.addBell({ feedId: personal.id, words: "Rust" });
+  server.advance(1);
+  server.addBell({ words: "Azure 障害" });
+  await routeFakeSendo(context, server);
+  await page.goto("/");
+  await signIn(page);
+  await page.getByRole("button", { name: /^Workspaces:/ }).click();
+  const dialog = page.getByRole("dialog", { name: "Workspaces", exact: true });
+  await dialog.getByRole("button", { name: "Only Public", exact: true }).click();
+  await dialog.getByRole("button", { name: "Close", exact: true }).click();
+
+  await page.goto("/settings");
+  await page.getByRole("tab", { name: "Notifications", exact: true }).click();
+  const region = page.getByRole("region", { name: "Bells" });
+  await expect(region.getByRole("listitem")).toHaveText([/Public feed/, /Azure 障害/]);
+  await expect(region).not.toContainText("Hidden feed");
+  await expect(region).toContainText(
+    "選んでいないワークスペースの購読のベルは、ここに出していません。",
+  );
+});
