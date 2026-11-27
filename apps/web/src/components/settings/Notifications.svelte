@@ -1,7 +1,12 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { describePushSendError, PUSH_UNAVAILABLE } from "../../lib/errors";
-  import { type DeviceState, IOS_HOME_SCREEN_GUIDE, type TurnOnResult } from "../../lib/push";
+  import {
+    type DeviceState,
+    IOS_HOME_SCREEN_GUIDE,
+    type TurnOffResult,
+    type TurnOnResult,
+  } from "../../lib/push";
   import { pushDevice } from "../../lib/push-device";
   import Problem from "./Problem.svelte";
 
@@ -39,7 +44,7 @@
     };
   });
 
-  function failureOf(result: TurnOnResult): string | null {
+  function failureOf(result: TurnOnResult | TurnOffResult): string | null {
     switch (result.kind) {
       case "subscribe-failed":
         return "この端末では通知を受けられませんでした。";
@@ -51,11 +56,18 @@
     }
   }
 
-  async function run(action: () => Promise<string | null>) {
+  async function run(action: Promise<TurnOnResult | TurnOffResult>) {
     busy = true;
     failure = null;
     try {
-      failure = await action();
+      const result = await action;
+      if (result.kind === "unreachable") {
+        // ほかのタブがロックを持ったまま。確かめ直しも同じロックを待つので、待たずに Retry を出す
+        checks += 1;
+        device = { kind: "unreachable" };
+        return;
+      }
+      failure = failureOf(result);
       await check();
     } finally {
       busy = false;
@@ -65,16 +77,12 @@
   function turnOn(publicKey: string) {
     if (busy) return;
     // 利用者の操作のすぐあとに許可を求める（間に待ちを挟まない）
-    const result = pushDevice.turnOn(publicKey);
-    void run(async () => failureOf(await result));
+    void run(pushDevice.turnOn(publicKey));
   }
 
   function turnOff() {
     if (busy) return;
-    void run(async () => {
-      await pushDevice.turnOff();
-      return null;
-    });
+    void run(pushDevice.turnOff());
   }
 </script>
 

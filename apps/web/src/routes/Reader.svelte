@@ -16,7 +16,7 @@
   import { useReader } from "../lib/context";
   import { layout, reducedMotion } from "../lib/layout.svelte";
   import { ArticleListState, type ListProgress } from "../lib/list.svelte";
-  import { takeNotificationOpen } from "../lib/notification-open";
+  import { leaveNotificationOpen, takeNotificationOpen } from "../lib/notification-open";
   import { openListScope } from "../lib/open-list";
   import { prefs } from "../lib/prefs.svelte";
   import {
@@ -127,6 +127,14 @@
     })().catch(() => {});
     return () => {
       active = false;
+    };
+  });
+
+  // 通知から開こうとした記事の画面を離れたら、その記事の待ちを終える（docs/decisions/notifications.md の 9）
+  $effect(() => {
+    const id = router.articleId;
+    return () => {
+      if (id !== null) leaveNotificationOpen(id);
     };
   });
 

@@ -186,14 +186,12 @@ export async function checkDevice(env: PushEnvironment): Promise<DeviceState> {
   if (readiness === "unsupported") return { kind: "unsupported" };
   if (service.kind === "unauthorized" || service.kind === "unreachable") return service;
   if (service.kind === "available" && readiness === "timeout") return { kind: "unreachable" };
-  // 登録はロックの中で読む（ほかのタブが作り直している途中の、外したところを見ない）。ほかのタブが
-  // ロックを持ったままのこともある（Safari は bfcache に入ったページのロックを残すことがある）ので、
-  // ready と合わせた上限までに読めなければ、確かめられないとする
+  // 登録はロックの中で読む（ほかのタブが作り直している途中の、外したところを見ない）。ready と
+  // 合わせた上限までにロックを取れなければ、確かめられないとする
   let subscribed = false;
   if (env.permission() === "granted") {
-    const read = await beforeDeadline(
-      env.lock(() => currentSubscription(env)),
-      READY_TIMEOUT_MS - (Date.now() - started),
+    const read = await lockWithin(env, READY_TIMEOUT_MS - (Date.now() - started), () =>
+      currentSubscription(env),
     );
     if (read === "timeout") return { kind: "unreachable" };
     subscribed = read !== null;
@@ -203,20 +201,32 @@ export async function checkDevice(env: PushEnvironment): Promise<DeviceState> {
   return subscribed ? { kind: "on" } : { kind: "off", publicKey: service.publicKey };
 }
 
-/** task が ms までに終わらなければ timeout を返す（task は止めない） */
-function beforeDeadline<T>(task: Promise<T>, ms: number): Promise<T | "timeout"> {
+/**
+ * ロックを ms までに取れなければ timeout を返す。ほかのタブがロックを持ったままのことがある（Safari は
+ * bfcache に入ったページのロックを残すことがある）ため。上限は取るまでだけに置き、取れたら task を
+ * 最後まで待つ。上限を過ぎてから取れたら、task を動かさずに放す（timeout と返したあとに登録を変えない）
+ */
+function lockWithin<T>(
+  env: PushEnvironment,
+  ms: number,
+  task: () => Promise<T>,
+): Promise<T | "timeout"> {
   return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => resolve("timeout"), Math.max(ms, 0));
-    task.then(
-      (value) => {
-        clearTimeout(timer);
-        resolve(value);
+    let expired = false;
+    const timer = setTimeout(
+      () => {
+        expired = true;
+        resolve("timeout");
       },
-      (error: unknown) => {
-        clearTimeout(timer);
-        reject(error);
-      },
+      Math.max(ms, 0),
     );
+    env
+      .lock(async () => {
+        if (expired) return;
+        clearTimeout(timer);
+        resolve(await task());
+      })
+      .catch(reject);
   });
 }
 
@@ -235,14 +245,19 @@ export function suggestionFor(state: DeviceState): Suggestion | null {
 
 /**
  * Turn on notifications を押した結果。dismissed は許可の窓を決めずに閉じた（何も出さずに戻す）、
- * subscribe-failed はブラウザーが登録を断った、send-failed は sendo に送れなかった（作った登録は外した）
+ * subscribe-failed はブラウザーが登録を断った、send-failed は sendo に送れなかった（作った登録は外した）、
+ * unreachable はロックを上限（10 秒）までに取れず、何もしなかった（Retry を出す）
  */
 export type TurnOnResult =
   | { kind: "on" }
   | { kind: "dismissed" }
   | { kind: "denied" }
   | { kind: "subscribe-failed" }
-  | { kind: "send-failed"; error: unknown };
+  | { kind: "send-failed"; error: unknown }
+  | { kind: "unreachable" };
+
+/** Turn off notifications を押した結果。unreachable はロックを上限までに取れず、何もしなかった */
+export type TurnOffResult = { kind: "off" } | { kind: "unreachable" };
 
 /**
  * Turn on notifications を押したときに呼ぶ。利用者の操作のすぐあとでないと許可の窓を出さない
@@ -261,7 +276,7 @@ export async function turnOn(env: PushEnvironment, publicKey: string): Promise<T
   if (permission === "denied") return { kind: "denied" };
   // 許可したら、手元の数が変わっていなくても書き直す（iOS では、許可の前に書けなかった）
   env.refreshBadge();
-  return env.lock(async (): Promise<TurnOnResult> => {
+  const result = await lockWithin(env, READY_TIMEOUT_MS, async (): Promise<TurnOnResult> => {
     const registration = await env.registration().catch(() => null);
     if (registration === null) return { kind: "subscribe-failed" };
     const { pushManager } = registration;
@@ -290,29 +305,38 @@ export async function turnOn(env: PushEnvironment, publicKey: string): Promise<T
     }
     return { kind: "on" };
   });
+  return result === "timeout" ? { kind: "unreachable" } : result;
 }
 
 /**
  * Turn off notifications（docs/decisions/notifications.md の 4）。sendo の登録を外し、sendo に届かなくても
  * ブラウザーの登録は外す
  */
-export async function turnOff(env: PushEnvironment): Promise<void> {
-  await env.lock(async () => {
-    const subscription = await currentSubscription(env);
-    try {
-      await env.sendo.confirmUser();
-      await env.sendo.deleteRegistration();
-    } catch {
-      // 外した登録に送ると、プッシュサービスが 404 か 410 を返し、sendo が消す
-    }
-    await subscription?.unsubscribe().catch(() => false);
-  });
+export async function turnOff(env: PushEnvironment): Promise<TurnOffResult> {
+  const result = await lockWithin(env, READY_TIMEOUT_MS, async () =>
+    turnOffLocked(env, await currentSubscription(env)),
+  );
+  return result === "timeout" ? { kind: "unreachable" } : { kind: "off" };
+}
+
+async function turnOffLocked(
+  env: PushEnvironment,
+  subscription: PushSubscriptionLike | null,
+): Promise<void> {
+  try {
+    await env.sendo.confirmUser();
+    await env.sendo.deleteRegistration();
+  } catch {
+    // 外した登録に送ると、プッシュサービスが 404 か 410 を返し、sendo が消す
+  }
+  await subscription?.unsubscribe().catch(() => false);
 }
 
 /**
  * 画面が起動したとき（タブごと）に、登録があれば送り直す（docs/decisions/notifications.md の 3）。
- * 許可が granted でなければ外す（GET /api/v1/push の結果によらない）。使える Sendo なら送り直し、
- * 公開鍵が登録の鍵と違えば作り直してから送る。失敗は画面に出さず、次の起動でまた送る
+ * 許可が granted でなければ、Turn off notifications と同じく外す（GET /api/v1/push の結果によらない）。
+ * 使える Sendo なら送り直し、公開鍵が登録の鍵と違えば作り直してから送る。失敗は画面に出さず、次の
+ * 起動でまた送る
  */
 export async function resendOnStartup(env: PushEnvironment): Promise<void> {
   if (env.support !== "supported") return;
@@ -322,7 +346,7 @@ export async function resendOnStartup(env: PushEnvironment): Promise<void> {
       (await registration?.pushManager.getSubscription().catch(() => null)) ?? null;
     if (registration === null || subscription === null) return;
     if (env.permission() !== "granted") {
-      await subscription.unsubscribe().catch(() => false);
+      await turnOffLocked(env, subscription);
       return;
     }
     let status: PushStatus;

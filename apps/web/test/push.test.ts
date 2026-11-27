@@ -406,7 +406,7 @@ describe("Turn off notifications", () => {
       subscription: subscription(KEY),
       del: new ApiError("network", "x"),
     });
-    await turnOff(env);
+    expect(await turnOff(env)).toEqual({ kind: "off" });
     expect(events).toEqual([
       "lock",
       "getSubscription",
@@ -415,6 +415,81 @@ describe("Turn off notifications", () => {
       "unsubscribe https://push.example/a",
     ]);
     expect(subscribed()).toBe(false);
+  });
+});
+
+describe("Turn on ／ Turn off で、ほかのタブがロックを持ったまま返さない", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  /** ロックを grantAfter ミリ秒で取れる（null なら取れない）環境 */
+  function lockedFor(options: Parameters<typeof setup>[0], grantAfter: number | null) {
+    vi.useFakeTimers();
+    const app = setup(options);
+    const lock = app.env.lock;
+    app.env.lock = (task) =>
+      new Promise((resolve, reject) => {
+        if (grantAfter === null) return;
+        setTimeout(() => lock(task).then(resolve, reject), grantAfter);
+      });
+    return app;
+  }
+
+  /** 呼んだ結果を、決まったあとに読めるようにする */
+  function watch<T>(promise: Promise<T>): () => T | undefined {
+    let value: T | undefined;
+    void promise.then((result) => {
+      value = result;
+    });
+    return () => value;
+  }
+
+  test("Turn on は、ちょうど 10 秒で、何もせずに確かめられないと返す", async () => {
+    const { env, events, subscribed } = lockedFor({ answer: "granted" }, null);
+    const result = watch(turnOn(env, KEY));
+    await vi.advanceTimersByTimeAsync(9_999);
+    expect(result()).toBeUndefined();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(result()).toEqual({ kind: "unreachable" });
+    expect(events).toEqual(["requestPermission", "refresh badge"]);
+    expect(subscribed()).toBe(false);
+  });
+
+  test("Turn off は、ちょうど 10 秒で、何もせずに確かめられないと返す", async () => {
+    const { env, events, subscribed } = lockedFor(
+      { permission: "granted", subscription: subscription(KEY) },
+      null,
+    );
+    const result = watch(turnOff(env));
+    await vi.advanceTimersByTimeAsync(9_999);
+    expect(result()).toBeUndefined();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(result()).toEqual({ kind: "unreachable" });
+    expect(events).toEqual([]);
+    expect(subscribed()).toBe(true);
+  });
+
+  test("上限を過ぎてからロックを取れても、登録を作らない", async () => {
+    const { env, events, subscribed } = lockedFor({ answer: "granted" }, 10_001);
+    const result = watch(turnOn(env, KEY));
+    await vi.advanceTimersByTimeAsync(10_001);
+    expect(result()).toEqual({ kind: "unreachable" });
+    expect(events).toEqual(["requestPermission", "refresh badge", "lock"]);
+    expect(subscribed()).toBe(false);
+  });
+
+  test("上限の前にロックを取れたら、上限を過ぎても最後まで済ませる", async () => {
+    const { env, put } = lockedFor({ answer: "granted" }, 9_999);
+    const putRegistration = env.sendo.putRegistration;
+    env.sendo.putRegistration = (registration) =>
+      new Promise((resolve, reject) => {
+        setTimeout(() => putRegistration(registration).then(resolve, reject), 5_000);
+      });
+    const result = watch(turnOn(env, KEY));
+    await vi.advanceTimersByTimeAsync(14_999);
+    expect(result()).toEqual({ kind: "on" });
+    expect(put).toHaveLength(1);
   });
 });
 
@@ -436,13 +511,30 @@ describe("起動したときの送り直し", () => {
     expect(put).toEqual([]);
   });
 
-  test("許可が granted でなければ、GET /api/v1/push によらずに外す", async () => {
+  test("許可が granted でなければ、GET /api/v1/push によらずに、Turn off notifications と同じく外す", async () => {
     const { env, events, subscribed } = setup({
       permission: "denied",
       subscription: subscription(KEY),
     });
     await resendOnStartup(env);
-    expect(events).toEqual(["lock", "getSubscription", "unsubscribe https://push.example/a"]);
+    expect(events).toEqual([
+      "lock",
+      "getSubscription",
+      "GET /me",
+      "DELETE /push/registration",
+      "unsubscribe https://push.example/a",
+    ]);
+    expect(subscribed()).toBe(false);
+  });
+
+  test("許可が granted でなく、sendo に届かなくても、ブラウザーの登録は外す", async () => {
+    const { env, events, subscribed } = setup({
+      permission: "default",
+      subscription: subscription(KEY),
+      del: new ApiError("network", "x"),
+    });
+    await resendOnStartup(env);
+    expect(events).toContain("unsubscribe https://push.example/a");
     expect(subscribed()).toBe(false);
   });
 
