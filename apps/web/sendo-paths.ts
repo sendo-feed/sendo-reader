@@ -18,12 +18,11 @@ const EXACT_PATHS = [
   "/.well-known/oauth-authorization-server",
   "/oauth/token",
   "/oauth/register",
-  "/accounts/ClientLogin",
   "/healthz",
 ] as const;
 
 /** この下のパスをすべて中継する（/ で終える） */
-const PATH_PREFIXES = ["/api/", "/reader/api/0/"] as const;
+const PATH_PREFIXES = ["/api/"] as const;
 
 /** パス（URL の pathname。クエリを含めない）が sendo のものか */
 export function isSendoPath(pathname: string): boolean {

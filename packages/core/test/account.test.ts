@@ -39,7 +39,7 @@ describe("アクセストークン", () => {
     expect(readWrite.accessToken.scopes).toEqual(["read", "write"]);
   });
 
-  test("リーダーアプリ用には、範囲を渡しても送らない", async () => {
+  test("REST API 用には、範囲を渡しても送らない", async () => {
     const { account } = setup();
     const issued = await account.createToken({
       name: "Reeder",

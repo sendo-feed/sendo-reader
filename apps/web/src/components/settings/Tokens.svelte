@@ -1,7 +1,7 @@
 <script lang="ts">
   import type { AccessToken } from "@sendo-reader/core";
   import { onDestroy, onMount } from "svelte";
-  import { account } from "../../lib/account";
+  import { account, PURPOSE_LABELS } from "../../lib/account";
   import ConnectionTable from "./ConnectionTable.svelte";
   import CreateTokenDialog from "./CreateTokenDialog.svelte";
 
@@ -17,7 +17,7 @@
       ...token,
       access:
         token.purpose === "reader"
-          ? "Reader app"
+          ? PURPOSE_LABELS.reader
           : `MCP · ${token.scopes.includes("write") ? "Read & write" : "Read only"}`,
     })) ?? null,
   );

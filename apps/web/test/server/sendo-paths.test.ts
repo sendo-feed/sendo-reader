@@ -10,8 +10,6 @@ const SENDO_PATHS = [
   "/.well-known/oauth-authorization-server",
   "/oauth/token",
   "/oauth/register",
-  "/accounts/ClientLogin",
-  "/reader/api/0/stream/contents/user/-/state/com.google/reading-list",
   "/healthz",
 ];
 
@@ -28,6 +26,8 @@ const READER_PATHS = [
   "/feeds/abc",
   "/folders/abc",
   "/oauth/authorize",
+  "/accounts/ClientLogin",
+  "/reader/api/0/user-info",
   // 前に付く文字が同じでも、別のパス
   "/apis",
   "/api2",
