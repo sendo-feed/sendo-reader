@@ -1,5 +1,6 @@
 <script lang="ts">
   import LeaveStalled from "./components/LeaveStalled.svelte";
+  import NotificationSuggestion from "./components/NotificationSuggestion.svelte";
   import UpdateReady from "./components/UpdateReady.svelte";
   import VersionMismatch from "./components/VersionMismatch.svelte";
   import { useReader } from "./lib/context";
@@ -28,6 +29,10 @@
   <VersionMismatch error={state.versionMismatch} />
 {:else if notice === "ready" || notice === "failed"}
   <UpdateReady failed={notice === "failed"} />
+{/if}
+<!-- このタブが使えないことを言う知らせが出ている間は、通知の勧めを出さない -->
+{#if state.signedIn && notice !== "leaveStalled" && notice !== "versionMismatch"}
+  <NotificationSuggestion />
 {/if}
 {#if state.signedIn === null}
   <p class="starting" aria-live="polite">Loading…</p>

@@ -712,3 +712,129 @@ test.describe("消えた通知で見分ける（iPhone と iPad のホーム画�
     await expect(page).toHaveURL(new RegExp(`\\?article=${second.id}$`));
   });
 });
+
+test.describe("ベルを付けたときの勧め", () => {
+  const bell = (page: Page, name: string) =>
+    page.getByRole("main").getByRole("button", { name: `Bell: ${name}`, exact: true });
+  const suggestion = (page: Page) => page.getByText("この端末で通知を受けますか？");
+
+  function seed() {
+    const server = new FakeSendo();
+    server.subscribe({ url: "https://blog.example/feed.xml", title: "Blog" });
+    server.subscribe({ url: "https://news.example/rss", title: "News" });
+    return server;
+  }
+
+  /** GET /push を受けるのを待つ（確かめ終える前は勧めを出さないので、出ないことを確かめる前に待つ） */
+  async function pushChecked(server: FakeSendo, before: number) {
+    await expect
+      .poll(() => server.requests.filter((r) => r.startsWith("GET /push")).length)
+      .toBeGreaterThan(before);
+  }
+  const pushChecks = (server: FakeSendo) =>
+    server.requests.filter((r) => r.startsWith("GET /push")).length;
+
+  test("この端末で受けていなければ、ベルを付けたときに勧め、Turn on notifications で登録する", async ({
+    page,
+    context,
+  }) => {
+    const server = seed();
+    await routeFakeSendo(context, server);
+    await stubPush(context);
+    await page.goto("/manage");
+    await signIn(page);
+    await bell(page, "Blog").click();
+    await expect(suggestion(page)).toBeVisible();
+    // ベルの表示は、勧めを待たずに変わっている
+    await expect(bell(page, "Blog")).toHaveAttribute("aria-pressed", "true");
+    await page.getByRole("button", { name: "Turn on notifications", exact: true }).click();
+    await expect(suggestion(page)).toHaveCount(0);
+    expect(server.pushRegistrations.size).toBe(1);
+    expect((await stubState(page))?.requests).toBe(1);
+
+    // 受けていれば勧めない
+    const before = pushChecks(server);
+    await bell(page, "News").click();
+    await pushChecked(server, before);
+    await expect(suggestion(page)).toHaveCount(0);
+  });
+
+  test("Dismiss で閉じたら、読み込み直すまで出さない", async ({ page, context }) => {
+    const server = seed();
+    await routeFakeSendo(context, server);
+    await stubPush(context);
+    await page.goto("/manage");
+    await signIn(page);
+    await bell(page, "Blog").click();
+    await expect(suggestion(page)).toBeVisible();
+    await page.getByRole("button", { name: "Dismiss", exact: true }).click();
+    await expect(suggestion(page)).toHaveCount(0);
+    await bell(page, "News").click();
+    await expect(bell(page, "News")).toHaveAttribute("aria-pressed", "true");
+    await page.waitForTimeout(300);
+    await expect(suggestion(page)).toHaveCount(0);
+
+    await page.reload();
+    await bell(page, "News").click();
+    await bell(page, "News").click();
+    await expect(suggestion(page)).toBeVisible();
+    // 起動しただけ、勧めを出しただけでは、許可を求めない
+    expect((await stubState(page))?.requests ?? 0).toBe(0);
+  });
+
+  test("許可を拒否していたら、勧めない", async ({ page, context }) => {
+    const server = seed();
+    await routeFakeSendo(context, server);
+    await stubPush(context, { permission: "denied", answer: "denied" });
+    await page.goto("/manage");
+    await signIn(page);
+    const before = pushChecks(server);
+    await bell(page, "Blog").click();
+    await pushChecked(server, before);
+    await page.waitForTimeout(300);
+    await expect(suggestion(page)).toHaveCount(0);
+  });
+
+  test("Web Push を使えない Sendo では、勧めない", async ({ page, context }) => {
+    const server = seed();
+    server.push = "unavailable";
+    await routeFakeSendo(context, server);
+    await stubPush(context);
+    await page.goto("/manage");
+    await signIn(page);
+    const before = pushChecks(server);
+    await bell(page, "Blog").click();
+    await pushChecked(server, before);
+    await page.waitForTimeout(300);
+    await expect(suggestion(page)).toHaveCount(0);
+  });
+
+  test("iPhone と iPad の Safari でホーム画面に追加していなければ、追加の仕方を勧める", async ({
+    page,
+    context,
+  }) => {
+    const server = seed();
+    await routeFakeSendo(context, server);
+    await context.addInitScript(() => {
+      Object.defineProperty(Navigator.prototype, "standalone", { get: () => false });
+      Reflect.deleteProperty(window, "PushManager");
+      Reflect.deleteProperty(window, "Notification");
+    });
+    await page.goto("/manage");
+    await signIn(page);
+    await bell(page, "Blog").click();
+    await expect(
+      page.getByText("通知は、ホーム画面に追加したアプリでだけ受けられます。", { exact: false }),
+    ).toBeVisible();
+    await expect(page.getByRole("button", { name: "Turn on notifications" })).toHaveCount(0);
+
+    // Settings にも同じ案内を出す
+    await page.goto("/settings");
+    await page.getByRole("tab", { name: "Notifications", exact: true }).click();
+    await expect(
+      page
+        .getByRole("tabpanel")
+        .getByText("通知は、ホーム画面に追加したアプリでだけ受けられます。", { exact: false }),
+    ).toBeVisible();
+  });
+});
