@@ -46,6 +46,10 @@ class NotificationSuggestion {
           case "send-failed":
             this.failure = describePushSendError(outcome.error);
             break;
+          case "unreachable":
+            // ほかのタブがロックを持ったまま、上限までに始められなかった。もう一度押せる
+            this.failure = "通知を受ける準備ができませんでした。もう一度押してください。";
+            break;
           case "dismissed":
             // 許可の窓を決めずに閉じたら、押す前に戻す
             break;

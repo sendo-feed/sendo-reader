@@ -1,6 +1,7 @@
 import { describe, expect, test } from "vitest";
 import { OPEN_ARTICLE, OPEN_ARTICLE_MAX_AGE_MS } from "../src/lib/notification";
 import {
+  leaveNotificationOpen,
   type NotificationOpenEnvironment,
   noteNotificationOpen,
   takeNotificationOpen,
@@ -224,6 +225,15 @@ describe("通知から開こうとした記事", () => {
     noteNotificationOpen("a1");
     expect(takeNotificationOpen("a2")).toBe(false);
     expect(takeNotificationOpen("a1")).toBe(true);
+    expect(takeNotificationOpen("a1")).toBe(false);
+  });
+
+  test("届かないままその記事の画面を離れたら覚えを消し、ほかの記事の画面を離れても消さない", () => {
+    noteNotificationOpen("a1");
+    leaveNotificationOpen("a2");
+    expect(takeNotificationOpen("a1")).toBe(true);
+    noteNotificationOpen("a1");
+    leaveNotificationOpen("a1");
     expect(takeNotificationOpen("a1")).toBe(false);
   });
 });

@@ -9,6 +9,7 @@ import {
   type PushEnvironment,
   resendOnStartup,
   type ServiceWorkerReadiness,
+  type TurnOffResult,
   type TurnOnResult,
   turnOff,
   turnOn,
@@ -72,7 +73,7 @@ class PushDevice {
     return turnOn(this.#env, publicKey);
   }
 
-  turnOff(): Promise<void> {
+  turnOff(): Promise<TurnOffResult> {
     return turnOff(this.#env);
   }
 

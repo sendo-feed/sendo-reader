@@ -133,3 +133,11 @@ export function takeNotificationOpen(articleId: string): boolean {
   if (opened) openedFromNotification = null;
   return opened;
 }
+
+/**
+ * 記事の画面を離れたときに呼ぶ。その記事が通知から開こうとした記事なら、届かないまま待ちを終えたので
+ * 覚えを消す（あとで同じ記事の URL を開いても、通知の知らせを出さない）
+ */
+export function leaveNotificationOpen(articleId: string): void {
+  if (openedFromNotification === articleId) openedFromNotification = null;
+}
