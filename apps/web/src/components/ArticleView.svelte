@@ -54,7 +54,7 @@
   let article = $state<Article | null>(null);
   let missing = $state(false);
   /**
-   * 手元にない記事を開いたときに、同期を頼んで待っている記事（docs/decisions/notifications.md の 9）。
+   * 手元にない記事を開いたときに、同期を頼んで待っている記事（docs/decisions/push-receive.md の 5）。
    * 頼んだあとに始まった同期が終わるまで「記事を同期しています…」と出す。頼むのは記事ごとに 1 度
    */
   let syncingFor = $state<string | null>(null);

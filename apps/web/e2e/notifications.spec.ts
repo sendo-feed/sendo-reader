@@ -478,7 +478,7 @@ const shownNotifications = (page: Page) =>
   });
 
 /**
- * Service Worker が IndexedDB に覚えた通知（docs/decisions/notifications.md の 8・10）。まだなければ、
+ * Service Worker が IndexedDB に覚えた通知（docs/decisions/push-receive.md の 4・6）。まだなければ、
  * src/lib/notification-store.ts と同じ版と形で作る（版を付けずに開くと、表のない版 1 ができ、
  * Service Worker が表を作れなくなる）
  */

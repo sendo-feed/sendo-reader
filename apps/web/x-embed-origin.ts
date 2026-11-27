@@ -86,7 +86,7 @@ export function withXEmbedMeta(html: string, origin: string): string {
 
 /**
  * sw.js の precache の一覧の中の、index.html の項目。injectManifest（workbox-build）は、一覧を鍵を
- * 並べた JSON にして差し込む（docs/decisions/notifications.md の 5）
+ * 並べた JSON にして差し込む（docs/decisions/push-receive.md の 1）
  */
 const INDEX_REVISION = /\{"revision":"[0-9a-f]+","url":"index\.html"\}/g;
 

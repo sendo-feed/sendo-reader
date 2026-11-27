@@ -69,7 +69,7 @@ if (location.pathname === AUTHORIZE_PATH) {
     user: () => state.user,
     onAccountChanged: () => void state.client.syncNow().catch(() => {}),
     // 通知を許可したときと、ログアウトとユーザーの切り替えで登録を外したときに書き直す
-    // （docs/decisions/notifications.md の 4・11）
+    // （docs/decisions/notifications.md の 4・5）
     refreshBadge,
     // 手元を消すときに core が置く、解除待ちの印（docs/decisions/notifications.md の 4）
     unsubscribePending: () => state.client.isPushUnsubscribePending(),
@@ -92,7 +92,7 @@ if (location.pathname === AUTHORIZE_PATH) {
   setTimeout(trim, 10_000);
   setInterval(trim, 10 * 60_000);
 
-  // 押された通知の記事を、この画面で開く（docs/decisions/notifications.md の 7・8）。記事の URL を
+  // 押された通知の記事を、この画面で開く（docs/decisions/push-receive.md の 3・4）。記事の URL を
   // 開いたときと同じ道で開く
   const opens = watchNotificationOpens({
     serviceWorker: navigator.serviceWorker ?? null,
@@ -141,7 +141,7 @@ if (import.meta.env.PROD) {
     fetch: (path, init) => fetch(path, init),
     document,
     // 自動で読み込み直す前に印を置く（読み込み直したあとの起動を、前に出たときと同じに扱う。
-    // docs/decisions/notifications.md の 8）
+    // docs/decisions/push-receive.md の 4）
     reload: () => {
       markAutoReload();
       location.reload();

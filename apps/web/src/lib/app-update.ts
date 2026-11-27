@@ -58,7 +58,7 @@ export interface AppUpdateEnvironment {
   onNotice: (notice: AppUpdateNotice | null) => void;
   /**
    * 画面が前に出たときに、自動で読み込み直すかを決めてから呼ぶ（reloading は読み込み直すと決めた）。
-   * 消えた通知を比べるのは、この結果を見てから（docs/decisions/notifications.md の 8）
+   * 消えた通知を比べるのは、この結果を見てから（docs/decisions/push-receive.md の 4）
    */
   onVisible?: (reloading: boolean) => void;
 }

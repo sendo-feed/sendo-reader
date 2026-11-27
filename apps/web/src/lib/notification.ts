@@ -1,5 +1,5 @@
 /**
- * ベルの通知（docs/decisions/notifications.md の 6〜10）。Service Worker（sw/sw.ts）と画面の両方が使う。
+ * ベルの通知（docs/decisions/push-receive.md の 2〜6）。Service Worker（sw/sw.ts）と画面の両方が使う。
  * ブラウザーでも Service Worker でも動く（画面だけの API を使わない）。
  *
  * 中身の形は sendo の決定（notifications.md の 14）が正。title と body は信頼できない文字で、通知に
@@ -80,7 +80,7 @@ export function notificationPath(tag: string): string {
 }
 
 /**
- * Service Worker が、押された通知の記事を開かせる知らせ（docs/decisions/notifications.md の 7）。画面は
+ * Service Worker が、押された通知の記事を開かせる知らせ（docs/decisions/push-receive.md の 3）。画面は
  * 知らせに付けたポートで OpenArticleReply を返す。形は変えない（変えるときは、別の名前の知らせにする。
  * 古い版の画面は答えず、Service Worker が新しい窓で開く）
  */

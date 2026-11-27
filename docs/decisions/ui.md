@@ -1,7 +1,7 @@
 # UI とツール
 
 - 状態：提案中
-- 関連：[ローカルファースト](local-first.md)、[記事の翻訳](translation.md)、[コンテナ版](container.md)、[速さの予算](performance.md)、[記事の中の X の投稿](embeds.md)、[通知](notifications.md)、sendo の[テックスタック](https://github.com/sendo-feed/sendo/blob/main/docs/decisions/tech-stack.md)、[技術構成](https://github.com/sendo-feed/sendo/blob/main/docs/tech-deck.md)（4・7・8 の未決事項 1・6）
+- 関連：[ローカルファースト](local-first.md)、[記事の翻訳](translation.md)、[コンテナ版](container.md)、[速さの予算](performance.md)、[記事の中の X の投稿](embeds.md)、[通知](notifications.md)、[プッシュの受信と、押したとき](push-receive.md)、sendo の[テックスタック](https://github.com/sendo-feed/sendo/blob/main/docs/decisions/tech-stack.md)、[技術構成](https://github.com/sendo-feed/sendo/blob/main/docs/tech-deck.md)（4・7・8 の未決事項 1・6）
 
 ## 決定
 
@@ -13,11 +13,11 @@
 2. **Void（Cloudflare）は使わない。**
 3. **配布する UI は Web の PWA。** ネイティブ版を配布する場合は、`apps/web` のビルドを Capacitor で包み、`apps/mobile` に置く。
 4. **配信は、reader のコンテナのサーバーで行う。** 画面のビルドを返し、sendo のパスを compose の中の sendo に中継する（[コンテナ版](container.md)）。ブラウザからは同じオリジンに見えるので、CORS は要らない。手元では、Vite の dev サーバーが、同じ一覧のパス（[コンテナ版](container.md)の 3）を、WebSocket の Upgrade も含めて、sendo の `pnpm dev`（`http://localhost:8787`）に中継する。
-5. **PWA にする。** Service Worker で、アプリの外枠と SQLite の wasm をキャッシュし、ネットワークがなくても起動できるようにする。Service Worker は vite-plugin-pwa の injectManifest で自分で書き、通知（push と、通知を押したとき）も受ける。Workbox の部品も含めて 1 つのファイル（`sw.js`）にまとめ、`importScripts` は使わない（[通知](notifications.md)の 5）。
+5. **PWA にする。** Service Worker で、アプリの外枠と SQLite の wasm をキャッシュし、ネットワークがなくても起動できるようにする。Service Worker は vite-plugin-pwa の injectManifest で自分で書き、通知（push と、通知を押したとき）も受ける。Workbox の部品も含めて 1 つのファイル（`sw.js`）にまとめ、`importScripts` は使わない（[プッシュの受信と、押したとき](push-receive.md)の 1）。
    - **新しい版には、利用者が何もしなくても切り替わる。** 画面が前に出たときと、開いたままなら 1 時間ごとに、新しい版があるかを確かめる。新しい版は、裏で取り込んですぐ使い始める
    - 開いている画面は、読み込んだときの版のまま動くので、新しい版に替わったら読み込み直す。読み込み直すのは、画面が裏にある間か、次に前に出たときだけ。読んでいる最中には、読み込み直さない
    - 読み込み直すと消えるものを出している画面（設定の画面の、発行したばかりのアクセストークン。OAuth の許可の画面）では読み込み直さず、ほかの画面に移ってから切り替える
-   - 自動で読み込み直す前に、`sessionStorage` に印を置く。前に出たときは、読み込み直すかを先に決め、消えた通知を比べるのはその結果を見てからにする（[通知](notifications.md)の 8）。押した通知で前に出たときに読み込み直しても、押した記事を開くため
+   - 自動で読み込み直す前に、`sessionStorage` に印を置く。前に出たときは、読み込み直すかを先に決め、消えた通知を比べるのはその結果を見てからにする（[プッシュの受信と、押したとき](push-receive.md)の 4）。押した通知で前に出たときに読み込み直しても、押した記事を開くため
    - 画面を受け持っていなかった Service Worker が受け持ち始めたとき（初めて入れたとき、強制再読み込みのあと）は、画面はサーバーから取ったので、たいていは最新の版で動いている。このときは、サーバーの版（下の `/version.json`）と画面の版が違うときだけ、版の切り替えとして扱う。サーバーの版を取れなければ、切り替えとして扱わない
    - 読み込み直すまでの間、古い版のタブと新しい版のタブが同時に開いていることがある。タブどうしのやり取りの版が合わないときの扱いは、[ローカルファースト](local-first.md)の 5
    - reader のコンテナの設定（X の投稿の隔離フレームのオリジン）を変えたときも、新しい版として、同じ時点で切り替わる（[記事の中の X の投稿](embeds.md)の 3）

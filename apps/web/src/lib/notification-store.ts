@@ -1,5 +1,5 @@
 /**
- * Service Worker が出した通知の tag を覚える場所（IndexedDB。docs/decisions/notifications.md の 8・10）。
+ * Service Worker が出した通知の tag を覚える場所（IndexedDB。docs/decisions/push-receive.md の 4・6）。
  *
  * iPhone と iPad のホーム画面のアプリでは、裏で動いているときに押された通知が届かないので、画面が
  * 前に出たときに、覚えた tag のうち通知センターから消えたものを見分ける。Cache Storage は、Service

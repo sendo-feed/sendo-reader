@@ -52,7 +52,7 @@
   let verifiedArticleFeed = $state<string | null>(null);
   /**
    * 手元にない記事（どのワークスペースにも）。記事の画面のまま同期を待ち（ArticleView）、範囲の外かは
-   * 届いてから決める（docs/decisions/notifications.md の 9）
+   * 届いてから決める（docs/decisions/push-receive.md の 5）
    */
   let missingArticleKey = $state<string | null>(null);
   const workspaceIds = $derived(reader.visibleWorkspaceIds);
@@ -130,7 +130,7 @@
     };
   });
 
-  // 通知から開こうとした記事の画面を離れたら、その記事の待ちを終える（docs/decisions/notifications.md の 9）
+  // 通知から開こうとした記事の画面を離れたら、その記事の待ちを終える（docs/decisions/push-receive.md の 5）
   $effect(() => {
     const id = router.articleId;
     return () => {
