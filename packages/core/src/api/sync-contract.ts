@@ -7,6 +7,7 @@
  * - hasMore が true なら、返ってきたカーソルですぐ続きを取る
  * - 消したフォルダと購読は deleted: true の行で、受信箱から消えた記事は { id, deleted: true } で届く
  * - 設定の項目（settings）は、どの端末の種類の分も届く。消した項目は deleted: true で届く
+ * - 通知のベル（bells）は、外したものが { id, deleted: true } で届く。購読をやめると、その購読のベルも届く
  * - カーソルが読めない（古すぎる、など）ときは 400 と error.code = "invalid_cursor"。最初から同期し直す
  *
  * 応答は外から来たデータなので、使う項目の形を確かめてから、生成した型（SyncChanges）を基に
@@ -14,6 +15,7 @@
  */
 
 import {
+  type Bell,
   DEVICE_TYPES,
   type JsonValue,
   type SavedPage,
@@ -74,6 +76,10 @@ export function toSyncPage(body: unknown): SyncPage {
       ) ?? null,
     defaultWorkspaceOnSubscribe:
       changes.workspaces !== undefined && changes.defaultWorkspaceOnSubscribe === true,
+    bells:
+      changes.bells?.map((row) =>
+        row.deleted ? row : { ...row, createdAt: Date.parse(row.createdAt) },
+      ) ?? null,
     cursor: changes.cursor,
     hasMore: changes.hasMore,
     folders: changes.folders.map((folder) => ({
@@ -137,13 +143,14 @@ export function toSyncPage(body: unknown): SyncPage {
  */
 function parseSyncChanges(body: unknown): Omit<
   SyncChanges,
-  "feeds" | "settings" | "savedPages" | "articles" | "workspaces"
+  "feeds" | "settings" | "savedPages" | "articles" | "workspaces" | "bells"
 > & {
   feeds: ParsedSyncFeed[];
   articles: ParsedSyncArticle[];
   settings: SyncChanges["settings"] | undefined;
   savedPages: SyncChanges["savedPages"];
   workspaces: ParsedSyncWorkspace[] | undefined;
+  bells: SyncChanges["bells"];
 } {
   const root = record(body, "(root)");
   return {
@@ -189,6 +196,18 @@ function parseSyncChanges(body: unknown): Omit<
               }),
               deleted: false,
             };
+          }),
+    // あとから足された項目。ベルに対応する前の sendo が相手でも、同期を止めない
+    bells:
+      root.bells === undefined
+        ? undefined
+        : array(root.bells, "bells").map((value, i): Schemas["SyncBell"] => {
+            const field = `bells[${i}]`;
+            const row = record(value, field);
+            if (boolean(row.deleted, `${field}.deleted`)) {
+              return { id: string(row.id, `${field}.id`), deleted: true };
+            }
+            return { ...parseBell(row, field), deleted: false };
           }),
     cursor: string(root.cursor, "cursor"),
     hasMore: boolean(root.hasMore, "hasMore"),
@@ -340,6 +359,22 @@ function parseSavedPage(row: Record<string, unknown>, field: string): Schemas["S
     url,
     title: nullableString(row.title, `${field}.title`),
     savedAt: time(row.savedAt, `${field}.savedAt`),
+  };
+}
+
+/** ベルを付けた応答（POST /bells）にも、差分同期と同じ境界の検証を使う */
+export function toBell(body: unknown): Bell {
+  const bell = parseBell(record(body, "bell"), "bell");
+  return { ...bell, createdAt: Date.parse(bell.createdAt) };
+}
+
+function parseBell(row: Record<string, unknown>, field: string): Schemas["Bell"] {
+  return {
+    id: string(row.id, `${field}.id`),
+    subscriptionId: nullableString(row.subscriptionId, `${field}.subscriptionId`),
+    feedId: nullableString(row.feedId, `${field}.feedId`),
+    words: nullableString(row.words, `${field}.words`),
+    createdAt: time(row.createdAt, `${field}.createdAt`),
   };
 }
 

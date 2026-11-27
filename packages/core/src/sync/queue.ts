@@ -1,4 +1,5 @@
 import { ApiError, type SendoApi } from "../api/client";
+import { putBell, removeBell } from "../db/bells";
 import type { Database, Executor } from "../db/database";
 import { putSavedPage, removeSavedPage } from "../db/saved-pages";
 import { invalidateWorkspaceDefault, putWorkspaceDefault } from "../db/workspaces";
@@ -11,6 +12,7 @@ import {
   keyOf,
   merge,
   type Operation,
+  remapBellId,
   remapFolderId,
   send,
   undo,
@@ -248,6 +250,13 @@ export async function push(
           if (sent.savedPage === undefined) await removeSavedPage(tx, op.id);
           else await putSavedPage(tx, sent.savedPage);
         }
+        if (op.kind === "setFeedBell") {
+          if (sent.bell === undefined) await removeBell(tx, op.bellId);
+          else {
+            await putBell(tx, sent.bell);
+            await remapBellId(tx, op.bellId, sent.bell.id);
+          }
+        }
         if (op.kind === "deleteWorkspace") {
           const [removed] = await tx.all<{ deleted_locally: number }>(
             "delete from workspaces where id = ? returning deleted_locally",
@@ -283,6 +292,7 @@ export async function push(
       result.sent += 1;
       const changed = new Set<Table>();
       if (op.kind === "setSavedPage") changed.add("savedPages");
+      if (op.kind === "setFeedBell") changed.add("bells");
       if (workspacesChanged) changed.add("workspaces");
       if (sent.remap !== undefined) {
         result.remapped.push(sent.remap);
@@ -345,11 +355,13 @@ export async function push(
           ? []
           : op.kind === "setSavedPage"
             ? ["savedPages"]
-            : op.kind === "setSettings"
-              ? ["settings"]
-              : isWorkspaceOperation(op)
-                ? ["workspaces", "feeds"]
-                : ["folders", "feeds", "articles"],
+            : op.kind === "setFeedBell"
+              ? ["bells"]
+              : op.kind === "setSettings"
+                ? ["settings"]
+                : isWorkspaceOperation(op)
+                  ? ["workspaces", "feeds"]
+                  : ["folders", "feeds", "articles"],
       );
       if (workspacesChanged) changed.add("workspaces");
       if (changed.size > 0) options.onChange?.(changed);

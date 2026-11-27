@@ -171,4 +171,30 @@ test.describe("速さの予算", () => {
     console.log(`「Translate」の反応：${Math.round(elapsed)}ms`);
     expect(elapsed).toBeLessThan(100);
   });
+
+  test("購読のベルを押した反応は 100ms 以内", async ({ page, context }) => {
+    await page.goto("/manage");
+    const bell = page.getByRole("main").getByRole("button", { name: "Bell: Blog", exact: true });
+    await expect(bell).toHaveAttribute("aria-pressed", "false");
+    const cdp = await context.newCDPSession(page);
+    await cdp.send("Emulation.setCPUThrottlingRate", { rate: CPU_SLOWDOWN });
+
+    // 押してから、付いた表示になるまで 100ms 以内
+    const elapsed = await page.evaluate(
+      () =>
+        new Promise<number>((resolve) => {
+          const selector = 'main button[aria-label="Bell: Blog"]';
+          const start = performance.now();
+          document.querySelector<HTMLButtonElement>(selector)?.click();
+          const check = () => {
+            if (document.querySelector(selector)?.getAttribute("aria-pressed") === "true") {
+              resolve(performance.now() - start);
+            } else requestAnimationFrame(check);
+          };
+          check();
+        }),
+    );
+    console.log(`ベルの反応：${Math.round(elapsed)}ms`);
+    expect(elapsed).toBeLessThan(100);
+  });
 });

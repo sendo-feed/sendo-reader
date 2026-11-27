@@ -63,7 +63,7 @@ describe("ログイン（sendo のセッション）", () => {
     expect(await core.listFeeds()).toEqual([]);
     expect(await db.all("select key from settings")).toEqual([{ key: "auth.logoutPending" }]);
     expect(changes).toEqual([
-      ["articles", "feeds", "folders", "savedPages", "settings", "workspaces"],
+      ["articles", "bells", "feeds", "folders", "savedPages", "settings", "workspaces"],
     ]);
 
     expect(await core.sendPendingSignOut()).toBe(true);
@@ -186,13 +186,14 @@ describe("送る前に、セッションのユーザーを確かめる", () => {
     expect(core.currentUser()).toEqual(USER_B);
     expect(server.requests).toEqual([
       "GET /me",
-      "GET /sync?includeSaved=true&includeWorkspaces=true",
+      "GET /sync?includeSaved=true&includeWorkspaces=true&includeBells=true",
     ]);
     expect(await core.listArticles()).toEqual([]);
     expect(await core.listFeeds()).toMatchObject([{ id: feed.id }]);
     expect(await core.countPending()).toBe(0);
     expect(changes[0]).toEqual([
       "articles",
+      "bells",
       "feeds",
       "folders",
       "savedPages",
@@ -237,7 +238,9 @@ describe("ログアウトと中断", () => {
     server.failNext(null, "hang");
     const syncing = core.sync();
     await vi.waitFor(() =>
-      expect(server.requests.at(-1)).toBe("GET /sync?includeSaved=true&includeWorkspaces=true"),
+      expect(server.requests.at(-1)).toBe(
+        "GET /sync?includeSaved=true&includeWorkspaces=true&includeBells=true",
+      ),
     );
 
     await core.signOut();
@@ -309,7 +312,9 @@ describe("ログアウトと中断", () => {
     server.failNext(null, "hang-body");
     const syncing = core.sync();
     await vi.waitFor(() =>
-      expect(server.requests).toContain("GET /sync?includeSaved=true&includeWorkspaces=true"),
+      expect(server.requests).toContain(
+        "GET /sync?includeSaved=true&includeWorkspaces=true&includeBells=true",
+      ),
     );
 
     await core.signOut();

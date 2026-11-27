@@ -1,4 +1,5 @@
 import { ApiError, type SendoApi } from "../api/client";
+import { clearBells, putBell, removeBell } from "../db/bells";
 import type { Database, Executor, SqlValue } from "../db/database";
 import { putFeed } from "../db/feeds";
 import { clearSavedPages, putSavedPage, removeSavedPage } from "../db/saved-pages";
@@ -163,6 +164,7 @@ async function resync(
     const settings = pages.some((page) => page.settings !== null);
     if (settings) await clearSyncedSettings(tx);
     if (pages.some((page) => page.savedPages !== null)) await clearSavedPages(tx);
+    if (pages.some((page) => page.bells !== null)) await clearBells(tx);
     for (const page of pages) {
       await applyPage(tx, page);
       await reconcilePendingMarkRead(tx, page.articles);
@@ -215,7 +217,11 @@ async function applyPage(tx: Executor, page: SyncPage): Promise<Set<Table>> {
     changed.add("workspaces");
   }
   for (const feed of page.feeds) await applyFeed(tx, feed);
-  if (page.feeds.length > 0) changed.add("feeds");
+  if (page.feeds.length > 0) {
+    changed.add("feeds");
+    // 見えるベルは購読の行にもよる。ベルが先のページに届き、購読があとのページに届くことがある
+    changed.add("bells");
+  }
   for (const article of page.articles) await applyArticle(tx, article);
   if (page.articles.length > 0) changed.add("articles");
   // 配列は変更番号の順。同じ項目が続けて来たら、後のものが残る
@@ -229,6 +235,11 @@ async function applyPage(tx: Executor, page: SyncPage): Promise<Set<Table>> {
     else await putSavedPage(tx, saved);
   }
   if ((page.savedPages?.length ?? 0) > 0) changed.add("savedPages");
+  for (const bell of page.bells ?? []) {
+    if (bell.deleted) await removeBell(tx, bell.id);
+    else await putBell(tx, bell);
+  }
+  if ((page.bells?.length ?? 0) > 0) changed.add("bells");
   return changed;
 }
 

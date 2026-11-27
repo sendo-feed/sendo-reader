@@ -6,6 +6,7 @@ import {
   type ContentStorage,
   parseContentStorageLimit,
 } from "./content/storage";
+import { clearBells, countVisibleBells, listBells, visibleFeedBellId } from "./db/bells";
 import {
   type ContentSource,
   clearPageMissing,
@@ -62,6 +63,7 @@ import {
 import {
   type Article,
   type ArticleContent,
+  type Bell,
   DEVICE_TYPES,
   type DeviceType,
   type Feed,
@@ -205,6 +207,9 @@ export const MAX_FOLDER_NAME_LENGTH = 200;
 
 /** Sendo の購読更新 API に合わせた表示名の上限（UTF-16） */
 export const MAX_FEED_DISPLAY_NAME_LENGTH = 200;
+
+/** 有効なベルの数の上限（sendo の docs/decisions/notifications.md の 3） */
+export const MAX_BELLS = 100;
 
 /** まとめて既読にする記事を、範囲の一部に絞る（どれも渡さなければ、範囲のすべて） */
 export interface MarkAllReadOptions {
@@ -978,12 +983,38 @@ export class ReaderCore {
     await this.#write({ kind: "renameFeed", feedId, displayName: name }, ["feeds"]);
   }
 
+  /**
+   * 購読だけのベルを付ける（true）／外す（false）。すでにその状態なら何もしない（代表のタブが
+   * 替わって同じ頼みを送り直しても、2 回付けない）。付けるベルの ID は、ここで決める
+   */
+  async setFeedBell(feedId: string, on: boolean): Promise<void> {
+    this.#requireSignedIn();
+    const session = this.#session.signal;
+    const changed = await this.#db.transaction(async (tx) => {
+      throwIfSessionEnded(session);
+      const current = await visibleFeedBellId(tx, feedId);
+      if ((current !== null) === on) return false;
+      if (on && (await countVisibleBells(tx)) >= MAX_BELLS) {
+        throw new ApiError("invalid", `ベルは ${MAX_BELLS} 個まで付けられます。`);
+      }
+      await this.#enqueue(tx, {
+        kind: "setFeedBell",
+        feedId,
+        bellId: current ?? crypto.randomUUID(),
+        on,
+        at: this.#now(),
+      });
+      return true;
+    });
+    if (changed) this.#emit(new Set<Table>(["bells"]));
+  }
+
   /** 購読をやめる。記事はスターを付けたものだけが残る。そのフィードの一覧の設定も消す */
   unsubscribe(feedId: string): Promise<void> {
     return this.#writeWithListSettings(
       { kind: "unsubscribe", feedId },
       [feedListPath(feedId)],
-      ["feeds", "articles"],
+      ["feeds", "articles", "bells"],
     );
   }
 
@@ -1345,6 +1376,11 @@ export class ReaderCore {
 
   listSavedPages(hideStarred = false): Promise<SavedPage[]> {
     return listSavedPages(this.#db, hideStarred);
+  }
+
+  /** 手元に見えるベル（まだ送っていない付け外しを重ねたもの）を、作った順に返す */
+  listBells(): Promise<Bell[]> {
+    return listBells(this.#db);
   }
 
   async getSavedPageForUrl(raw: string): Promise<SavedPage | null> {
@@ -1923,6 +1959,7 @@ async function clearAll(tx: Executor): Promise<void> {
   await tx.run("delete from workspaces");
   await tx.run("delete from synced_settings");
   await clearSavedPages(tx);
+  await clearBells(tx);
   // 本文を置く量の上限は、端末ごとの設定なので残す
   await tx.run("delete from settings where key <> ?", [CONTENT_STORAGE_LIMIT_KEY]);
 }

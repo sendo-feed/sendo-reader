@@ -2031,6 +2031,290 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/bells": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 有効なベルを作った順で返す */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description 有効なベルの一覧 */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            items: components["schemas"]["Bell"][];
+                        };
+                    };
+                };
+            };
+        };
+        put?: never;
+        /**
+         * ベルを付ける
+         * @description 購読だけ、言葉だけ、購読 AND 言葉のベルを付ける。有効なベルは 100 個まで。クライアントは応答の id を正とする。
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["AddBellRequest"];
+                };
+            };
+            responses: {
+                /** @description 同じ組（購読と言葉）の有効なベルがある。送った id と言葉の並びによらず、そのベルを返す */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            bell: components["schemas"]["Bell"];
+                        };
+                    };
+                };
+                /** @description 付けた */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            bell: components["schemas"]["Bell"];
+                        };
+                    };
+                };
+                /** @description 入力が正しくない。feedId も words もないか、言葉が上限などに合わない */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description feedId のフィードの有効な購読がない */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description 有効なベルが 100 個ある（bell_limit_reached）か、指定した id はほかのベルに使われている（bell_id_taken） */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/bells/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** ベルを外す */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description 外した、または外してあった */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description ベルがない */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/push": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Web Push の有無と VAPID の公開鍵 */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description 有無と公開鍵 */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["PushStatus"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/push/registration": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * この端末の Web Push の登録を置く
+         * @description ブラウザが返した登録（PushSubscription.toJSON() の形）を、このセッションに結んで置く。同じ登録を何度送ってもよい。このセッションの前の登録と、ほかのセッションの同じエンドポイントの登録は外れる。ログアウトすると外れる。
+         */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["PushRegistration"];
+                };
+            };
+            responses: {
+                /** @description 置いた */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description エンドポイントか鍵の形が正しくない */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description ブラウザのセッションではない（アクセストークンでは使えない） */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Web Push を使う設定（VAPID_SUBJECT と READER_URL）がない */
+                501: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        post?: never;
+        /**
+         * この端末の Web Push の登録を外す
+         * @description 登録がなくても、Web Push を使えない設定でも 204 を返す。
+         */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description 外した、または登録がない */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description ブラウザのセッションではない（アクセストークンでは使えない） */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/settings/{deviceType}": {
         parameters: {
             query?: never;
@@ -2159,6 +2443,7 @@ export interface paths {
          *     settings には、どの端末の種類の項目も届く。クライアントは、自分の種類の分だけを使えばよい。
          *     includeSaved=true なら、あとで読むページの新規保存と解除も savedPages に載せる。
          *     includeWorkspaces=true なら、workspaces と、有効な feeds の workspaceId・subscriptionId を返す。対応する位置がない既存のカーソルでは、購読とワークスペースだけを番号0から返す。差分の有無にかかわらず、購読先の省略に対応した印 defaultWorkspaceOnSubscribe を返す。
+         *     includeBells=true なら、通知のベルの付けたものと外したものも bells に載せる。ベルの位置がない既存のカーソルでは、ベルだけを最初から送る。購読をやめると、その購読のベルも deleted で届く。
          *     cursor の中身には意味を持たせていないので、クライアントはそのまま送り返すだけにする。
          */
         get: {
@@ -2166,6 +2451,7 @@ export interface paths {
                 query?: {
                     includeSaved?: "true" | "false";
                     includeWorkspaces?: "true" | "false";
+                    includeBells?: "true" | "false";
                     /** @description 前回の応答の cursor */
                     cursor?: string;
                 };
@@ -2892,6 +3178,41 @@ export interface components {
             /** Format: date-time */
             savedAt: string;
         };
+        Bell: {
+            id: string;
+            /** @description 鳴らす購読の ID。購読し直すと変わる。購読のないベルは null */
+            subscriptionId: string | null;
+            /** @description 鳴らす購読のフィードの ID。購読のないベルは null */
+            feedId: string | null;
+            /** @description 当てる言葉（NFKC にして区切った言葉を、半角の空白 1 つでつないだもの）。言葉のないベルは null */
+            words: string | null;
+            /** Format: date-time */
+            createdAt: string;
+        };
+        AddBellRequest: {
+            /** @description クライアントが決めた小文字の UUID。省略時は Sendo が決める */
+            id?: string;
+            /** @description 鳴らす購読のフィードの ID。言葉だけのベルは省く。feedId と words の少なくとも一方が要る */
+            feedId?: string;
+            /** @description 当てる言葉。空白で区切った言葉をすべて含む記事に当てる（AND）。NFKC にしてから区切り、重なりを除いた形で 1〜8 個、全体で 64 文字まで。購読だけのベルは省く */
+            words?: string;
+        };
+        PushStatus: {
+            /** @description Web Push を使える設定（VAPID_SUBJECT と READER_URL）がそろっているか */
+            available: boolean;
+            /** @description VAPID の公開鍵（P-256 の非圧縮の点 65 バイトの base64url）。PushManager.subscribe の applicationServerKey に渡す。手元の登録の鍵と違えば、登録し直す。使えなければ null */
+            publicKey: string | null;
+        };
+        PushRegistration: {
+            /** @description プッシュサービスの URL（https:、2048 文字まで） */
+            endpoint: string;
+            keys: {
+                /** @description 端末の公開鍵（P-256 の非圧縮の点 65 バイト）の base64url */
+                p256dh: string;
+                /** @description 認証の秘密（16 バイト）の base64url */
+                auth: string;
+            };
+        };
         Setting: {
             name: string;
             /** @description JSON の値（オブジェクト、配列、文字列、数、真偽、null）。Sendo は中身を解釈しない */
@@ -2920,6 +3241,7 @@ export interface components {
             settings: components["schemas"]["SyncSetting"][];
             savedPages?: components["schemas"]["SyncSavedPage"][];
             workspaces?: components["schemas"]["SyncWorkspace"][];
+            bells?: components["schemas"]["SyncBell"][];
             /**
              * @description includeWorkspaces=true のとき付く。購読先の省略はデフォルトを使う
              * @enum {boolean}
@@ -3077,6 +3399,14 @@ export interface components {
             deleted: true;
         };
         SyncWorkspace: (components["schemas"]["Workspace"] & {
+            /** @enum {boolean} */
+            deleted: false;
+        }) | {
+            id: string;
+            /** @enum {boolean} */
+            deleted: true;
+        };
+        SyncBell: (components["schemas"]["Bell"] & {
             /** @enum {boolean} */
             deleted: false;
         }) | {
